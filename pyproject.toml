@@ -1,0 +1,13 @@
+[project]
+name = "ai-ecom-crawler-docs"
+version = "2026.11.18"
+description = "电商采集业务文档与导出、链接检查工具"
+requires-python = ">=3.11"
+dependencies = []
+
+[dependency-groups]
+dev = ["ruff"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
