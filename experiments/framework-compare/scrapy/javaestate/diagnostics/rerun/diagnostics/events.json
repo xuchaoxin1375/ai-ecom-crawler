@@ -1,0 +1,44 @@
+{
+  "events": [
+    {
+      "at": "2026-11-18T23:31:42Z",
+      "stage": "catalog_page_3",
+      "url": "https://javaestate.com/products.json?limit=250&page=3",
+      "status": 429,
+      "action": "backoff",
+      "attempt": 1,
+      "delay_s": 60.0,
+      "retry_after": "60"
+    },
+    {
+      "at": "2026-11-18T23:32:42Z",
+      "stage": "catalog_page_3",
+      "url": "https://javaestate.com/products.json?limit=250&page=3",
+      "status": 429,
+      "action": "backoff",
+      "attempt": 2,
+      "delay_s": 60.0,
+      "retry_after": "60"
+    },
+    {
+      "at": "2026-11-18T23:33:42Z",
+      "stage": "catalog_page_3",
+      "url": "https://javaestate.com/products.json?limit=250&page=3",
+      "status": 429,
+      "action": "backoff",
+      "attempt": 3,
+      "delay_s": 60.0,
+      "retry_after": "60"
+    },
+    {
+      "at": "2026-11-18T23:34:43Z",
+      "stage": "catalog_page_3",
+      "url": "https://javaestate.com/products.json?limit=250&page=3",
+      "status": 429,
+      "action": "give_up",
+      "attempt": 3,
+      "delay_s": null,
+      "retry_after": "60"
+    }
+  ]
+}

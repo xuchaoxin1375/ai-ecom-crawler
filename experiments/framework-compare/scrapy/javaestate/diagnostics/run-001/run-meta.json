@@ -1,0 +1,248 @@
+{
+  "started_at": "2026-11-18T23:29:03Z",
+  "finished_at": "2026-11-18T23:30:12Z",
+  "first_valid_at": "2026-11-18T23:30:12Z",
+  "close_reason": null,
+  "max_products": 30,
+  "max_seconds": 600,
+  "selected": [
+    {
+      "url": "https://javaestate.com/products/ghirardelli-white-chocolate-sweet-ground-powder",
+      "handle": "ghirardelli-white-chocolate-sweet-ground-powder"
+    },
+    {
+      "url": "https://javaestate.com/products/ghirardelli-sauce-pump",
+      "handle": "ghirardelli-sauce-pump"
+    },
+    {
+      "url": "https://javaestate.com/products/ghirardelli-sweet-ground-chocolate-sauce",
+      "handle": "ghirardelli-sweet-ground-chocolate-sauce"
+    },
+    {
+      "url": "https://javaestate.com/products/ghirardelli-white-chocolate-sauce",
+      "handle": "ghirardelli-white-chocolate-sauce"
+    },
+    {
+      "url": "https://javaestate.com/products/ghirardelli-double-chocolate-hot-cocoa-mix-90-count-0-85-oz-packets",
+      "handle": "ghirardelli-double-chocolate-hot-cocoa-mix-90-count-0-85-oz-packets"
+    },
+    {
+      "url": "https://javaestate.com/products/ghirardelli-chocolate-cocoa-sweet-ground-powder",
+      "handle": "ghirardelli-chocolate-cocoa-sweet-ground-powder"
+    },
+    {
+      "url": "https://javaestate.com/products/ghirardelli-classic-white-frappe-mix-10-lb-box",
+      "handle": "ghirardelli-classic-white-frappe-mix-10-lb-box"
+    },
+    {
+      "url": "https://javaestate.com/products/ghirardelli-3-tier-pump-bottle-sauce-rack",
+      "handle": "ghirardelli-3-tier-pump-bottle-sauce-rack"
+    },
+    {
+      "url": "https://javaestate.com/products/ghirardelli-black-label-chocolate-sauce",
+      "handle": "ghirardelli-black-label-chocolate-sauce"
+    },
+    {
+      "url": "https://javaestate.com/products/ghirardelli-caramel-sauce",
+      "handle": "ghirardelli-caramel-sauce"
+    },
+    {
+      "url": "https://javaestate.com/products/big-train-20-below-frozen-hot-chocolate-beverage-mix",
+      "handle": "big-train-20-below-frozen-hot-chocolate-beverage-mix"
+    },
+    {
+      "url": "https://javaestate.com/products/big-train-20-below-frozen-white-chocolate-beverage-mix",
+      "handle": "big-train-20-below-frozen-white-chocolate-beverage-mix"
+    },
+    {
+      "url": "https://javaestate.com/products/big-train-kidz-kreamz-bubble-gum-blended-beverage-mix",
+      "handle": "big-train-kidz-kreamz-bubble-gum-blended-beverage-mix"
+    },
+    {
+      "url": "https://javaestate.com/products/big-train-cake-batter-blended-creme-beverage-mix",
+      "handle": "big-train-cake-batter-blended-creme-beverage-mix"
+    },
+    {
+      "url": "https://javaestate.com/products/big-train-caramel-latte-blended-ice-coffee-beverage-mix",
+      "handle": "big-train-caramel-latte-blended-ice-coffee-beverage-mix"
+    },
+    {
+      "url": "https://javaestate.com/products/big-train-chocolate-peanut-butter-blended-ice-coffee-beverage-mix",
+      "handle": "big-train-chocolate-peanut-butter-blended-ice-coffee-beverage-mix"
+    },
+    {
+      "url": "https://javaestate.com/products/big-train-blended-ice-coffee-beverage-mix",
+      "handle": "big-train-blended-ice-coffee-beverage-mix"
+    },
+    {
+      "url": "https://javaestate.com/products/big-train-cookies-n-cream-blended-creme-beverage-mix",
+      "handle": "big-train-cookies-n-cream-blended-creme-beverage-mix"
+    },
+    {
+      "url": "https://javaestate.com/products/big-train-kidz-kreamz-cotton-candy-blended-beverage-mix",
+      "handle": "big-train-kidz-kreamz-cotton-candy-blended-beverage-mix"
+    },
+    {
+      "url": "https://javaestate.com/products/big-train-dragonfly-coconut-blended-creme-beverage-mix",
+      "handle": "big-train-dragonfly-coconut-blended-creme-beverage-mix"
+    },
+    {
+      "url": "https://javaestate.com/products/big-train-dragonfly-mango-blended-creme-beverage-mix",
+      "handle": "big-train-dragonfly-mango-blended-creme-beverage-mix"
+    },
+    {
+      "url": "https://javaestate.com/products/big-train-espresso-blended-ice-coffee-beverage-mix",
+      "handle": "big-train-espresso-blended-ice-coffee-beverage-mix"
+    },
+    {
+      "url": "https://javaestate.com/products/big-train-java-chip-blended-ice-coffee-beverage-mix",
+      "handle": "big-train-java-chip-blended-ice-coffee-beverage-mix"
+    },
+    {
+      "url": "https://javaestate.com/products/big-train-mocha-blended-ice-coffee-beverage-mix",
+      "handle": "big-train-mocha-blended-ice-coffee-beverage-mix"
+    },
+    {
+      "url": "https://javaestate.com/products/big-train-reduced-sugar-mocha-blended-ice-coffee-beverage-mix",
+      "handle": "big-train-reduced-sugar-mocha-blended-ice-coffee-beverage-mix"
+    },
+    {
+      "url": "https://javaestate.com/products/big-train-reduced-sugar-vanilla-latte-blended-ice-coffee-beverage-mix",
+      "handle": "big-train-reduced-sugar-vanilla-latte-blended-ice-coffee-beverage-mix"
+    },
+    {
+      "url": "https://javaestate.com/products/big-train-kidz-kreamz-orange-cream-blended-beverage-mix",
+      "handle": "big-train-kidz-kreamz-orange-cream-blended-beverage-mix"
+    },
+    {
+      "url": "https://javaestate.com/products/big-train-spiced-chai-tea-latte-beverage-mix",
+      "handle": "big-train-spiced-chai-tea-latte-beverage-mix"
+    },
+    {
+      "url": "https://javaestate.com/products/big-train-strawberry-blended-creme-beverage-mix",
+      "handle": "big-train-strawberry-blended-creme-beverage-mix"
+    },
+    {
+      "url": "https://javaestate.com/products/big-train-toffee-mocha-blended-ice-coffee-beverage-mix",
+      "handle": "big-train-toffee-mocha-blended-ice-coffee-beverage-mix"
+    }
+  ],
+  "denominator": 706,
+  "catalog_pages": [
+    {
+      "page": 3,
+      "status": 200,
+      "count": 207,
+      "added": 207,
+      "result": "ok"
+    }
+  ],
+  "events": [
+    {
+      "at": "2026-11-18T23:29:12Z",
+      "stage": "catalog_page_3",
+      "url": "https://javaestate.com/products.json?limit=250&page=3",
+      "status": 429,
+      "action": "backoff",
+      "attempt": 1,
+      "delay_s": 60.0,
+      "retry_after": "60"
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "downloader/request_count": 6,
+    "downloader/response_count": 6,
+    "downloader/response_status_count/200": 5,
+    "downloader/response_status_count/429": 1,
+    "downloader/response_status_count/403": null,
+    "downloader/response_status_count/404": null,
+    "retry/count": null,
+    "log_count/ERROR": null,
+    "log_count/WARNING": 2
+  },
+  "currency": "USD",
+  "currency_evidence": "homepage Shopify.currency.active=USD (status 200, 2026-11-18T23:29:10Z)",
+  "statuses": {
+    "sitemap_index": 200,
+    "product_sitemap": 200,
+    "homepage": 200,
+    "catalog": 200
+  },
+  "counts": {
+    "discovered_urls": 706,
+    "pending_navigation_entries": 0,
+    "product_candidates": 706,
+    "pending_products": 676,
+    "in_flight_products": 0,
+    "processed_products": 30,
+    "valid_products": 30,
+    "excluded_products": 0,
+    "failed_products": 0,
+    "partial_description_products": 30
+  },
+  "task_result": {
+    "task_id": "fc-scrapy-javaestate-20261118T232903Z",
+    "plan_id": "javaestate-scrapy-us",
+    "plan_version": "2026.11.19-1",
+    "market": "US",
+    "locale": "en-US",
+    "state": "FINISHED",
+    "outcome": "PARTIAL",
+    "stop_reason": "BUDGET_EXHAUSTED",
+    "started_at": "2026-11-18T23:29:03Z",
+    "finished_at": "2026-11-18T23:30:12Z",
+    "counts": {
+      "discovered_urls": 706,
+      "pending_navigation_entries": 0,
+      "product_candidates": 706,
+      "pending_products": 676,
+      "in_flight_products": 0,
+      "processed_products": 30,
+      "valid_products": 30,
+      "excluded_products": 0,
+      "failed_products": 0,
+      "partial_description_products": 30
+    },
+    "coverage": {
+      "status": "KNOWN",
+      "denominator_source": "Shopify product sitemap loc count (sitemap_products_1.xml)",
+      "denominator": 706,
+      "covered": 30,
+      "notes": "Bounded sample: first 30 product URLs in sitemap order; 676 product URLs remain outside this run. Coverage is not full-site coverage."
+    },
+    "business_acceptance": {
+      "status": "NOT_REVIEWED",
+      "accepted_by": null,
+      "accepted_at": null,
+      "reason": null,
+      "scope": "bounded framework-comparison trial"
+    },
+    "runtime": {
+      "framework": "Scrapy",
+      "framework_version": "2.20.0",
+      "python_version": "3.13.13",
+      "llm_calls": 0,
+      "raw_pages_retained": false,
+      "concurrency": 1,
+      "download_delay_s": 2.0,
+      "retry_limit": 3
+    },
+    "currency": {
+      "code": "USD",
+      "evidence": "homepage Shopify.currency.active=USD (status 200, 2026-11-18T23:29:10Z)",
+      "mismatch": false
+    },
+    "errors": [],
+    "limitations": [
+      "Product HTML pages returned HTTP 429 during build probes (Retry-After: 60); the run uses the public products.json catalog. Descriptions are marked partial because page-only theme blocks and metafields were not verified.",
+      "The catalog JSON does not carry a per-quote currency field; USD comes from the storefront active currency on the homepage and the fixed US/en-US/USD task market.",
+      "Tax basis is not stated on the source; rows record tax_basis=NOT_STATED.",
+      "Bounded sample: the first 30 product URLs in product-sitemap order; 676 product URLs remain outside this run, so coverage is not full-site coverage.",
+      "Catalog page order is a site-specific heuristic [3, 2, 4, 1]; if the catalog size changes, the selected sitemap products may require another page.",
+      "No LLM is called at runtime; field rules are deterministic Python."
+    ]
+  },
+  "pending_selected": [],
+  "out_of_sample_pending": 676
+}

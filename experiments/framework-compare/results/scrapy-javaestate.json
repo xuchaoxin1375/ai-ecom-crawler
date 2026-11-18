@@ -1,0 +1,121 @@
+{
+  "framework": "Scrapy",
+  "framework_version": "2.20.0",
+  "plan_id": "javaestate-scrapy-us",
+  "plan_version": "2026.11.19-1",
+  "plan_path": "experiments/framework-compare/scrapy/javaestate",
+  "task_id": "fc-scrapy-javaestate-20261118T232903Z",
+  "started_at": "2026-11-18T23:29:03Z",
+  "finished_at": "2026-11-18T23:30:12Z",
+  "run_started_at": "2026-11-18T23:29:03Z",
+  "run_finished_at": "2026-11-18T23:30:12Z",
+  "wall_clock_s": 69.0,
+  "build_started_at": "2026-11-19T06:37:00+08:00",
+  "plan_created_at": "2026-11-18T23:02:35Z",
+  "first_valid_product_s": 3192.0,
+  "first_plan_s": 1760.0,
+  "revisions": 0,
+  "implementation_revisions": 6,
+  "runtime_llm_calls": 0,
+  "requests": 6,
+  "request_stats": {
+    "requests": 6,
+    "responses_200": 5,
+    "responses_429": 1,
+    "responses_403": null,
+    "responses_404": null,
+    "robots_txt_requests": 1,
+    "sitemap_requests": 2,
+    "catalog_page_requests": 2,
+    "catalog_http_429_events": 1,
+    "product_html_requests": 0,
+    "homepage_requests": 1
+  },
+  "valid_products": 30,
+  "excluded_products": 0,
+  "failed_products": 0,
+  "partial_description_products": 30,
+  "pending_products": 676,
+  "processed_products": 30,
+  "outcome": "PARTIAL",
+  "stop_reason": "BUDGET_EXHAUSTED",
+  "coverage": {
+    "status": "KNOWN",
+    "denominator_source": "Shopify product sitemap loc count (sitemap_products_1.xml)",
+    "denominator": 706,
+    "covered": 30,
+    "notes": "Bounded sample: first 30 product URLs in sitemap order; 676 product URLs remain outside this run. Coverage is not full-site coverage."
+  },
+  "counts": {
+    "discovered_urls": 706,
+    "pending_navigation_entries": 0,
+    "product_candidates": 706,
+    "pending_products": 676,
+    "in_flight_products": 0,
+    "processed_products": 30,
+    "valid_products": 30,
+    "excluded_products": 0,
+    "failed_products": 0,
+    "partial_description_products": 30
+  },
+  "currency": {
+    "code": "USD",
+    "evidence": "homepage Shopify.currency.active=USD (status 200, 2026-11-18T23:29:10Z)",
+    "mismatch": false
+  },
+  "errors": [],
+  "limitations": [
+    "Product HTML pages returned HTTP 429 during build probes (Retry-After: 60); the run uses the public products.json catalog. Descriptions are marked partial because page-only theme blocks and metafields were not verified.",
+    "The catalog JSON does not carry a per-quote currency field; USD comes from the storefront active currency on the homepage and the fixed US/en-US/USD task market.",
+    "Tax basis is not stated on the source; rows record tax_basis=NOT_STATED.",
+    "Bounded sample: the first 30 product URLs in product-sitemap order; 676 product URLs remain outside this run, so coverage is not full-site coverage.",
+    "Catalog page order is a site-specific heuristic [3, 2, 4, 1]; if the catalog size changes, the selected sitemap products may require another page.",
+    "No LLM is called at runtime; field rules are deterministic Python.",
+    "The second execution hit a longer 429 window (4x429 over 193s) and ended FAILED/ACCESS_DENIED; live access is not stable enough to guarantee a repeat success, although the first run succeeded.",
+    "Build-time catalog reconnaissance fetched products.json pages 1-3 (707 records) once to confirm page order and field shapes; the run itself read page 3 (207 records) and processed 30. Build-time catalog data was not retained in the plan package."
+  ],
+  "outputs": {
+    "valid_csv": "experiments/framework-compare/scrapy/javaestate/valid.csv",
+    "task_result": "experiments/framework-compare/scrapy/javaestate/task-result.json",
+    "diagnostics": "experiments/framework-compare/scrapy/javaestate/diagnostics",
+    "metrics_json": "experiments/framework-compare/results/scrapy-javaestate.json",
+    "metrics_md": "experiments/framework-compare/results/scrapy-javaestate.md"
+  },
+  "notes": [
+    "All numbers are read from the crawl stats and output files, not from model assertions.",
+    "runtime_llm_calls is 0: extraction is deterministic Python.",
+    "first_valid_product_s and first_plan_s are relative to --build-started-at when provided."
+  ],
+  "revision_notes": [
+    "Scrapy 2.20 uses async start() instead of start_requests(); the first implementation yielded no requests and was fixed before the successful run.",
+    "Pipeline callbacks were adapted to Scrapy 2.20's from_crawler/optional-spider signature.",
+    "Added --base-url for local fixture validation; the production default remains https://javaestate.com.",
+    "Catalog 429 now stops after the retry limit instead of walking further catalog pages.",
+    "Removed internal download_latency meta before a 429 retry to avoid Scrapy's MetaCopyDetection warning.",
+    "No field, selector, price or description requirement changed; plan_version remains 2026.11.19-1.",
+    "Added explicit 401/403 access-denied handling for sitemap and catalog stages."
+  ],
+  "rerun": {
+    "task_id": "fc-scrapy-javaestate-20261118T233130Z",
+    "started_at": "2026-11-18T23:31:30Z",
+    "finished_at": "2026-11-18T23:34:43Z",
+    "valid_products": 0,
+    "failed_products": 30,
+    "requests": 8,
+    "outcome": "FAILED",
+    "stop_reason": "ACCESS_DENIED",
+    "note": "Same plan and command; 4x HTTP 429 on products.json page 3, three 60s backoffs, then ACCESS_DENIED. Differences are site rate limiting, not field rules."
+  },
+  "warnings": [
+    {
+      "at": "2026-11-18T23:29:12Z",
+      "stage": "catalog_page_3",
+      "code": "http_429_recovered",
+      "url": "https://javaestate.com/products.json?limit=250&page=3",
+      "retry_after_s": 60,
+      "action": "backoff_then_200"
+    }
+  ],
+  "plan_drafted_s": 1535.0,
+  "first_plan_note": "Measured to the first successful end-to-end fixture run at 2026-11-18T23:06:20Z; the manifest draft was written at 23:02:35Z (1535s) before the Scrapy 2.20 start()/pipeline fixes."
+}

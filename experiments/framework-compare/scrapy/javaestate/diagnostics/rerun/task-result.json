@@ -1,0 +1,77 @@
+{
+  "task_id": "fc-scrapy-javaestate-20261118T233130Z",
+  "plan_id": "javaestate-scrapy-us",
+  "plan_version": "2026.11.19-1",
+  "market": "US",
+  "locale": "en-US",
+  "state": "FINISHED",
+  "outcome": "FAILED",
+  "stop_reason": "ACCESS_DENIED",
+  "started_at": "2026-11-18T23:31:30Z",
+  "finished_at": "2026-11-18T23:34:43Z",
+  "counts": {
+    "discovered_urls": 706,
+    "pending_navigation_entries": 0,
+    "product_candidates": 706,
+    "pending_products": 676,
+    "in_flight_products": 0,
+    "processed_products": 30,
+    "valid_products": 0,
+    "excluded_products": 0,
+    "failed_products": 30,
+    "partial_description_products": 0
+  },
+  "coverage": {
+    "status": "KNOWN",
+    "denominator_source": "Shopify product sitemap loc count (sitemap_products_1.xml)",
+    "denominator": 706,
+    "covered": 30,
+    "notes": "Bounded sample: first 30 product URLs in sitemap order; 676 product URLs remain outside this run. Coverage is not full-site coverage."
+  },
+  "business_acceptance": {
+    "status": "NOT_REVIEWED",
+    "accepted_by": null,
+    "accepted_at": null,
+    "reason": null,
+    "scope": "bounded framework-comparison trial"
+  },
+  "runtime": {
+    "framework": "Scrapy",
+    "framework_version": "2.20.0",
+    "python_version": "3.13.13",
+    "llm_calls": 0,
+    "raw_pages_retained": false,
+    "concurrency": 1,
+    "download_delay_s": 2.0,
+    "retry_limit": 3
+  },
+  "currency": {
+    "code": "USD",
+    "evidence": "homepage Shopify.currency.active=USD (status 200, 2026-11-18T23:31:40Z)",
+    "mismatch": false
+  },
+  "errors": [
+    {
+      "at": "2026-11-18T23:34:43Z",
+      "stage": "catalog_page_3",
+      "code": "http_429_after_retries",
+      "url": "https://javaestate.com/products.json?limit=250&page=3",
+      "message": "3 retries exhausted; Retry-After=60.0s"
+    },
+    {
+      "at": "2026-11-18T23:34:43Z",
+      "stage": "catalog",
+      "code": "catalog_access_denied_http_429",
+      "url": "https://javaestate.com/products.json?limit=250&page=3",
+      "message": "stopping catalog attempts after retry limit"
+    }
+  ],
+  "limitations": [
+    "Product HTML pages returned HTTP 429 during build probes (Retry-After: 60); the run uses the public products.json catalog. Descriptions are marked partial because page-only theme blocks and metafields were not verified.",
+    "The catalog JSON does not carry a per-quote currency field; USD comes from the storefront active currency on the homepage and the fixed US/en-US/USD task market.",
+    "Tax basis is not stated on the source; rows record tax_basis=NOT_STATED.",
+    "Bounded sample: the first 30 product URLs in product-sitemap order; 676 product URLs remain outside this run, so coverage is not full-site coverage.",
+    "Catalog page order is a site-specific heuristic [3, 2, 4, 1]; if the catalog size changes, the selected sitemap products may require another page.",
+    "No LLM is called at runtime; field rules are deterministic Python."
+  ]
+}
