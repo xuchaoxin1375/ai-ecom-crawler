@@ -6,7 +6,8 @@
       "currency": "GBP"
     },
     "primary_image_url": "https://shop.example/images/shirt.jpg",
-    "description_html": "<p>轻便运动上衣。</p><ul><li>棉质面料</li></ul><table><tr><td>版型</td><td>常规</td></tr></table>",
+    "description_html": "<p>轻便运动上衣, 适合日常穿着。</p><ul><li>棉质面料</li></ul><table><tr><td>版型</td><td>常规</td></tr></table>",
+    "description_format": "html",
     "categories": [
       "运动上衣"
     ],
@@ -37,6 +38,7 @@
     "partial_reason": null,
     "missing_reasons": {},
     "task_id": "example-task-01",
+    "plan_id": "example-plan",
     "plan_version": "example-plan-v1",
     "extracted_at": "2026-10-27T14:00:00Z"
   },
@@ -48,6 +50,7 @@
     },
     "primary_image_url": "https://shop.example/images/filter.jpg",
     "description_html": "<p>适用于原站列明车型的替换滤芯。</p>",
+    "description_format": "html",
     "categories": [
       "空气滤芯"
     ],
@@ -73,6 +76,7 @@
       "brand": "NOT_PROVIDED"
     },
     "task_id": "example-task-01",
+    "plan_id": "example-plan",
     "plan_version": "example-plan-v1",
     "extracted_at": "2026-10-27T14:01:00Z"
   }
