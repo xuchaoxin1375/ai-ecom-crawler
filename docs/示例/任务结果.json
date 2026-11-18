@@ -1,30 +1,43 @@
 {
   "synthetic_example": true,
   "task_id": "example-task-01",
+  "plan_id": "example-plan",
   "plan_version": "example-plan-v1",
   "market": "GB",
   "locale": "en-GB",
+  "state": "FINISHED",
+  "outcome": "PARTIAL",
+  "stop_reason": "BUDGET_EXHAUSTED",
+  "started_at": "2026-10-27T14:00:00Z",
+  "finished_at": "2026-10-27T14:10:00Z",
   "counts": {
+    "discovered_urls": 5,
+    "pending_navigation_entries": 2,
     "product_candidates": 3,
+    "pending_products": 0,
+    "in_flight_products": 0,
     "processed_products": 3,
     "valid_products": 2,
     "excluded_products": 1,
     "failed_products": 0,
-    "pending_products": 0,
-    "pending_navigation_entries": 2,
     "partial_description_products": 1
   },
-  "system_result": {
-    "outcome": "PARTIAL",
-    "stop_reason": "BUDGET_EXHAUSTED",
-    "coverage": "UNKNOWN"
+  "coverage": {
+    "status": "UNKNOWN",
+    "denominator_source": null,
+    "denominator": null,
+    "covered": null,
+    "notes": "没有可靠的全站总量；保留已发现和已处理事实"
   },
   "business_acceptance": {
     "status": "ACCEPTED_BY_USER",
     "accepted_by": "示例验收人",
     "accepted_at": "2026-10-27T14:10:00Z",
-    "reason": "已取得业务所需商品，认可本次范围；知悉两个目录待访问、覆盖未知及一条部分描述。"
+    "reason": "已取得业务所需商品，认可本次范围；知悉两个目录待访问、覆盖未知及一条部分描述。",
+    "scope": "本次任务已发现的范围"
   },
-  "runtime_llm_calls": 0,
-  "raw_pages_retained": false
+  "runtime": {
+    "llm_calls": 0,
+    "raw_pages_retained": false
+  }
 }
