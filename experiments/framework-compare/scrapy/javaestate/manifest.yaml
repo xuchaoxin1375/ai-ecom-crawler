@@ -1,0 +1,275 @@
+schema_version: "1.0"
+plan_id: "javaestate-scrapy-us"
+plan_version: "2026.11.19-1"
+kind: "program"
+status: "candidate"
+created_at: "2026-11-18T23:02:35Z"
+updated_at: "2026-11-18T23:40:52Z"
+
+site:
+  name: "Java Estate Roastery"
+  entry_urls:
+    - "https://javaestate.com/"
+  allowed_origins:
+    - "https://javaestate.com"
+  allowed_path_prefixes:
+    - "/products/"
+    - "/collections/"
+    - "/products.json"
+    - "/sitemap"
+    - "/robots.txt"
+  market: "US"
+  locale: "en-US"
+  currency: "USD"
+  currency_evidence: >-
+    Fixed task market US/en-US/USD; the run also probes the public homepage and
+    reads Shopify.currency.active. The catalog JSON itself does not carry a
+    per-quote currency field, so USD is tied to the storefront active currency
+    and the fixed task market, not to a currency symbol.
+
+scope:
+  include:
+    - "https://javaestate.com/products/*"
+  exclude:
+    - "/cart/*"
+    - "/checkout/*"
+    - "/account/*"
+    - "/orders/*"
+    - "/admin/*"
+    - "/services/*"
+    - "/recommendations/*"
+    - "collections with sort_by, filter or + traps"
+  sample: "First 30 distinct product URLs in product-sitemap order."
+  limits:
+    max_products: 30
+    max_seconds: 600
+  notes: >-
+    Bounded framework-comparison trial. The product sitemap contained 706
+    distinct product URLs on 2026-11-19; the other 676 remain outside this
+    run, so the result is a sample and not full-site coverage.
+
+discovery:
+  strategies:
+    - "sitemap"
+  sitemap_urls:
+    - "https://javaestate.com/sitemap.xml"
+  product_sitemap_pattern: "sitemap_products_*.xml"
+  product_url_patterns:
+    - "^https://javaestate\\.com/products/[^/?#]+$"
+  url_identity: "Shopify product handle (last path segment)"
+  pagination: "none; the product sitemap is a single file for this catalog size"
+  notes: >-
+    Read /sitemap.xml, select entries whose loc contains sitemap_products_,
+    then collect /products/ locs and preserve sitemap order. Deduplicate by
+    handle. Do not traverse collections or the whole storefront.
+
+fetch:
+  default_engine: "http"
+  per_url_type:
+    sitemap:
+      engine: "http"
+      method: "GET"
+    catalog:
+      engine: "http"
+      method: "GET"
+      url_template: "https://javaestate.com/products.json?limit=250&page={page}"
+      page_order: [3, 2, 4, 1]
+      notes: >-
+        Public Shopify catalog JSON. Page 3 contains the oldest products and
+        therefore the first 30 sitemap products at the observed catalog size.
+        The page order is a site-specific heuristic with fallbacks; the run
+        stops as soon as all selected handles are found.
+    product_html:
+      engine: "http"
+      status: "disabled_after_429"
+      evidence: >-
+        Build probes on 2026-11-19 returned HTTP 429 (Retry-After: 60) for
+        /products/{handle} and /collections/all. The plan does not retry product
+        HTML per product; catalog JSON is the documented fallback.
+  rate_limit:
+    concurrency: 1
+    delay_ms: 2000
+    autothrottle_max_delay_ms: 90000
+  retry:
+    max_attempts: 3
+    retry_http_codes: [429, 500, 502, 503, 504]
+    backoff: "Retry-After seconds when present, capped at 90s; otherwise 60s"
+  timeout_ms: 60000
+  robots: "obey; Scrapy ROBOTSTXT_OBEY=True"
+  cookies: false
+  sessions: "none"
+
+extract:
+  fields:
+    name:
+      source: "catalog_json"
+      path: "title"
+      required: true
+      normalize: "collapse whitespace; remove an explicit store suffix only"
+    price.amount:
+      source: "catalog_json"
+      path: "variants[].price"
+      required: true
+      rule: "lowest finite positive variant price, including unavailable variants"
+    price.currency:
+      source: "storefront"
+      path: "Shopify.currency.active + fixed task market"
+      required: true
+    primary_image_url:
+      source: "catalog_json"
+      path: "images[0].src"
+      required: true
+    description_html:
+      source: "catalog_json"
+      path: "body_html"
+      required: false
+      status: "partial when the product HTML page was not fetched"
+    description_format:
+      source: "derived"
+      rule: "html when cleaned markup remains; text for native bare text"
+    categories:
+      source: "catalog_json"
+      path: "product_type"
+    brand:
+      source: "catalog_json"
+      path: "vendor"
+      rule: "empty for BYOB or empty vendor; never use the store domain"
+    options:
+      source: "catalog_json"
+      path: "options[]"
+      rule: "public groups only; ignore Title/Default Title and quantity groups"
+    availability:
+      source: "catalog_json"
+      path: "variants[].available"
+      rule: "in_stock if any variant is available; out_of_stock otherwise"
+    source_url:
+      source: "sitemap"
+      path: "product loc"
+    market:
+      source: "fixed"
+      value: "US"
+    locale:
+      source: "fixed"
+      value: "en-US"
+    tax_basis:
+      source: "derived"
+      value: "NOT_STATED"
+      note: "the public catalog does not state tax inclusion"
+  notes: >-
+    The catalog JSON is a public structured source. Product HTML was not
+    available under the observed 429 boundary, so theme-only sections and
+    metafields cannot be verified.
+
+normalize:
+  price:
+    choose: "lowest_public_current_variant_price"
+    positive_only: true
+    include_unavailable_variants: true
+    currency: "USD"
+    tax_basis: "NOT_STATED"
+    precision: "0.01"
+    reject: ["zero", "negative", "invalid", "missing"]
+  description:
+    mode: "clean_html"
+    statuses: ["complete", "partial", "fallback", "not_provided", "failed"]
+    remove_tags: ["script", "style", "iframe", "form", "img", "video", "svg"]
+    unwrap_tags: ["a", "span", "font", "small", "center"]
+    keep_table_attrs: ["colspan", "rowspan", "scope"]
+    remove_admin_warning_class: "byob-bundle-description-warning"
+    partial_reason: >-
+      product_html_http_429; description_source=products.json body_html;
+      page-only theme blocks and metafields unverified
+  name:
+    collapse_whitespace: true
+    strip_store_suffix: "| Java Estate Roastery"
+  options:
+    exclude_quantity: true
+    strip_price_delta: true
+    escape_chars: "\\ # | ~"
+  csv:
+    columns: 22
+    encoding: "utf-8-sig"
+    line_terminator: "CRLF"
+    quote_style: "minimal"
+    formula_guard: "prefix apostrophe for cells starting with = + - @"
+  entrypoint: "javaestate/normalize.py"
+
+validate:
+  required_fields:
+    - "name"
+    - "price.amount"
+    - "price.currency"
+    - "primary_image_url"
+    - "source_url"
+  assertions:
+    - field: "price.amount"
+      op: ">"
+      value: 0
+    - field: "price.currency"
+      op: "in"
+      value: ["USD"]
+    - field: "source_url"
+      op: "regex"
+      value: "^https://javaestate\\.com/products/"
+    - field: "description_format"
+      op: "in"
+      value: ["html", "text", ""]
+  partial_description: "allowed_with_flag"
+  failure_classification:
+    business_exclusion: ["non_positive_price", "no_public_price", "invalid_price", "missing_required_image", "currency_mismatch"]
+    technical_failure: ["name_missing_after_clean", "handle_missing", "description_parse_error", "extraction_exception", "catalog_access_denied_http_429", "handle_not_found_in_fetched_catalog_pages", "http_429_after_retries"]
+  notes: >-
+    Partial descriptions are allowed but must carry partial_reason. Zero,
+    negative, missing and invalid prices never enter valid.csv.
+
+runtime:
+  entrypoint: "run.py"
+  command: >-
+    python -m uv run --project experiments/framework-compare/scrapy
+    python experiments/framework-compare/scrapy/javaestate/run.py
+    --max-products 30 --max-seconds 600
+  protocol: "CLI; writes files described in outputs"
+  outputs:
+    valid_csv: "valid.csv"
+    task_result: "task-result.json"
+    diagnostics: "diagnostics/"
+    metrics_json: "../../results/scrapy-javaestate.json"
+    metrics_md: "../../results/scrapy-javaestate.md"
+  limits:
+    max_products: 30
+    max_seconds: 600
+    concurrency: 1
+    download_delay_s: 2
+    retry_limit: 3
+  idempotency: "(task_id, source_url); valid.csv rows are deduplicated by source_url"
+  cancellation: >-
+    SIGINT or CLOSESPIDER_TIMEOUT; the pipeline writes accepted results and
+    pending diagnostics at spider close. No browser or child process is left.
+  resources: "one short-lived Python process; no browser, no database, no queue"
+  llm_calls: 0
+
+compatibility:
+  os: ["windows", "linux", "wsl2"]
+  runtime: "python>=3.11,<3.14"
+  framework: "Scrapy==2.20.0"
+  dependencies_lock: "../uv.lock"
+  network: "public web; system proxy optional; no login, no cookies, no auth"
+  secrets: "none"
+  assumptions:
+    - "javaestate.com is reachable from the selected egress"
+    - "the public products.json catalog remains enabled"
+    - "US/en-US/USD remains the storefront default market"
+
+entrypoint: "run.py"
+
+notes: >-
+  Built for the framework-comparison experiment (S1). Status is candidate:
+  the bounded trial passed, but the plan does not claim verified full-site
+  coverage. The product sitemap had 706 distinct product URLs on 2026-11-19;
+  only the first 30 were processed. Product HTML returned HTTP 429 during
+  build probes, so descriptions use the public catalog body_html and are
+  marked partial. The CSV uses UTF-8 with BOM and CRLF for spreadsheet use;
+  machine consumers should use the header and description_format, not guess
+  from the column name. Re-run with the same command; if the catalog size
+  changes, adjust fetch.per_url_type.catalog.page_order or let the fallback
+  pages find the selected handles.
