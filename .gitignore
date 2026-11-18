@@ -1,0 +1,27 @@
+# 秘密与本地配置
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+serviceAccountKey.json
+
+# 运行与临时产物
+*.log
+*.tmp
+Thumbs.db
+.DS_Store
+dist/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.ruff_cache/
+
+# 编辑器
+.idea/
+.vscode/settings.json
+.vscode/launch.json

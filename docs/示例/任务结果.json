@@ -1,0 +1,30 @@
+{
+  "synthetic_example": true,
+  "task_id": "example-task-01",
+  "plan_version": "example-plan-v1",
+  "market": "GB",
+  "locale": "en-GB",
+  "counts": {
+    "product_candidates": 3,
+    "processed_products": 3,
+    "valid_products": 2,
+    "excluded_products": 1,
+    "failed_products": 0,
+    "pending_products": 0,
+    "pending_navigation_entries": 2,
+    "partial_description_products": 1
+  },
+  "system_result": {
+    "outcome": "PARTIAL",
+    "stop_reason": "BUDGET_EXHAUSTED",
+    "coverage": "UNKNOWN"
+  },
+  "business_acceptance": {
+    "status": "ACCEPTED_BY_USER",
+    "accepted_by": "示例验收人",
+    "accepted_at": "2026-10-27T14:10:00Z",
+    "reason": "已取得业务所需商品，认可本次范围；知悉两个目录待访问、覆盖未知及一条部分描述。"
+  },
+  "runtime_llm_calls": 0,
+  "raw_pages_retained": false
+}

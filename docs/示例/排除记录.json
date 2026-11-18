@@ -1,0 +1,11 @@
+[
+  {
+    "source_url": "https://shop.example/products/free-sample",
+    "observed_price": {
+      "amount": 0,
+      "currency": "GBP"
+    },
+    "reason": "NON_POSITIVE_PRICE",
+    "included_in_valid_export": false
+  }
+]

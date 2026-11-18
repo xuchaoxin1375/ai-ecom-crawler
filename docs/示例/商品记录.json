@@ -1,0 +1,79 @@
+[
+  {
+    "name": "示例运动上衣",
+    "price": {
+      "amount": 24.17,
+      "currency": "GBP"
+    },
+    "primary_image_url": "https://shop.example/images/shirt.jpg",
+    "description_html": "<p>轻便运动上衣。</p><ul><li>棉质面料</li></ul><table><tr><td>版型</td><td>常规</td></tr></table>",
+    "categories": [
+      "运动上衣"
+    ],
+    "brand": "示例品牌",
+    "options": [
+      {
+        "name": "Size",
+        "values": [
+          "S",
+          "M"
+        ]
+      },
+      {
+        "name": "Color",
+        "values": [
+          "Red",
+          "Blue"
+        ]
+      }
+    ],
+    "source_url": "https://shop.example/products/shirt",
+    "market": "GB",
+    "locale": "en-GB",
+    "availability": "OUT_OF_STOCK",
+    "price_basis": "LOWEST_PUBLIC_CURRENT",
+    "tax_basis": "EXCLUSIVE",
+    "description_status": "COMPLETE",
+    "partial_reason": null,
+    "missing_reasons": {},
+    "task_id": "example-task-01",
+    "plan_version": "example-plan-v1",
+    "extracted_at": "2026-10-27T14:00:00Z"
+  },
+  {
+    "name": "示例汽车空气滤芯",
+    "price": {
+      "amount": 18.5,
+      "currency": "GBP"
+    },
+    "primary_image_url": "https://shop.example/images/filter.jpg",
+    "description_html": "<p>适用于原站列明车型的替换滤芯。</p>",
+    "categories": [
+      "空气滤芯"
+    ],
+    "brand": null,
+    "options": [
+      {
+        "name": "Model",
+        "values": [
+          "A",
+          "B"
+        ]
+      }
+    ],
+    "source_url": "https://shop.example/products/filter",
+    "market": "GB",
+    "locale": "en-GB",
+    "availability": null,
+    "price_basis": "LOWEST_PUBLIC_CURRENT",
+    "tax_basis": "NOT_SPECIFIED",
+    "description_status": "PARTIAL",
+    "partial_reason": "复杂车型适配表经有界观察仍无法可靠取得；现保留已验证的产品说明。",
+    "missing_reasons": {
+      "brand": "NOT_PROVIDED"
+    },
+    "task_id": "example-task-01",
+    "plan_version": "example-plan-v1",
+    "extracted_at": "2026-10-27T14:01:00Z"
+  }
+]
