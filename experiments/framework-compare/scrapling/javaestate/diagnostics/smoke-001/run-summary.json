@@ -1,0 +1,143 @@
+{
+  "task_id": "scrapling-javaestate-smoke-001-20261119T000452Z",
+  "label": "smoke-001",
+  "plan_id": "javaestate-us-scrapling",
+  "plan_version": "2026.11.19-1",
+  "run_started_at": "2026-11-19T00:04:52Z",
+  "run_finished_at": "2026-11-19T00:05:01Z",
+  "build_started_at": "2026-11-18T23:45:00Z",
+  "first_valid_at": "2026-11-19T00:05:00Z",
+  "first_valid_product_s": 1200.3,
+  "elapsed_s": 8.88,
+  "state": "FINISHED",
+  "outcome": "PARTIAL",
+  "stop_reason": "BUDGET_EXHAUSTED",
+  "stop_detail": "task cap reached: processed 2 product pages; sitemap declares 707",
+  "counts": {
+    "discovered_urls": 5,
+    "pending_navigation_entries": 0,
+    "product_candidates": 2,
+    "pending_products": 0,
+    "in_flight_products": 0,
+    "processed_products": 2,
+    "valid_products": 2,
+    "excluded_products": 0,
+    "failed_products": 0,
+    "partial_description_products": 0
+  },
+  "coverage": {
+    "status": "PARTIAL",
+    "denominator_source": "sitemap_products_1.xml <url><loc> count",
+    "denominator": 707,
+    "covered": 2,
+    "notes": "Task cap 2 product pages. Processed 2 of 707 sitemap product URLs; the rest are outside this bounded run and are not a full-site completion claim."
+  },
+  "requests": 6,
+  "retries": 0,
+  "per_purpose": {
+    "robots": 1,
+    "entry": 1,
+    "sitemap_index": 1,
+    "sitemap_products": 1,
+    "product": 2
+  },
+  "per_status": {
+    "status_200": 6
+  },
+  "errors": [],
+  "discovery": {
+    "entry_url": "https://javaestate.com/",
+    "entry_final_url": "https://javaestate.com/",
+    "html_lang": "en",
+    "html_title": "Java Estate Roastery",
+    "site_name": "Java Estate Roastery",
+    "sitemap_index_url": "https://javaestate.com/sitemap.xml",
+    "product_sitemap_url": "https://javaestate.com/sitemap_products_1.xml?from=7233447460934&to=10283359469638",
+    "product_sitemap_count": 707,
+    "kept_products": 2,
+    "duplicate_urls": 0,
+    "filtered_urls": 1,
+    "robots_status": 200,
+    "notes": [
+      "product sitemap declared 707 <url> entries; kept first 2 unique product URLs within the 2-page cap."
+    ]
+  },
+  "product_audits": [
+    {
+      "source_url": "https://javaestate.com/products/ghirardelli-white-chocolate-sweet-ground-powder",
+      "outcome": "valid",
+      "detail": "",
+      "name": "Ghirardelli Sweet Ground White Chocolate Powder, 3.2 lb Canister",
+      "price_amount": "25.49",
+      "price_currency": "USD",
+      "description_status": "complete",
+      "description_format": "html",
+      "description_chars": 772,
+      "partial_reason": "",
+      "category": "Powdered Beverage Mixes",
+      "brand": "Ghirardelli",
+      "options": [],
+      "availability": "in_stock",
+      "missing_reasons": {},
+      "evidence": {
+        "jsonld_product": true,
+        "embedded_product_json": true,
+        "name_source": "jsonld_name",
+        "variant_count": 1,
+        "variant_price_samples_usd_cents": [
+          2549
+        ],
+        "price_source": "embedded_variants_min_positive",
+        "currency_source": "jsonld_offers_priceCurrency",
+        "image_source": "embedded_featured_image",
+        "category_source": "jsonld_category",
+        "brand_source": "jsonld_brand",
+        "options_source": "none",
+        "price_amount": "25.49"
+      }
+    },
+    {
+      "source_url": "https://javaestate.com/products/ghirardelli-sauce-pump",
+      "outcome": "valid",
+      "detail": "",
+      "name": "Ghirardelli (1/2oz) Sauce Pump",
+      "price_amount": "11.10",
+      "price_currency": "USD",
+      "description_status": "complete",
+      "description_format": "html",
+      "description_chars": 190,
+      "partial_reason": "",
+      "category": "Condiments & Sauces",
+      "brand": "Ghirardelli",
+      "options": [],
+      "availability": "in_stock",
+      "missing_reasons": {},
+      "evidence": {
+        "jsonld_product": true,
+        "embedded_product_json": true,
+        "name_source": "jsonld_name",
+        "variant_count": 1,
+        "variant_price_samples_usd_cents": [
+          1110
+        ],
+        "price_source": "embedded_variants_min_positive",
+        "currency_source": "jsonld_offers_priceCurrency",
+        "image_source": "embedded_featured_image",
+        "category_source": "jsonld_category",
+        "brand_source": "jsonld_brand",
+        "options_source": "none",
+        "price_amount": "11.10"
+      }
+    }
+  ],
+  "runtime": {
+    "llm_calls": 0,
+    "raw_pages_retained": false,
+    "browser_launched": false,
+    "http_engine": "scrapling.FetcherSession (curl_cffi, static HTML)",
+    "concurrency": 1,
+    "request_interval_seconds": 1.1,
+    "max_attempts": 3
+  },
+  "errors_count": 0
+}

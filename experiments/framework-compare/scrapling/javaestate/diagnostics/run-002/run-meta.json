@@ -1,0 +1,16 @@
+{
+  "task_id": "scrapling-javaestate-run-002-20261119T001235Z",
+  "framework": "Scrapling",
+  "scrapling_version": "0.5.1",
+  "engine": "scrapling.FetcherSession",
+  "browser_launched": false,
+  "python": "3.13.13 | packaged by conda-forge | (main, Apr  8 2026, 01:56:49) [MSC v.1944 64 bit (AMD64)]",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "proxy_env_names": [
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
+    "NO_PROXY"
+  ],
+  "command": "experiments/framework-compare/scrapling/javaestate/run.py --out-dir experiments/framework-compare/scrapling/javaestate/diagnostics/run-002-output --label run-002 --max-products 30 --max-seconds 600 --plan-version 2026.11.19-2 --build-started-at 2026-11-18T23:45:00Z",
+  "network_note": "Proxy values withheld; egress was not independently measured."
+}

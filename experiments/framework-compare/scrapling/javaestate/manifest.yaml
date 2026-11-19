@@ -1,0 +1,308 @@
+schema_version: "1.0"
+plan_id: "javaestate-us-scrapling"
+plan_version: "2026.11.19-2"
+kind: "program"
+status: "candidate"
+created_at: "2026-11-19T00:05:19Z"
+updated_at: "2026-11-19T00:31:47Z"
+
+site:
+  name: "Java Estate Roastery"
+  entry_urls:
+    - "https://javaestate.com/"
+  allowed_origins:
+    - "https://javaestate.com"
+    - "https://www.javaestate.com"
+  allowed_path_prefixes:
+    - "/"
+    - "/products/"
+    - "/sitemap"
+  market: "US"
+  locale: "en-US"
+  currency: "USD"
+
+scope:
+  include:
+    - "https://javaestate.com/products/<handle>"
+  exclude:
+    - "/cart/"
+    - "/checkout"
+    - "/account"
+    - "/orders"
+    - "/services/"
+    - "/recommendations/products"
+    - "collection sort/filter URLs"
+  default_mode: "bounded_sample"
+  max_products: 30
+  max_seconds: 600
+  notes: "First 30 unique product URLs from the product sitemap, sitemap order. No login, cart, checkout, account or paid access."
+
+discovery:
+  strategies:
+    - "entry_page"
+    - "sitemap_index"
+    - "product_sitemap"
+  sitemap_urls:
+    - "https://javaestate.com/sitemap.xml"
+  sitemap_resolution: "Fetch the index, select the sitemap whose URL contains `sitemap_products`, then parse only `<url><loc>` nodes."
+  sitemap_product_count_observed: 707
+  product_url_patterns:
+    - "^/products/[^/]+$"
+  url_identity: "normalized_path_casefolded"
+  deduplication: "Canonicalize to https://javaestate.com + path; strip query/fragment; dedupe by casefolded /products/<handle> path."
+  robots:
+    url: "https://javaestate.com/robots.txt"
+    parser: "protego (same parser used by Scrapling's RobotsTxtManager)"
+    user_agent: "*"
+    policy: "Fetch robots.txt before any business URL; skip disallowed URLs; do not use login, cart, checkout, account, orders, services, recommendations or internal Shopify endpoints."
+  pagination:
+    type: "none"
+    notes: "Product sitemap is the only discovery path in this bounded plan; collection pagination is out of scope."
+
+fetch:
+  default_engine: "scrapling.FetcherSession (curl_cffi, static HTML)"
+  per_url_type:
+    entry:
+      engine: "static"
+      method: "GET"
+      follow_redirects: true
+    sitemap:
+      engine: "static"
+      method: "GET"
+      follow_redirects: true
+    product:
+      engine: "static"
+      method: "GET"
+      follow_redirects: true
+      wait_selector: null
+      actions: []
+  rate_limit:
+    concurrency: 1
+    delay_ms: 1100
+    pacing: "end-to-next-start, measured after the previous response"
+  retry:
+    max_attempts: 3
+    retry_delay_ms: 1000
+    backoff: "2s, 4s for transport/5xx; Retry-After for 429 (capped at 60s)"
+    stop_on_persistent_429: true
+    stop_on_401_403: true
+  timeout_ms: 45000
+  session:
+    reuse: "one FetcherSession for the whole run"
+    profile_required: false
+    cookies_required: false
+    browser_required: false
+  stop_conditions:
+    - "HTTP 429 persists after 3 attempts, or Retry-After exceeds 60s"
+    - "HTTP 401/403 on a business URL"
+    - "200 response matches a challenge-shell marker and has no product heading"
+    - "wall-clock budget of 600s is exhausted"
+
+extract:
+  source_type: "static_html"
+  price_evidence:
+    primary: "window.wpdExtensionIsProductPage.variants[*].price (integer USD cents; minimum positive variant)"
+    fallback: "JSON-LD Product.offers.price, then embedded price_min, then og:price:amount"
+    currency:
+      - "JSON-LD Product.offers.priceCurrency"
+      - "meta[property=og:price:currency]"
+      - "Shopify.currency = {\"active\":\"USD\"}"
+      - "ShopifyAnalytics.meta.currency"
+  fields:
+    name:
+      sources:
+        - "JSON-LD Product.name"
+        - "h1"
+        - "window.wpdExtensionIsProductPage.title"
+        - "og:title"
+      required: true
+      normalize: "Collapse whitespace; strip an explicit site-name suffix only; do not guess brands."
+    price.amount:
+      source: "embedded variants, minimum finite positive value"
+      required: true
+      normalize: "Integer cents -> decimal with two places; zero and missing prices are excluded and recorded."
+    price.currency:
+      source: "same-offer JSON-LD / og / Shopify currency evidence"
+      required: true
+      normalize: "Uppercase ISO-4217-shaped three-letter code; never inferred from `$`, TLD, language or proxy country."
+    primary_image_url:
+      sources:
+        - "window.wpdExtensionIsProductPage.featured_image"
+        - "first embedded product image"
+        - "JSON-LD Product.image"
+        - "og:image"
+        - "first .product-gallery img"
+      required: true
+      normalize: "Protocol-relative to https; reject logo/placeholder-looking URLs."
+    description_html:
+      sources:
+        - "window.wpdExtensionIsProductPage.description (HTML)"
+        - ".product__description (HTML)"
+        - "meta description / og:description (plain-text fallback)"
+      required: false
+      normalize: "DOM whitelist cleaning; remove scripts/styles/images/forms/links/attributes; keep paragraphs, lists, emphasis and tables."
+    categories:
+      sources:
+        - "JSON-LD Product.category"
+        - "window.wpdExtensionIsProductPage.type"
+      required: false
+      normalize: "First meaningful category; drop Home/Shop/All/Products."
+    brand:
+      sources:
+        - "JSON-LD Product.brand.name"
+        - "window.wpdExtensionIsProductPage.vendor"
+      required: false
+      normalize: "Leave empty when the value is only the store name/domain."
+    options:
+      sources:
+        - "window.wpdExtensionIsProductPage.options + variants option1..3"
+        - "select.product-variant-container with its label (DOM fallback)"
+      required: false
+      normalize: "Drop quantity groups, default-title pseudo options and trailing price deltas; preserve first spelling and order."
+    availability:
+      sources:
+        - "embedded variants[*].available"
+        - "JSON-LD Product.offers.availability"
+      required: false
+      normalize: "in_stock if any variant is available; out_of_stock if all are false; otherwise empty (do not infer)."
+    tax_basis:
+      source: "embedded variants[*].taxable"
+      required: false
+      normalize: "all false -> no_tax_applied; all true -> unknown_not_stated (taxable does not prove inclusive pricing); mixed -> mixed_taxability; missing -> unknown_not_stated."
+    source_url:
+      source: "final response URL, canonicalized to the /products/<handle> path"
+      required: true
+
+normalize:
+  price:
+    tax_basis: "derived from embedded variants[*].taxable: all false -> no_tax_applied; all true -> unknown_not_stated; mixed -> mixed_taxability; missing -> unknown_not_stated"
+    choose: "lowest_public_current_variant_price"
+    positive_only: true
+    includes_out_of_stock_priced_variants: true
+    ignores: "compare-at, installments, shipping, add-ons and recommendation prices"
+  description:
+    mode: "clean_html_whitelist"
+    statuses:
+      - "complete"
+      - "partial"
+      - "fallback"
+      - "not_provided"
+      - "failed"
+    partial_policy: "Set partial when the rendered .product__description is materially shorter than the embedded description, or when the rendered block is absent and the embedded JSON is the only body source; record the reason."
+  name:
+    mode: "collapse_whitespace_and_explicit_site_suffix_only"
+  options:
+    mode: "structured_name_value_pairs"
+    exclude_quantity: true
+    strip_price_delta: true
+    serialize: "Size#S|M~Color#Red|Blue with backslash escaping for \\, #, | and ~"
+  csv:
+    encoding: "utf-8"
+    columns: 22
+    formula_protection: "Prefix untrusted text cells starting with =, +, - or @ with a single quote; numeric price_amount stays numeric."
+    missing_reasons: "JSON object string, {} when nothing is missing."
+
+validate:
+  required_fields:
+    - "name"
+    - "price.amount"
+    - "price.currency"
+    - "primary_image_url"
+    - "source_url"
+  assertions:
+    - field: "price.amount"
+      op: ">"
+      value: 0
+    - field: "price.currency"
+      op: "matches"
+      value: "^[A-Z]{3}$"
+    - field: "description_status"
+      op: "in"
+      value: ["complete", "partial", "fallback", "not_provided", "failed"]
+  excluded_reasons:
+    - "zero_price"
+    - "missing_price"
+    - "missing_currency"
+    - "missing_primary_image"
+    - "missing_name"
+    - "currency_mismatch"
+    - "robots_disallowed"
+  failed_reasons:
+    - "transport_error"
+    - "http_5xx"
+    - "http_404"
+    - "http_429_after_retries"
+    - "challenge_page"
+    - "extraction_error"
+  partial_description: "allowed_with_flag"
+  deduplication: "One row per casefolded /products/<handle> path."
+
+runtime:
+  entrypoint: "run.py"
+  language: "Python"
+  invocation: "python -m uv run --project experiments/framework-compare/scrapling python experiments/framework-compare/scrapling/javaestate/run.py --out-dir experiments/framework-compare/scrapling/javaestate --label run-001"
+  context: "CLI arguments only; no build-session state, cookies or secrets."
+  output_contract:
+    - "valid.csv (22 columns)"
+    - "task-result.json (09 state/outcome/stop_reason/counts/coverage)"
+    - "run-summary.json"
+    - "diagnostics/<label>/events.ndjson"
+    - "diagnostics/<label>/excluded_products.csv"
+    - "diagnostics/<label>/failed_products.csv"
+    - "diagnostics/<label>/pending_products.csv"
+    - "diagnostics/<label>/product-audit.jsonl"
+  checkpoint:
+    mode: "none"
+    notes: "Bounded runs finish in about two minutes; each run is independent and writes an immutable diagnostics label."
+  idempotency_key: "task_id + plan_version + canonical source_url"
+  cancellation: "Ctrl+C interrupts the sequential loop; the FetcherSession context manager closes the HTTP session. A cancelled run is not a published FINISHED result; rerun with a new label."
+  resource_cleanup: "No browser process; one in-process curl_cffi session closed on exit."
+
+entrypoint: "run.py"
+
+compatibility:
+  os:
+    - "windows"
+    - "linux"
+    - "wsl2"
+  runtime: "python>=3.11,<3.14"
+  dependencies:
+    - "scrapling[fetchers]==0.5.1"
+    - "protego (installed with Scrapling)"
+    - "lxml (installed with Scrapling)"
+  browser: "none; static FetcherSession only"
+  network: "public web; environment HTTP_PROXY/HTTPS_PROXY may be present, values are injected by the environment"
+  secrets: "none required; no cookies or API keys"
+  lockfile: "experiments/framework-compare/scrapling/uv.lock"
+
+evidence:
+  sample_urls:
+    - "https://javaestate.com/products/ghirardelli-white-chocolate-sweet-ground-powder"
+    - "https://javaestate.com/products/ghirardelli-sauce-pump"
+  expected:
+    - url: "https://javaestate.com/products/ghirardelli-white-chocolate-sweet-ground-powder"
+      name: "Ghirardelli Sweet Ground White Chocolate Powder, 3.2 lb Canister"
+      price.amount: 25.49
+      price.currency: "USD"
+      description_status: "complete"
+    - url: "https://javaestate.com/products/ghirardelli-sauce-pump"
+      name: "Ghirardelli (1/2oz) Sauce Pump"
+      price.amount: 11.10
+      price.currency: "USD"
+  verified_at: null
+  verification_scope: "Build smoke run (2 products), the v1 30-product run under diagnostics/run-001, the v2 fix rerun under diagnostics/fix-rerun, and the same-plan v2 rerun under diagnostics/run-002."
+  limitations:
+    - "Static HTML only; sampled template did not require browser rendering."
+    - "Task cap 30 product pages; sitemap denominator is a moving public list."
+    - "Tax basis uses the public variant taxable flag only; it does not prove tax-inclusive pricing."
+    - "Description status compares rendered DOM text with the embedded product description; JS-only tabs are not exercised."
+    - "Options are public variant values only; no SKU-combination pricing."
+    - "429 behavior is implemented but was not triggered in the smoke run."
+
+notes:
+  - "The product sitemap URL carries `from`/`to` query parameters; resolve it from the sitemap index at run time instead of hardcoding it."
+  - "Some product pages have no Product JSON-LD (for example retail-special-pack-12oz-bag-5-pack-2); embedded product JSON and og/Shopify currency are the fallback."
+  - "The theme uses custom select.product-variant-container pickers rather than Shopify's default variant-selects."
+  - "robots.txt allows public product/collection/page/blog HTML and disallows cart, checkout, account, orders, services and recommendations."
+  - "Build diagnostic on `java-jacket-drink-sleeves-8-24-oz-copy` verified the zero_price exclusion and the no-JSON-LD fallback (og currency, h1 name); it is outside the bounded run and not in valid.csv."
+  - "Do not add collection pagination or all 707 products without a new scope decision and a new plan_version."

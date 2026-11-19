@@ -1,0 +1,25 @@
+{
+  "probe": "zero_price_exclusion",
+  "source_url": "https://javaestate.com/products/java-jacket-drink-sleeves-8-24-oz-copy",
+  "http_status": 200,
+  "name": "Java Jacket Drink Sleeves, Customized Private Label",
+  "price_cents": null,
+  "price_currency": "USD",
+  "exclusion_reason": "zero_price",
+  "exclusion_detail": "all public variant prices are zero; samples=[]",
+  "description_status": "complete",
+  "evidence": {
+    "jsonld_product": false,
+    "embedded_product_json": true,
+    "name_source": "h1",
+    "variant_count": 1,
+    "variant_price_samples_usd_cents": [],
+    "currency_source": "og_price_currency",
+    "image_source": "embedded_featured_image",
+    "category_source": "embedded_type",
+    "brand_source": "embedded_vendor",
+    "options_source": "embedded_variants",
+    "tax_basis_source": "embedded_variants_taxable_false"
+  },
+  "note": "Build diagnostic only; this product is outside the bounded run and is not in valid.csv."
+}

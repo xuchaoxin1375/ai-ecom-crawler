@@ -1,0 +1,239 @@
+{
+  "framework": "Scrapling",
+  "framework_version": "0.5.1",
+  "engine": "scrapling.FetcherSession (curl_cffi, static HTML)",
+  "site": "javaestate.com",
+  "entry_url": "https://javaestate.com/",
+  "market": "US",
+  "locale": "en-US",
+  "currency": "USD",
+  "plan_id": "javaestate-us-scrapling",
+  "plan_versions": ["2026.11.19-1", "2026.11.19-2"],
+  "build_started_at": "2026-11-18T23:45:00Z",
+  "build_started_at_note": "Session start, minute precision. The first build artifact was created at 2026-11-18T23:48:57Z; first_* metrics are measured from this declared build start, not from any run start.",
+  "build_finished_at": "2026-11-19T00:12:19Z",
+  "build_elapsed_s": 1639.0,
+  "first_plan_at": "2026-11-19T00:07:05Z",
+  "first_plan_s": 1325.0,
+  "first_valid_product_at": "2026-11-19T00:07:22Z",
+  "first_valid_product_s": 1342.8,
+  "first_metric_origin": "first_plan_s and first_valid_product_s are seconds from build_started_at, not from the bounded run start.",
+  "implementation_revisions": 3,
+  "implementation_revision_notes": [
+    "rev1: initial plan package (manifest, Scrapling FetcherSession runner, extractors, 22-column CSV, diagnostics, README, unit tests).",
+    "rev2: smoke run passed for fields, but a unit test found ambiguous '1,234' was accepted as 1234; parser now rejects a lone separator with three digits. No live field bug.",
+    "rev3: fix task v2 added evidence-based 02 tax_basis extraction from the public variant taxable flag (v1 used a constant placeholder)."
+  ],
+  "runtime_llm_calls": 0,
+  "started_at": "2026-11-19T00:07:15Z",
+  "finished_at": "2026-11-19T00:08:06Z",
+  "published_result_started_at": "2026-11-19T00:11:11Z",
+  "published_result_finished_at": "2026-11-19T00:12:02Z",
+  "published_result_plan_version": "2026.11.19-2",
+  "wall_clock_s": 51.12,
+  "requests": 34,
+  "retries": 0,
+  "request_breakdown": {
+    "robots": 1,
+    "entry": 1,
+    "sitemap_index": 1,
+    "sitemap_products": 1,
+    "product": 30
+  },
+  "http_status_breakdown": {
+    "200": 34
+  },
+  "valid_products": 30,
+  "excluded_products": 0,
+  "failed_products": 0,
+  "partial_description_products": 0,
+  "zero_price_products": 0,
+  "zero_price_probe": {
+    "source_url": "https://javaestate.com/products/java-jacket-drink-sleeves-8-24-oz-copy",
+    "http_status": 200,
+    "exclusion_reason": "zero_price",
+    "in_valid_csv": false,
+    "also_verifies": ["no_jsonld_fallback", "og_price_currency", "h1_name_fallback", "embedded_vendor_brand"]
+  },
+  "missing_price_products": 0,
+  "missing_currency_products": 0,
+  "missing_image_products": 0,
+  "duplicate_products": 0,
+  "errors": [],
+  "build_errors": [
+    {
+      "when": "unit test, before first run",
+      "error": "parse_positive_money accepted the ambiguous '1,234' as 1234",
+      "fix": "reject a lone separator followed by exactly three digits; covered by test_contract.py",
+      "status": "fixed"
+    },
+    {
+      "when": "manifest syntax check",
+      "error": "PyYAML is not installed in the fixed environment and packages may not be installed",
+      "fix": "manifest was hand-checked line by line; no YAML parser validation was recorded",
+      "status": "not_fixed"
+    }
+  ],
+  "limitations": [
+    "Bounded 30-product run; the product sitemap declared 707 product URLs, so this is not full-site coverage.",
+    "All 30 sampled products were single-variant; live option extraction was not exercised, only unit-tested with fixtures.",
+    "All 30 sampled products had a complete embedded description; partial/fallback/not-provided/failed statuses were not exercised by live data.",
+    "No zero-price or missing-price product appeared in the first 30; the zero-price branch was live-verified by a build diagnostic on java-jacket-drink-sleeves-8-24-oz-copy (excluded, not in valid.csv). Missing-price and invalid-amount branches remain unit-tested only.",
+    "No HTTP 429 occurred in any run; 429 Retry-After handling is implemented but not live-verified.",
+    "Product pages omit a tax-inclusive/exclusive statement; tax_basis uses the public variant taxable flag only.",
+    "All 30 sampled products had Product JSON-LD; the no-JSON-LD fallback was live-verified by the same zero-price build diagnostic (og_price_currency, h1 name, embedded vendor), but that product is outside valid.csv.",
+    "Static HTML only; JS-only tabs and widgets were not rendered or exercised.",
+    "Proxy environment variables HTTP_PROXY/HTTPS_PROXY are present; values were not recorded and egress was not independently measured.",
+    "Peak memory was not measured.",
+    "The manifest YAML was not machine-parsed because no YAML parser is installed in the fixed environment."
+  ],
+  "run": {
+    "label": "run-001",
+    "plan_version": "2026.11.19-1",
+    "task_id": "scrapling-javaestate-run-001-20261119T000715Z",
+    "started_at": "2026-11-19T00:07:15Z",
+    "finished_at": "2026-11-19T00:08:06Z",
+    "elapsed_s": 51.12,
+    "requests": 34,
+    "outcome": "PARTIAL",
+    "stop_reason": "BUDGET_EXHAUSTED",
+    "counts": {
+      "discovered_urls": 33,
+      "pending_navigation_entries": 0,
+      "product_candidates": 30,
+      "pending_products": 0,
+      "in_flight_products": 0,
+      "processed_products": 30,
+      "valid_products": 30,
+      "excluded_products": 0,
+      "failed_products": 0,
+      "partial_description_products": 0
+    },
+    "coverage": {
+      "status": "PARTIAL",
+      "denominator_source": "sitemap_products_1.xml <url><loc> count",
+      "denominator": 707,
+      "covered": 30
+    }
+  },
+  "fix_task": {
+    "status": "passed",
+    "started_at": "2026-11-19T00:08:45Z",
+    "finished_at": "2026-11-19T00:12:19Z",
+    "fix_minutes": 3.6,
+    "change": "Added evidence-based 02 tax_basis extraction from embedded variants[*].taxable. v1 wrote a constant unknown_not_stated; v2 writes no_tax_applied when all variants are non-taxable, mixed_taxability for mixed flags, and keeps unknown_not_stated when the flag is true or absent.",
+    "plan_version_from": "2026.11.19-1",
+    "plan_version_to": "2026.11.19-2",
+    "files_changed": [
+      "javaestate_scraper/normalize.py",
+      "javaestate_scraper/extract.py",
+      "javaestate_scraper/runner.py",
+      "javaestate_scraper/config.py",
+      "manifest.yaml",
+      "README.md",
+      "tests/test_contract.py",
+      "tools/validate_output.py"
+    ],
+    "rows_changed": 28,
+    "rows_total": 30,
+    "tax_basis_after": {
+      "no_tax_applied": 28,
+      "unknown_not_stated": 2
+    },
+    "rerun": {
+      "label": "fix-rerun",
+      "task_id": "scrapling-javaestate-fix-rerun-20261119T001111Z",
+      "started_at": "2026-11-19T00:11:11Z",
+      "finished_at": "2026-11-19T00:12:02Z",
+      "elapsed_s": 50.9,
+      "requests": 34,
+      "valid_products": 30,
+      "excluded_products": 0,
+      "failed_products": 0,
+      "partial_description_products": 0,
+      "changed_business_columns": ["tax_basis"],
+      "same_products": true,
+      "runtime_llm_calls": 0
+    },
+    "note": "The same 30 product URLs were used; no samples were removed or added to pass the fix."
+  },
+  "rerun": {
+    "label": "run-002",
+    "plan_version": "2026.11.19-2",
+    "task_id": "scrapling-javaestate-run-002-20261119T001235Z",
+    "started_at": "2026-11-19T00:12:35Z",
+    "finished_at": "2026-11-19T00:13:25Z",
+    "elapsed_s": 50.36,
+    "requests": 34,
+    "valid_products": 30,
+    "excluded_products": 0,
+    "failed_products": 0,
+    "partial_description_products": 0,
+    "runtime_llm_calls": 0,
+    "difference_from_fix_rerun": {
+      "business_fields_identical": true,
+      "changed_columns": ["task_id", "extracted_at"],
+      "note": "Same plan version and same 30 product URLs; no business value changed."
+    }
+  },
+  "quality": {
+    "positive_price_rows": 30,
+    "usd_currency_rows": 30,
+    "rows_with_primary_image": 30,
+    "rows_with_description": 30,
+    "description_status_counts": {
+      "complete": 30,
+      "partial": 0,
+      "fallback": 0,
+      "not_provided": 0,
+      "failed": 0
+    },
+    "rows_with_options": 0,
+    "availability_counts": {
+      "in_stock": 27,
+      "out_of_stock": 3
+    },
+    "distinct_brands": ["Big Train", "Ghirardelli"],
+    "categories": ["Condiments & Sauces", "Powdered Beverage Mixes"],
+    "csv_columns": 22,
+    "csv_validation": "tools/validate_output.py: OK",
+    "duplicate_source_urls": 0,
+    "http_429": 0,
+    "min_request_gap_s": 1.372,
+    "request_interval_target_s": 1.1,
+    "concurrency": 1
+  },
+  "resources": {
+    "browser_launched": false,
+    "browser_processes_started": 0,
+    "http_sessions_started": 3,
+    "residual_browser_processes": 0,
+    "residual_run_processes": 0,
+    "peak_memory_mb": null,
+    "note": "One in-process curl_cffi session per run, closed by the FetcherSession context manager; no browser was started."
+  },
+  "network": {
+    "proxy_env_names": ["HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY"],
+    "proxy_name": "environment HTTP(S) proxy (value withheld)",
+    "egress_measured": false,
+    "note": "Not an independent egress measurement; proxy values are not recorded."
+  },
+  "build_probe_requests_estimated": 34,
+  "post_build_diagnostic_requests": 1,
+  "post_build_diagnostics": {
+    "zero_price_probe_at": "2026-11-19T00:30:39Z",
+    "source_url": "https://javaestate.com/products/java-jacket-drink-sleeves-8-24-oz-copy",
+    "result": "excluded zero_price; also exercised no-JSON-LD fallback",
+    "in_valid_csv": false
+  },
+  "build_probe_note": "Manual build probes plus the 2-product smoke run; not included in the run request count.",
+  "artifacts": {
+    "plan_dir": "experiments/framework-compare/scrapling/javaestate/",
+    "valid_csv": "experiments/framework-compare/scrapling/javaestate/valid.csv",
+    "task_result": "experiments/framework-compare/scrapling/javaestate/task-result.json",
+    "run_log": "experiments/framework-compare/scrapling/javaestate/run-log.md",
+    "main_run_diagnostics": "experiments/framework-compare/scrapling/javaestate/diagnostics/run-001/",
+    "fix_rerun_diagnostics": "experiments/framework-compare/scrapling/javaestate/diagnostics/fix-rerun/",
+    "same_plan_rerun_diagnostics": "experiments/framework-compare/scrapling/javaestate/diagnostics/run-002/"
+  }
+}

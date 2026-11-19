@@ -1,0 +1,66 @@
+{
+  "task_id": "scrapling-javaestate-run-002-20261119T001235Z",
+  "plan_id": "javaestate-us-scrapling",
+  "plan_version": "2026.11.19-2",
+  "market": "US",
+  "locale": "en-US",
+  "state": "FINISHED",
+  "outcome": "PARTIAL",
+  "stop_reason": "BUDGET_EXHAUSTED",
+  "stop_detail": "task cap reached: processed 30 product pages; sitemap declares 707",
+  "started_at": "2026-11-19T00:12:35Z",
+  "finished_at": "2026-11-19T00:13:25Z",
+  "counts": {
+    "discovered_urls": 33,
+    "pending_navigation_entries": 0,
+    "product_candidates": 30,
+    "pending_products": 0,
+    "in_flight_products": 0,
+    "processed_products": 30,
+    "valid_products": 30,
+    "excluded_products": 0,
+    "failed_products": 0,
+    "partial_description_products": 0
+  },
+  "coverage": {
+    "status": "PARTIAL",
+    "denominator_source": "sitemap_products_1.xml <url><loc> count",
+    "denominator": 707,
+    "covered": 30,
+    "notes": "Task cap 30 product pages. Processed 30 of 707 sitemap product URLs; the rest are outside this bounded run and are not a full-site completion claim."
+  },
+  "business_acceptance": {
+    "status": "NOT_REVIEWED",
+    "accepted_by": null,
+    "accepted_at": null,
+    "reason": null,
+    "scope": "bounded 30-product javaestate.com run"
+  },
+  "runtime": {
+    "llm_calls": 0,
+    "raw_pages_retained": false,
+    "browser_launched": false,
+    "http_engine": "scrapling.FetcherSession (curl_cffi, static HTML)",
+    "concurrency": 1,
+    "request_interval_seconds": 1.1,
+    "max_attempts": 3
+  },
+  "errors": [],
+  "limitations": [
+    "Static HTML path only; no browser rendering was needed for the sampled Shopify template.",
+    "The task cap is 30 product pages; remaining sitemap products were intentionally not visited.",
+    "Product pages state no tax-inclusive/exclusive basis; tax_basis uses the public variant taxable flag and is never guessed.",
+    "Some product pages omit Product JSON-LD; currency and price fall back to og/Shopify currency and embedded variant data.",
+    "Options are public variant/picker values only; SKU combinations were not enumerated or priced one by one.",
+    "Description completeness is checked against the embedded product description text; JS-only tabs were not exercised.",
+    "No login, cart, checkout, account or recommendations endpoints were used.",
+    "429 handling waits for Retry-After up to 60s, retries at most 3 attempts, then stops the run.",
+    "product sitemap declared 707 <url> entries; kept first 30 unique product URLs within the 30-page cap.",
+    "Proxy environment variables HTTP_PROXY/HTTPS_PROXY are present; values were not recorded and egress was not independently measured."
+  ],
+  "artifacts": {
+    "valid_csv": "valid.csv",
+    "run_summary": "run-summary.json",
+    "diagnostics_dir": "diagnostics/run-002/"
+  }
+}
