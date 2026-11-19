@@ -1,0 +1,167 @@
+{
+  "task_id": "fc-scrapy-skatepro-20261119T024633Z",
+  "plan_id": "skatepro-es-scrapy",
+  "plan_version": "2026.11.19-2",
+  "market": "ES",
+  "locale": "es-ES",
+  "state": "FINISHED",
+  "outcome": "PARTIAL",
+  "stop_reason": "BUDGET_EXHAUSTED",
+  "started_at": "2026-11-19T02:46:33Z",
+  "finished_at": "2026-11-19T02:51:56Z",
+  "counts": {
+    "discovered_urls": 6662,
+    "pending_navigation_entries": 0,
+    "product_candidates": 6660,
+    "pending_products": 6630,
+    "in_flight_products": 0,
+    "processed_products": 30,
+    "valid_products": 30,
+    "excluded_products": 0,
+    "failed_products": 0,
+    "partial_description_products": 16
+  },
+  "coverage": {
+    "status": "KNOWN",
+    "denominator_source": "https://www.skatepro.es/sitemap.xml product URL count, observed 2026-11-19T02:51:56Z",
+    "denominator": 6660,
+    "covered": 30,
+    "notes": "Bounded sample: first 30 product URLs in sitemap order; 6630 product URLs remain outside this run. Not full-site coverage."
+  },
+  "business_acceptance": {
+    "status": "NOT_REVIEWED",
+    "accepted_by": null,
+    "accepted_at": null,
+    "reason": null,
+    "scope": "bounded framework-comparison trial"
+  },
+  "quality_exceptions": [
+    {
+      "source_url": "https://www.skatepro.es/116-3125.htm",
+      "description_status": "partial",
+      "partial_reason": "specifications_section_missing_or_empty",
+      "missing_reasons": {}
+    },
+    {
+      "source_url": "https://www.skatepro.es/168-3021.htm",
+      "description_status": "partial",
+      "partial_reason": "specifications_section_missing_or_empty",
+      "missing_reasons": {}
+    },
+    {
+      "source_url": "https://www.skatepro.es/1-2625.htm",
+      "description_status": "partial",
+      "partial_reason": "specifications_section_missing_or_empty",
+      "missing_reasons": {}
+    },
+    {
+      "source_url": "https://www.skatepro.es/57-2527.htm",
+      "description_status": "partial",
+      "partial_reason": "specifications_section_missing_or_empty",
+      "missing_reasons": {}
+    },
+    {
+      "source_url": "https://www.skatepro.es/1-2406.htm",
+      "description_status": "partial",
+      "partial_reason": "specifications_section_missing_or_empty",
+      "missing_reasons": {}
+    },
+    {
+      "source_url": "https://www.skatepro.es/57-1468.htm",
+      "description_status": "partial",
+      "partial_reason": "specifications_section_missing_or_empty",
+      "missing_reasons": {}
+    },
+    {
+      "source_url": "https://www.skatepro.es/206-1416.htm",
+      "description_status": "partial",
+      "partial_reason": "specifications_section_missing_or_empty",
+      "missing_reasons": {}
+    },
+    {
+      "source_url": "https://www.skatepro.es/1-1137.htm",
+      "description_status": "partial",
+      "partial_reason": "specifications_section_missing_or_empty",
+      "missing_reasons": {}
+    },
+    {
+      "source_url": "https://www.skatepro.es/1-1122.htm",
+      "description_status": "partial",
+      "partial_reason": "specifications_section_missing_or_empty",
+      "missing_reasons": {}
+    },
+    {
+      "source_url": "https://www.skatepro.es/80-1063.htm",
+      "description_status": "partial",
+      "partial_reason": "specifications_section_missing_or_empty",
+      "missing_reasons": {}
+    },
+    {
+      "source_url": "https://www.skatepro.es/206-861.htm",
+      "description_status": "partial",
+      "partial_reason": "specifications_section_missing_or_empty",
+      "missing_reasons": {}
+    },
+    {
+      "source_url": "https://www.skatepro.es/139-439.htm",
+      "description_status": "partial",
+      "partial_reason": "specifications_section_missing_or_empty",
+      "missing_reasons": {}
+    },
+    {
+      "source_url": "https://www.skatepro.es/57-417.htm",
+      "description_status": "partial",
+      "partial_reason": "specifications_section_missing_or_empty",
+      "missing_reasons": {}
+    },
+    {
+      "source_url": "https://www.skatepro.es/162-274.htm",
+      "description_status": "partial",
+      "partial_reason": "specifications_section_missing_or_empty",
+      "missing_reasons": {}
+    },
+    {
+      "source_url": "https://www.skatepro.es/206-227.htm",
+      "description_status": "partial",
+      "partial_reason": "specifications_section_missing_or_empty",
+      "missing_reasons": {}
+    },
+    {
+      "source_url": "https://www.skatepro.es/330-187.htm",
+      "description_status": "partial",
+      "partial_reason": "specifications_section_missing_or_empty",
+      "missing_reasons": {}
+    }
+  ],
+  "runtime": {
+    "framework": "Scrapy",
+    "framework_version": "2.20.0",
+    "python_version": "3.13.13",
+    "llm_calls": 0,
+    "raw_pages_retained": false,
+    "concurrency": 1,
+    "download_delay_s": 10.0,
+    "retry_limit": 3,
+    "robots": "ROBOTSTXT_OBEY=True; Crawl-delay: 10"
+  },
+  "currency": {
+    "codes": {
+      "EUR": 30
+    },
+    "mismatch": false,
+    "evidence": "JSON-LD Product.offers.priceCurrency bound to the offer price"
+  },
+  "description_status_counts": {
+    "partial": 16,
+    "complete": 14
+  },
+  "errors": [],
+  "limitations": [
+    "Bounded sample: the first 30 product URLs in sitemap order. It is not full-site coverage; the sitemap is the only denominator.",
+    "Category listing is server-rendered for one page only (30 cards); '?page=2' returns the same page and further pages load through a JS component, so the plan discovers products from the public sitemap.",
+    "Descriptions are the editorial description plus the specification table. The 'Piezas compatibles' related-parts block and recommendation rails are not product copy and are excluded.",
+    "Tax basis is not stated on the product page; rows record NOT_STATED.",
+    "Prices come from the public php2js variant payload; the ISO currency comes from JSON-LD offers bound to the same offer value.",
+    "No LLM is called at runtime; field rules are deterministic Python."
+  ]
+}

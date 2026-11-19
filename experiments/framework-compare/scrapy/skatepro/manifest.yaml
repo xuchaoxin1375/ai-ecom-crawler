@@ -1,0 +1,306 @@
+schema_version: "1.0"
+plan_id: "skatepro-es-scrapy"
+plan_version: "2026.11.19-2"
+kind: "program"
+status: "candidate"
+created_at: "2026-11-19T02:33:29Z"
+updated_at: "2026-11-19T02:52:00Z"
+
+site:
+  name: "SkatePro ES"
+  entry_urls:
+    - "https://www.skatepro.es/"
+  allowed_origins:
+    - "https://www.skatepro.es"
+  allowed_path_prefixes:
+    - "/"
+    - "/sitemap.xml"
+    - "/robots.txt"
+  market: "ES"
+  locale: "es-ES"
+  currency: "EUR"
+  currency_evidence: >-
+    Per product: JSON-LD Product.offers.priceCurrency bound to the same offer
+    object, cross-checked against the product meta sale_price:currency/amount
+    pair on the same page. The market/locale is the fixed task context, not a
+    substitute for the quote evidence.
+
+scope:
+  include:
+    - "https://www.skatepro.es/{category_id}-{product_id}.htm (product pages)"
+  exclude:
+    - "*/catalog*"
+    - "*/wishlist*"
+    - "/adminshop*"
+    - "/static*"
+    - "/cart*"
+    - "/checkout*"
+    - "/account*"
+    - "/s.htm*"
+    - "/m*.htm (brand pages)"
+    - "/a*.htm (size guides and article lightboxes)"
+  sample: "First 30 distinct product URLs in sitemap order."
+  limits:
+    max_products: 30
+    max_seconds: 600
+  notes: >-
+    Bounded framework-comparison trial. The sitemap listed 6660 product URLs
+    when read on 2026-11-19; the rest remain outside this run, so the result is
+    a sample and not full-site coverage. robots.txt forbids */catalog and
+    */wishlist and declares Crawl-delay: 10.
+
+discovery:
+  strategies:
+    - "sitemap"
+    - "category"
+  sitemap_urls:
+    - "https://www.skatepro.es/sitemap.xml"
+  category_seeds:
+    - "https://www.skatepro.es/c2.htm"
+  product_url_patterns:
+    - "^https://www\\.skatepro\\.es/\\d+-\\d+\\.htm$"
+  url_identity: "canonical product path /{category_id}-{product_id}.htm (query dropped)"
+  pagination: "none for static HTTP; the category listing uses a JS load-more component"
+  notes: >-
+    Read robots.txt -> Sitemap, download the public sitemap once, keep locs
+    matching the product pattern in sitemap order, dedupe by canonical path and
+    take the first 30. One category page is fetched only as navigation evidence:
+    it renders 30 cards server-side, '?page=2' returns the same page, and
+    further pages need the JS component. Products are never discovered by
+    walking the whole catalogue.
+
+fetch:
+  default_engine: "http"
+  per_url_type:
+    sitemap:
+      engine: "http"
+      method: "GET"
+      notes: "single public urlset, ~725 KB"
+    category:
+      engine: "http"
+      method: "GET"
+      notes: "navigation evidence only; not a product source"
+    product:
+      engine: "http"
+      method: "GET"
+      notes: "server-rendered HTML with JSON-LD and a public php2js payload"
+  rate_limit:
+    concurrency: 1
+    delay_ms: 10000
+    jitter: 0
+  retry:
+    max_attempts: 3
+    retry_http_codes: [500, 502, 503, 504, 522, 524]
+    backoff: "429 handled in the spider: Retry-After seconds when present, capped at 60s"
+  timeout_ms: 60000
+  robots: "obey; Scrapy ROBOTSTXT_OBEY=True; Crawl-delay: 10 enforced by DOWNLOAD_DELAY"
+  cookies: false
+  sessions: "none"
+  user_agent: >-
+    fc-scrapy-skatepro/0.1 (framework-comparison experiment; respects robots.txt;
+    contact: local)
+
+extract:
+  fields:
+    name:
+      source: "json_ld"
+      path: "Product.name or ProductGroup.name"
+      required: true
+      fallback: "h1.product_page text"
+      normalize: "collapse whitespace; remove an explicit '| SkatePro' suffix only"
+    price.amount:
+      source: "embed"
+      path: "php2js.product[{product_id}].variants[].price_number"
+      required: true
+      rule: >-
+        lowest finite positive price across all public variants, including
+        unavailable variants; zero/negative/invalid values are exclusions
+      fallback: "json_ld Product.offers.price only when the variant payload is absent"
+    price.currency:
+      source: "json_ld"
+      path: "Product.offers.priceCurrency / ProductGroup.hasVariant[].offers.priceCurrency"
+      required: true
+      fallback: "meta product:sale_price:currency with product:sale_price:amount"
+    primary_image_url:
+      source: "json_ld"
+      path: "Product.image[0] / ProductGroup.hasVariant[0].image[0]"
+      required: true
+      fallback: "meta og:image"
+    description_html:
+      source: "dom"
+      selector: "#product_description; #product_specifications > div.row (two columns)"
+      required: false
+      rule: >-
+        editorial description HTML plus a two-column table built from the
+        specification rows, cleaned with a tag allow-list
+    description_format:
+      source: "derived"
+      rule: "html when cleaned markup remains"
+    categories:
+      source: "json_ld"
+      path: "Product.category"
+      fallback: "breadcrumb links, excluding Inicio/Home"
+    brand:
+      source: "json_ld"
+      path: "Product.brand.name"
+      rule: "empty when the page states no brand"
+    options:
+      source: "embed"
+      path: "php2js.product[{product_id}].variants[].attribute_text / attribute_variant_text"
+      rule: >-
+        dimensions with at least two public values; single-value dimensions are
+        specifications, not options
+    availability:
+      source: "json_ld"
+      path: "Product.offers.availability"
+      fallback: "variant stock_level"
+    source_url:
+      source: "canonical"
+      path: "response URL after redirects"
+
+normalize:
+  price:
+    choose: "lowest_public_variant_price"
+    positive_only: true
+    include_unavailable_variants: true
+    currency: "EUR"
+    tax_basis: "NOT_STATED"
+    precision: "0.01"
+    reject: ["zero", "negative", "invalid", "missing"]
+  description:
+    mode: "clean_html"
+    statuses: ["complete", "partial", "fallback", "not_provided", "failed"]
+    remove_tags:
+      ["script", "style", "noscript", "iframe", "form", "button", "img", "picture",
+       "video", "audio", "svg", "canvas", "object", "embed"]
+    unwrap_tags: ["a", "span", "font", "small", "center"]
+    keep_table_attrs: ["colspan", "rowspan", "scope"]
+    drop_blocks: ["Piezas compatibles", "recommendation rails", "reviews"]
+    partial_reason_examples:
+      - "specifications_section_missing_or_empty"
+      - "editorial_description_section_missing"
+  name:
+    collapse_whitespace: true
+    strip_store_suffix: "| SkatePro"
+  options:
+    exclude_quantity: true
+    strip_price_delta: true
+    min_values_per_dimension: 2
+    escape_chars: "\\ # | ~"
+  csv:
+    columns: 9
+    encoding: "utf-8-sig"
+    line_terminator: "CRLF"
+    quote_style: "minimal"
+    formula_guard: "prefix apostrophe for cells starting with = + - @"
+  entrypoint: "skatepro/normalize.py"
+
+validate:
+  required_fields:
+    - "name"
+    - "price.amount"
+    - "price.currency"
+    - "primary_image_url"
+    - "source_url"
+  assertions:
+    - field: "price.amount"
+      op: ">"
+      value: 0
+    - field: "price.currency"
+      op: "regex"
+      value: "^[A-Z]{3}$"
+    - field: "source_url"
+      op: "regex"
+      value: "^https://www\\.skatepro\\.es/\\d+-\\d+\\.htm$"
+    - field: "description_format"
+      op: "in"
+      value: ["html", ""]
+  partial_description: "allowed_with_flag"
+  failure_classification:
+    business_exclusion:
+      ["non_positive_price", "no_public_price", "invalid_price",
+       "missing_required_image", "currency_unproven"]
+    technical_failure:
+      ["product_json_ld_missing", "name_missing_after_clean",
+       "description_extract_failed", "description_parse_error",
+       "extraction_exception", "http_429_after_retries", "http_403",
+       "http_404", "http_5xx"]
+  quality_exceptions: >-
+    Every valid row whose description is not complete, or whose brand,
+    category, attributes or description is missing, is listed in
+    task-result.json with source_url, description_status, partial_reason and
+    missing_reasons. An empty option set on a single-variant product is a
+    documented "no public choice" and is kept in the internal record, not as a
+    missing reason.
+
+runtime:
+  entrypoint: "run.py"
+  command: >-
+    python -m uv run --project experiments/framework-compare/scrapy
+    python experiments/framework-compare/scrapy/skatepro/run.py
+    --max-products 30 --max-seconds 600
+  protocol: "CLI; writes the files listed in outputs"
+  outputs:
+    valid_csv: "valid.csv"
+    task_result: "task-result.json"
+    diagnostics: "diagnostics/"
+    metrics_json: "experiments/framework-compare/results/scrapy-skatepro.json"
+    metrics_md: "experiments/framework-compare/results/scrapy-skatepro.md"
+  limits:
+    max_products: 30
+    max_seconds: 600
+    concurrency: 1
+    download_delay_s: 10
+    retry_limit: 3
+  idempotency: "(task_id, source_url); valid rows are deduplicated by source_url"
+  cancellation: >-
+    SIGINT or CLOSESPIDER_TIMEOUT; the pipeline writes accepted results and the
+    pending diagnostics at spider close. No browser or child process remains.
+  resources: "one short-lived Python process; no browser, no database, no queue"
+  llm_calls: 0
+
+compatibility:
+  os: ["windows", "linux", "wsl2"]
+  runtime: "python>=3.11,<3.14"
+  framework: "Scrapy==2.20.0"
+  dependencies_lock: "../uv.lock"
+  network: "public web; no login, no cookies, no auth"
+  secrets: "none"
+  assumptions:
+    - "skatepro.es is reachable from the selected egress"
+    - "the sitemap stays public and lists product URLs as /{category}-{product}.htm"
+    - "the product page keeps JSON-LD Product and the php2js variant payload"
+
+entrypoint: "run.py"
+
+evidence:
+  sample_urls:
+    - "https://www.skatepro.es/218-36511.htm"
+    - "https://www.skatepro.es/116-3125.htm"
+  expected:
+    name: "Longway Adam Scooter Freestyle"
+    price.amount: 69.95
+    price.currency: "EUR"
+    description_status: "complete"
+  product_group_expected:
+    name: "Rollerblade Pro Muñequeras"
+    price.amount: 8.95
+    attributes: "Talla#S|M|L|XL"
+    json_ld_type: "ProductGroup"
+  verified_at: null
+  limitations:
+    - "Bounded 30-product sample from 6660 sitemap product URLs."
+    - "Category pagination needs the JS component; products come from the sitemap."
+    - "16 of 30 valid products have a partial description because the page exposes no specification table."
+
+notes: >-
+  Built for the framework-comparison experiment (S2, round 2 contract).
+  status=candidate: the bounded trial passed, but the plan does not claim
+  verified full-site coverage. The category page fetches one static page only;
+  '?page=2' returned the same HTML, so a static plan cannot paginate the listing.
+  Descriptions are the editorial block plus the specification table; the
+  'Piezas compatibles' related-parts block is deliberately excluded as a
+  separate module. plan_version 2026.11.19-2 is the fix-task revision: the
+  JSON-LD reader now accepts ProductGroup (variable products) in addition to
+  Product, which the first run reported as product_json_ld_missing. Re-run with
+  the same command.

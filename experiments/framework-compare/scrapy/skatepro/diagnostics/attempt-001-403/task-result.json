@@ -1,0 +1,73 @@
+{
+  "task_id": "fc-scrapy-skatepro-20261119T023336Z",
+  "plan_id": "skatepro-es-scrapy",
+  "plan_version": "2026.11.19-1",
+  "market": "ES",
+  "locale": "es-ES",
+  "state": "FINISHED",
+  "outcome": "FAILED",
+  "stop_reason": "ACCESS_DENIED",
+  "started_at": "2026-11-19T02:33:36Z",
+  "finished_at": "2026-11-19T02:33:48Z",
+  "counts": {
+    "discovered_urls": 0,
+    "pending_navigation_entries": 0,
+    "product_candidates": 0,
+    "pending_products": 0,
+    "in_flight_products": 0,
+    "processed_products": 0,
+    "valid_products": 0,
+    "excluded_products": 0,
+    "failed_products": 0,
+    "partial_description_products": 0
+  },
+  "coverage": {
+    "status": "UNKNOWN",
+    "denominator_source": null,
+    "denominator": null,
+    "covered": 0,
+    "notes": "The sitemap did not yield product URLs; no reliable denominator."
+  },
+  "business_acceptance": {
+    "status": "NOT_REVIEWED",
+    "accepted_by": null,
+    "accepted_at": null,
+    "reason": null,
+    "scope": "bounded framework-comparison trial"
+  },
+  "quality_exceptions": [],
+  "runtime": {
+    "framework": "Scrapy",
+    "framework_version": "2.20.0",
+    "python_version": "3.13.13",
+    "llm_calls": 0,
+    "raw_pages_retained": false,
+    "concurrency": 1,
+    "download_delay_s": 10.0,
+    "retry_limit": 3,
+    "robots": "ROBOTSTXT_OBEY=True; Crawl-delay: 10"
+  },
+  "currency": {
+    "codes": {},
+    "mismatch": false,
+    "evidence": "JSON-LD Product.offers.priceCurrency bound to the offer price"
+  },
+  "description_status_counts": {},
+  "errors": [
+    {
+      "at": "2026-11-19T02:33:47Z",
+      "stage": "sitemap",
+      "code": "http_403",
+      "url": "https://www.skatepro.es/sitemap.xml",
+      "message": ""
+    }
+  ],
+  "limitations": [
+    "Bounded sample: the first 30 product URLs in sitemap order. It is not full-site coverage; the sitemap is the only denominator.",
+    "Category listing is server-rendered for one page only (30 cards); '?page=2' returns the same page and further pages load through a JS component, so the plan discovers products from the public sitemap.",
+    "Descriptions are the editorial description plus the specification table. The 'Piezas compatibles' related-parts block and recommendation rails are not product copy and are excluded.",
+    "Tax basis is not stated on the product page; rows record NOT_STATED.",
+    "Prices come from the public php2js variant payload; the ISO currency comes from JSON-LD offers bound to the same offer value.",
+    "No LLM is called at runtime; field rules are deterministic Python."
+  ]
+}

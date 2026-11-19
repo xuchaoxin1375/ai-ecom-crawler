@@ -1,0 +1,404 @@
+[
+  {
+    "source_url": "https://www.skatepro.es/168-3021.htm",
+    "description_status": "partial",
+    "partial_reason": "specifications_section_missing_or_empty",
+    "missing_reasons": {
+      "attributes": "NO_PUBLIC_CHOICE"
+    },
+    "description_format": "html",
+    "availability": "in_stock",
+    "tax_basis": "NOT_STATED",
+    "price_basis": "lowest_public_variant_price_incl_unavailable",
+    "currency_evidence": "json_ld Product.offers.priceCurrency=EUR bound to offers.price=19.95",
+    "skipped_option_dimensions": [],
+    "spec_rows": 0,
+    "extracted_at": "2026-11-19T02:38:13Z"
+  },
+  {
+    "source_url": "https://www.skatepro.es/168-2876.htm",
+    "description_status": "complete",
+    "partial_reason": "",
+    "missing_reasons": {
+      "attributes": "NO_PUBLIC_CHOICE"
+    },
+    "description_format": "html",
+    "availability": "in_stock",
+    "tax_basis": "NOT_STATED",
+    "price_basis": "lowest_public_variant_price_incl_unavailable",
+    "currency_evidence": "json_ld Product.offers.priceCurrency=EUR bound to offers.price=24.95",
+    "skipped_option_dimensions": [
+      "Color"
+    ],
+    "spec_rows": 1,
+    "extracted_at": "2026-11-19T02:38:23Z"
+  },
+  {
+    "source_url": "https://www.skatepro.es/69-2852.htm",
+    "description_status": "complete",
+    "partial_reason": "",
+    "missing_reasons": {
+      "attributes": "NO_PUBLIC_CHOICE"
+    },
+    "description_format": "html",
+    "availability": "in_stock",
+    "tax_basis": "NOT_STATED",
+    "price_basis": "lowest_public_variant_price_incl_unavailable",
+    "currency_evidence": "json_ld Product.offers.priceCurrency=EUR bound to offers.price=26.95",
+    "skipped_option_dimensions": [
+      "Diámetro",
+      "Color"
+    ],
+    "spec_rows": 4,
+    "extracted_at": "2026-11-19T02:38:34Z"
+  },
+  {
+    "source_url": "https://www.skatepro.es/1-2625.htm",
+    "description_status": "partial",
+    "partial_reason": "specifications_section_missing_or_empty",
+    "missing_reasons": {
+      "attributes": "NO_PUBLIC_CHOICE"
+    },
+    "description_format": "html",
+    "availability": "preorder",
+    "tax_basis": "NOT_STATED",
+    "price_basis": "lowest_public_variant_price_incl_unavailable",
+    "currency_evidence": "json_ld Product.offers.priceCurrency=EUR bound to offers.price=3",
+    "skipped_option_dimensions": [],
+    "spec_rows": 0,
+    "extracted_at": "2026-11-19T02:38:43Z"
+  },
+  {
+    "source_url": "https://www.skatepro.es/57-2527.htm",
+    "description_status": "partial",
+    "partial_reason": "specifications_section_missing_or_empty",
+    "missing_reasons": {
+      "attributes": "NO_PUBLIC_CHOICE"
+    },
+    "description_format": "html",
+    "availability": "in_stock",
+    "tax_basis": "NOT_STATED",
+    "price_basis": "lowest_public_variant_price_incl_unavailable",
+    "currency_evidence": "json_ld Product.offers.priceCurrency=EUR bound to offers.price=0.95",
+    "skipped_option_dimensions": [],
+    "spec_rows": 0,
+    "extracted_at": "2026-11-19T02:38:53Z"
+  },
+  {
+    "source_url": "https://www.skatepro.es/1-2406.htm",
+    "description_status": "partial",
+    "partial_reason": "specifications_section_missing_or_empty",
+    "missing_reasons": {
+      "attributes": "NO_PUBLIC_CHOICE"
+    },
+    "description_format": "html",
+    "availability": "preorder",
+    "tax_basis": "NOT_STATED",
+    "price_basis": "lowest_public_variant_price_incl_unavailable",
+    "currency_evidence": "json_ld Product.offers.priceCurrency=EUR bound to offers.price=5.95",
+    "skipped_option_dimensions": [],
+    "spec_rows": 0,
+    "extracted_at": "2026-11-19T02:39:03Z"
+  },
+  {
+    "source_url": "https://www.skatepro.es/454-2379.htm",
+    "description_status": "complete",
+    "partial_reason": "",
+    "missing_reasons": {
+      "attributes": "NO_PUBLIC_CHOICE"
+    },
+    "description_format": "html",
+    "availability": "in_stock",
+    "tax_basis": "NOT_STATED",
+    "price_basis": "lowest_public_variant_price_incl_unavailable",
+    "currency_evidence": "json_ld Product.offers.priceCurrency=EUR bound to offers.price=1.45",
+    "skipped_option_dimensions": [],
+    "spec_rows": 2,
+    "extracted_at": "2026-11-19T02:39:13Z"
+  },
+  {
+    "source_url": "https://www.skatepro.es/359-1617.htm",
+    "description_status": "complete",
+    "partial_reason": "",
+    "missing_reasons": {
+      "attributes": "NO_PUBLIC_CHOICE"
+    },
+    "description_format": "html",
+    "availability": "in_stock",
+    "tax_basis": "NOT_STATED",
+    "price_basis": "lowest_public_variant_price_incl_unavailable",
+    "currency_evidence": "json_ld Product.offers.priceCurrency=EUR bound to offers.price=1.85",
+    "skipped_option_dimensions": [
+      "Modelo"
+    ],
+    "spec_rows": 5,
+    "extracted_at": "2026-11-19T02:39:23Z"
+  },
+  {
+    "source_url": "https://www.skatepro.es/359-1616.htm",
+    "description_status": "complete",
+    "partial_reason": "",
+    "missing_reasons": {
+      "attributes": "NO_PUBLIC_CHOICE"
+    },
+    "description_format": "html",
+    "availability": "in_stock",
+    "tax_basis": "NOT_STATED",
+    "price_basis": "lowest_public_variant_price_incl_unavailable",
+    "currency_evidence": "json_ld Product.offers.priceCurrency=EUR bound to offers.price=1.45",
+    "skipped_option_dimensions": [
+      "Modelo"
+    ],
+    "spec_rows": 5,
+    "extracted_at": "2026-11-19T02:39:33Z"
+  },
+  {
+    "source_url": "https://www.skatepro.es/359-1615.htm",
+    "description_status": "complete",
+    "partial_reason": "",
+    "missing_reasons": {
+      "attributes": "NO_PUBLIC_CHOICE"
+    },
+    "description_format": "html",
+    "availability": "in_stock",
+    "tax_basis": "NOT_STATED",
+    "price_basis": "lowest_public_variant_price_incl_unavailable",
+    "currency_evidence": "json_ld Product.offers.priceCurrency=EUR bound to offers.price=0.95",
+    "skipped_option_dimensions": [
+      "Modelo"
+    ],
+    "spec_rows": 5,
+    "extracted_at": "2026-11-19T02:39:43Z"
+  },
+  {
+    "source_url": "https://www.skatepro.es/57-1468.htm",
+    "description_status": "partial",
+    "partial_reason": "specifications_section_missing_or_empty",
+    "missing_reasons": {
+      "attributes": "NO_PUBLIC_CHOICE"
+    },
+    "description_format": "html",
+    "availability": "in_stock",
+    "tax_basis": "NOT_STATED",
+    "price_basis": "lowest_public_variant_price_incl_unavailable",
+    "currency_evidence": "json_ld Product.offers.priceCurrency=EUR bound to offers.price=1.95",
+    "skipped_option_dimensions": [],
+    "spec_rows": 0,
+    "extracted_at": "2026-11-19T02:39:53Z"
+  },
+  {
+    "source_url": "https://www.skatepro.es/206-1416.htm",
+    "description_status": "partial",
+    "partial_reason": "specifications_section_missing_or_empty",
+    "missing_reasons": {
+      "attributes": "NO_PUBLIC_CHOICE"
+    },
+    "description_format": "html",
+    "availability": "in_stock",
+    "tax_basis": "NOT_STATED",
+    "price_basis": "lowest_public_variant_price_incl_unavailable",
+    "currency_evidence": "json_ld Product.offers.priceCurrency=EUR bound to offers.price=1.25",
+    "skipped_option_dimensions": [],
+    "spec_rows": 0,
+    "extracted_at": "2026-11-19T02:40:03Z"
+  },
+  {
+    "source_url": "https://www.skatepro.es/1-1137.htm",
+    "description_status": "partial",
+    "partial_reason": "specifications_section_missing_or_empty",
+    "missing_reasons": {
+      "attributes": "NO_PUBLIC_CHOICE"
+    },
+    "description_format": "html",
+    "availability": "in_stock",
+    "tax_basis": "NOT_STATED",
+    "price_basis": "lowest_public_variant_price_incl_unavailable",
+    "currency_evidence": "json_ld Product.offers.priceCurrency=EUR bound to offers.price=5",
+    "skipped_option_dimensions": [
+      "Modelo"
+    ],
+    "spec_rows": 0,
+    "extracted_at": "2026-11-19T02:40:13Z"
+  },
+  {
+    "source_url": "https://www.skatepro.es/1-1122.htm",
+    "description_status": "partial",
+    "partial_reason": "specifications_section_missing_or_empty",
+    "missing_reasons": {
+      "attributes": "NO_PUBLIC_CHOICE"
+    },
+    "description_format": "html",
+    "availability": "preorder",
+    "tax_basis": "NOT_STATED",
+    "price_basis": "lowest_public_variant_price_incl_unavailable",
+    "currency_evidence": "json_ld Product.offers.priceCurrency=EUR bound to offers.price=4.95",
+    "skipped_option_dimensions": [],
+    "spec_rows": 0,
+    "extracted_at": "2026-11-19T02:40:23Z"
+  },
+  {
+    "source_url": "https://www.skatepro.es/87-1086.htm",
+    "description_status": "complete",
+    "partial_reason": "",
+    "missing_reasons": {
+      "attributes": "NO_PUBLIC_CHOICE"
+    },
+    "description_format": "html",
+    "availability": "in_stock",
+    "tax_basis": "NOT_STATED",
+    "price_basis": "lowest_public_variant_price_incl_unavailable",
+    "currency_evidence": "json_ld Product.offers.priceCurrency=EUR bound to offers.price=9.95",
+    "skipped_option_dimensions": [
+      "Talla",
+      "Color"
+    ],
+    "spec_rows": 2,
+    "extracted_at": "2026-11-19T02:40:33Z"
+  },
+  {
+    "source_url": "https://www.skatepro.es/206-861.htm",
+    "description_status": "partial",
+    "partial_reason": "specifications_section_missing_or_empty",
+    "missing_reasons": {
+      "attributes": "NO_PUBLIC_CHOICE"
+    },
+    "description_format": "html",
+    "availability": "in_stock",
+    "tax_basis": "NOT_STATED",
+    "price_basis": "lowest_public_variant_price_incl_unavailable",
+    "currency_evidence": "json_ld Product.offers.priceCurrency=EUR bound to offers.price=26.95",
+    "skipped_option_dimensions": [],
+    "spec_rows": 0,
+    "extracted_at": "2026-11-19T02:40:53Z"
+  },
+  {
+    "source_url": "https://www.skatepro.es/87-674.htm",
+    "description_status": "complete",
+    "partial_reason": "",
+    "missing_reasons": {
+      "attributes": "NO_PUBLIC_CHOICE"
+    },
+    "description_format": "html",
+    "availability": "in_stock",
+    "tax_basis": "NOT_STATED",
+    "price_basis": "lowest_public_variant_price_incl_unavailable",
+    "currency_evidence": "json_ld Product.offers.priceCurrency=EUR bound to offers.price=9.95",
+    "skipped_option_dimensions": [],
+    "spec_rows": 1,
+    "extracted_at": "2026-11-19T02:41:03Z"
+  },
+  {
+    "source_url": "https://www.skatepro.es/87-517.htm",
+    "description_status": "complete",
+    "partial_reason": "",
+    "missing_reasons": {
+      "attributes": "NO_PUBLIC_CHOICE"
+    },
+    "description_format": "html",
+    "availability": "in_stock",
+    "tax_basis": "NOT_STATED",
+    "price_basis": "lowest_public_variant_price_incl_unavailable",
+    "currency_evidence": "json_ld Product.offers.priceCurrency=EUR bound to offers.price=16.95",
+    "skipped_option_dimensions": [],
+    "spec_rows": 2,
+    "extracted_at": "2026-11-19T02:41:14Z"
+  },
+  {
+    "source_url": "https://www.skatepro.es/139-439.htm",
+    "description_status": "partial",
+    "partial_reason": "specifications_section_missing_or_empty",
+    "missing_reasons": {
+      "attributes": "NO_PUBLIC_CHOICE"
+    },
+    "description_format": "html",
+    "availability": "in_stock",
+    "tax_basis": "NOT_STATED",
+    "price_basis": "lowest_public_variant_price_incl_unavailable",
+    "currency_evidence": "json_ld Product.offers.priceCurrency=EUR bound to offers.price=9.95",
+    "skipped_option_dimensions": [
+      "Color"
+    ],
+    "spec_rows": 0,
+    "extracted_at": "2026-11-19T02:41:23Z"
+  },
+  {
+    "source_url": "https://www.skatepro.es/162-274.htm",
+    "description_status": "partial",
+    "partial_reason": "specifications_section_missing_or_empty",
+    "missing_reasons": {
+      "attributes": "NO_PUBLIC_CHOICE"
+    },
+    "description_format": "html",
+    "availability": "in_stock",
+    "tax_basis": "NOT_STATED",
+    "price_basis": "lowest_public_variant_price_incl_unavailable",
+    "currency_evidence": "json_ld Product.offers.priceCurrency=EUR bound to offers.price=1.45",
+    "skipped_option_dimensions": [],
+    "spec_rows": 0,
+    "extracted_at": "2026-11-19T02:41:53Z"
+  },
+  {
+    "source_url": "https://www.skatepro.es/359-249.htm",
+    "description_status": "complete",
+    "partial_reason": "",
+    "missing_reasons": {
+      "attributes": "NO_PUBLIC_CHOICE"
+    },
+    "description_format": "html",
+    "availability": "in_stock",
+    "tax_basis": "NOT_STATED",
+    "price_basis": "lowest_public_variant_price_incl_unavailable",
+    "currency_evidence": "json_ld Product.offers.priceCurrency=EUR bound to offers.price=0.95",
+    "skipped_option_dimensions": [],
+    "spec_rows": 3,
+    "extracted_at": "2026-11-19T02:42:13Z"
+  },
+  {
+    "source_url": "https://www.skatepro.es/330-187.htm",
+    "description_status": "partial",
+    "partial_reason": "specifications_section_missing_or_empty",
+    "missing_reasons": {
+      "attributes": "NO_PUBLIC_CHOICE"
+    },
+    "description_format": "html",
+    "availability": "in_stock",
+    "tax_basis": "NOT_STATED",
+    "price_basis": "lowest_public_variant_price_incl_unavailable",
+    "currency_evidence": "json_ld Product.offers.priceCurrency=EUR bound to offers.price=12.95",
+    "skipped_option_dimensions": [],
+    "spec_rows": 0,
+    "extracted_at": "2026-11-19T02:42:33Z"
+  },
+  {
+    "source_url": "https://www.skatepro.es/87-157.htm",
+    "description_status": "complete",
+    "partial_reason": "",
+    "missing_reasons": {
+      "attributes": "NO_PUBLIC_CHOICE"
+    },
+    "description_format": "html",
+    "availability": "in_stock",
+    "tax_basis": "NOT_STATED",
+    "price_basis": "lowest_public_variant_price_incl_unavailable",
+    "currency_evidence": "json_ld Product.offers.priceCurrency=EUR bound to offers.price=5.95",
+    "skipped_option_dimensions": [],
+    "spec_rows": 2,
+    "extracted_at": "2026-11-19T02:42:43Z"
+  },
+  {
+    "source_url": "https://www.skatepro.es/87-156.htm",
+    "description_status": "complete",
+    "partial_reason": "",
+    "missing_reasons": {
+      "attributes": "NO_PUBLIC_CHOICE"
+    },
+    "description_format": "html",
+    "availability": "in_stock",
+    "tax_basis": "NOT_STATED",
+    "price_basis": "lowest_public_variant_price_incl_unavailable",
+    "currency_evidence": "json_ld Product.offers.priceCurrency=EUR bound to offers.price=19.95",
+    "skipped_option_dimensions": [],
+    "spec_rows": 2,
+    "extracted_at": "2026-11-19T02:42:53Z"
+  }
+]

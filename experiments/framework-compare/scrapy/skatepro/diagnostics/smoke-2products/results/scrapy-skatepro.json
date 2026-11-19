@@ -1,0 +1,91 @@
+{
+  "framework": "Scrapy",
+  "framework_version": "2.20.0",
+  "plan_id": "skatepro-es-scrapy",
+  "plan_version": "2026.11.19-2",
+  "plan_path": "experiments/framework-compare/scrapy/skatepro",
+  "task_id": "fc-scrapy-skatepro-smoke2",
+  "started_at": "2026-11-19T02:52:35Z",
+  "finished_at": "2026-11-19T02:53:18Z",
+  "run_started_at": "2026-11-19T02:52:35Z",
+  "run_finished_at": "2026-11-19T02:53:18Z",
+  "wall_clock_s": 43.0,
+  "build_started_at": null,
+  "plan_created_at": null,
+  "first_valid_product_s": null,
+  "first_plan_s": null,
+  "first_metrics_note": "first_valid_product_s and first_plan_s are measured from build_started_at, the start of this build session (reconstructed from session tool timestamps).",
+  "implementation_revisions": 0,
+  "runtime_llm_calls": 0,
+  "model_variant": "high",
+  "requests": 5,
+  "request_stats": {
+    "requests": 5,
+    "responses_200": 5,
+    "responses_429": null,
+    "responses_403": null,
+    "responses_404": null,
+    "robots_txt_requests": null,
+    "sitemap_requests": 1,
+    "category_requests": 1,
+    "product_requests": 2,
+    "http_429_events": 0
+  },
+  "valid_products": 2,
+  "excluded_products": 0,
+  "failed_products": 0,
+  "partial_description_products": 0,
+  "pending_products": 6658,
+  "processed_products": 2,
+  "description_status_counts": {
+    "complete": 2
+  },
+  "outcome": "PARTIAL",
+  "stop_reason": "BUDGET_EXHAUSTED",
+  "coverage": {
+    "status": "KNOWN",
+    "denominator_source": "https://www.skatepro.es/sitemap.xml product URL count, observed 2026-11-19T02:53:18Z",
+    "denominator": 6660,
+    "covered": 2,
+    "notes": "Bounded sample: first 2 product URLs in sitemap order; 6658 product URLs remain outside this run. Not full-site coverage."
+  },
+  "counts": {
+    "discovered_urls": 6662,
+    "pending_navigation_entries": 0,
+    "product_candidates": 6660,
+    "pending_products": 6658,
+    "in_flight_products": 0,
+    "processed_products": 2,
+    "valid_products": 2,
+    "excluded_products": 0,
+    "failed_products": 0,
+    "partial_description_products": 0
+  },
+  "currency": {
+    "codes": {
+      "EUR": 2
+    },
+    "mismatch": false,
+    "evidence": "JSON-LD Product.offers.priceCurrency bound to the offer price"
+  },
+  "errors": [],
+  "limitations": [
+    "Bounded sample: the first 2 product URLs in sitemap order. It is not full-site coverage; the sitemap is the only denominator.",
+    "Category listing is server-rendered for one page only (30 cards); '?page=2' returns the same page and further pages load through a JS component, so the plan discovers products from the public sitemap.",
+    "Descriptions are the editorial description plus the specification table. The 'Piezas compatibles' related-parts block and recommendation rails are not product copy and are excluded.",
+    "Tax basis is not stated on the product page; rows record NOT_STATED.",
+    "Prices come from the public php2js variant payload; the ISO currency comes from JSON-LD offers bound to the same offer value.",
+    "No LLM is called at runtime; field rules are deterministic Python."
+  ],
+  "outputs": {
+    "valid_csv": "experiments/framework-compare/scrapy/skatepro/diagnostics/smoke-2products/valid.csv",
+    "task_result": "experiments/framework-compare/scrapy/skatepro/diagnostics/smoke-2products/task-result.json",
+    "diagnostics": "experiments/framework-compare/scrapy/skatepro/diagnostics/smoke-2products/diagnostics",
+    "metrics_json": "experiments/framework-compare/scrapy/skatepro/diagnostics/smoke-2products/results/scrapy-skatepro.json",
+    "metrics_md": "experiments/framework-compare/scrapy/skatepro/diagnostics/smoke-2products/results/scrapy-skatepro.md"
+  },
+  "notes": [
+    "All numbers are read from crawl stats and output files, not from model assertions.",
+    "runtime_llm_calls is 0: extraction is deterministic Python."
+  ]
+}

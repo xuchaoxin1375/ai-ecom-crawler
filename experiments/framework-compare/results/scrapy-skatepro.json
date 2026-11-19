@@ -1,0 +1,223 @@
+{
+  "framework": "Scrapy",
+  "framework_version": "2.20.0",
+  "plan_id": "skatepro-es-scrapy",
+  "plan_version": "2026.11.19-2",
+  "plan_path": "experiments/framework-compare/scrapy/skatepro",
+  "task_id": "fc-scrapy-skatepro-20261119T024633Z",
+  "started_at": "2026-11-19T02:46:33Z",
+  "finished_at": "2026-11-19T02:51:56Z",
+  "run_started_at": "2026-11-19T02:46:33Z",
+  "run_finished_at": "2026-11-19T02:51:56Z",
+  "wall_clock_s": 323.0,
+  "build_started_at": "2026-11-19T02:13:00Z",
+  "plan_created_at": "2026-11-19T02:33:29Z",
+  "first_valid_product_s": 1513.0,
+  "first_plan_s": 1229.0,
+  "first_metrics_note": "first_valid_product_s and first_plan_s are measured from build_started_at, the start of this build session (reconstructed from session tool timestamps).",
+  "implementation_revisions": 5,
+  "runtime_llm_calls": 0,
+  "model_variant": "high",
+  "requests": 33,
+  "request_stats": {
+    "requests": 33,
+    "responses_200": 33,
+    "responses_429": null,
+    "responses_403": null,
+    "responses_404": null,
+    "robots_txt_requests": null,
+    "sitemap_requests": 1,
+    "category_requests": 1,
+    "product_requests": 30,
+    "http_429_events": 0
+  },
+  "valid_products": 30,
+  "excluded_products": 0,
+  "failed_products": 0,
+  "partial_description_products": 16,
+  "pending_products": 6630,
+  "processed_products": 30,
+  "description_status_counts": {
+    "partial": 16,
+    "complete": 14
+  },
+  "outcome": "PARTIAL",
+  "stop_reason": "BUDGET_EXHAUSTED",
+  "coverage": {
+    "status": "KNOWN",
+    "denominator_source": "https://www.skatepro.es/sitemap.xml product URL count, observed 2026-11-19T02:51:56Z",
+    "denominator": 6660,
+    "covered": 30,
+    "notes": "Bounded sample: first 30 product URLs in sitemap order; 6630 product URLs remain outside this run. Not full-site coverage."
+  },
+  "counts": {
+    "discovered_urls": 6662,
+    "pending_navigation_entries": 0,
+    "product_candidates": 6660,
+    "pending_products": 6630,
+    "in_flight_products": 0,
+    "processed_products": 30,
+    "valid_products": 30,
+    "excluded_products": 0,
+    "failed_products": 0,
+    "partial_description_products": 16
+  },
+  "currency": {
+    "codes": {
+      "EUR": 30
+    },
+    "mismatch": false,
+    "evidence": "JSON-LD Product.offers.priceCurrency bound to the offer price"
+  },
+  "errors": [],
+  "limitations": [
+    "Bounded sample: the first 30 product URLs in sitemap order. It is not full-site coverage; the sitemap is the only denominator.",
+    "Category listing is server-rendered for one page only (30 cards); '?page=2' returns the same page and further pages load through a JS component, so the plan discovers products from the public sitemap.",
+    "Descriptions are the editorial description plus the specification table. The 'Piezas compatibles' related-parts block and recommendation rails are not product copy and are excluded.",
+    "Tax basis is not stated on the product page; rows record NOT_STATED.",
+    "Prices come from the public php2js variant payload; the ISO currency comes from JSON-LD offers bound to the same offer value.",
+    "No LLM is called at runtime; field rules are deterministic Python."
+  ],
+  "outputs": {
+    "valid_csv": "experiments/framework-compare/scrapy/skatepro/valid.csv",
+    "task_result": "experiments/framework-compare/scrapy/skatepro/task-result.json",
+    "diagnostics": "experiments/framework-compare/scrapy/skatepro/diagnostics",
+    "metrics_json": "experiments/framework-compare/results/scrapy-skatepro.json",
+    "metrics_md": "experiments/framework-compare/results/scrapy-skatepro.md"
+  },
+  "notes": [
+    "All numbers are read from crawl stats and output files, not from model assertions.",
+    "runtime_llm_calls is 0: extraction is deterministic Python."
+  ],
+  "initial_run": {
+    "task_id": "fc-scrapy-skatepro-20261119T023741Z",
+    "plan_version": "2026.11.19-1",
+    "started_at": "2026-11-19T02:37:41Z",
+    "finished_at": "2026-11-19T02:43:03Z",
+    "valid_products": 24,
+    "excluded_products": 0,
+    "failed_products": 6,
+    "partial_description_products": 12,
+    "requests": 33,
+    "outcome": "PARTIAL",
+    "stop_reason": "BUDGET_EXHAUSTED",
+    "failures": [
+      {
+        "at": "2026-11-19T02:38:04Z",
+        "stage": "extract",
+        "code": "product_json_ld_missing",
+        "url": "https://www.skatepro.es/116-3125.htm",
+        "message": "product_json_ld_missing"
+      },
+      {
+        "at": "2026-11-19T02:40:43Z",
+        "stage": "extract",
+        "code": "product_json_ld_missing",
+        "url": "https://www.skatepro.es/80-1063.htm",
+        "message": "product_json_ld_missing"
+      },
+      {
+        "at": "2026-11-19T02:41:33Z",
+        "stage": "extract",
+        "code": "product_json_ld_missing",
+        "url": "https://www.skatepro.es/57-417.htm",
+        "message": "product_json_ld_missing"
+      },
+      {
+        "at": "2026-11-19T02:41:43Z",
+        "stage": "extract",
+        "code": "product_json_ld_missing",
+        "url": "https://www.skatepro.es/61-315.htm",
+        "message": "product_json_ld_missing"
+      },
+      {
+        "at": "2026-11-19T02:42:03Z",
+        "stage": "extract",
+        "code": "product_json_ld_missing",
+        "url": "https://www.skatepro.es/61-260.htm",
+        "message": "product_json_ld_missing"
+      },
+      {
+        "at": "2026-11-19T02:42:23Z",
+        "stage": "extract",
+        "code": "product_json_ld_missing",
+        "url": "https://www.skatepro.es/206-227.htm",
+        "message": "product_json_ld_missing"
+      }
+    ],
+    "note": "First complete-plan run before the fix task; kept for comparison, not overwritten."
+  },
+  "errors_history": [
+    {
+      "run": "initial",
+      "at": "2026-11-19T02:38:04Z",
+      "stage": "extract",
+      "code": "product_json_ld_missing",
+      "url": "https://www.skatepro.es/116-3125.htm",
+      "message": "product_json_ld_missing"
+    },
+    {
+      "run": "initial",
+      "at": "2026-11-19T02:40:43Z",
+      "stage": "extract",
+      "code": "product_json_ld_missing",
+      "url": "https://www.skatepro.es/80-1063.htm",
+      "message": "product_json_ld_missing"
+    },
+    {
+      "run": "initial",
+      "at": "2026-11-19T02:41:33Z",
+      "stage": "extract",
+      "code": "product_json_ld_missing",
+      "url": "https://www.skatepro.es/57-417.htm",
+      "message": "product_json_ld_missing"
+    },
+    {
+      "run": "initial",
+      "at": "2026-11-19T02:41:43Z",
+      "stage": "extract",
+      "code": "product_json_ld_missing",
+      "url": "https://www.skatepro.es/61-315.htm",
+      "message": "product_json_ld_missing"
+    },
+    {
+      "run": "initial",
+      "at": "2026-11-19T02:42:03Z",
+      "stage": "extract",
+      "code": "product_json_ld_missing",
+      "url": "https://www.skatepro.es/61-260.htm",
+      "message": "product_json_ld_missing"
+    },
+    {
+      "run": "initial",
+      "at": "2026-11-19T02:42:23Z",
+      "stage": "extract",
+      "code": "product_json_ld_missing",
+      "url": "https://www.skatepro.es/206-227.htm",
+      "message": "product_json_ld_missing"
+    }
+  ],
+  "fix": {
+    "status": "done",
+    "fix_minutes": 8.0,
+    "changes": "JSON-LD reader accepts ProductGroup (variable products); offers/images read from hasVariant; plan_version 2026.11.19-1 -> 2026.11.19-2",
+    "note": "Initial run: 6 of 30 pages carried only ProductGroup and were recorded as product_json_ld_missing. After the fix all 30 pages processed with the same bound and rate limit; no failed products.",
+    "task_id": "fc-scrapy-skatepro-20261119T024633Z",
+    "started_at": "2026-11-19T02:46:33Z",
+    "finished_at": "2026-11-19T02:51:56Z",
+    "valid_products": 30,
+    "excluded_products": 0,
+    "failed_products": 0,
+    "partial_description_products": 16,
+    "requests": 33,
+    "outcome": "PARTIAL",
+    "stop_reason": "BUDGET_EXHAUSTED",
+    "outputs": {
+      "valid_csv": "experiments/framework-compare/scrapy/skatepro/valid.csv",
+      "task_result": "experiments/framework-compare/scrapy/skatepro/task-result.json",
+      "diagnostics": "experiments/framework-compare/scrapy/skatepro/diagnostics",
+      "metrics_json": "experiments/framework-compare/results/scrapy-skatepro.json",
+      "metrics_md": "experiments/framework-compare/results/scrapy-skatepro.md"
+    }
+  }
+}

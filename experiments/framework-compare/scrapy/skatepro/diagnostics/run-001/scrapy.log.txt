@@ -1,0 +1,81 @@
+2026-11-19 10:37:41 [py.warnings] WARNING: C:\repos\ai-ecom-crawler\experiments\framework-compare\scrapy\.venv\Lib\site-packages\scrapy\core\engine.py:238: ScrapyDeprecationWarning: The RANDOMIZE_DOWNLOAD_DELAY setting is deprecated, use DOWNLOAD_DELAY_JITTER instead: it takes the magnitude of the random variation as a number, e.g. 0.5 for the ±50% that RANDOMIZE_DOWNLOAD_DELAY enables, or 0 to disable it.
+  self.downloader: Downloader = downloader_cls(crawler)
+
+2026-11-19 10:37:41 [scrapy.middleware] INFO: Enabled downloader middlewares:
+['scrapy.downloadermiddlewares.offsite.OffsiteMiddleware',
+ 'scrapy.downloadermiddlewares.robotstxt.RobotsTxtMiddleware',
+ 'scrapy.downloadermiddlewares.uriuserinfo.UriUserInfoMiddleware',
+ 'scrapy.downloadermiddlewares.httpauth.HttpAuthMiddleware',
+ 'scrapy.downloadermiddlewares.downloadtimeout.DownloadTimeoutMiddleware',
+ 'scrapy.downloadermiddlewares.defaultheaders.DefaultHeadersMiddleware',
+ 'scrapy.downloadermiddlewares.useragent.UserAgentMiddleware',
+ 'scrapy.downloadermiddlewares.retry.RetryMiddleware',
+ 'scrapy.downloadermiddlewares.redirect.MetaRefreshMiddleware',
+ 'scrapy.downloadermiddlewares.httpcompression.HttpCompressionMiddleware',
+ 'scrapy.downloadermiddlewares.redirect.RedirectMiddleware',
+ 'scrapy.downloadermiddlewares.httpproxy.HttpProxyMiddleware',
+ 'scrapy.downloadermiddlewares.stats.DownloaderStats']
+2026-11-19 10:37:41 [scrapy.middleware] INFO: Enabled spider middlewares:
+['scrapy.spidermiddlewares.start.StartSpiderMiddleware',
+ 'scrapy.spidermiddlewares.httperror.HttpErrorMiddleware',
+ 'scrapy.spidermiddlewares.referer.RefererMiddleware',
+ 'scrapy.spidermiddlewares.urllength.UrlLengthMiddleware',
+ 'scrapy.spidermiddlewares.depth.DepthMiddleware',
+ 'scrapy.spidermiddlewares.metacopy.MetaCopyDetectionMiddleware']
+2026-11-19 10:37:41 [scrapy.middleware] INFO: Enabled item pipelines:
+['skatepro.pipelines.ResultWriterPipeline']
+2026-11-19 10:37:41 [scrapy.core.engine] INFO: Spider opened
+2026-11-19 10:37:41 [scrapy.extensions.logstats] INFO: Crawled 0 pages (at 0 pages/min), scraped 0 items (at 0 items/min)
+2026-11-19 10:37:41 [scrapy.extensions.remote_control] INFO: Remote control HTTP server listening on port 52624 (job 19616-d679107049bd45d4905732be4da7bb33)
+2026-11-19 10:37:53 [skatepro-products] INFO: sitemap products=6660 selected=30
+2026-11-19 10:38:04 [skatepro-products] ERROR: stage=extract code=product_json_ld_missing url=https://www.skatepro.es/116-3125.htm product_json_ld_missing
+2026-11-19 10:38:11 [scrapy.extensions.logstats] INFO: Crawled 3 pages (at 6 pages/min), scraped 0 items (at 0 items/min)
+2026-11-19 10:38:13 [skatepro-products] INFO: first valid product at 2026-11-19T02:38:13Z: https://www.skatepro.es/168-3021.htm
+2026-11-19 10:38:41 [scrapy.extensions.logstats] INFO: Crawled 6 pages (at 6 pages/min), scraped 3 items (at 6 items/min)
+2026-11-19 10:39:11 [scrapy.extensions.logstats] INFO: Crawled 9 pages (at 6 pages/min), scraped 6 items (at 6 items/min)
+2026-11-19 10:39:41 [scrapy.extensions.logstats] INFO: Crawled 12 pages (at 6 pages/min), scraped 9 items (at 6 items/min)
+2026-11-19 10:40:11 [scrapy.extensions.logstats] INFO: Crawled 15 pages (at 6 pages/min), scraped 12 items (at 6 items/min)
+2026-11-19 10:40:41 [scrapy.extensions.logstats] INFO: Crawled 18 pages (at 6 pages/min), scraped 15 items (at 6 items/min)
+2026-11-19 10:40:43 [skatepro-products] ERROR: stage=extract code=product_json_ld_missing url=https://www.skatepro.es/80-1063.htm product_json_ld_missing
+2026-11-19 10:41:11 [scrapy.extensions.logstats] INFO: Crawled 21 pages (at 6 pages/min), scraped 17 items (at 4 items/min)
+2026-11-19 10:41:33 [skatepro-products] ERROR: stage=extract code=product_json_ld_missing url=https://www.skatepro.es/57-417.htm product_json_ld_missing
+2026-11-19 10:41:41 [scrapy.extensions.logstats] INFO: Crawled 24 pages (at 6 pages/min), scraped 19 items (at 4 items/min)
+2026-11-19 10:41:43 [skatepro-products] ERROR: stage=extract code=product_json_ld_missing url=https://www.skatepro.es/61-315.htm product_json_ld_missing
+2026-11-19 10:42:03 [skatepro-products] ERROR: stage=extract code=product_json_ld_missing url=https://www.skatepro.es/61-260.htm product_json_ld_missing
+2026-11-19 10:42:11 [scrapy.extensions.logstats] INFO: Crawled 27 pages (at 6 pages/min), scraped 20 items (at 2 items/min)
+2026-11-19 10:42:23 [skatepro-products] ERROR: stage=extract code=product_json_ld_missing url=https://www.skatepro.es/206-227.htm product_json_ld_missing
+2026-11-19 10:42:41 [scrapy.extensions.logstats] INFO: Crawled 30 pages (at 6 pages/min), scraped 22 items (at 4 items/min)
+2026-11-19 10:43:03 [skatepro-products] INFO: category status=200 cards=30 product_links=30 (static page; load-more is JS)
+2026-11-19 10:43:03 [scrapy.core.engine] INFO: Closing spider (finished)
+2026-11-19 10:43:03 [skatepro-products] INFO: outputs written: valid=24 excluded=0 failed=0 pending_selected=0
+2026-11-19 10:43:03 [scrapy.statscollectors] INFO: Dumping Scrapy stats:
+{'downloader/request_bytes': 11350,
+ 'downloader/request_count': 33,
+ 'downloader/request_method_count/GET': 33,
+ 'downloader/response_bytes': 1070335,
+ 'downloader/response_count': 33,
+ 'downloader/response_status_count/200': 33,
+ 'elapsed_time_seconds': 322.34135919995606,
+ 'finish_reason': 'finished',
+ 'finish_reason_error': False,
+ 'finish_time': datetime.datetime(2026, 11, 19, 2, 43, 3, 819076, tzinfo=datetime.timezone.utc),
+ 'httpcompression/response_bytes': 6058572,
+ 'httpcompression/response_count': 33,
+ 'item_scraped_count': 24,
+ 'items_per_minute': 4.472049689440994,
+ 'log_count/ERROR': 6,
+ 'log_count/INFO': 17,
+ 'request_backout_seconds/concurrency': 321.6916820006445,
+ 'request_backout_seconds/total': 321.6916820006445,
+ 'request_depth_max': 1,
+ 'response_received_count': 33,
+ 'responses_per_minute': 6.149068322981367,
+ 'robotstxt/request_count': 1,
+ 'robotstxt/response_count': 1,
+ 'robotstxt/response_status_count/200': 1,
+ 'scheduler/dequeued': 32,
+ 'scheduler/dequeued/memory': 32,
+ 'scheduler/enqueued': 32,
+ 'scheduler/enqueued/memory': 32,
+ 'start_time': datetime.datetime(2026, 11, 19, 2, 37, 41, 477714, tzinfo=datetime.timezone.utc)}
+2026-11-19 10:43:03 [scrapy.core.engine] INFO: Spider closed (finished)
