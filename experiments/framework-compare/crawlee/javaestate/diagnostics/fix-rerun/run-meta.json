@@ -1,0 +1,70 @@
+{
+  "run_id": "fix-rerun",
+  "task_id": "fc-crawlee-javaestate-fix-rerun",
+  "plan_id": "javaestate-us-en-usd",
+  "plan_version": "2026.11.19-2",
+  "model_variant": "max",
+  "runtime_llm_calls": 0,
+  "build_started_at": "2026-11-19T00:44:29Z",
+  "plan_ready_at": "2026-11-19T01:11:27Z",
+  "started_at": "2026-11-19T01:27:45Z",
+  "finished_at": "2026-11-19T01:38:06Z",
+  "wall_seconds": 621.0,
+  "first_plan_s": 1618.0,
+  "first_valid_product_at": "2026-11-19T01:28:13Z",
+  "first_valid_product_s": 2624.0,
+  "implementation_revisions": 3,
+  "max_products": 30,
+  "time_budget_seconds": 600,
+  "sitemap_denominator": 706,
+  "denominator_source": "sitemap_products_1.xml: unique /products/ <loc> entries",
+  "selection_rule": "systematic sample: every 23.53th product URL, first 30 of 706",
+  "counts": {
+    "product_candidates": 30,
+    "pending_products": 3,
+    "in_flight_products": 0,
+    "processed_products": 27,
+    "valid_products": 27,
+    "excluded_products": 0,
+    "failed_products": 0,
+    "partial_description_products": 0
+  },
+  "outcome": "PARTIAL",
+  "stop_reason": "BUDGET_EXHAUSTED",
+  "state": "FINISHED",
+  "coverage": {
+    "status": "KNOWN",
+    "denominator_source": "sitemap_products_1.xml: unique /products/ <loc> entries",
+    "denominator": 706,
+    "covered": 27,
+    "scope": "bounded trial: 30 selected product pages",
+    "notes": "The denominator is the number of public product URLs in the site's product sitemap at discovery time. Covered counts candidates with a processed verdict in this bounded task, not the whole catalogue. The sitemap can change between runs and is not independently audited."
+  },
+  "requests_logged": 29,
+  "requests_total_crawlee": 29,
+  "robots_txt_fetch": 1,
+  "browser_launches": 1,
+  "crawler_statistics": {
+    "requests_finished": 29,
+    "requests_failed": 0,
+    "retry_histogram": [
+      29
+    ],
+    "request_avg_failed_duration": null,
+    "request_avg_finished_duration": 21.249556,
+    "requests_finished_per_minute": 3,
+    "requests_failed_per_minute": 0,
+    "request_total_duration": 616.237132,
+    "requests_total": 29,
+    "crawler_runtime": 617.547463
+  },
+  "errors": [],
+  "warnings": [],
+  "failed_products": [],
+  "excluded_products": [],
+  "outputs": {
+    "valid_csv": "valid.csv",
+    "task_result": "task-result.json",
+    "diagnostics": "diagnostics/fix-rerun/"
+  }
+}

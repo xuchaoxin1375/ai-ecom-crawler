@@ -1,0 +1,136 @@
+{
+  "framework": "crawlee-for-python",
+  "framework_version": "1.11.2",
+  "browser": "Playwright Chromium 159.0.8154.6",
+  "site": "javaestate.com",
+  "market": "US",
+  "locale": "en-US",
+  "currency": "USD",
+  "contract_note": "Task instruction fixed 22 CSV columns. docs/02 was changed externally during the session to a 9-column final business CSV; shared/task-spec.md records that this round keeps the 22-column results as old-contract evidence and does not rerun. No docs/ or shared/ file was modified by this implementation.",
+  "model_variant": "max",
+  "runtime_llm_calls": 0,
+  "build_started_at": "2026-11-19T00:44:29Z",
+  "plan_ready_at": "2026-11-19T01:11:27Z",
+  "started_at": "2026-11-19T01:11:48Z",
+  "finished_at": "2026-11-19T01:21:58Z",
+  "wall_seconds": 610.0,
+  "first_plan_s": 1618.0,
+  "first_valid_product_at": "2026-11-19T01:12:51Z",
+  "first_valid_product_s": 1702.0,
+  "time_origin": "build_started_at; both first_* values are seconds after it",
+  "implementation_revisions": 2,
+  "total_implementation_revisions": 3,
+  "plan_id": "javaestate-us-en-usd",
+  "plan_version": "2026.11.19-1",
+  "task_id": "fc-crawlee-javaestate-run-001",
+  "requests": 28,
+  "requests_breakdown": {
+    "crawlee_top_level": 27,
+    "robots_txt": 1,
+    "note": "Browser subresources are excluded; this is not network-level request count."
+  },
+  "valid_products": 25,
+  "excluded_products": 0,
+  "failed_products": 0,
+  "partial_description_products": 0,
+  "pending_products": 5,
+  "processed_products": 25,
+  "product_candidates": 30,
+  "description_status_counts": {
+    "complete": 23,
+    "not_provided": 2
+  },
+  "availability_counts": {
+    "in_stock": 24,
+    "out_of_stock": 1
+  },
+  "tax_basis_counts": {
+    "UNKNOWN": 25
+  },
+  "coverage": {
+    "status": "KNOWN",
+    "denominator_source": "sitemap_products_1.xml: unique /products/ <loc> entries",
+    "denominator": 706,
+    "covered": 25,
+    "scope": "bounded trial: 30 selected product pages",
+    "notes": "The denominator is the number of public product URLs in the site's product sitemap at discovery time. Covered counts candidates with a processed verdict in this bounded task, not the whole catalogue. The sitemap can change between runs and is not independently audited."
+  },
+  "outcome": "PARTIAL",
+  "stop_reason": "BUDGET_EXHAUSTED",
+  "state": "FINISHED",
+  "errors": [],
+  "build_errors": [
+    "Plain HTTP probes (curl, including a proxy bypass) returned 429 local_rate_limited with retry-after: 60 for product and collection pages; a real Chromium page returned 200 for the same product page. These probes are not part of the measured run."
+  ],
+  "network_note": "HTTP_PROXY/HTTPS_PROXY/NO_PROXY are present. The browser used the platform's default network path; the actual egress was not independently measured. No credentials are recorded.",
+  "resource": {
+    "browser_launches": 1,
+    "cleanup": "browser pool closed; post-run process snapshot found no Chromium/Playwright process",
+    "residual_processes": 0,
+    "raw_pages_retained": false
+  },
+  "main_run": {
+    "run_id": "run-001",
+    "archive": "diagnostics/run-001/",
+    "plan_version": "2026.11.19-1",
+    "started_at": "2026-11-19T01:11:48Z",
+    "finished_at": "2026-11-19T01:21:58Z",
+    "valid_products": 25,
+    "excluded_products": 0,
+    "failed_products": 0,
+    "pending_products": 5,
+    "stop_reason": "BUDGET_EXHAUSTED"
+  },
+  "fix_task": {
+    "status": "completed",
+    "started_at": "2026-11-19T01:22:00Z",
+    "fix_minutes": 5.7,
+    "fix_total_minutes": 16.1,
+    "change": "Post-run selector fix: the description selector matched an empty .product__description.rte placeholder on two products and recorded it as a DOM-captured description. The fix requires non-empty text, uses .product__description.rte first, distinguishes an empty source container (not_provided) from a missing container (failed), and records selector/empty-container evidence. Added 3 contract tests (16 total).",
+    "files": [
+      "crawlee_javaestate/extract.py",
+      "crawlee_javaestate/export.py",
+      "crawlee_javaestate/runner.py",
+      "crawlee_javaestate/config.py",
+      "crawlee_javaestate/__init__.py",
+      "manifest.yaml",
+      "README.md",
+      "tests/test_contract.py"
+    ],
+    "tests_passed": 16,
+    "rerun": {
+      "run_id": "fix-rerun",
+      "started_at": "2026-11-19T01:27:45Z",
+      "finished_at": "2026-11-19T01:38:06Z",
+      "plan_version": "2026.11.19-2",
+      "valid_products": 27,
+      "excluded_products": 0,
+      "failed_products": 0,
+      "pending_products": 3,
+      "requests": 30,
+      "errors": []
+    },
+    "common_rows_compared": 25,
+    "common_rows_unchanged": true,
+    "row_differences": []
+  },
+  "final_package": {
+    "plan_version": "2026.11.19-2",
+    "validCSV": "valid.csv",
+    "task_result": "task-result.json",
+    "valid_products": 27,
+    "pending_products": 3,
+    "note": "The package root is the fix rerun (v2); the first bounded trial (v1) is archived under diagnostics/run-001/."
+  },
+  "limitations": [
+    "Bounded trial: 30 product pages or 10 minutes, whichever comes first. The main run processed 25 and the fix rerun 27; neither is whole-site coverage.",
+    "The 706-URL sitemap denominator is point-in-time and not independently audited. coverage.status=KNOWN describes the denominator, not a full crawl.",
+    "tax_basis is UNKNOWN for every product because the source does not state inclusive/exclusive pricing; the reason is recorded per row.",
+    "No real-run product had a partial or fallback description; those states are covered by synthetic contract tests, not by this site's live sample.",
+    "The main trial left 5 products pending and the fix rerun left 3 because the 10-minute watchdog stopped the crawler.",
+    "Pause/resume is not implemented; Ctrl+C cancels and --resume replays a checkpoint. A normal run purges its Crawlee queue and is a new task.",
+    "Plain HTTP probes hit 429 local_rate_limited during build; the measured run used Chromium and had no 429 or retry. The probes are not part of the run counts.",
+    "The Crawlee throttler's per-domain sub-manager wrote queue JSON to a repo-root storage/ directory in addition to the per-run storage. The directory was removed and contained no page content; run-scoped storage isolation is a follow-up.",
+    "The actual network egress was not independently measured; HTTP(S)_PROXY variables were present and the browser used the platform default path."
+  ]
+}

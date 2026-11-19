@@ -1,0 +1,252 @@
+schema_version: "1.0"
+plan_id: "javaestate-us-en-usd"
+plan_version: "2026.11.19-2"
+kind: "program"
+status: "candidate"
+created_at: "2026-11-19T01:08:40Z"
+updated_at: "2026-11-19T01:46:59Z"
+
+site:
+  name: "Java Estate Roastery (javaestate.com)"
+  entry_urls:
+    - "https://javaestate.com/"
+  allowed_origins:
+    - "https://javaestate.com"
+  allowed_path_prefixes:
+    - "/products/"
+    - "/sitemap.xml"
+    - "/sitemap_products_1.xml"
+    - "/robots.txt"
+  market: "US"
+  locale: "en-US"
+  currency: "USD"
+
+scope:
+  include:
+    - "/products/*"
+  exclude:
+    - "/cart/*"
+    - "/checkout/*"
+    - "/account/*"
+    - "/orders/*"
+    - "/collections/*"
+    - "/blogs/*"
+    - "/pages/*"
+  max_products: 30
+  max_duration_seconds: 600
+  selection: "systematic sample across the product sitemap, evenly spaced indices"
+  notes: "Public product pages only. No login, cart, checkout or account access. The 30-product cap is a trial budget, not a full-catalogue crawl."
+
+discovery:
+  strategies:
+    - "sitemap_index"
+    - "sitemap_products"
+  sitemap_urls:
+    - "https://javaestate.com/sitemap.xml"
+  product_sitemap_match: "sitemap_products"
+  product_url_patterns:
+    - "^https://javaestate\\.com/products/[^/?#]+$"
+  url_identity: "normalized https origin + path; query and fragment removed; trailing slash removed"
+  dedupe: "unique normalized /products/ path; sitemap order preserved"
+  navigation_limit: 2
+  selection_rule: "if the product sitemap has more than 30 URLs, take 30 evenly spaced indices (step = N/30); otherwise take all"
+  notes: "The sitemap index is read from the entry site's robots-declared sitemap. Product pages are only enqueued for URLs whose normalized path matches /products/."
+
+fetch:
+  default_engine: "browser"
+  browser: "playwright-chromium"
+  per_url_type:
+    sitemap_index:
+      engine: "browser"
+      wait_until: "domcontentloaded"
+      body: "response.text()"
+    sitemap_products:
+      engine: "browser"
+      wait_until: "domcontentloaded"
+      body: "response.text()"
+    product:
+      engine: "browser"
+      wait_until: "domcontentloaded"
+      wait_selector: "h1"
+      block_assets: true
+      body: "page.content()"
+  rate_limit:
+    concurrency: 1
+    min_interval_ms: 1100
+    max_tasks_per_minute: 50
+  retry:
+    max_retries: 2
+    max_attempts: 3
+    on_429: "ThrottlingRequestManager honors Retry-After with per-domain delay; max_domain_stall=190s"
+    on_5xx: "Crawlee request retry (max 2 retries)"
+  timeout_ms: 45000
+  robots:
+    respect: true
+    url: "https://javaestate.com/robots.txt"
+    notes: "Crawlee RobotsTxtFile is enabled; product paths are allowed, cart/checkout/account paths are excluded by scope."
+  session:
+    profile_required: false
+    cookies: "only the site's own localization cookies set by the browser; no login"
+
+extract:
+  fields:
+    name:
+      source: "embedded_product_json.title | jsonld.Product.name | h1"
+      required: true
+      clean: "collapse whitespace; remove explicit javaestate.com fragments and adjacent separators"
+    price.amount:
+      source: "embedded_product_json.variants[].price (minor units)"
+      fallback: "jsonld.Product.offers.price | lowPrice"
+      required: true
+      choose: "minimum finite positive variant price, including unavailable variants"
+    price.currency:
+      source: "Shopify.currency.active + ShopifyAnalytics.meta.currency + jsonld.Product.offers.priceCurrency"
+      required: true
+      rule: "all present sources must agree; a three-letter ISO code is required"
+    primary_image_url:
+      source: "embedded_product_json.featured_image | images[0] | jsonld.Product.image"
+      required: true
+      rule: "resolve protocol-relative URLs; remove width/height resize parameters; reject logo/placeholder"
+    description_html:
+      source: "embedded_product_json.description | .product__description.rte | jsonld.Product.description"
+      required: false
+      clean: "DOM whitelist, attributes removed, links unwrapped, scripts/styles/forms/images removed"
+      state_rule: "empty description container -> not_provided; missing container with no other source -> failed; JSON-LD-only -> fallback"
+    categories:
+      source: "embedded_product_json.type | jsonld.Product.category"
+      required: false
+      rule: "first meaningful merchant type; generic Home/Shop/All values are filtered"
+    brand:
+      source: "embedded_product_json.vendor | jsonld.Product.brand.name"
+      required: false
+      rule: "store name Java Estate Roastery is not used as a product brand"
+    options:
+      source: "embedded_product_json.options + variants[].options"
+      required: false
+      rule: "exclude quantity groups and Default Title placeholders; strip trailing price deltas"
+    availability:
+      source: "embedded_product_json.available | variants[].available"
+      required: false
+    source_url:
+      source: "link[rel=canonical] | final request URL"
+      required: true
+      rule: "normalize origin/path; remove query and fragment"
+    market:
+      source: "Shopify.country"
+      required: true
+      value: "US"
+    locale:
+      source: "Shopify.locale and content-language"
+      required: true
+      value: "en-US"
+  evidence:
+    - "embedded product JSON presence and variant count"
+    - "all currency sources and their values"
+    - "description source and cleaned text length"
+    - "selected category and brand candidate"
+
+normalize:
+  price:
+    positive_only: true
+    source_units: "minor units (cents) in embedded product JSON; dollars in JSON-LD"
+    choose: "lowest_public_current_variant_price"
+    include_out_of_stock: true
+    exclude: "compare_at_price, shipping, payment plans, recommendations"
+    tax_basis: "detect explicit tax included/excluded text; otherwise UNKNOWN with missing reason"
+  description:
+    cleaner: "crawlee_javaestate.clean.clean_html_fragment"
+    statuses:
+      - "complete"
+      - "partial"
+      - "fallback"
+      - "not_provided"
+      - "failed"
+    partial_reason: "list known extra blocks not merged, or the related blocks used when body_html was absent"
+  name:
+    remove_domain_fragments: true
+    do_not_remove: "brand or store words that are part of the product name"
+  options:
+    exclude_quantity: true
+    strip_price_delta: true
+    placeholder_values:
+      - "Default Title"
+      - "Title"
+  csv:
+    columns: 22
+    encoding: "UTF-8"
+    line_terminator: "LF"
+    formula_guard: "prefix = + - @ text cells with an apostrophe; amounts stay numeric"
+
+validate:
+  required_fields:
+    - "name"
+    - "price.amount"
+    - "price.currency"
+    - "primary_image_url"
+    - "source_url"
+    - "market"
+    - "locale"
+    - "description_status"
+    - "price_basis"
+    - "task_id"
+    - "plan_id"
+    - "plan_version"
+    - "extracted_at"
+  assertions:
+    - "price.amount is finite and > 0"
+    - "price.currency matches ^[A-Z]{3}$ and equals USD"
+    - "Shopify.country is US when present"
+    - "Shopify.locale is en or en-US when present"
+    - "primary_image_url and source_url are http(s) URLs"
+    - "description_status is one of the five documented states"
+    - "missing_reasons is a JSON object"
+  partial_description: "allowed_with_flag"
+  failures:
+    excluded: "ZERO_PRICE, NEGATIVE_PRICE, NO_PRICE, CURRENCY_NOT_TARGET, MARKET_MISMATCH, LOCALE_MISMATCH"
+    failed: "HTTP_NOT_FOUND, CURRENCY_EVIDENCE_MISSING, CURRENCY_CONFLICT, PRIMARY_IMAGE_MISSING, PRODUCT_DATA_JSON_MISSING, REQUIRED_FIELD_MISSING, DESCRIPTION_BLOCK_NOT_FOUND, DESCRIPTION_CLEAN_FAILED, UNEXPECTED_ERROR"
+
+runtime:
+  entrypoint: "run.py"
+  command: "python -m uv run --project experiments/framework-compare/crawlee python experiments/framework-compare/crawlee/javaestate/run.py --run-id <run-id>"
+  working_directory: "repository root"
+  task_context:
+    source: "command line"
+    fields:
+      - "--run-id"
+      - "--max-products (default 30, capped at 30)"
+      - "--time-budget-seconds (default 600, capped at 600)"
+      - "--build-started-at"
+      - "--plan-ready-at"
+      - "--implementation-revisions"
+      - "--resume"
+  checkpoint: "diagnostics/<run-id>/checkpoint.jsonl; --resume replays verdicts and skips processed URLs"
+  idempotency: "task_id + plan_version + normalized source_url"
+  cancellation: "Ctrl+C stops the crawler; a normal run purges its Crawlee queue. Pause/resume is not implemented."
+  resource_cleanup: "PlaywrightCrawler owns and closes its BrowserPool; the runner uses no custom browser process."
+  outputs:
+    - "valid.csv"
+    - "task-result.json"
+    - "diagnostics/<run-id>/"
+  llm_calls: 0
+
+compatibility:
+  os:
+    - "windows"
+    - "linux"
+    - "wsl2"
+  runtime: "python>=3.11,<3.14"
+  dependencies:
+    - "crawlee[playwright,parsel]==1.11.2 (locked in experiments/framework-compare/crawlee/uv.lock)"
+    - "playwright 1.65.x"
+    - "Chromium 159.0.8154.6 (Playwright chromium-1255)"
+  browser: "Playwright Chromium, headless by default"
+  network: "public web; HTTP(S)_PROXY may be present; no authentication, no login, no paid access"
+  secrets: "none"
+
+entrypoint: "run.py"
+
+notes:
+  - "Candidate plan produced by the Crawlee side of the framework comparison; not verified."
+  - "The Java Estate trial is bounded to 30 product pages or 10 minutes, whichever comes first."
+  - "Runtime has no model or LLM dependency; all extraction is selector/JSON based."
+  - "The site's product pages return 429 to plain HTTP clients from some egresses; the plan uses a real Chromium browser and Crawlee's throttling request manager. A persistent 429 is a stop condition, not a bypass target."

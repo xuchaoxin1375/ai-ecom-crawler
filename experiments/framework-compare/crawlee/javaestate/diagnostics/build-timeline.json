@@ -1,0 +1,65 @@
+{
+  "build_started_at": "2026-11-19T00:44:29Z",
+  "plan_ready_at": "2026-11-19T01:11:27Z",
+  "implementation_revisions": 3,
+  "build_revisions": 2,
+  "fix_revisions": 1,
+  "revisions": [
+    {
+      "revision": 1,
+      "summary": "Initial Crawlee package: manifest, PlaywrightCrawler runner, sitemap discovery, embedded product JSON + JSON-LD extraction, HTML cleaner, 22-column CSV export, diagnostics and contract tests.",
+      "files": [
+        "manifest.yaml",
+        "run.py",
+        "crawlee_javaestate/config.py",
+        "crawlee_javaestate/runner.py",
+        "crawlee_javaestate/extract.py",
+        "crawlee_javaestate/clean.py",
+        "crawlee_javaestate/export.py",
+        "tests/test_contract.py"
+      ]
+    },
+    {
+      "revision": 2,
+      "summary": "Smoke-run fixes: registered the pre-navigation hook via PlaywrightCrawler.pre_navigation_hook (Crawlee 1.11.2 does not accept it as a constructor kwarg), and made embedded variant prices authoritative so an all-zero variant set cannot fall back to a JSON-LD offer.",
+      "files": [
+        "crawlee_javaestate/runner.py",
+        "crawlee_javaestate/extract.py"
+      ],
+      "verified_by": "diagnostics/smoke-001 (temp run): 1 valid product, 3 top-level requests, 0 failures"
+    },
+    {
+      "revision": 3,
+      "summary": "Post-run selector fix: the description selector matched an empty .product__description.rte placeholder on two products and recorded it as a DOM-captured description. The fix requires non-empty text, uses .product__description.rte first, distinguishes an empty source container (not_provided) from a missing container (failed), and records selector/empty-container evidence. Added 3 contract tests (16 total).",
+      "files": [
+        "crawlee_javaestate/extract.py",
+        "crawlee_javaestate/export.py",
+        "crawlee_javaestate/runner.py",
+        "crawlee_javaestate/config.py",
+        "crawlee_javaestate/__init__.py",
+        "manifest.yaml",
+        "README.md",
+        "tests/test_contract.py"
+      ],
+      "fix_started_at": "2026-11-19T01:22:00Z",
+      "fix_tests_passed_at": "2026-11-19T01:27:40Z",
+      "fix_rerun_started_at": "2026-11-19T01:27:45Z",
+      "fix_rerun_finished_at": "2026-11-19T01:38:06Z",
+      "fix_minutes": 5.7,
+      "fix_total_minutes": 16.1
+    }
+  ],
+  "smoke_run": {
+    "run_id": "smoke-001",
+    "started_at": "2026-11-19T01:07:29Z",
+    "finished_at": "2026-11-19T01:08:00Z",
+    "valid_products": 1,
+    "requests_total_crawlee": 3,
+    "failed_products": 0,
+    "note": "Integration smoke test only; not the bounded trial."
+  },
+  "build_errors": [
+    "Plain HTTP probes (curl, including a proxy bypass) returned 429 local_rate_limited with retry-after: 60 for product and collection pages; a real Chromium page returned 200 for the same product page. These probes are not part of the measured run."
+  ],
+  "network_note": "HTTP_PROXY/HTTPS_PROXY/NO_PROXY are present. The browser used the platform's default network path; the actual egress was not independently measured. No credentials are recorded."
+}

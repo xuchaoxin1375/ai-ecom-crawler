@@ -1,0 +1,60 @@
+{
+  "task_id": "fc-crawlee-javaestate-fix-rerun",
+  "plan_id": "javaestate-us-en-usd",
+  "plan_version": "2026.11.19-2",
+  "site": "javaestate.com",
+  "market": "US",
+  "locale": "en-US",
+  "state": "FINISHED",
+  "outcome": "PARTIAL",
+  "stop_reason": "BUDGET_EXHAUSTED",
+  "started_at": "2026-11-19T01:27:45Z",
+  "finished_at": "2026-11-19T01:38:06Z",
+  "counts": {
+    "discovered_urls": 32,
+    "pending_navigation_entries": 0,
+    "product_candidates": 30,
+    "pending_products": 3,
+    "in_flight_products": 0,
+    "processed_products": 27,
+    "valid_products": 27,
+    "excluded_products": 0,
+    "failed_products": 0,
+    "partial_description_products": 0
+  },
+  "coverage": {
+    "status": "KNOWN",
+    "denominator_source": "sitemap_products_1.xml: unique /products/ <loc> entries",
+    "denominator": 706,
+    "covered": 27,
+    "scope": "bounded trial: 30 selected product pages",
+    "notes": "The denominator is the number of public product URLs in the site's product sitemap at discovery time. Covered counts candidates with a processed verdict in this bounded task, not the whole catalogue. The sitemap can change between runs and is not independently audited."
+  },
+  "business_acceptance": {
+    "status": "NOT_REVIEWED",
+    "accepted_by": null,
+    "accepted_at": null,
+    "reason": "Bounded framework-comparison trial; user acceptance pending.",
+    "scope": "First 30 selected product pages from the public product sitemap."
+  },
+  "runtime": {
+    "llm_calls": 0,
+    "raw_pages_retained": false,
+    "browser_launches": 1,
+    "browser_cleanup": "PlaywrightCrawler.run() returned; browser pool closed by the crawler.",
+    "requests_total_crawlee": 29,
+    "robots_txt_fetch": 1,
+    "implementation_revisions": 3,
+    "program_exit": 0
+  },
+  "notes": [
+    "Bounded trial: the declared scope is 30 product pages or 10 minutes, whichever comes first.",
+    "Coverage covered counts processed candidates in this task, not the whole site.",
+    "Sitemap denominator: 706.",
+    "Tax basis is UNKNOWN when the source page does not state inclusive/exclusive pricing.",
+    "Single-variant products have no meaningful options; options are left empty with a reason.",
+    "No model or other LLM is called at runtime.",
+    "This candidate does not implement pause/resume; every run purges its Crawlee queue and is a new task.",
+    "The 10-minute watchdog stopped the crawler."
+  ]
+}
