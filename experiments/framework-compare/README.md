@@ -47,6 +47,8 @@ python -m uv sync --project experiments/framework-compare/scrapling
 
 `uv` 未在 PATH 时用 `python -m uv`。浏览器和其他运行时依赖按实际站点需要另行安装，安装前记录版本与来源。
 
+环境在三个框架子目录的 `.venv` 下；通用的环境扫描默认不包含这些嵌套 venv，使用时直接指定 `experiments/framework-compare/<framework>/.venv/Scripts/python.exe`，不要另建同名环境。
+
 ## 执行顺序
 
 按 `13` 的随机化要求，开跑前在 `results/order.md` 固定顺序并记录随机种子；同一站点尽量在同一时间窗内完成。所有框架使用同一时间上限、商品页上限、模型和提示词。
