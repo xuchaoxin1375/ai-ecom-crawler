@@ -1,0 +1,176 @@
+{
+  "task_id": "scrapling-skatepro-smoke-001-20261119T031029Z",
+  "label": "smoke-001",
+  "plan_id": "skatepro-es-scrapling",
+  "plan_version": "2026.11.19-2",
+  "run_started_at": "2026-11-19T03:10:29Z",
+  "run_finished_at": "2026-11-19T03:11:31Z",
+  "build_started_at": "2026-11-19T02:57:00Z",
+  "first_valid_at": "2026-11-19T03:11:18Z",
+  "first_valid_product_s": 859.0,
+  "elapsed_s": 61.25,
+  "state": "FINISHED",
+  "outcome": "PARTIAL",
+  "stop_reason": "BUDGET_EXHAUSTED",
+  "stop_detail": "task cap reached: processed 2 product pages; 3 navigation entries remain",
+  "counts": {
+    "discovered_urls": 7,
+    "pending_navigation_entries": 3,
+    "product_candidates": 2,
+    "pending_products": 0,
+    "in_flight_products": 0,
+    "processed_products": 2,
+    "valid_products": 2,
+    "excluded_products": 0,
+    "failed_products": 0,
+    "partial_description_products": 0
+  },
+  "coverage": {
+    "status": "PARTIAL",
+    "denominator_source": "https://www.skatepro.es/sitemap.xml product URL count at run time",
+    "denominator": 6660,
+    "covered": 2,
+    "notes": "Discovery scope is the entry page's category grid, capped at 2 product pages; 2 valid products of 6660 sitemap product URLs. This is a bounded sample, not a full-site completion claim."
+  },
+  "requests": 6,
+  "retries": 0,
+  "per_purpose": {
+    "robots": 1,
+    "entry": 1,
+    "category": 1,
+    "sitemap": 1,
+    "product": 2
+  },
+  "per_status": {
+    "status_200": 6
+  },
+  "errors": [],
+  "discovery": {
+    "entry_url": "https://www.skatepro.es/",
+    "entry_final_url": "https://www.skatepro.es/",
+    "html_lang": "es",
+    "html_title": "SkatePro - Especialistas en Deportes de Acción",
+    "site_name": "SkatePro",
+    "category_urls_available": 450,
+    "visited_categories": [
+      "https://www.skatepro.es/c2.htm"
+    ],
+    "kept_products": 2,
+    "duplicate_urls": 0,
+    "filtered_urls": 0,
+    "pending_navigation": [
+      "https://www.skatepro.es/c2.htm?page=2",
+      "https://www.skatepro.es/c251.htm",
+      "https://www.skatepro.es/c252.htm"
+    ],
+    "sitemap_url": "https://www.skatepro.es/sitemap.xml",
+    "sitemap_product_count": 6660,
+    "robots_status": 200,
+    "notes": [
+      "sitemap.xml declares 6660 product URLs; it is a site-level denominator, not this bounded category scope.",
+      "discovery used 1 category page(s) and kept 2 unique products within the 2-page cap."
+    ]
+  },
+  "product_audits": [
+    {
+      "source_url": "https://www.skatepro.es/243-35728.htm",
+      "name": "Native Stem Tabla Scooter",
+      "price_amount": "49.95",
+      "price_currency": "EUR",
+      "description_status": "complete",
+      "description_chars": 2126,
+      "partial_reason": "",
+      "category": "Patinetes > Recambios Patinete > Tablas",
+      "brand": "Native",
+      "options": [
+        [
+          "Longitud",
+          [
+            "520mm",
+            "560mm"
+          ]
+        ],
+        [
+          "Color",
+          [
+            "Raw",
+            "Saundezy",
+            "Xl Raw",
+            "Xl"
+          ]
+        ]
+      ],
+      "variant_count": 6,
+      "zero_price_variants": 0,
+      "missing_reasons": {},
+      "evidence": {
+        "source_kind": "static_html",
+        "currency": "json_ld_offer_priceCurrency=EUR",
+        "price_source": "php2js_variants_min_price_number",
+        "variant_prices_considered": 6,
+        "description": {
+          "dom_body_chars": 1228,
+          "spec_rows": 14,
+          "json_ld_chars": 1228
+        },
+        "tax_basis": "no_tax_inclusive_or_exclusive statement found in static HTML",
+        "ld_product_count": 1
+      },
+      "outcome": "valid",
+      "detail": ""
+    },
+    {
+      "source_url": "https://www.skatepro.es/246-8437.htm",
+      "name": "Ethic DTC (Caucho) Puños Patinete",
+      "price_amount": "6.95",
+      "price_currency": "EUR",
+      "description_status": "complete",
+      "description_chars": 496,
+      "partial_reason": "",
+      "category": "Patinetes > Recambios Patinete > Puños",
+      "brand": "Ethic",
+      "options": [
+        [
+          "Color",
+          [
+            "Negro",
+            "Transparente",
+            "Rojo",
+            "Azul",
+            "Marrón",
+            "Verde"
+          ]
+        ]
+      ],
+      "variant_count": 6,
+      "zero_price_variants": 0,
+      "missing_reasons": {},
+      "evidence": {
+        "source_kind": "static_html",
+        "currency": "json_ld_offer_priceCurrency=EUR",
+        "price_source": "php2js_variants_min_price_number",
+        "variant_prices_considered": 6,
+        "description": {
+          "dom_body_chars": 143,
+          "spec_rows": 6,
+          "json_ld_chars": 143
+        },
+        "tax_basis": "no_tax_inclusive_or_exclusive statement found in static HTML",
+        "ld_product_count": 1
+      },
+      "outcome": "valid",
+      "detail": ""
+    }
+  ],
+  "runtime": {
+    "llm_calls": 0,
+    "raw_pages_retained": false,
+    "browser_launched": false,
+    "http_engine": "scrapling.FetcherSession (curl_cffi, static HTML)",
+    "scrapling_version": "0.5.1",
+    "concurrency": 1,
+    "request_interval_seconds": 10.0,
+    "max_attempts": 3
+  },
+  "errors_count": 0
+}

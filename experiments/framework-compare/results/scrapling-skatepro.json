@@ -1,0 +1,262 @@
+{
+  "framework": "Scrapling",
+  "framework_version": "0.5.1",
+  "engine": "scrapling.FetcherSession (curl_cffi, static HTML)",
+  "site": "skatepro.es",
+  "entry_url": "https://www.skatepro.es/",
+  "market": "ES",
+  "locale": "es-ES",
+  "currency": "EUR",
+  "round": "round2-9col",
+  "plan_id": "skatepro-es-scrapling",
+  "plan_versions": ["2026.11.19-1", "2026.11.19-2"],
+  "model_variant": "high",
+  "build_started_at": "2026-11-19T02:57:00Z",
+  "build_started_at_note": "Estimated at the last moment before the first site request (robots.txt response header 2026-11-19T03:00:14Z) minus the preceding document-reading step. The estimate can understate the build start by about 3-5 minutes; first_* metrics are measured from this value, not from any run start.",
+  "build_finished_at": "2026-11-19T03:29:10Z",
+  "build_elapsed_s": 1930,
+  "first_plan_at": "2026-11-19T03:10:16Z",
+  "first_plan_s": 796,
+  "first_plan_basis": "manifest.yaml file timestamp; entrypoint and modules were runnable and the smoke run started at 2026-11-19T03:10:29Z.",
+  "first_valid_product_at": "2026-11-19T03:12:36Z",
+  "first_valid_product_s": 936.1,
+  "first_metric_origin": "first_plan_s and first_valid_product_s are seconds from build_started_at. first_valid_product_s uses the main run-001 first valid product (2026-11-19T03:12:36Z); the fix rerun first valid product at 2026-11-19T03:21:21Z equals 1461.7 s from the same origin.",
+  "implementation_revisions": 2,
+  "implementation_revision_notes": [
+    "rev1 (2026.11.19-1): initial plan package - Scrapling FetcherSession runner, entry/category/pagination discovery, sitemap denominator, PHP2JS variant price extraction, JSON-LD Product/ProductGroup currency and fallback, description assembly, options, 9-column CSV, diagnostics, tests.",
+    "rev2 (2026.11.19-2): fix task added the nullable 02 availability field from JSON-LD offers across Product/ProductGroup/hasVariant, cross-checked with PHP2JS stock_level; availability_summary added to the task report."
+  ],
+  "runtime_llm_calls": 0,
+  "started_at": "2026-11-19T03:11:46Z",
+  "finished_at": "2026-11-19T03:18:25Z",
+  "published_result_started_at": "2026-11-19T03:20:32Z",
+  "published_result_finished_at": "2026-11-19T03:27:16Z",
+  "published_result_plan_version": "2026.11.19-2",
+  "wall_clock_s": 398.83,
+  "published_result_wall_clock_s": 404.66,
+  "requests": 34,
+  "requests_all_runs": 74,
+  "retries": 0,
+  "request_breakdown": {
+    "robots": 1,
+    "entry": 1,
+    "category": 1,
+    "sitemap": 1,
+    "product": 30
+  },
+  "request_breakdown_all_runs": {
+    "smoke-001": 6,
+    "run-001": 34,
+    "fix-rerun": 34
+  },
+  "http_status_breakdown": {
+    "200": 34
+  },
+  "build_recon_requests_estimated": 9,
+  "build_recon_note": "Manual build-time reconnaissance before the plan existed (robots, entry, sitemap, one category page, three product pages, one Scrapling probe, two verification pages). Counted from the build session commands; not part of any run's request count.",
+  "valid_products": 30,
+  "excluded_products": 0,
+  "failed_products": 0,
+  "partial_description_products": 0,
+  "quality_exceptions": 9,
+  "availability_summary": {
+    "in_stock": 30
+  },
+  "errors": [],
+  "build_errors": [
+    {
+      "when": "before the first HTTP request",
+      "error": "NameError: DEFAULT_MAX_CATEGORY_SEEDS was used by the CLI parser but not imported",
+      "fix": "added the import; the first smoke run then completed",
+      "status": "fixed",
+      "impact": "none on data; no request had been sent"
+    },
+    {
+      "when": "run-001 and smoke-001",
+      "error": "config.DEFAULT_PLAN_VERSION was set to the final 2026.11.19-2 from the start, so the v1 runs recorded plan_version 2026.11.19-2 in run-summary.json",
+      "fix": "fix-rerun passed --plan-version 2026.11.19-2 explicitly; the produced logs were not rewritten",
+      "status": "documented_not_rewritten",
+      "impact": "label only: run-001's product-audit.jsonl has no availability key, which proves it ran v1 code; no business value changed"
+    },
+    {
+      "when": "manifest syntax check",
+      "error": "PyYAML is not installed in the fixed uv environment and packages may not be installed",
+      "fix": "validated the required top-level keys with a line scan instead; no YAML parser validation recorded",
+      "status": "not_fixed",
+      "impact": "manifest structure checked by key presence only"
+    }
+  ],
+  "limitations": [
+    "Bounded 30-product run; the sitemap declared 6660 product-like URLs at observation time, so this is not full-site coverage.",
+    "Discovery covered the entry page's first 3 main-menu category seeds; 3 navigation entries stayed pending (category page 2 plus two seeds).",
+    "No zero-price, missing-price, out-of-stock or challenge-page sample appeared in the 30 products; those branches are unit-tested, not live-verified.",
+    "All 30 sampled products had a complete rendered description; partial/fallback/not-provided statuses are implemented and unit-tested but not exercised by live data.",
+    "The static HTML states no tax-inclusive/exclusive basis, so tax_basis stays unknown_not_stated.",
+    "The site suggested a US delivery country because of the egress IP; quotes stayed EUR and JSON-LD shipping/return policies target ES. No country cookie was set and no currency conversion was performed.",
+    "Cross-sell ('Piezas compatibles'), manufacturer contact block and reviews are deliberately excluded from description_html.",
+    "No HTTP 429 occurred; Retry-After handling is implemented but not live-verified.",
+    "The runner keeps one canonical valid.csv at the plan root: run-001 row-level audit and summary are retained but its CSV was superseded by the fix rerun. Shared-field comparison of the two audits shows 0 differences.",
+    "The same-plan clean-environment import (A10) was not executed on a second machine.",
+    "Peak memory was not measured."
+  ],
+  "run": {
+    "label": "run-001",
+    "plan_version": "2026.11.19-1",
+    "recorded_plan_version": "2026.11.19-2",
+    "recorded_plan_version_note": "The runner's default constant was already 2026.11.19-2 when run-001 executed v1 code; the product audit has no availability key, confirming v1. Logs were left unedited.",
+    "task_id": "scrapling-skatepro-run-001-20261119T031146Z",
+    "started_at": "2026-11-19T03:11:46Z",
+    "finished_at": "2026-11-19T03:18:25Z",
+    "elapsed_s": 398.83,
+    "requests": 34,
+    "outcome": "PARTIAL",
+    "stop_reason": "BUDGET_EXHAUSTED",
+    "counts": {
+      "discovered_urls": 35,
+      "pending_navigation_entries": 3,
+      "product_candidates": 30,
+      "pending_products": 0,
+      "in_flight_products": 0,
+      "processed_products": 30,
+      "valid_products": 30,
+      "excluded_products": 0,
+      "failed_products": 0,
+      "partial_description_products": 0
+    },
+    "coverage": {
+      "status": "PARTIAL",
+      "denominator_source": "https://www.skatepro.es/sitemap.xml product URL count at run time",
+      "denominator": 6660,
+      "covered": 30
+    }
+  },
+  "fix_task": {
+    "status": "passed",
+    "started_at": "2026-11-19T03:19:45Z",
+    "finished_at": "2026-11-19T03:27:16Z",
+    "fix_minutes": 7.5,
+    "fix_minutes_note": "First repair edit to fix-rerun completion; output validation and unit tests finished by 03:29:10Z.",
+    "change": "Added the nullable 02 field availability: aggregate JSON-LD offers.availability across Product/ProductGroup/hasVariant into in_stock/out_of_stock, cross-check with PHP2JS stock_level, and expose availability_summary in the task report. Plan v1 omitted the field on purpose; the 9 CSV columns are unchanged.",
+    "plan_version_from": "2026.11.19-1",
+    "plan_version_to": "2026.11.19-2",
+    "files_changed": [
+      "skatepro_scraper/extract.py",
+      "skatepro_scraper/runner.py",
+      "manifest.yaml"
+    ],
+    "rows_changed": 30,
+    "rows_total": 30,
+    "availability_after": {
+      "in_stock": 30
+    },
+    "rerun": {
+      "label": "fix-rerun",
+      "task_id": "scrapling-skatepro-fix-rerun-20261119T032032Z",
+      "started_at": "2026-11-19T03:20:32Z",
+      "finished_at": "2026-11-19T03:27:16Z",
+      "elapsed_s": 404.66,
+      "requests": 34,
+      "valid_products": 30,
+      "excluded_products": 0,
+      "failed_products": 0,
+      "partial_description_products": 0,
+      "changed_business_columns": [],
+      "shared_field_differences": 0,
+      "same_products": true,
+      "runtime_llm_calls": 0
+    },
+    "note": "The same 30 product URLs were used; no samples were removed or added to pass the fix. The 9-column CSV is byte-identical in business content because availability is an internal field."
+  },
+  "rerun": {
+    "label": "fix-rerun",
+    "plan_version": "2026.11.19-2",
+    "task_id": "scrapling-skatepro-fix-rerun-20261119T032032Z",
+    "started_at": "2026-11-19T03:20:32Z",
+    "finished_at": "2026-11-19T03:27:16Z",
+    "elapsed_s": 404.66,
+    "requests": 34,
+    "valid_products": 30,
+    "excluded_products": 0,
+    "failed_products": 0,
+    "partial_description_products": 0,
+    "runtime_llm_calls": 0,
+    "difference_from_main_run": {
+      "business_fields_identical": true,
+      "changed_fields": ["availability"],
+      "shared_field_differences": 0,
+      "note": "Same plan scope and same 30 product URLs; only the new internal availability field differs."
+    }
+  },
+  "quality": {
+    "positive_price_rows": 30,
+    "eur_currency_rows": 30,
+    "rows_with_primary_image": 30,
+    "rows_with_description": 30,
+    "description_status_counts": {
+      "complete": 30,
+      "partial": 0,
+      "fallback": 0,
+      "not_provided": 0,
+      "failed": 0
+    },
+    "rows_with_options": 26,
+    "rows_without_options": 4,
+    "rows_without_spec_table": 7,
+    "distinct_brands": 20,
+    "distinct_categories": 13,
+    "price_range_eur": {"min": 0.95, "max": 399.95},
+    "csv_columns": 9,
+    "csv_validation": "tools/validate_output.py: 30 rows, 0 problems",
+    "unit_tests": "tests/test_contract.py: 12 passed",
+    "duplicate_source_urls": 0,
+    "http_429": 0,
+    "retries": 0,
+    "min_completion_to_completion_gap_s": 11.54,
+    "avg_completion_to_completion_gap_s": 12.2,
+    "request_interval_target_s": 10,
+    "pacing_note": "End-to-next-start is held at 10 s by the pacing loop; the completion-to-completion gap also includes the next response time (average HTTP duration 2.19 s).",
+    "concurrency": 1
+  },
+  "resources": {
+    "browser_launched": false,
+    "browser_processes_started": 0,
+    "http_sessions_started": 3,
+    "residual_browser_processes": 0,
+    "residual_run_processes": 0,
+    "peak_memory_mb": null,
+    "note": "One in-process curl_cffi session per run, closed by the FetcherSession context manager; no browser was started."
+  },
+  "network": {
+    "proxy_env_names": ["HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY"],
+    "proxy_name": "environment HTTP(S) proxy (value withheld)",
+    "egress_measured": false,
+    "note": "Not an independent egress measurement; proxy values are not recorded. The site geolocated the egress to the United States while quotes remained EUR."
+  },
+  "reuse_scope": {
+    "framework_local_only": true,
+    "read_other_framework_dirs": false,
+    "reused": [
+      "experiments/framework-compare/scrapling/javaestate/javaestate_scraper/http.py (pacing/retry/stop skeleton)",
+      "experiments/framework-compare/scrapling/javaestate/javaestate_scraper/export.py (CSV/JSON writers)",
+      "experiments/framework-compare/scrapling/javaestate/javaestate_scraper/normalize.py (HTML whitelist cleaning, option serialization, spreadsheet guard)"
+    ],
+    "rewritten": [
+      "skatepro_scraper/config.py",
+      "skatepro_scraper/discovery.py",
+      "skatepro_scraper/extract.py",
+      "skatepro_scraper/runner.py",
+      "tools/validate_output.py",
+      "tests/test_contract.py"
+    ]
+  },
+  "artifacts": {
+    "plan_dir": "experiments/framework-compare/scrapling/skatepro/",
+    "manifest": "experiments/framework-compare/scrapling/skatepro/manifest.yaml",
+    "valid_csv": "experiments/framework-compare/scrapling/skatepro/valid.csv",
+    "task_result": "experiments/framework-compare/scrapling/skatepro/task-result.json",
+    "run_log": "experiments/framework-compare/scrapling/skatepro/run-log.md",
+    "smoke_diagnostics": "experiments/framework-compare/scrapling/skatepro/diagnostics/smoke-001/",
+    "main_run_diagnostics": "experiments/framework-compare/scrapling/skatepro/diagnostics/run-001/",
+    "fix_rerun_diagnostics": "experiments/framework-compare/scrapling/skatepro/diagnostics/fix-rerun/"
+  }
+}

@@ -1,0 +1,17 @@
+User-agent: *
+disallow: /adminshop
+disallow: /static
+disallow: */catalog
+disallow: */wishlist
+
+User-agent: meta-externalagent
+disallow: /adminshop
+disallow: /static
+disallow: */catalog
+disallow: */wishlist
+Crawl-delay: 10
+
+
+Sitemap: https://www.skatepro.es/sitemap.xml
+
+# Timestamp: 2026-11-19 04:10:34
