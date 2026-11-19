@@ -1,0 +1,63 @@
+{
+  "build_started_at": "2026-11-19T03:35:38Z",
+  "build_started_at_source": "Creation time (UTC) of the first shell artifact written by this build session (the repository listing command). The preceding specification reading (about 5 minutes) is not included, so first_* values are lower bounds relative to the true session start.",
+  "plan_ready_at": "2026-11-19T03:49:39Z",
+  "plan_ready_at_source": "Timestamp when manifest.yaml, the runner, extractor, exporter and validator were all on disk; the smoke run had not started yet.",
+  "implementation_revisions": 3,
+  "revisions": [
+    {
+      "revision": 1,
+      "at": "2026-11-19T03:49:39Z",
+      "summary": "Initial complete plan: robots-aware sitemap discovery with systematic sampling, JSON-LD variant prices, DOM description and specification blocks, 9-column CSV export, quality_exceptions, local validator.",
+      "files": [
+        "crawlee/skatepro/crawlee_skatepro/config.py",
+        "crawlee/skatepro/crawlee_skatepro/clean.py",
+        "crawlee/skatepro/crawlee_skatepro/extract.py",
+        "crawlee/skatepro/crawlee_skatepro/export.py",
+        "crawlee/skatepro/crawlee_skatepro/runner.py",
+        "crawlee/skatepro/run.py",
+        "crawlee/skatepro/manifest.yaml",
+        "crawlee/skatepro/tools/validate_output.py"
+      ]
+    },
+    {
+      "revision": 2,
+      "at": "2026-11-19T03:51:30Z",
+      "summary": "First smoke run (2 products) exposed a 45 s navigation hang on the first product request. Replaced context.block_requests() with an explicit route filter that also aborts scripts, and lowered the navigation timeout to 30 s; the data is server-rendered so no fact depends on script execution. A 3-product smoke then finished 4 requests with no retry.",
+      "files": [
+        "crawlee/skatepro/crawlee_skatepro/runner.py",
+        "crawlee/skatepro/crawlee_skatepro/config.py"
+      ]
+    },
+    {
+      "revision": 3,
+      "at": "2026-11-19T04:01:36Z",
+      "kind": "fix task",
+      "fix_started_at": "2026-11-19T03:59:00Z",
+      "fix_code_done_at": "2026-11-19T04:01:36Z",
+      "fix_passed_at": "2026-11-19T04:07:42Z",
+      "fix_tests_passed_at": "2026-11-19T04:09:37Z",
+      "fix_minutes": 8.7,
+      "fix_total_minutes": 10.6,
+      "summary": "Fixed the known-defect stock-state handling found by run-001: only InStock/OutOfStock were mapped, so a product whose variants were PreOrder had an empty availability and a business-field missing reason. The mapping now covers InStock/LimitedAvailability/OnlineOnly, OutOfStock/SoldOut/Discontinued, PreOrder and BackOrder, and falls back to the visible .urgency[data-stockcode] stock line when the offers publish no state. In the same revision, tax_basis was moved out of missing_reasons into tax_basis_note, so quality_exceptions lists only docs/02 business fields. A defensive price-parser guard (reject ambiguous single-dot decimals in es-ES) was added while writing the contract tests.",
+      "files": [
+        "crawlee/skatepro/crawlee_skatepro/extract.py",
+        "crawlee/skatepro/crawlee_skatepro/config.py",
+        "crawlee/skatepro/manifest.yaml",
+        "crawlee/skatepro/tests/test_contract.py",
+        "crawlee/skatepro/tools/make_metrics.py"
+      ],
+      "rerun": "diagnostics/fix-rerun, 30 valid / 0 excluded / 0 failed / 0 pending, plan_version 2026.11.19-2",
+      "verified_effect": "250-49508 availability '' -> 'preorder'; quality_exceptions 30 -> 4; all other CSV fields unchanged on the 30 common rows."
+    }
+  ],
+  "build_errors": [
+    {
+      "at": "2026-11-19T03:44:00Z",
+      "type": "NameError",
+      "message": "extract.py referenced CURRENCY without importing it from config; caught by the offline extraction check on two saved pages before any crawler run.",
+      "fix": "added the config import; re-ran the offline check successfully."
+    }
+  ],
+  "network_note": "Build probes (robots.txt, sitemap.xml, two product pages, one category page) were plain curl requests spaced by 6-9 seconds from the same machine egress as the crawler. They are not part of the run counts. No proxy was configured for these probes; the harness HTTP(S)_PROXY variables were present and the browser used the platform default path."
+}

@@ -1,0 +1,13 @@
+{
+  "path": "repository-root/storage/ (outside the plan package)",
+  "created_by": "Crawlee ThrottlingRequestManager per-domain sub-managers during smoke-2products, smoke-3products, run-001 and fix-rerun",
+  "file_count": 38,
+  "total_bytes": 17232.0,
+  "request_queues": [
+    "throttled-skatepro.es",
+    "throttled-www.skatepro.es"
+  ],
+  "contains_page_content": false,
+  "inspected_at": "2026-11-19T04:11:48Z",
+  "action": "listed here, then removed after both runs finished"
+}

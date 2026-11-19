@@ -1,0 +1,276 @@
+schema_version: "1.0"
+plan_id: "skatepro-es-es-es-eur"
+plan_version: "2026.11.19-2"
+kind: "program"
+status: "candidate"
+created_at: "2026-11-19T03:49:08Z"
+updated_at: "2026-11-19T04:01:36Z"
+
+site:
+  name: "SkatePro España (skatepro.es)"
+  entry_urls:
+    - "https://www.skatepro.es/"
+  allowed_origins:
+    - "https://www.skatepro.es"
+  allowed_path_prefixes:
+    - "/"
+  market: "ES"
+  locale: "es-ES"
+  currency: "EUR"
+  notes: >-
+    Product pages live at the site root as /<category-id>-<product-id>.htm.
+    The plan only enqueues URLs that match that pattern plus sitemap.xml and
+    robots.txt; category (/c*.htm), brand (/m*.htm) and informational (/a*.htm)
+    pages are never requested.
+
+scope:
+  include:
+    - "/\\d+-\\d+\\.htm"
+    - "/sitemap.xml"
+    - "/robots.txt"
+  exclude:
+    - "*/catalog*"
+    - "*/wishlist*"
+    - "/adminshop*"
+    - "/static*"
+    - "/c*.htm"
+    - "/m*.htm"
+    - "/a*.htm"
+  max_products: 30
+  max_duration_seconds: 600
+  selection: "systematic sample: 30 evenly spaced indices over the product URLs in sitemap.xml"
+  notes: >-
+    Public product pages only. No login, cart, checkout, account or wishlist
+    access. The 30-product cap and the 10-minute cap are a trial budget, not a
+    full-catalogue crawl.
+
+discovery:
+  strategies:
+    - "sitemap"
+  sitemap_urls:
+    - "https://www.skatepro.es/sitemap.xml"
+  sitemap_handling: >-
+    The document is read as a urlset (verified 2026-11-19: 8397 <loc> entries,
+    6660 of them product URLs). An index document is also supported: up to five
+    child sitemaps are followed.
+  product_url_patterns:
+    - "^https://www\\.skatepro\\.es/\\d+-\\d+\\.htm$"
+  url_identity: "normalized https origin + path; query (?stockcode=...) and fragment removed"
+  dedupe: "unique normalized product path; sitemap order preserved"
+  navigation_limit: 1
+  selection_rule: "if the product sitemap has more than 30 product URLs, take 30 evenly spaced indices (step = N/30); otherwise take all"
+  notes: >-
+    robots.txt advertises the sitemap; it is read through Crawlee's robots file
+    handling, so the declared disallow rules are applied before any request.
+
+fetch:
+  default_engine: "browser"
+  browser: "playwright-chromium"
+  per_url_type:
+    sitemap:
+      engine: "browser"
+      wait_until: "domcontentloaded"
+      body: "response.text()"
+    product:
+      engine: "browser"
+      wait_until: "domcontentloaded"
+      wait_selector: "h1"
+      block_assets: true
+      body: "page.content()"
+  rate_limit:
+    concurrency: 1
+    min_interval_ms: 10000
+    max_tasks_per_minute: 12
+    note: "robots.txt publishes Crawl-delay: 10; the runner spaces top-level requests by 10 s."
+  retry:
+    max_retries: 2
+    max_attempts: 3
+    on_429: "ThrottlingRequestManager honors Retry-After with a per-domain delay; max_domain_stall=190s, after which the run stops as ACCESS_DENIED"
+    on_5xx: "Crawlee request retry, at most 3 attempts in total"
+  timeout_ms: 45000
+  robots:
+    respect: true
+    url: "https://www.skatepro.es/robots.txt"
+    notes: >-
+      RobotsTxtFile is enabled in the crawler. The declared rules are
+      "disallow: /adminshop", "/static", "*/catalog", "*/wishlist"; the plan
+      enqueues none of them. Product pages are allowed.
+  session:
+    profile_required: false
+    cookies: "only the site's own session/localisation cookies set by the browser; no login"
+
+extract:
+  fields:
+    name:
+      source: "jsonld ProductGroup.name | jsonld Product.name | h1 > span"
+      required: true
+      clean: "collapse whitespace; remove explicit skatepro.es fragments and adjacent separators; keep brand words"
+    price.amount:
+      source: "jsonld hasVariant[].offers.price | jsonld Product.offers.price"
+      required: true
+      choose: "minimum finite positive price across all variants, including out-of-stock variants"
+      cross_check: ".product_prices .pi_price .price must equal one of the variant prices"
+      never_read: "priceSpecification StrikethroughPrice (list price), price_save, shipping, recommendations"
+    price.currency:
+      source: "offers.priceCurrency of the chosen variant offer"
+      required: true
+      rule: "all priced variants must agree; three-letter ISO code required; must equal EUR"
+    primary_image_url:
+      source: ".pi_main_image [data-href] (original size) | og:image | jsonld image[0] | variant image[0]"
+      required: true
+      rule: "resolve protocol-relative URLs; reject logo/placeholder"
+    description_html:
+      source: "#product_description + #model_specifications + #product_specifications, in page order"
+      required: false
+      clean: "whitelist DOM cleaning; attributes removed; links/buttons unwrapped; scripts/styles/forms/images removed"
+      state_rule: >-
+        body block present -> complete; only specification blocks -> partial
+        (reason recorded); no DOM content but JSON-LD description -> fallback;
+        empty known containers -> not_provided; no container at all -> failed
+    categories:
+      source: "jsonld category path (a > b > c) | breadcrumb links"
+      required: false
+      rule: "deepest non-generic segment; Inicio/Home/Shop filtered"
+    brand:
+      source: "jsonld brand.name | #brand_name"
+      required: false
+      rule: "store name SkatePro is not used as a product brand"
+    options:
+      source: "jsonld hasVariant[].size, .color; DOM .pi_size_selector rows as a fallback"
+      required: false
+      rule: "public size/colour dimensions; single-value colour dimensions are dropped; quantity groups do not exist; no price deltas are printed"
+    availability:
+      source: "jsonld variant offers.availability, with .urgency[data-stockcode] visible text as fallback"
+      required: false
+      rule: >-
+        InStock/LimitedAvailability/OnlineOnly -> in_stock; OutOfStock/SoldOut/
+        Discontinued -> out_of_stock; PreOrder -> preorder; BackOrder -> backorder.
+        When the offers publish no state, the visible stock line of the selected
+        variant is mapped the same way and the source is recorded.
+      note: >-
+        Added in plan_version 2026.11.19-2: the first run left one pre-order
+        product with an empty availability because only InStock/OutOfStock were
+        mapped and no DOM fallback existed.
+    source_url:
+      source: "link[rel=canonical] | final request URL"
+      required: true
+      rule: "normalize origin/path; remove query and fragment"
+    market:
+      source: "og:locale and html lang"
+      required: true
+      value: "ES"
+    locale:
+      source: "og:locale (es_ES) and html lang (es)"
+      required: true
+      value: "es-ES"
+  evidence:
+    - "every variant with sku, size, colour, price, currency and availability"
+    - "chosen variant and rendered price text"
+    - "description source containers and cleaned text length"
+    - "category path, brand candidate, option dimensions"
+
+normalize:
+  price:
+    positive_only: true
+    choose: "lowest_public_current_variant_price"
+    include_out_of_stock: true
+    exclude: "strikethrough/list price, savings text, shipping, payment plans, recommendations"
+    tax_basis: "detect explicit IVA/impuestos incluido(s) or excluido(s); otherwise UNKNOWN, recorded in tax_basis_note (internal only, not a business-field missing reason)"
+  description:
+    cleaner: "crawlee_skatepro.clean.clean_html_fragment"
+    statuses:
+      - "complete"
+      - "partial"
+      - "fallback"
+      - "not_provided"
+      - "failed"
+    partial_reason: "recorded when only specification blocks exist or a block was not merged"
+    headings: "section h2 text is kept as a <strong> paragraph so the block order survives cleaning"
+  name:
+    remove_domain_fragments: true
+    do_not_remove: "brand or model words that are part of the product name"
+  options:
+    exclude_quantity: true
+    strip_price_delta: true
+  csv:
+    columns: 9
+    encoding: "UTF-8"
+    line_terminator: "LF"
+    formula_guard: "prefix = + - @ text cells with an apostrophe; amounts stay numeric"
+
+validate:
+  required_fields:
+    - "name"
+    - "price.amount"
+    - "price.currency"
+    - "primary_image_url"
+    - "source_url"
+    - "market"
+    - "locale"
+    - "description_status"
+    - "price_basis"
+    - "task_id"
+    - "plan_id"
+    - "plan_version"
+    - "extracted_at"
+  assertions:
+    - "price.amount is finite and > 0"
+    - "price.currency matches ^[A-Z]{3}$ and equals EUR"
+    - "the rendered price equals one of the JSON-LD variant prices"
+    - "og:locale starts with es and html lang starts with es"
+    - "primary_image_url and source_url are http(s) URLs"
+    - "description_status is one of the five documented states"
+    - "description_status=complete implies non-empty cleaned description"
+    - "description_status=partial implies partial_reason"
+    - "missing_reasons is an object and only names docs/02 business fields"
+  partial_description: "allowed_with_flag"
+  failures:
+    excluded: "ZERO_PRICE, NEGATIVE_PRICE, NO_PRICE, CURRENCY_NOT_TARGET, LOCALE_MISMATCH"
+    failed: "HTTP_NOT_FOUND, PRODUCT_JSONLD_MISSING, PRODUCT_VARIANTS_MISSING, NAME_MISSING, CURRENCY_EVIDENCE_MISSING, CURRENCY_CONFLICT, CURRENCY_INVALID, PRICE_EVIDENCE_CONFLICT, PRIMARY_IMAGE_MISSING, DESCRIPTION_BLOCK_NOT_FOUND, DESCRIPTION_CLEAN_FAILED, REQUIRED_FIELD_MISSING, UNEXPECTED_ERROR"
+
+runtime:
+  entrypoint: "run.py"
+  command: "python -m uv run --project experiments/framework-compare/crawlee python experiments/framework-compare/crawlee/skatepro/run.py --run-id <run-id>"
+  working_directory: "repository root"
+  task_context:
+    source: "command line"
+    fields:
+      - "--run-id"
+      - "--max-products (default 30, capped at 30)"
+      - "--time-budget-seconds (default 600, capped at 600)"
+      - "--build-started-at"
+      - "--plan-ready-at"
+      - "--implementation-revisions"
+      - "--resume"
+  checkpoint: "diagnostics/<run-id>/checkpoint.jsonl; --resume replays verdicts and skips processed URLs"
+  idempotency: "task_id + plan_version + normalized source_url"
+  cancellation: "Ctrl+C stops the crawler; a normal run purges its Crawlee queue. Pause/resume is not implemented."
+  resource_cleanup: "PlaywrightCrawler owns and closes its BrowserPool; the runner starts no browser process of its own."
+  outputs:
+    - "valid.csv"
+    - "task-result.json"
+    - "diagnostics/<run-id>/"
+  llm_calls: 0
+
+compatibility:
+  os:
+    - "windows"
+    - "linux"
+    - "wsl2"
+  runtime: "python>=3.11,<3.14"
+  dependencies:
+    - "crawlee[playwright,parsel]==1.11.2 (locked in experiments/framework-compare/crawlee/uv.lock)"
+    - "playwright 1.65.x"
+    - "Chromium installed by Playwright for this experiment"
+  browser: "Playwright Chromium, headless by default"
+  network: "public web; HTTP(S)_PROXY may be present; no authentication, no login, no paid access"
+  secrets: "none"
+
+entrypoint: "run.py"
+
+notes:
+  - "Candidate plan produced by the Crawlee side of the framework comparison; not verified."
+  - "Bounded to 30 product pages or 10 minutes, whichever comes first."
+  - "Runtime has no model or LLM dependency; extraction is JSON-LD and selector based."
+  - "robots.txt publishes Crawl-delay: 10; the plan uses a 10-second interval instead of the experiment's 1-second floor."
+  - "Variant prices come from the site's own JSON-LD; the visible price is used as a cross-check, not as the source of truth."

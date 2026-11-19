@@ -1,0 +1,308 @@
+{
+  "task_id": "fc-crawlee-skatepro-run-001",
+  "plan_id": "skatepro-es-es-es-eur",
+  "plan_version": "2026.11.19-1",
+  "site": "www.skatepro.es",
+  "market": "ES",
+  "locale": "es-ES",
+  "state": "FINISHED",
+  "outcome": "COMPLETED",
+  "stop_reason": "BUDGET_EXHAUSTED",
+  "started_at": "2026-11-19T03:53:47Z",
+  "finished_at": "2026-11-19T03:58:52Z",
+  "counts": {
+    "discovered_urls": 31,
+    "pending_navigation_entries": 0,
+    "product_candidates": 30,
+    "pending_products": 0,
+    "in_flight_products": 0,
+    "processed_products": 30,
+    "valid_products": 30,
+    "excluded_products": 0,
+    "failed_products": 0,
+    "partial_description_products": 0
+  },
+  "coverage": {
+    "status": "KNOWN",
+    "denominator_source": "sitemap.xml: unique <loc> entries matching ^https://www.skatepro.es/\\d+-\\d+\\.htm$",
+    "denominator": 6660,
+    "covered": 30,
+    "scope": "bounded trial: 30 sampled product pages out of the product URLs in sitemap.xml",
+    "notes": "The denominator is the number of product URLs matched by ^/\\d+-\\d+\\.htm$ in sitemap.xml at discovery time. Covered counts sampled candidates with a processed verdict in this bounded task, not the whole catalogue; the sitemap can change between runs and is not independently audited."
+  },
+  "business_acceptance": {
+    "status": "NOT_REVIEWED",
+    "accepted_by": null,
+    "accepted_at": null,
+    "reason": "Bounded framework-comparison trial; user acceptance pending.",
+    "scope": "First 30 sampled public product pages."
+  },
+  "runtime": {
+    "llm_calls": 0,
+    "raw_pages_retained": false,
+    "browser_launches": 1,
+    "browser_cleanup": "PlaywrightCrawler.run() returned; the crawler closed its browser pool.",
+    "requests_total_crawlee": 31,
+    "robots_txt_fetch": 1,
+    "request_interval_seconds": 10.0,
+    "implementation_revisions": 2,
+    "program_exit": 0
+  },
+  "notes": [
+    "Bounded trial: 30 product pages or 10 minutes, whichever comes first.",
+    "robots.txt publishes Crawl-delay: 10; top-level requests are spaced by 10 s with concurrency 1.",
+    "robots.txt disallows */catalog and */wishlist; no such URL is enqueued.",
+    "Product denominator from sitemap.xml: 6660.",
+    "Prices are the lowest positive variant offer in the page's own JSON-LD, including out-of-stock variants; strikethrough prices are not read.",
+    "Coverage covered counts processed candidates in this bounded task, not the whole catalogue.",
+    "No model or other LLM is called at runtime.",
+    "This candidate does not implement pause/resume; every run purges its Crawlee queue and is a new task."
+  ],
+  "quality_exceptions": [
+    {
+      "source_url": "https://www.skatepro.es/87-156.htm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "options": "NO_MEANINGFUL_OPTIONS",
+        "tax_basis": "NOT_SPECIFIED_BY_SOURCE"
+      }
+    },
+    {
+      "source_url": "https://www.skatepro.es/799-13616.htm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "tax_basis": "NOT_SPECIFIED_BY_SOURCE"
+      }
+    },
+    {
+      "source_url": "https://www.skatepro.es/252-21056.htm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "tax_basis": "NOT_SPECIFIED_BY_SOURCE"
+      }
+    },
+    {
+      "source_url": "https://www.skatepro.es/259-27833.htm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "options": "NO_MEANINGFUL_OPTIONS",
+        "tax_basis": "NOT_SPECIFIED_BY_SOURCE"
+      }
+    },
+    {
+      "source_url": "https://www.skatepro.es/812-31936.htm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "options": "NO_MEANINGFUL_OPTIONS",
+        "tax_basis": "NOT_SPECIFIED_BY_SOURCE"
+      }
+    },
+    {
+      "source_url": "https://www.skatepro.es/200-34966.htm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "tax_basis": "NOT_SPECIFIED_BY_SOURCE"
+      }
+    },
+    {
+      "source_url": "https://www.skatepro.es/270-37373.htm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "tax_basis": "NOT_SPECIFIED_BY_SOURCE"
+      }
+    },
+    {
+      "source_url": "https://www.skatepro.es/188-39127.htm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "tax_basis": "NOT_SPECIFIED_BY_SOURCE"
+      }
+    },
+    {
+      "source_url": "https://www.skatepro.es/243-40774.htm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "tax_basis": "NOT_SPECIFIED_BY_SOURCE"
+      }
+    },
+    {
+      "source_url": "https://www.skatepro.es/378-42027.htm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "tax_basis": "NOT_SPECIFIED_BY_SOURCE"
+      }
+    },
+    {
+      "source_url": "https://www.skatepro.es/56-43220.htm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "tax_basis": "NOT_SPECIFIED_BY_SOURCE"
+      }
+    },
+    {
+      "source_url": "https://www.skatepro.es/61-44185.htm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "tax_basis": "NOT_SPECIFIED_BY_SOURCE"
+      }
+    },
+    {
+      "source_url": "https://www.skatepro.es/209-45212.htm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "tax_basis": "NOT_SPECIFIED_BY_SOURCE"
+      }
+    },
+    {
+      "source_url": "https://www.skatepro.es/212-46731.htm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "tax_basis": "NOT_SPECIFIED_BY_SOURCE"
+      }
+    },
+    {
+      "source_url": "https://www.skatepro.es/84-48122.htm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "tax_basis": "NOT_SPECIFIED_BY_SOURCE"
+      }
+    },
+    {
+      "source_url": "https://www.skatepro.es/250-49508.htm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "availability": "AVAILABILITY_NOT_PROVIDED",
+        "tax_basis": "NOT_SPECIFIED_BY_SOURCE"
+      }
+    },
+    {
+      "source_url": "https://www.skatepro.es/243-50740.htm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "tax_basis": "NOT_SPECIFIED_BY_SOURCE"
+      }
+    },
+    {
+      "source_url": "https://www.skatepro.es/339-52052.htm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "tax_basis": "NOT_SPECIFIED_BY_SOURCE"
+      }
+    },
+    {
+      "source_url": "https://www.skatepro.es/322-52594.htm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "tax_basis": "NOT_SPECIFIED_BY_SOURCE"
+      }
+    },
+    {
+      "source_url": "https://www.skatepro.es/252-53202.htm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "tax_basis": "NOT_SPECIFIED_BY_SOURCE"
+      }
+    },
+    {
+      "source_url": "https://www.skatepro.es/62-53810.htm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "options": "NO_MEANINGFUL_OPTIONS",
+        "tax_basis": "NOT_SPECIFIED_BY_SOURCE"
+      }
+    },
+    {
+      "source_url": "https://www.skatepro.es/60-54181.htm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "tax_basis": "NOT_SPECIFIED_BY_SOURCE"
+      }
+    },
+    {
+      "source_url": "https://www.skatepro.es/321-54540.htm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "tax_basis": "NOT_SPECIFIED_BY_SOURCE"
+      }
+    },
+    {
+      "source_url": "https://www.skatepro.es/385-54972.htm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "tax_basis": "NOT_SPECIFIED_BY_SOURCE"
+      }
+    },
+    {
+      "source_url": "https://www.skatepro.es/77-55329.htm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "tax_basis": "NOT_SPECIFIED_BY_SOURCE"
+      }
+    },
+    {
+      "source_url": "https://www.skatepro.es/510-55724.htm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "tax_basis": "NOT_SPECIFIED_BY_SOURCE"
+      }
+    },
+    {
+      "source_url": "https://www.skatepro.es/203-56010.htm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "tax_basis": "NOT_SPECIFIED_BY_SOURCE"
+      }
+    },
+    {
+      "source_url": "https://www.skatepro.es/306-56289.htm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "tax_basis": "NOT_SPECIFIED_BY_SOURCE"
+      }
+    },
+    {
+      "source_url": "https://www.skatepro.es/511-56581.htm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "tax_basis": "NOT_SPECIFIED_BY_SOURCE"
+      }
+    },
+    {
+      "source_url": "https://www.skatepro.es/114-56941.htm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "tax_basis": "NOT_SPECIFIED_BY_SOURCE"
+      }
+    }
+  ]
+}

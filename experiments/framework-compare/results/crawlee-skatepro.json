@@ -1,0 +1,174 @@
+{
+  "framework": "crawlee-for-python",
+  "framework_version": "1.11.2",
+  "browser": "Playwright Chromium 159.0.8154.6",
+  "site": "www.skatepro.es",
+  "market": "ES",
+  "locale": "es-ES",
+  "currency": "EUR",
+  "contract": "docs/02 9-column business CSV + quality_exceptions (round 2)",
+  "model_variant": "high",
+  "runtime_llm_calls": 0,
+  "build_started_at": "2026-11-19T03:35:38Z",
+  "plan_ready_at": "2026-11-19T03:49:39Z",
+  "started_at": "2026-11-19T03:53:47Z",
+  "finished_at": "2026-11-19T03:58:52Z",
+  "wall_seconds": 305.0,
+  "first_plan_s": 841.0,
+  "first_valid_product_at": "2026-11-19T03:54:02Z",
+  "first_valid_product_s": 1104.0,
+  "time_origin": "build_started_at = first recorded build artifact of this session (2026-11-19T03:35:38Z); the ~5 minutes of specification reading before it are not included, so both first_* values are lower bounds relative to the true session start.",
+  "implementation_revisions": 2,
+  "total_implementation_revisions": 3,
+  "plan_id": "skatepro-es-es-es-eur",
+  "plan_version_main": "2026.11.19-1",
+  "plan_version": "2026.11.19-2",
+  "task_id": "fc-crawlee-skatepro-run-001",
+  "requests": 32,
+  "requests_breakdown": {
+    "crawlee_top_level": 31,
+    "robots_txt": 1,
+    "note": "Browser subresources are excluded; this is not a network-level request count. Assets and scripts are aborted before request."
+  },
+  "request_interval_seconds": 10.0,
+  "valid_products": 30,
+  "excluded_products": 0,
+  "failed_products": 0,
+  "partial_description_products": 0,
+  "pending_products": 0,
+  "processed_products": 30,
+  "product_candidates": 30,
+  "discovered_urls": 31,
+  "description_status_counts": {
+    "complete": 30
+  },
+  "availability_counts": {
+    "in_stock": 29,
+    "preorder": 1
+  },
+  "price_basis_counts": {
+    "single_public_current_price": 9,
+    "lowest_public_current_variant_price": 21
+  },
+  "tax_basis_counts": {
+    "UNKNOWN": 30
+  },
+  "multi_variant_products": 21,
+  "min_price_below_displayed": [
+    {
+      "source_url": "https://www.skatepro.es/252-21056.htm",
+      "displayed": "69.95",
+      "chosen": "64.95",
+      "variants": 5
+    },
+    {
+      "source_url": "https://www.skatepro.es/243-50740.htm",
+      "displayed": "114.95",
+      "chosen": "109.95",
+      "variants": 5
+    }
+  ],
+  "out_of_stock_variants_observed": 0,
+  "quality_exceptions": 4,
+  "missing_reason_counts": {
+    "options": 4
+  },
+  "coverage": {
+    "status": "KNOWN",
+    "denominator_source": "sitemap.xml: unique <loc> entries matching ^https://www.skatepro.es/\\d+-\\d+\\.htm$",
+    "denominator": 6660,
+    "covered": 30,
+    "scope": "bounded trial: 30 sampled product pages out of the product URLs in sitemap.xml",
+    "notes": "The denominator is the number of product URLs matched by ^/\\d+-\\d+\\.htm$ in sitemap.xml at discovery time. Covered counts sampled candidates with a processed verdict in this bounded task, not the whole catalogue; the sitemap can change between runs and is not independently audited."
+  },
+  "outcome": "COMPLETED",
+  "stop_reason": "BUDGET_EXHAUSTED",
+  "state": "FINISHED",
+  "errors": [],
+  "run_warnings": [],
+  "build_errors": [
+    {
+      "at": "2026-11-19T03:44:00Z",
+      "type": "NameError",
+      "message": "extract.py referenced CURRENCY without importing it from config; caught by the offline extraction check on two saved pages before any crawler run.",
+      "fix": "added the config import; re-ran the offline check successfully."
+    }
+  ],
+  "network_note": "Build probes (robots.txt, sitemap.xml, two product pages, one category page) were plain curl requests spaced by 6-9 seconds from the same machine egress as the crawler. They are not part of the run counts. No proxy was configured for these probes; the harness HTTP(S)_PROXY variables were present and the browser used the platform default path.",
+  "resource": {
+    "browser_launches": 2,
+    "cleanup": "PlaywrightCrawler.run() closed its browser pool after each run",
+    "residual_processes": 0,
+    "residual_check": "Win32_Process query for chrome/chromium/headless_shell/playwright after both runs returned 0 rows",
+    "raw_pages_retained": false
+  },
+  "main_run": {
+    "run_id": "run-001",
+    "archive": "diagnostics/run-001/",
+    "plan_version": "2026.11.19-1",
+    "started_at": "2026-11-19T03:53:47Z",
+    "finished_at": "2026-11-19T03:58:52Z",
+    "wall_seconds": 305.0,
+    "requests": 32,
+    "valid_products": 30,
+    "excluded_products": 0,
+    "failed_products": 0,
+    "pending_products": 0,
+    "quality_exceptions": 30,
+    "stop_reason": "BUDGET_EXHAUSTED"
+  },
+  "fix_task": {
+    "status": "completed",
+    "type": "known-defect fix: stock-state mapping plus a DOM fallback selector",
+    "started_at": "2026-11-19T03:59:00Z",
+    "code_done_at": "2026-11-19T04:01:36Z",
+    "fix_minutes": 8.7,
+    "fix_total_minutes": 10.6,
+    "change": "Fixed the known-defect stock-state handling found by run-001: only InStock/OutOfStock were mapped, so a product whose variants were PreOrder had an empty availability and a business-field missing reason. The mapping now covers InStock/LimitedAvailability/OnlineOnly, OutOfStock/SoldOut/Discontinued, PreOrder and BackOrder, and falls back to the visible .urgency[data-stockcode] stock line when the offers publish no state. In the same revision, tax_basis was moved out of missing_reasons into tax_basis_note, so quality_exceptions lists only docs/02 business fields. A defensive price-parser guard (reject ambiguous single-dot decimals in es-ES) was added while writing the contract tests.",
+    "files": [
+      "crawlee/skatepro/crawlee_skatepro/extract.py",
+      "crawlee/skatepro/crawlee_skatepro/config.py",
+      "crawlee/skatepro/manifest.yaml",
+      "crawlee/skatepro/tests/test_contract.py",
+      "crawlee/skatepro/tools/make_metrics.py"
+    ],
+    "tests": "20 unittest contract tests pass",
+    "rerun": {
+      "run_id": "fix-rerun",
+      "started_at": "2026-11-19T04:02:12Z",
+      "finished_at": "2026-11-19T04:07:42Z",
+      "plan_version": "2026.11.19-2",
+      "valid_products": 30,
+      "excluded_products": 0,
+      "failed_products": 0,
+      "pending_products": 0,
+      "requests": 32,
+      "quality_exceptions": 4,
+      "errors": []
+    },
+    "common_rows_compared": 30,
+    "common_rows_unchanged": true,
+    "row_differences": [],
+    "verified_effect": "250-49508 availability '' -> 'preorder'; quality_exceptions 30 -> 4"
+  },
+  "final_package": {
+    "plan_version": "2026.11.19-2",
+    "valid_csv": "valid.csv",
+    "task_result": "task-result.json",
+    "valid_products": 30,
+    "note": "The package root is the fix rerun (v2); the first bounded trial (v1) is archived under diagnostics/run-001/."
+  },
+  "limitations": [
+    "Bounded trial: 30 product pages or 10 minutes, whichever comes first; 30 pages of a 6660-URL sitemap were sampled, so this is not whole-site coverage.",
+    "The 6660-URL denominator is point-in-time (2026-11-19) and not independently audited; coverage.status=KNOWN describes the denominator, not a full crawl.",
+    "No product in the sample had a zero, negative or missing price and no variant was out of stock, so A01/A02 live evidence is negative (zero occurrences), not positive; those paths are covered by synthetic contract tests only.",
+    "Option dimension names fall back to a generic 'Talla' when the page does not expose data-size_name; 14 of the 26 option-bearing rows use that label, and 8 of them carry inch/mm width, diameter or length values rather than a shoe size. The values and their order are correct; only the dimension name is weaker than the source's own label. Reading .pi_size_selector[aria-label] is the follow-up, outside the 30-minute fix window.",
+    "tax_basis is UNKNOWN for every product because the pages do not state IVA included/excluded. It is kept in the internal record as tax_basis_note and is not counted as a business-field missing reason.",
+    "One navigation attempt per run hit a 30 s timeout and succeeded on retry (87-156 in the first smoke, 60-54181 in the fix rerun). The Crawlee retry absorbed it; no product was lost.",
+    "Asset and script requests are aborted in the browser. This is a fetch decision for a server-rendered site; a template that moved price or variants into client-side JS would break it.",
+    "Pause/resume is not implemented; Ctrl+C cancels and --resume replays a checkpoint. A normal run purges its Crawlee queue and is a new task.",
+    "Crawlee's throttling request manager wrote per-domain queue state to a repository-root storage/ directory in addition to the run-scoped storage. It contained request URLs but no page content; it was listed in diagnostics/storage-residue.json and removed after the runs. Run-scoped isolation is a follow-up.",
+    "The actual network egress was not independently measured; the harness HTTP(S)_PROXY variables were present and the browser used the platform default path.",
+    "plan_version 2026.11.19-2 artifacts were produced about ten minutes before the final defensive price-parser guard, which only rejects ambiguous inputs. All 30 rows parsed their rendered price and matched a variant, so no row took the guarded path; the guard is covered by unit tests and by offline re-extraction of three saved pages."
+  ]
+}

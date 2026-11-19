@@ -1,0 +1,73 @@
+{
+  "run_id": "smoke-3products",
+  "task_id": "fc-crawlee-skatepro-smoke-3products",
+  "plan_id": "skatepro-es-es-es-eur",
+  "plan_version": "2026.11.19-1",
+  "model_variant": "high",
+  "runtime_llm_calls": 0,
+  "build_started_at": "2026-11-19T03:35:38Z",
+  "plan_ready_at": "2026-11-19T03:49:39Z",
+  "started_at": "2026-11-19T03:52:24Z",
+  "finished_at": "2026-11-19T03:52:58Z",
+  "wall_seconds": 34.0,
+  "first_plan_s": 841.0,
+  "first_valid_product_at": "2026-11-19T03:52:38Z",
+  "first_valid_product_s": 1020.0,
+  "implementation_revisions": 2,
+  "max_products": 3,
+  "time_budget_seconds": 600,
+  "request_interval_seconds": 10.0,
+  "sitemap_kind": "urlset",
+  "sitemap_denominator": 6660,
+  "denominator_source": "sitemap.xml: unique <loc> entries matching ^https://www.skatepro.es/\\d+-\\d+\\.htm$",
+  "selection_rule": "systematic sample: every 2220.00th product URL, 3 of 6660",
+  "counts": {
+    "product_candidates": 3,
+    "pending_products": 0,
+    "in_flight_products": 0,
+    "processed_products": 3,
+    "valid_products": 3,
+    "excluded_products": 0,
+    "failed_products": 0,
+    "partial_description_products": 0
+  },
+  "outcome": "COMPLETED",
+  "stop_reason": "BUDGET_EXHAUSTED",
+  "state": "FINISHED",
+  "coverage": {
+    "status": "KNOWN",
+    "denominator_source": "sitemap.xml: unique <loc> entries matching ^https://www.skatepro.es/\\d+-\\d+\\.htm$",
+    "denominator": 6660,
+    "covered": 3,
+    "scope": "bounded trial: 3 sampled product pages out of the product URLs in sitemap.xml",
+    "notes": "The denominator is the number of product URLs matched by ^/\\d+-\\d+\\.htm$ in sitemap.xml at discovery time. Covered counts sampled candidates with a processed verdict in this bounded task, not the whole catalogue; the sitemap can change between runs and is not independently audited."
+  },
+  "quality_exception_count": 3,
+  "requests_logged": 4,
+  "requests_total_crawlee": 4,
+  "robots_txt_fetch": 1,
+  "browser_launches": 1,
+  "crawler_statistics": {
+    "requests_finished": 4,
+    "requests_failed": 0,
+    "retry_histogram": [
+      4
+    ],
+    "request_avg_failed_duration": null,
+    "request_avg_finished_duration": 7.258922,
+    "requests_finished_per_minute": 7,
+    "requests_failed_per_minute": 0,
+    "request_total_duration": 29.035689,
+    "requests_total": 4,
+    "crawler_runtime": 32.158164
+  },
+  "errors": [],
+  "warnings": [],
+  "failed_products": [],
+  "excluded_products": [],
+  "outputs": {
+    "valid_csv": "valid.csv",
+    "task_result": "task-result.json",
+    "diagnostics": "diagnostics/smoke-3products/"
+  }
+}

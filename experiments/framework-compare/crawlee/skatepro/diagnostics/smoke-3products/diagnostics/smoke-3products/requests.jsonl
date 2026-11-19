@@ -1,0 +1,4 @@
+{"url": "https://www.skatepro.es/sitemap.xml", "label": "sitemap", "attempt": 1, "started_at": "2026-11-19T03:52:29Z", "outcome": "ok", "finished_at": "2026-11-19T03:52:29Z", "duration_ms": 70.3, "http_status": 200}
+{"url": "https://www.skatepro.es/87-156.htm", "label": "product", "attempt": 1, "started_at": "2026-11-19T03:52:38Z", "outcome": "ok", "finished_at": "2026-11-19T03:52:38Z", "duration_ms": 42.1, "http_status": 200}
+{"url": "https://www.skatepro.es/56-43220.htm", "label": "product", "attempt": 1, "started_at": "2026-11-19T03:52:48Z", "outcome": "ok", "finished_at": "2026-11-19T03:52:48Z", "duration_ms": 40.7, "http_status": 200}
+{"url": "https://www.skatepro.es/62-53810.htm", "label": "product", "attempt": 1, "started_at": "2026-11-19T03:52:58Z", "outcome": "ok", "finished_at": "2026-11-19T03:52:58Z", "duration_ms": 40.1, "http_status": 200}
