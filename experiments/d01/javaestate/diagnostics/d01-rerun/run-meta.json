@@ -1,0 +1,14 @@
+{
+  "task_id": "d01-javaestate-d01-rerun-20261119T155753Z",
+  "framework": "Scrapling",
+  "scrapling_version": "0.5.1",
+  "engine": "scrapling.FetcherSession",
+  "browser_launched": false,
+  "python": "3.13.13 | packaged by conda-forge | (main, Apr  8 2026, 01:56:49) [MSC v.1944 64 bit (AMD64)]",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "proxy_env_names": [
+    "NO_PROXY"
+  ],
+  "command": "experiments/d01/javaestate/run.py --out-dir experiments/d01/javaestate --label d01-rerun",
+  "network_note": "Proxy values withheld; egress was not independently measured."
+}
