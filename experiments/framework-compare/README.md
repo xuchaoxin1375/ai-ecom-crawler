@@ -6,7 +6,7 @@
 
 - 共享任务规格与评分表：已建立。
 - 三个框架的独立环境：已建立并完成导入与浏览器启动验证。
-- 站点范围、执行顺序与运行：第 1、2 轮（`javaestate.com`、`skatepro.es`）三臂已执行；`sixmoondesigns.com`、`campsaver.com` 只完成补充探针，见 [`probes/`](probes/README.md)，未做正式 D01 轮次。
+- 站点范围、执行顺序与运行：第 1、2 轮（`javaestate.com`、`skatepro.es`）三臂已执行；`sixmoondesigns.com`、`campsaver.com` 只完成补充探针（campsaver 另有有头可达性复核），见 [`probes/`](probes/README.md)，未做正式 D01 轮次。
 - 合同变更：2026-11-19 起 `docs/02` 的最终业务CSV为9列；本目录已完成的运行按当时的22列合同记录，保留为旧合同证据，不追溯改写。
 
 ## 版本记录

@@ -44,8 +44,31 @@
 结论：
 
 - campsaver 是 PerimeterX 风格挑战，不是 Cloudflare；Scrapling 的 `solve_cloudflare` 不适用。
-- 三套默认栈都被挡在挑战页，campsaver 是共同边界，不是区分框架的站点。
+- 三套默认栈都被挡在挑战页，campsaver 是默认无头栈的共同边界，不是区分框架的站点；有头复核见下节，站点并非不可采。
 - 因此不能把“Scrapling 能过挑战”外推成“所有挑战都能过”。仓库里 `partsfornissans.com` 的 Scrapling 成功仍只证明 Cloudflare 类路径。
+
+## campsaver 有头可达性复核（2026-11-19）
+
+原探针只覆盖无头栈。为区分“IP 出口封禁”和“自动化指纹”，同日补了一轮有头对照；本次共 13 次目标请求，超过原探针 5 次/3 分钟预算，作为边界证据保留。
+
+| 客户端 | 出口 | 结果 |
+| --- | --- | --- |
+| curl + Chrome UA | 直连 | 307 → `forbidden.html`，PerimeterX 挑战页 |
+| curl + Chrome UA | 本机 HTTP 代理（`mihomo-mixed`） | 200 `forbidden.html`，同一挑战页 |
+| Playwright Chromium（headless） | 直连 | 403 `Access Blocked`，出口 110.85.117.163 |
+| Playwright Chromium（headless） | 本机 HTTP 代理（`mihomo-mixed`） | 403 `Access Blocked`，出口 142.202.241.90 |
+| Playwright Chromium（headless） | 本机 SOCKS5 代理（`xray-socks5`） | 403 `Access Blocked`，出口 23.239.105.147 |
+| Playwright Chromium（headed） | 直连 | 首次 200，标题 CampSaver.com &#124; Quality Outdoor Equipment，599,097 字节，20 cookies |
+| Playwright Chromium（headed） | 直连 | 随后同一出口 200 `forbidden.html`，标题 `Before we continue`，`PRESS & HOLD` 挑战 |
+
+结论：
+
+- 不是单一 IP 被封：同一 CN 直连出口在 headed 下曾完整打开首页；三套 headless 在两个 US 出口也都被硬 403，说明自动化指纹是主因。
+- IP 信誉仍是次要因素：两个 US 出口都是 datacenter，headless 直接 `Access Blocked`；有头直连随后也被挑战，说明风险会随请求累积。
+- 站点不是不可采，但默认无头栈不可采；需要真实有头浏览器、会话复用和低速率。框架对比仍只能得出“默认无头栈边界”的结论。
+- 后续复核按 5 次目标请求/3 分钟执行，先 headed，不重复跑 headless 矩阵。
+
+环境：Windows，Playwright 1.64.0 bundled Chromium；出口为直连与 `~/.config/proxy-resources.json` 登记的两个本机入口。复核只读公开页面，未登录、未下单、未尝试破解 CAPTCHA。
 
 ## 对选型的意义
 
