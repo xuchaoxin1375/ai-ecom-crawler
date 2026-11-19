@@ -52,5 +52,55 @@
       "product_content": false
     }
   },
-  "conclusion": "All default stacks stopped at the PerimeterX-style challenge; campsaver is a boundary, not a framework differentiator. Scrapling solve_cloudflare does not apply to this challenge type."
+  "conclusion": "All default stacks stopped at the PerimeterX-style challenge; campsaver is a boundary for default headless stacks, not a framework differentiator. Scrapling solve_cloudflare does not apply to this challenge type. See follow_up_2026_11_19 for headed evidence; the site is not unscrapable.",
+  "follow_up_2026_11_19": {
+    "purpose": "区分 IP 出口与自动化指纹；补有头对照",
+    "request_count": 13,
+    "budget_note": "超过原探针 5 次/3 分钟预算；作为边界证据保留，后续复核按 5 次/3 分钟执行",
+    "network": {
+      "direct_cn": "110.85.117.163",
+      "mihomo_us": "142.202.241.90",
+      "xray_us": "23.239.105.147"
+    },
+    "results": {
+      "curl_direct": {
+        "status": 307,
+        "final": "forbidden.html",
+        "challenge": "PerimeterX PXZdYJqpOd"
+      },
+      "curl_mihomo": {
+        "status": 200,
+        "final": "forbidden.html",
+        "challenge": "PerimeterX PXZdYJqpOd"
+      },
+      "playwright_headless_direct": {
+        "status": 403,
+        "title": "Access Blocked",
+        "ip": "110.85.117.163"
+      },
+      "playwright_headless_mihomo": {
+        "status": 403,
+        "title": "Access Blocked",
+        "ip": "142.202.241.90"
+      },
+      "playwright_headless_xray": {
+        "status": 403,
+        "title": "Access Blocked",
+        "ip": "23.239.105.147"
+      },
+      "playwright_headed_direct_first": {
+        "status": 200,
+        "title": "CampSaver.com | Quality Outdoor Equipment",
+        "bytes": 599097,
+        "cookies": 20
+      },
+      "playwright_headed_direct_later": {
+        "status": 200,
+        "final": "forbidden.html",
+        "title": "Before we continue",
+        "challenge": "PRESS & HOLD"
+      }
+    },
+    "conclusion": "不是单一 IP 封禁；headless 指纹触发硬 403，headed 可短暂放行；PerimeterX 风险随请求累积，datacenter 出口更差。站点不是不可采，但默认无头栈不可采。"
+  }
 }
