@@ -1,0 +1,313 @@
+schema_version: "1.0"
+plan_id: "skatepro-es-scrapling"
+plan_version: "2026.11.19-2"
+kind: "program"
+status: "candidate"
+created_at: "2026-11-19T03:10:16Z"
+updated_at: "2026-11-19T03:24:00Z"
+
+site:
+  name: "SkatePro España"
+  entry_urls:
+    - "https://www.skatepro.es/"
+  allowed_origins:
+    - "https://www.skatepro.es"
+    - "https://skatepro.es"
+  allowed_path_prefixes:
+    - "/"
+    - "/c"
+    - "/sitemap.xml"
+    - "/robots.txt"
+  market: "ES"
+  locale: "es-ES"
+  currency: "EUR"
+
+scope:
+  include:
+    - "https://www.skatepro.es/<category-id>-<product-id>.htm"
+    - "https://www.skatepro.es/c<id>.htm"
+  exclude:
+    - "*/catalog*"
+    - "/adminshop*"
+    - "/static*"
+    - "*/wishlist*"
+    - "/a*.htm"
+    - "/m*.htm"
+    - "/l*.htm"
+    - "/z*.htm"
+  default_mode: "bounded_sample"
+  max_products: 30
+  max_seconds: 600
+  notes: >-
+    Bounded category/pagination sample: the entry page's first main-menu category
+    grids supply product cards, then up to 30 unique product pages are fetched.
+    No login, cart, checkout, account, wishlist, search or paid access.
+
+discovery:
+  strategies:
+    - "entry_page"
+    - "category"
+    - "pagination"
+    - "sitemap_denominator"
+  entry_page: "https://www.skatepro.es/"
+  category_seeds_source: "main-menu links matching ^/c<digits>.htm$ in document order; first 3 seeds form the frontier"
+  pagination:
+    type: "page_parameter"
+    url_template: "{category_url}?page={n}"
+    max_pages_per_category: 2
+    notes: "The grid grows through the page_load_more web component; ?page=N is the public pagination parameter."
+  product_url_patterns:
+    - "^/\\d+-\\d+\\.htm$"
+  url_identity: "normalized_path"
+  deduplication: "Canonicalize to https://www.skatepro.es + path; strip ?stockcode; dedupe by casefolded path."
+  sitemap_url: "https://www.skatepro.es/sitemap.xml"
+  sitemap_use: "Denominator only (count of product-like <loc> URLs); the sitemap is not crawled product by product."
+  robots:
+    url: "https://www.skatepro.es/robots.txt"
+    parser: "protego (same parser family used by Scrapling's RobotsTxtManager)"
+    user_agent: "*"
+    policy: "Fetch robots.txt before any business URL; skip disallowed URLs; never request */catalog, /adminshop, /static or */wishlist."
+
+fetch:
+  default_engine: "scrapling.FetcherSession (curl_cffi, static HTML)"
+  per_url_type:
+    entry:
+      engine: "static"
+      method: "GET"
+      follow_redirects: true
+    category:
+      engine: "static"
+      method: "GET"
+      follow_redirects: true
+    product:
+      engine: "static"
+      method: "GET"
+      follow_redirects: true
+      wait_selector: null
+      actions: []
+  rate_limit:
+    concurrency: 1
+    delay_ms: 10000
+    pacing: "end-to-next-start; honours the published Crawl-delay: 10"
+  retry:
+    max_attempts: 3
+    backoff: "2s, 4s for transport/5xx; Retry-After for 429 (capped at 60s)"
+    stop_on_persistent_429: true
+    stop_on_401_403: true
+  timeout_ms: 45000
+  session:
+    reuse: "one FetcherSession for the whole run"
+    profile_required: false
+    cookies_required: false
+    browser_required: false
+  stop_conditions:
+    - "HTTP 429 persists after 3 attempts, or Retry-After exceeds 60s"
+    - "HTTP 401/403 on a business URL"
+    - "200 response matches a challenge-shell marker and has no product description block"
+    - "wall-clock budget of 600s is exhausted"
+
+extract:
+  source_type: "static_html"
+  price_evidence:
+    primary: "PHP2JS.product.<id>.variants[*].price_number (numeric EUR, minimum positive variant)"
+    fallback: "JSON-LD Product/ProductGroup offers price (minimum positive), then hasVariant offers"
+    currency:
+      - "JSON-LD offers.priceCurrency (Product or ProductGroup; all variants must agree)"
+  fields:
+    name:
+      sources:
+        - "PHP2JS.product.<id>.name"
+        - "JSON-LD Product/ProductGroup name"
+        - "h1"
+      required: true
+      normalize: "Collapse whitespace; strip only the skatepro.es domain fragment; never strip the brand."
+    price.amount:
+      source: "minimum finite positive variant price_number"
+      required: true
+      normalize: "Numeric decimal with two places; zero/negative/missing prices are excluded and recorded."
+    price.currency:
+      source: "JSON-LD offer priceCurrency shared by all variant offers"
+      required: true
+      normalize: "Three-letter uppercase ISO code; never inferred from the € symbol, TLD or proxy country."
+    primary_image_url:
+      sources:
+        - ".pi_main_image span[data-href] (original 1800px static URL)"
+        - "JSON-LD image[0]"
+        - ".product_primary_image img"
+      required: true
+      normalize: "https only; relative/protocol-relative resolved; logo/placeholder/lazy-loader rejected."
+    description_html:
+      sources:
+        - "#product_description (marketing body)"
+        - "#product_specifications .row (specification table, rebuilt as <table>)"
+        - "JSON-LD description (fallback only)"
+      required: false
+      normalize: "DOM whitelist cleaning; removes scripts, styles, images, links, forms, attributes, reviews and cross-sell blocks."
+    categories:
+      sources:
+        - "JSON-LD Product/ProductGroup category"
+        - "nav.breadcrumb (Inicio/Atrás removed)"
+        - "PHP2JS category_path"
+      required: false
+      normalize: "Localized category path joined with ' > '; empty when neither source exists."
+    brand:
+      sources:
+        - "JSON-LD brand.name"
+        - "PHP2JS brand"
+      required: false
+      normalize: "Left empty when the page does not state a brand."
+    options:
+      sources:
+        - "PHP2JS variant attribute_text + attribute_variant_text"
+      required: false
+      normalize: "Union of dimension/value pairs across variants; quantity groups dropped; no SKU matrix."
+    availability:
+      source: "JSON-LD offers.availability across Product/ProductGroup variants, cross-checked with PHP2JS stock_level"
+      required: false
+      normalize: "in_stock when any variant offer is InStock; out_of_stock when every offer is out; empty with a reason otherwise."
+    source_url:
+      source: "canonical product path (query string stripped)"
+      required: true
+
+normalize:
+  price:
+    tax_basis: "unknown_not_stated (the static HTML states no inclusive/exclusive basis)"
+    choose: "lowest_public_current_variant_price"
+    positive_only: true
+    includes_out_of_stock_priced_variants: true
+    ignores: "compare-at prices, bundles, shipping, add-ons and recommendation prices"
+  description:
+    mode: "clean_html_whitelist"
+    statuses:
+      - "complete"
+      - "partial"
+      - "fallback"
+      - "not_provided"
+      - "failed"
+    partial_policy: "Partial when only the specification table exists, or when the rendered body is under half of the JSON-LD description length."
+  name:
+    mode: "collapse_whitespace_and_strip_site_domain_only"
+  options:
+    mode: "structured_name_value_pairs"
+    exclude_quantity: true
+    strip_price_delta: true
+    serialize: "Size#S|M~Color#Red|Blue with backslash escaping for \\, #, | and ~"
+  csv:
+    encoding: "utf-8"
+    columns: 9
+    columns_list:
+      - "name"
+      - "price_amount"
+      - "price_currency"
+      - "primary_image_url"
+      - "description_html"
+      - "category"
+      - "brand"
+      - "attributes"
+      - "source_url"
+    formula_protection: "Prefix untrusted text cells starting with =, +, - or @ with a single quote; price_amount stays numeric."
+    missing_reasons: "Stored in the task report and diagnostics, not as CSV columns."
+
+validate:
+  required_fields:
+    - "name"
+    - "price.amount"
+    - "price.currency"
+    - "primary_image_url"
+    - "source_url"
+  assertions:
+    - field: "price.amount"
+      op: ">"
+      value: 0
+    - field: "price.currency"
+      op: "matches"
+      value: "^[A-Z]{3}$"
+    - field: "description_status"
+      op: "in"
+      value: ["complete", "partial", "fallback", "not_provided", "failed"]
+  excluded_reasons:
+    - "zero_price"
+    - "missing_price"
+    - "currency_mismatch"
+    - "missing_name"
+    - "robots_disallowed"
+  failed_reasons:
+    - "transport_error"
+    - "http_5xx"
+    - "http_404"
+    - "http_429_after_retries"
+    - "challenge_page"
+    - "extraction_error"
+  partial_description: "allowed_with_flag"
+  deduplication: "One row per casefolded product path."
+
+runtime:
+  entrypoint: "run.py"
+  language: "Python"
+  invocation: "python -m uv run --project experiments/framework-compare/scrapling python experiments/framework-compare/scrapling/skatepro/run.py --out-dir experiments/framework-compare/scrapling/skatepro --label run-001"
+  context: "CLI arguments only; no build-session state, cookies or secrets."
+  output_contract:
+    - "valid.csv (9 business columns)"
+    - "task-result.json (09 state/outcome/stop_reason/counts/coverage/quality_exceptions)"
+    - "run-summary.json"
+    - "diagnostics/<label>/events.ndjson"
+    - "diagnostics/<label>/excluded_products.csv"
+    - "diagnostics/<label>/failed_products.csv"
+    - "diagnostics/<label>/pending_products.csv"
+    - "diagnostics/<label>/product-audit.jsonl"
+  checkpoint:
+    mode: "none"
+    notes: "Each bounded run is independent and writes into the caller-chosen diagnostics label. Choose a new label per run: reusing a label overwrites that label's files."
+  idempotency_key: "task_id + plan_version + canonical source_url"
+  cancellation: "Ctrl+C interrupts the sequential loop; the FetcherSession context manager closes the HTTP session. A cancelled run is not published as FINISHED."
+  resource_cleanup: "No browser process; one in-process curl_cffi session closed on exit."
+
+entrypoint: "run.py"
+
+compatibility:
+  os:
+    - "windows"
+    - "linux"
+    - "wsl2"
+  runtime: "python>=3.11,<3.14"
+  dependencies:
+    - "scrapling[fetchers]==0.5.1"
+    - "protego (installed with Scrapling)"
+    - "lxml (installed with Scrapling)"
+  browser: "none; static FetcherSession only"
+  network: "public web; environment HTTP_PROXY/HTTPS_PROXY may be present, values are injected by the environment"
+  secrets: "none required; no cookies or API keys"
+  lockfile: "experiments/framework-compare/scrapling/uv.lock"
+
+evidence:
+  sample_urls:
+    - "https://www.skatepro.es/218-36511.htm"
+    - "https://www.skatepro.es/99-33114.htm"
+  expected:
+    - url: "https://www.skatepro.es/218-36511.htm"
+      name: "Longway Adam Scooter Freestyle"
+      price.amount: 69.95
+      price.currency: "EUR"
+      description_status: "complete"
+    - url: "https://www.skatepro.es/99-33114.htm"
+      name: "SkatePro Camiseta"
+      price.amount: 14.95
+      price.currency: "EUR"
+      description_status: "complete"
+  verified_at: null
+  verification_scope: "Build-time offline extraction on two saved pages; bounded live runs run-001 (plan v1) and fix-rerun (plan v2, adds availability) are recorded under diagnostics/."
+  limitations:
+    - "Static HTML only; the sampled templates did not require browser rendering."
+    - "Task cap 30 product pages; the sitemap contains thousands more."
+    - "Tax basis is not stated in the static HTML; it is never guessed."
+    - "Availability is a schema.org offer flag; stock quantities are not a business guarantee."
+    - "Cross-sell ('Piezas compatibles'), manufacturer contact block and customer reviews are excluded from description_html."
+    - "Options cover public variant dimensions only; SKU combinations are not enumerated."
+
+notes:
+  - "robots.txt publishes Crawl-delay: 10 for meta-externalagent; this plan applies the same 10 s end-to-start interval to user-agent *."
+  - "robots.txt disallows */catalog, /adminshop, /static and */wishlist; those paths are never requested."
+  - "Variant prices live in the PHP2JS object; JSON-LD serves as the currency and fallback price source."
+  - "Apparel pages expose a JSON-LD ProductGroup with hasVariant offers; the extractor handles both Product and ProductGroup."
+  - "The site suggests a US delivery country from the egress IP; quotes remain EUR and JSON-LD shipping/return policies target ES."
+  - "Plan v1 (2026.11.19-1) omitted the nullable availability field on purpose; v2 adds it as the measured repair task and re-runs the same bounded scope."
