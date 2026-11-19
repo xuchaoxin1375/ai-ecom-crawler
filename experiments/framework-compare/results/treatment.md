@@ -19,7 +19,7 @@
 | 臂 | 框架版本 | 官方 skill | MCP | 说明 |
 | --- | --- | --- | --- | --- |
 | `scrapy` | 2.20.0 | 未使用；未登记官方 skill | 未使用 | 第 1、2 轮均按此 treatment |
-| `scrapling` | 0.5.1（`scrapling[fetchers]`） | 第 1 轮未使用；2026-11-19 起可加载 `scrapling-official` 0.5.1 | 未使用 | 安装前的运行按“无 skill”记录 |
+| `scrapling` | 0.5.1（`scrapling[fetchers]`） | 第 1、2 轮均无使用记录；2026-11-19 起可加载 `scrapling-official` 0.5.1 | 未使用 | 安装前的运行按“无 skill”记录；`skatepro` 日志未提及 skill，未追认 |
 | `crawlee` | 1.11.2（`[playwright,parsel]`） | 未使用；未登记官方 skill | 未使用 | 第 1 轮按此 treatment |
 
 版本来源：`experiments/framework-compare/README.md` 的版本记录；Python 3.13.13，uv 0.13.9，Chromium 159.0.8154.6，三臂共用浏览器缓存。
@@ -35,11 +35,12 @@
 
 - 2026-11-19：建立本文件。回溯第 1 轮（`javaestate.com`）与第 2 轮已完成部分，仓库内没有 skill 或 MCP 使用记录，按“未使用”登记。
 - 2026-11-19：`scrapling-official` 0.5.1 安装并可加载。此后开始的 Scrapling 构建会话属于“Scrapling + skill”treatment，需单独标记，不与安装前的运行跨轮比较。
+- 2026-11-19：`scrapling/skatepro` 的 `run-log.md` 未记录 skill 或 MCP；该运行仍按“无 skill”登记，不因安装时间晚于构建而追认为 skill treatment。
 
 ## 可比范围
 
 - **第 1 轮三臂可比**：同宿主、同模型与变体、同内置工具、均未使用第三方 skill 或 MCP。仍受 `results/order.md` 已记录的时间窗与站点变化限制。
-- **第 2 轮按臂分别判断**：已完成的 `scrapy-skatepro` 仍是无 skill treatment；后续 Scrapling、Crawlee 臂若保持无 skill，可与它同轮比较；若 Scrapling 臂启用 skill，只能与同样启用对应资料的臂比较，或单列为另一 treatment。
+- **第 2 轮按臂分别判断**：已完成的 `scrapy-skatepro` 与 `scrapling-skatepro` 均未记录 skill 或 MCP，可按无 skill treatment 比较；Crawlee 臂若保持无 skill，同样适用。若后续 Scrapling 臂启用 skill，只能与同样启用对应资料的臂比较，或单列为另一 treatment。
 - **H1 的 MCP 部分未测**：所有已执行运行都未使用 Scrapling MCP。需要回答“MCP 是否缩短首个有效结果时间”时，另做「Scrapling + skill」与「Scrapling + skill + MCP」的同站对照，结果不与本表混算。
 - **未记录项**：现有运行未保留逐次模型调用、token、文档查询与工具错误计数。后续构建会话按 `13` 的指标表记录，不能从产物反推。
 
