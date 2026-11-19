@@ -1,0 +1,17 @@
+{
+  "framework": "scrapling",
+  "version": "0.5.1",
+  "site": "https://www.sixmoondesigns.com",
+  "url": "https://www.sixmoondesigns.com/products.json?limit=250&page=1",
+  "proxy": "http://127.0.0.1:7897",
+  "started_at": "2026-11-19T13:17:23Z",
+  "status": 200,
+  "first_response_s": 4.87,
+  "products_in_payload": 112,
+  "valid_products": 30,
+  "first_valid_product_s": 4.88,
+  "total_s": 4.88,
+  "csv": "C:\\repos\\ai-ecom-crawler\\experiments\\framework-compare\\probes\\sixmoondesigns\\sixmoondesigns-scrapling.csv",
+  "description_complete": 24,
+  "description_not_provided": 6
+}

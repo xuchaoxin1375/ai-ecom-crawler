@@ -1,0 +1,17 @@
+{
+  "framework": "scrapy",
+  "version": "2.20.0",
+  "site": "https://www.sixmoondesigns.com",
+  "url": "https://www.sixmoondesigns.com/products.json?limit=250&page=1",
+  "proxy": "http://127.0.0.1:7897",
+  "started_at": "2026-11-19T13:18:29Z",
+  "statuses": [
+    200
+  ],
+  "products_in_payload": 112,
+  "valid_products": 30,
+  "first_valid_product_s": 5.06,
+  "csv": "C:\\repos\\ai-ecom-crawler\\experiments\\framework-compare\\probes\\sixmoondesigns\\sixmoondesigns-scrapy.csv",
+  "description_complete": 24,
+  "description_not_provided": 6
+}

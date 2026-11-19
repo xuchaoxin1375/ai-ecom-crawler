@@ -1,0 +1,56 @@
+{
+  "site": "https://www.campsaver.com/",
+  "probed_at": "2026-11-19T13:05:00Z",
+  "product_url": "https://www.campsaver.com/thermarest-neoair-xtherm-nxt-max-sleeping-pad.html",
+  "network": "direct",
+  "results": {
+    "curl_chrome_ua": {
+      "status": 307,
+      "location": "/forbidden.html?url=...&uuid=...&vid=",
+      "body_bytes": 145,
+      "product_content": false
+    },
+    "scrapling_stealthy_headless": {
+      "version": "0.5.1",
+      "options": {
+        "headless": true,
+        "solve_cloudflare": true,
+        "timeout": 60,
+        "network_idle": true
+      },
+      "status": 307,
+      "final_status": 200,
+      "final_url": "https://www.campsaver.com/forbidden.html?url=...&uuid=...&vid=",
+      "body_bytes": 24166,
+      "log": "No Cloudflare challenge found",
+      "product_content": false
+    },
+    "scrapling_stealthy_real_chrome": {
+      "version": "0.5.1",
+      "options": {
+        "headless": true,
+        "real_chrome": true,
+        "solve_cloudflare": true,
+        "google_search": true,
+        "timeout": 45,
+        "network_idle": true
+      },
+      "status": 307,
+      "final_status": 200,
+      "final_url": "https://www.campsaver.com/forbidden.html?url=...&uuid=...&vid=",
+      "body_bytes": 24214,
+      "log": "No Cloudflare challenge found",
+      "product_content": false
+    },
+    "playwright_chromium_headless": {
+      "version": "Chromium 159.0.8154.6",
+      "user_agent": "Chrome/131",
+      "status": 200,
+      "final_url": "https://www.campsaver.com/forbidden.html?url=...&uuid=...&vid=",
+      "title": "Before we continue",
+      "body_bytes": 14156,
+      "product_content": false
+    }
+  },
+  "conclusion": "All default stacks stopped at the PerimeterX-style challenge; campsaver is a boundary, not a framework differentiator. Scrapling solve_cloudflare does not apply to this challenge type."
+}
