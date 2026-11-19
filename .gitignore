@@ -13,6 +13,7 @@ serviceAccountKey.json
 Thumbs.db
 .DS_Store
 dist/
+/storage/
 
 # Python
 __pycache__/

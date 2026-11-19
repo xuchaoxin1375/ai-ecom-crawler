@@ -6,7 +6,7 @@
 
 - 共享任务规格与评分表：已建立。
 - 三个框架的独立环境：已建立并完成导入与浏览器启动验证。
-- 站点范围、执行顺序与运行：未开始；站点见 [D01验证模板](../../docs/14-D01验证模板.md)，框架对比取其中 3～4 站。
+- 站点范围、执行顺序与运行：第 1、2 轮（`javaestate.com`、`skatepro.es`）三臂已执行；`sixmoondesigns.com`、`campsaver.com` 只完成补充探针，见 [`probes/`](probes/README.md)，未做正式 D01 轮次。
 - 合同变更：2026-11-19 起 `docs/02` 的最终业务CSV为9列；本目录已完成的运行按当时的22列合同记录，保留为旧合同证据，不追溯改写。
 
 ## 版本记录
@@ -32,6 +32,7 @@
 | `scrapling/` | Scrapling 独立环境与实现 |
 | `crawlee/` | Crawlee for Python 独立环境与实现 |
 | `scrapy/` | Scrapy 独立环境与实现 |
+| `probes/` | 有界补充探针：公开 JSON 与挑战页；不替代正式轮次 |
 | `results/` | 原始指标、日志摘要和结果表；不保存整页原文 |
 
 每个框架目录使用独立虚拟环境和锁文件，不共享实现代码；禁止把某个框架的选择器或脚本复制到另一个目录。
@@ -56,3 +57,5 @@ python -m uv sync --project experiments/framework-compare/scrapling
 ## 结果与证据
 
 原始日志、指标和失败记录写入 `results/`，不写业务正文；实验结束后只把结果报告合入 `main`，失败实现归档或删除。
+
+补充探针的代码、CSV 和 JSON 审计在 [`probes/`](probes/README.md)，只记录有界验证，不计入正式轮次。
