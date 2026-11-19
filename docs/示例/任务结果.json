@@ -36,6 +36,16 @@
     "reason": "已取得业务所需商品，认可本次范围；知悉两个目录待访问、覆盖未知及一条部分描述。",
     "scope": "本次任务已发现的范围"
   },
+  "quality_exceptions": [
+    {
+      "source_url": "https://shop.example/products/filter",
+      "description_status": "PARTIAL",
+      "partial_reason": "复杂车型适配表经有界观察仍无法可靠取得；现保留已验证的产品说明。",
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED"
+      }
+    }
+  ],
   "runtime": {
     "llm_calls": 0,
     "raw_pages_retained": false
