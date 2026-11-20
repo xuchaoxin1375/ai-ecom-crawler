@@ -1,0 +1,10 @@
+{"ts": "2026-11-20T22:50:54Z", "event": "task_reconciled", "in_flight": 0, "reset": 0, "failed": 0, "orphan_files_removed": 0, "stale_result": false, "corrupt_product_lines": 0}
+{"ts": "2026-11-20T22:50:54Z", "event": "task_started", "task_type": "product", "plan_id": "familidoo-fr-d03"}
+{"ts": "2026-11-20T22:50:55Z", "event": "item_finished", "item_type": "navigation", "url": "https://www.familidoo.fr/fr/", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-20T22:50:56Z", "event": "item_finished", "item_type": "product", "url": "https://www.familidoo.fr/fr/poussette-quadruple/74464-poussette-4-places-lidoo-lite-cosmic-black-0615402035002.html", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-20T22:50:57Z", "event": "item_finished", "item_type": "product", "url": "https://www.familidoo.fr/fr/poussette-quadruple/8-poussette-4-places-lidoo-star-dj04frl-4712928372676.html", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-20T22:50:58Z", "event": "item_finished", "item_type": "product", "url": "https://www.familidoo.fr/fr/poussette-quadruple/193-poussette-4-places-lidoo-city-h4e-full-grey-4712928374274.html", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-20T22:50:59Z", "event": "item_finished", "item_type": "product", "url": "https://www.familidoo.fr/fr/poussette-compacte/183-poussette-compacte-lidoo-one-noire-4712928373475.html", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-20T22:51:00Z", "event": "item_finished", "item_type": "product", "url": "https://www.familidoo.fr/fr/libeca/316-veilleuse-5-en-1-baby-dream-machine-0617092971653.html", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-20T22:51:01Z", "event": "item_finished", "item_type": "product", "url": "https://www.familidoo.fr/fr/iglu/74427-bascule-en-mousse-iglu-banane-4751005644831.html", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-20T22:51:01Z", "event": "task_finished", "state": "FINISHED", "outcome": "COMPLETED", "stop_reason": "NATURAL_END"}
