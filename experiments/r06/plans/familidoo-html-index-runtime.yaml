@@ -1,0 +1,77 @@
+schema_version: "1.1"
+rule_id: "familidoo-html-index-runtime"
+rule_version: "2026.11.20-1"
+kind: declarative
+status: candidate
+created_at: "2026-11-20T16:00:00Z"
+updated_at: "2026-11-20T16:00:00Z"
+
+site:
+  name: "Familidoo"
+  entry_urls: ["https://www.familidoo.fr/fr/"]
+  allowed_origins: ["https://www.familidoo.fr"]
+  allowed_path_prefixes: ["/fr/"]
+  market: "FR"
+  locale: "fr-FR"
+  currency: "EUR"
+
+scope:
+  include: ['^/fr/[^/]+/\d+-[^/]+\.html$']
+  exclude:
+    - "/panier"
+    - "/commande"
+    - "/mon-compte"
+    - "controller="
+  max_products: 40
+  max_seconds: 180
+  notes: "P1 html_index recursion smoke: homepage category index plus one level of category pages; first 40 product URLs; no product fetch."
+
+capabilities:
+  discovery: true
+  product: false
+
+discovery:
+  sources:
+    - type: "html_index"
+      url: "https://www.familidoo.fr/fr/"
+      link_selector: "a"
+      category_patterns: ['^/fr/\d+-[^/]+$']
+      max_depth: 1
+  product_url_patterns: ['^/fr/[^/]+/\d+-[^/]+\.html$']
+  url_identity: "canonical"
+  limits:
+    max_navigation: 5
+    max_products: 40
+
+fetch:
+  default_engine: "static"
+  concurrency: 1
+  delay_ms: 1000
+  retry: {max_attempts: 2, backoff_ms: 1000}
+  timeout_ms: 45000
+  challenge: "stop_and_record"
+
+output:
+  url_list:
+    enabled: true
+    columns: ["url", "source", "status", "title"]
+    format: "csv"
+  product_csv:
+    enabled: false
+  task_result: true
+
+task_defaults:
+  max_urls: 40
+  max_products: 40
+  max_seconds: 180
+  max_attempts: 2
+  retry_backoff_ms: 1000
+  concurrency:
+    navigation: 1
+    product: 1
+
+compatibility:
+  os: ["windows", "linux", "wsl2"]
+  runtime: "python>=3.11"
+
+notes: "S? html_index category recursion: homepage category index plus one level of category pages; derived from experiments/r06/plans/familidoo-runtime.yaml."
