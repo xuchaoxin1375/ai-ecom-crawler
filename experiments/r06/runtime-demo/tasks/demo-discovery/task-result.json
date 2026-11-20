@@ -1,0 +1,66 @@
+{
+  "task_id": "demo-discovery",
+  "task_type": "discovery",
+  "rule_id": "familidoo-fr-runtime",
+  "rule_version": "2026.11.20-1",
+  "market": "FR",
+  "locale": "fr-FR",
+  "state": "FINISHED",
+  "outcome": "COMPLETED",
+  "stop_reason": "NATURAL_END",
+  "stop_detail": "entry-page sample exhausted",
+  "started_at": "2026-11-20T07:20:14Z",
+  "finished_at": "2026-11-20T07:20:18Z",
+  "counts": {
+    "navigation_urls": 1,
+    "discovered_urls": 7,
+    "url_candidates": 6,
+    "pending_urls": 0,
+    "valid_urls": 6,
+    "excluded_urls": 0,
+    "failed_urls": 0
+  },
+  "coverage": {
+    "status": "PARTIAL",
+    "denominator_source": "entry-page URL candidates",
+    "denominator": 6,
+    "covered": 6,
+    "notes": "Bounded sample from one entry page; not full-site coverage."
+  },
+  "business_acceptance": {
+    "status": "NOT_REVIEWED",
+    "accepted_by": null,
+    "accepted_at": null,
+    "reason": "R06 runtime prototype; no business sign-off yet.",
+    "scope": "entry-page sample declared by the rule"
+  },
+  "quality_exceptions": [],
+  "pricing": {
+    "policy": "Choose the smaller public pretax/gross pair per docs/02.",
+    "products": []
+  },
+  "runtime": {
+    "executor": "r06-runtime/0.1",
+    "llm_calls": 0,
+    "raw_pages_retained": false,
+    "http_engine": "scrapling.FetcherSession (curl_cffi, static HTML)"
+  },
+  "access": {
+    "entry_url": "https://www.familidoo.fr/fr/",
+    "robots_url": "https://www.familidoo.fr/robots.txt",
+    "robots_status": 200,
+    "delay_ms": 1000,
+    "max_products": 20,
+    "max_urls": 100,
+    "max_seconds": 180.0,
+    "browser_launched": false,
+    "login_used": false
+  },
+  "limitations": [
+    "Bounded to links accepted from the entry page; not full-site coverage.",
+    "Static HTML only; no browser rendering, login or access-control bypass.",
+    "Runtime LLM calls: 0; no raw page HTML is retained.",
+    "R16 v0 runtime prototype; not D01 verified.",
+    "Bounded to links shown on the homepage; not full-site coverage."
+  ]
+}

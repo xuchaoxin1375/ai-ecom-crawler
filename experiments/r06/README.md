@@ -1,30 +1,38 @@
-# R06 通用执行器最小原型
+# R06 通用执行器与任务运行时原型
 
 ## 目的与边界
 
-R06 验证一件事：**执行端只读 `manifest.yaml` 和声明式规则，就能跑完一个站，不再为站点写专用 `run.py`。**
+R06 验证两件事：
 
-这是最小原型，不是生产执行器。当前只支持：
+- 执行端只读 `manifest.yaml` 和声明式规则，就能跑完一个站，不再为站点写专用 `run.py`；
+- 规则可以按任务类型停在 discovery，也可以继续做 product；多个任务可以并行，任务账本独立。
+
+这是原型，不是生产执行器。当前支持：
 
 - `kind: declarative`；
 - `discovery.strategies: ["entry_links"]`，从一个入口页取商品链接；
-- 静态 HTTP（Scrapling `FetcherSession`），并发固定为 1，请求间隔不低于 1000ms；
+- 静态 HTTP（Scrapling `FetcherSession`），请求间隔不低于 1000ms；
 - 字段回退类型：`json_ld`、`css_text`、`css_attr`、`css_html`、`title`、`breadcrumb`、`option_groups`、`price_pair`、`canonical`、`constant`；
-- 9 列业务 CSV、`task-result.json`、`run-summary.json` 和诊断文件。
+- 9 列业务 CSV、`task-result.json`、`run-summary.json` 和诊断文件；
+- 任务账本、discovery／product 两种任务、SQLite 工作项检查点、并行 worker、暂停／恢复／取消。
 
-暂不支持 sitemap／分类分页、浏览器渲染、登录、断点续跑、取消回收和完整 NDJSON 协议；这些不在本轮“首次采集”范围内。
+暂不支持 sitemap／分类分页、浏览器渲染、登录、跨进程队列、Web UI 和完整 NDJSON 协议；这些不在 R16 v0 范围内。
 
-方案语义补充：`discovery.product_url_patterns` 和 `scope.exclude` 按正则匹配，`scope.include` 按 glob 匹配路径。`docs/08` 的最终语义仍待统一，R06 只实现这个可执行子集。
+方案语义补充：`discovery.product_url_patterns` 和 `scope.exclude` 按正则匹配，`scope.include` 按 glob 匹配路径。`docs/08` 的最终语义仍待统一，R06 只实现这个可执行子集。运行设计见 [`docs/19`](../../docs/19-采集规则与任务运行时.md)。
 
 ## 目录
 
 | 路径 | 内容 |
 | --- | --- |
-| `executor/` | 通用执行器：manifest 校验、发现、获取、提取、清洗、输出 |
-| `plans/familidoo.yaml` | 站点声明式方案；只有少量站点覆盖 |
-| `familidoo/` | 9 列 CSV、任务结果、运行摘要和 `r06-run-001`～`003` 诊断 |
-| `tests/` | 30 个无网络契约与提取测试 |
-| `tools/validate_output.py` | 输出目录校验器 |
+| `executor/` | 单次运行执行器：manifest 校验、发现、获取、提取、清洗、输出 |
+| `runtime/` | 任务运行时：SQLite 账本、工作项、discovery／product、并行 worker |
+| `plans/familidoo.yaml` | 单次运行的站点声明式方案 |
+| `plans/familidoo-runtime.yaml` | 运行时规则包；discovery 和 product 共用 |
+| `familidoo/` | 单次运行的 9 列 CSV、任务结果和 `r06-run-001`～`003` 诊断 |
+| `runtime-demo/` | 两个任务并行：discovery URL 清单和 product 9 列 CSV |
+| `tests/` | 38 个无网络契约、提取、任务账本和运行时测试 |
+| `tools/validate_output.py` | 单次运行输出校验器 |
+| `tools/validate_runtime.py` | 运行时 demo 校验器 |
 
 ## 运行
 
@@ -100,18 +108,81 @@ python experiments/r06/tools/validate_output.py --dir experiments/r06/familidoo
 
 R06 的方案构建时间不能直接和 R04 比：R06 的通用执行器是在同一会话里先写好的，110 秒只计“写站点方案到首个有效商品”，不计执行器开发；R04 的 404 秒计的是站点专用 runner 的构建。两者都不是受控基准，只作过程记录。可以确认的是：**R06 的站点侧不再需要写代码，方案只保留声明式覆盖。**
 
+## 任务运行时 v0（R16 切片）
+
+`plans/familidoo-runtime.yaml` 同时声明 discovery 和 product；任务类型决定停在哪一步。
+
+```powershell
+python -m uv run --project experiments/framework-compare/scrapling --with "pyyaml==6.0.2" `
+  python experiments/r06/runtime_cli.py rule validate `
+  --rule experiments/r06/plans/familidoo-runtime.yaml
+
+python -m uv run --project experiments/framework-compare/scrapling --with "pyyaml==6.0.2" `
+  python experiments/r06/runtime_cli.py task create `
+  --db experiments/r06/runtime-demo/tasks.db `
+  --rule experiments/r06/plans/familidoo-runtime.yaml `
+  --task-type discovery --task-id demo-discovery `
+  --out-root experiments/r06/runtime-demo/tasks --start
+
+python -m uv run --project experiments/framework-compare/scrapling --with "pyyaml==6.0.2" `
+  python experiments/r06/runtime_cli.py task create `
+  --db experiments/r06/runtime-demo/tasks.db `
+  --rule experiments/r06/plans/familidoo-runtime.yaml `
+  --task-type product --task-id demo-product `
+  --out-root experiments/r06/runtime-demo/tasks --start
+
+python -m uv run --project experiments/framework-compare/scrapling --with "pyyaml==6.0.2" `
+  python experiments/r06/runtime_cli.py worker run `
+  --db experiments/r06/runtime-demo/tasks.db `
+  --out-root experiments/r06/runtime-demo/tasks `
+  --max-tasks 2 --per-domain-rps 1
+```
+
+`task list`、`task status`、`task pause/resume/cancel` 使用同一个 `--db`；暂停和取消在工作项边界生效。
+
+### 并行结果
+
+| 任务 | 类型 | 结果 | 请求 | 起止 |
+| --- | --- | --- | --- | --- |
+| `demo-discovery` | discovery | 6 个 URL，`COMPLETED` | 2（robots＋入口） | 07:20:14–07:20:18 |
+| `demo-product` | product | 6 个商品，`COMPLETED` | 8（robots＋入口＋6 商品） | 07:20:14–07:20:24 |
+
+两个任务同一秒启动，discovery 先结束，product 继续；同域请求由全局限速器按 1 rps 串行，输出目录和计数互不污染。`demo-discovery` 没有请求商品页，验证了“只发现网址、不提取商品”的任务类型。
+
+校验：
+
+```powershell
+python experiments/r06/tools/validate_runtime.py --root experiments/r06/runtime-demo
+```
+
+输出：`OK: runtime demo`，`demo-discovery` 6 URLs、`demo-product` 6 products。
+
+### 运行时测试
+
+38 个无网络测试，覆盖：
+
+- 规则加载与非法发现策略拒绝；
+- SQLite 任务账本、工作项去重、claim／reset；
+- discovery 任务不请求商品页；
+- product 任务输出 9 列；
+- 两个任务必须同时进入 fetcher（`threading.Barrier`）才继续，验证 worker 并行启动；
+- 暂停到 `PAUSED` 后恢复，最终 `COMPLETED`。
+
 ## 局限
 
 - 入口页只展示 6 个商品，未做 10～20 个随机抽样；6／6 是小样本全量，不是全站覆盖。
 - 只验证一个站点、一次运行；没有独立复跑和跨环境导入。
 - 只支持静态 HTML；没有浏览器、登录、挑战处理或 JavaScript 渲染。
 - 只支持一个入口页；没有 sitemap、分类分页、公开 JSON 或详情补全。
-- 没有断点、取消、幂等键和恢复；`task-result.json` 只覆盖最小状态与计数。
+- 运行时只有单 worker；没有跨进程锁、队列、真实崩溃恢复演练；暂停／恢复只在无网络测试中验证过。
+- 单次运行执行器没有任务控制；任务控制只在 `runtime/` 中实现。
+- 没有 Web UI；`task list/status` 是 CLI。
 - `pyyaml` 通过 `uv run --with` 临时提供，尚未加入 Scrapling 项目的锁文件。
 
 ## 下一步
 
-- 用第二个站复测“只写方案、不写代码”的构建时间，避免把单站结果当成通用结论。
+- 用第二个站复测“只写方案、不写代码”，避免把单站结果当成通用结论。
 - 增加 `sitemap` 或分类入口，才能做 10～20 个商品的随机抽查和更完整的范围。
-- 把 R06 的输出与 `docs/08`、`docs/09` 的差异列清楚，再决定哪些字段进入 v1 执行器。
+- 把“两个任务并行 + 同域限速 + 暂停／取消”做成真实站点的验收记录，而不只用 fake fetcher。
+- 补跨进程 worker 或至少一个单 worker 的崩溃恢复演练。
 - 维护、漂移和长期稳定性仍后置（J08）；本轮不据此判断维护成本。
