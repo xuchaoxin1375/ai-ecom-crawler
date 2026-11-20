@@ -1,0 +1,35 @@
+{"ts": "2026-11-20T01:12:44Z", "event": "run_start", "plan_id": "sixmoondesigns-us-d01", "max_products": 30, "max_seconds": 600.0}
+{"ts": "2026-11-20T01:12:48Z", "event": "request", "purpose": "robots", "url": "https://www.sixmoondesigns.com/robots.txt", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:12:50Z", "event": "request", "purpose": "entry", "url": "https://www.sixmoondesigns.com/?country=US", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:12:52Z", "event": "request", "purpose": "api", "url": "https://www.sixmoondesigns.com/products.json?limit=250&page=1&country=US", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:12:54Z", "event": "request", "purpose": "spot", "url": "https://www.sixmoondesigns.com/products/cnoc-curn?country=US", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:12:54Z", "event": "product_valid", "source_url": "https://www.sixmoondesigns.com/products/cnoc-curn", "price": "18.00", "description_status": "complete"}
+{"ts": "2026-11-20T01:12:54Z", "event": "product_valid", "source_url": "https://www.sixmoondesigns.com/products/toaks-titanium-collapsible-chopsticks", "price": "30.00", "description_status": "complete"}
+{"ts": "2026-11-20T01:12:54Z", "event": "product_valid", "source_url": "https://www.sixmoondesigns.com/products/nite-ize-radiant-nutlit-rechargeable-lantern", "price": "25.00", "description_status": "complete"}
+{"ts": "2026-11-20T01:12:54Z", "event": "product_valid", "source_url": "https://www.sixmoondesigns.com/products/all-day-carry-travel-backpack-v2", "price": "300.00", "description_status": "complete"}
+{"ts": "2026-11-20T01:12:54Z", "event": "product_valid", "source_url": "https://www.sixmoondesigns.com/products/cnoc-thrubottle", "price": "10.00", "description_status": "complete"}
+{"ts": "2026-11-20T01:12:54Z", "event": "product_valid", "source_url": "https://www.sixmoondesigns.com/products/vecto-x-3l-water-container-28mm", "price": "27.00", "description_status": "complete"}
+{"ts": "2026-11-20T01:12:54Z", "event": "product_valid", "source_url": "https://www.sixmoondesigns.com/products/vecto-2l-water-container-28mm-copy", "price": "25.00", "description_status": "complete"}
+{"ts": "2026-11-20T01:12:54Z", "event": "product_valid", "source_url": "https://www.sixmoondesigns.com/products/standard-hip-belt", "price": "45.00", "description_status": "complete"}
+{"ts": "2026-11-20T01:12:54Z", "event": "product_valid", "source_url": "https://www.sixmoondesigns.com/products/seam-sealing-service-lunar-orbiter", "price": "50.00", "description_status": "complete"}
+{"ts": "2026-11-20T01:12:54Z", "event": "product_valid", "source_url": "https://www.sixmoondesigns.com/products/titanium-ultralight-450ml-cup-w-lid", "price": "24.00", "description_status": "complete"}
+{"ts": "2026-11-20T01:12:54Z", "event": "product_valid", "source_url": "https://www.sixmoondesigns.com/products/lunar-orbiter-tent", "price": "425.00", "description_status": "not_provided"}
+{"ts": "2026-11-20T01:12:54Z", "event": "product_valid", "source_url": "https://www.sixmoondesigns.com/products/backpacking-laundry-bag", "price": "20.00", "description_status": "complete"}
+{"ts": "2026-11-20T01:12:54Z", "event": "product_valid", "source_url": "https://www.sixmoondesigns.com/products/grocery-go-getter", "price": "30.00", "description_status": "complete"}
+{"ts": "2026-11-20T01:12:54Z", "event": "product_valid", "source_url": "https://www.sixmoondesigns.com/products/zip-pouches", "price": "10.00", "description_status": "complete"}
+{"ts": "2026-11-20T01:12:54Z", "event": "product_valid", "source_url": "https://www.sixmoondesigns.com/products/shower-cap-pack-cover", "price": "25.00", "description_status": "complete"}
+{"ts": "2026-11-20T01:12:54Z", "event": "product_valid", "source_url": "https://www.sixmoondesigns.com/products/passport-pouch", "price": "45.00", "description_status": "complete"}
+{"ts": "2026-11-20T01:12:54Z", "event": "product_valid", "source_url": "https://www.sixmoondesigns.com/products/ul-laptop-sleeve", "price": "35.00", "description_status": "complete"}
+{"ts": "2026-11-20T01:12:54Z", "event": "product_excluded", "source_url": "https://www.sixmoondesigns.com/products/restocking-fee", "reason": "missing_primary_image"}
+{"ts": "2026-11-20T01:12:54Z", "event": "product_valid", "source_url": "https://www.sixmoondesigns.com/products/adventure-trekker-bundle", "price": "48.00", "description_status": "complete"}
+{"ts": "2026-11-20T01:12:54Z", "event": "product_valid", "source_url": "https://www.sixmoondesigns.com/products/digital-nomad-bundle", "price": "80.00", "description_status": "complete"}
+{"ts": "2026-11-20T01:12:54Z", "event": "product_valid", "source_url": "https://www.sixmoondesigns.com/products/49-inch-ultralight-tent-poles", "price": "15.00", "description_status": "not_provided"}
+{"ts": "2026-11-20T01:12:54Z", "event": "product_valid", "source_url": "https://www.sixmoondesigns.com/products/45-inch-ultralight-tent-pole", "price": "15.00", "description_status": "not_provided"}
+{"ts": "2026-11-20T01:12:54Z", "event": "product_valid", "source_url": "https://www.sixmoondesigns.com/products/ultralight-tent-footprint-groundsheet", "price": "13.00", "description_status": "not_provided"}
+{"ts": "2026-11-20T01:12:54Z", "event": "product_valid", "source_url": "https://www.sixmoondesigns.com/products/all-day-carry-travel-backpack", "price": "151.00", "description_status": "not_provided"}
+{"ts": "2026-11-20T01:12:54Z", "event": "product_valid", "source_url": "https://www.sixmoondesigns.com/products/titanium-750ml-pot-copy", "price": "27.00", "description_status": "complete"}
+{"ts": "2026-11-20T01:12:54Z", "event": "product_valid", "source_url": "https://www.sixmoondesigns.com/products/leki-womens-micro-vario-carbon", "price": "230.00", "description_status": "complete"}
+{"ts": "2026-11-20T01:12:54Z", "event": "product_valid", "source_url": "https://www.sixmoondesigns.com/products/leki-micro-vario-cor-tec-ta", "price": "180.00", "description_status": "complete"}
+{"ts": "2026-11-20T01:12:54Z", "event": "product_valid", "source_url": "https://www.sixmoondesigns.com/products/leki-womens-legacy-lite-cor-tec", "price": "100.00", "description_status": "complete"}
+{"ts": "2026-11-20T01:12:54Z", "event": "product_valid", "source_url": "https://www.sixmoondesigns.com/products/leki-legacy-lite-cor-tec", "price": "100.00", "description_status": "complete"}
+{"ts": "2026-11-20T01:12:54Z", "event": "product_valid", "source_url": "https://www.sixmoondesigns.com/products/backpacking-smd-packing-pod-xl", "price": "20.00", "description_status": "complete"}

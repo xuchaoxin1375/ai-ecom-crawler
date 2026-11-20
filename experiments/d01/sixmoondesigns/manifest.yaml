@@ -1,0 +1,241 @@
+schema_version: "1.0"
+plan_id: "sixmoondesigns-us-d01"
+plan_version: "2026.11.20-1"
+kind: "program"
+status: "verified"
+created_at: "2026-11-20T00:45:00Z"
+updated_at: "2026-11-20T01:13:33Z"
+
+site:
+  name: "Six Moon Designs"
+  entry_urls:
+    - "https://www.sixmoondesigns.com/?country=US"
+  allowed_origins:
+    - "https://www.sixmoondesigns.com"
+    - "https://sixmoondesigns.com"
+  allowed_path_prefixes:
+    - "/"
+    - "/products.json"
+    - "/products/"
+  market: "US"
+  locale: "en-US"
+  currency: "USD"
+
+scope:
+  include:
+    - "https://www.sixmoondesigns.com/products.json?limit=250&page=1&country=US"
+    - "https://www.sixmoondesigns.com/products/<handle>"
+  exclude:
+    - "/cart/"
+    - "/checkout"
+    - "/account"
+    - "/orders"
+    - "/recommendations/products"
+  default_mode: "bounded_sample"
+  max_products: 30
+  max_seconds: 600
+  notes: "First 30 products from products.json page 1 for the US market; list-level extraction only. No login, cart, checkout, account or paid access."
+
+discovery:
+  strategies:
+    - "entry_currency"
+    - "public_products_json"
+    - "product_page_spot_check"
+  entry_page: "https://www.sixmoondesigns.com/?country=US"
+  api_url: "https://www.sixmoondesigns.com/products.json?limit=250&page=1&country=US"
+  product_url_patterns:
+    - "^/products/[^/]+$"
+  url_identity: "normalized_path"
+  deduplication: "Use the products.json product order; one row per unique handle."
+  currency_evidence:
+    primary: "entry page Shopify.currency.active with ?country=US"
+    spot_check: "first product page product:price:currency and product:price:amount"
+  robots:
+    url: "https://www.sixmoondesigns.com/robots.txt"
+    policy: "Fetch robots.txt before business URLs; use only public products.json and a single product-page spot check."
+  pagination:
+    type: "products_json_page"
+    page_size: 250
+    notes: "Page 1 returned 112 products at build time; the 30-product cap is a sample, not the full site."
+
+fetch:
+  default_engine: "scrapling.FetcherSession (curl_cffi, static HTML/JSON)"
+  per_url_type:
+    entry:
+      engine: "static"
+      method: "GET"
+      follow_redirects: true
+    api:
+      engine: "static"
+      method: "GET"
+      follow_redirects: true
+    spot:
+      engine: "static"
+      method: "GET"
+      follow_redirects: true
+  rate_limit:
+    concurrency: 1
+    delay_ms: 1100
+  retry:
+    max_attempts: 3
+    backoff: "2s/4s for transport or 5xx; Retry-After for 429, capped at 60s"
+    stop_on_persistent_429: true
+    stop_on_401_403: true
+  timeout_ms: 45000
+  session:
+    reuse: "one FetcherSession for the whole run"
+    cookies_required: false
+    browser_required: false
+  stop_conditions:
+    - "HTTP 429 persists after 3 attempts or Retry-After exceeds 60s"
+    - "HTTP 401/403 on a business URL"
+    - "entry page has no Shopify.currency evidence"
+    - "spot check currency or price conflicts with products.json"
+    - "wall-clock budget of 600s is exhausted"
+
+extract:
+  source_type: "public_json"
+  fields:
+    name:
+      source: "products.json product.title"
+      required: true
+    price.amount:
+      source: "products.json variants[*].price; minimum finite positive value"
+      required: true
+      normalize: "Two-decimal amount; zero or missing prices are excluded."
+    price.currency:
+      source: "entry Shopify.currency + first product page product:price:currency"
+      required: true
+      normalize: "Uppercase ISO-4217-shaped code; never inferred from the domain or symbol."
+    primary_image_url:
+      source: "products.json product.images[0].src"
+      required: true
+      normalize: "Keep the public CDN URL; reject empty images."
+    description_html:
+      source: "products.json product.body_html"
+      required: false
+      normalize: "White-list cleaning; scripts/styles/forms/images/links removed; tables and lists retained."
+    category:
+      source: "products.json product.product_type"
+      required: false
+    brand:
+      source: "products.json product.vendor"
+      required: false
+    options:
+      source: "products.json product.options + variants option1..3"
+      required: false
+      normalize: "Union values; drop quantity and Default Title; serialize with backslash escaping."
+    source_url:
+      source: "https://www.sixmoondesigns.com/products/<handle>"
+      required: true
+
+normalize:
+  price:
+    choose: "lowest_public_current_variant_price"
+    positive_only: true
+    includes_out_of_stock_priced_variants: true
+  description:
+    mode: "clean_html_whitelist"
+    statuses:
+      - "complete"
+      - "partial"
+      - "fallback"
+      - "not_provided"
+      - "failed"
+    empty_policy: "Keep the row valid with description_html empty and status not_provided; record in quality_exceptions."
+  options:
+    exclude_quantity: true
+    strip_default_title: true
+    serialize: "Size#S|M~Color#Red|Blue with backslash escaping for \\, #, | and ~"
+  csv:
+    encoding: "utf-8"
+    columns: 9
+    formula_protection: "Prefix untrusted text cells starting with =, +, - or @ with a single quote; price_amount stays numeric."
+
+validate:
+  required_fields:
+    - "name"
+    - "price.amount"
+    - "price.currency"
+    - "primary_image_url"
+    - "source_url"
+  assertions:
+    - field: "price.amount"
+      op: ">"
+      value: 0
+    - field: "price.currency"
+      op: "matches"
+      value: "^[A-Z]{3}$"
+  description_statuses:
+    - "complete"
+    - "partial"
+    - "fallback"
+    - "not_provided"
+    - "failed"
+  excluded_reasons:
+    - "zero_or_missing_price"
+    - "missing_name"
+    - "missing_currency"
+    - "missing_primary_image"
+    - "missing_source_url"
+  metrics:
+    quality_exceptions: "Rows with non-complete description or missing optional category/brand."
+
+runtime:
+  entrypoint: "run.py"
+  language: "Python"
+  invocation: "python -m uv run --project experiments/framework-compare/scrapling python experiments/d01/sixmoondesigns/run.py --out-dir experiments/d01/sixmoondesigns --label d01-run-001"
+  context: "CLI arguments only; no build-session state, cookies or secrets."
+  output_contract:
+    - "valid.csv (9 columns)"
+    - "task-result.json (09 state/outcome/stop_reason/counts/coverage/quality_exceptions)"
+    - "run-summary.json"
+    - "diagnostics/<label>/events.ndjson"
+    - "diagnostics/<label>/excluded_products.csv"
+    - "diagnostics/<label>/failed_products.csv"
+    - "diagnostics/<label>/pending_products.csv"
+    - "diagnostics/<label>/product-audit.jsonl"
+    - "diagnostics/<label>/robots.txt"
+  idempotency_key: "task_id + plan_version + canonical source_url"
+  cancellation: "Ctrl+C closes the FetcherSession; rerun with a new label. A cancelled run is not published as FINISHED."
+  resource_cleanup: "One in-process HTTP session; no browser process."
+
+entrypoint: "run.py"
+
+compatibility:
+  os:
+    - "windows"
+    - "linux"
+    - "wsl2"
+  runtime: "python>=3.11,<3.14"
+  dependencies:
+    - "scrapling[fetchers]==0.5.1"
+    - "lxml (installed with Scrapling)"
+  browser: "none; static FetcherSession only"
+  network: "public web; environment HTTP_PROXY/HTTPS_PROXY may be present, values are injected by the environment"
+  secrets: "none required"
+  lockfile: "experiments/framework-compare/scrapling/uv.lock"
+
+evidence:
+  sample_urls:
+    - "https://www.sixmoondesigns.com/products/cnoc-curn"
+  expected:
+    - url: "https://www.sixmoondesigns.com/products/cnoc-curn"
+      name: "CNOC Curn Collapsible Cups, Pair"
+      price.amount: 18.00
+      price.currency: "USD"
+  verified_at: "2026-11-20T01:13:33Z"
+  verification_scope: "D01 S4 pilot: diagnostics/d01-run-003 (29 valid, 1 excluded restocking fee, 4 requests, 14.49s, USD, spot check 18.00 USD); stable after fixing Scrapling .text/html_content handling. Earlier runs: d01-run-001 failure evidence and d01-run-002 intermediate."
+  limitations:
+    - "List-level public JSON only; no per-product description enrichment."
+    - "products.json page 1 is a moving public list; the 30-product cap is not full-site coverage."
+    - "Description body_html can be missing; empty bodies are kept with not_provided status."
+    - "The US market must be requested explicitly; default localization can be CNY."
+
+notes:
+  - "The currency query is mandatory: products.json without ?country=US returned CNY at build time."
+  - "The spot check compares the first API product price to its product page meta; a mismatch stops the run as PLAN_ERROR."
+  - "No login, cart, checkout, account or recommendations endpoints are requested."
+  - "Do not add product-page enrichment or the remaining 82 products without a new scope decision and plan_version."
+  - "Scrapling may expose large HTML pages through html_content while .text is empty; use html_content for HTML parsing and body for robots text."
+  - "Restocking Fee is a fee, not a product; it is excluded for missing primary image and recorded in excluded_products.csv."

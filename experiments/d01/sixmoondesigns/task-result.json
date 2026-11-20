@@ -1,0 +1,223 @@
+{
+  "task_id": "d01-sixmoondesigns-d01-run-003-20261120T011333Z",
+  "plan_id": "sixmoondesigns-us-d01",
+  "plan_version": "2026.11.20-1",
+  "market": "US",
+  "locale": "en-US",
+  "state": "FINISHED",
+  "outcome": "PARTIAL",
+  "stop_reason": "BUDGET_EXHAUSTED",
+  "stop_detail": "task cap reached: processed 30 products; products.json declares 112",
+  "started_at": "2026-11-20T01:13:19Z",
+  "finished_at": "2026-11-20T01:13:33Z",
+  "counts": {
+    "discovered_urls": 33,
+    "pending_navigation_entries": 0,
+    "product_candidates": 30,
+    "pending_products": 0,
+    "in_flight_products": 0,
+    "processed_products": 30,
+    "valid_products": 29,
+    "excluded_products": 1,
+    "failed_products": 0,
+    "partial_description_products": 0,
+    "description_not_provided_products": 5
+  },
+  "coverage": {
+    "status": "PARTIAL",
+    "denominator_source": "products.json?limit=250&page=1&country=US payload count",
+    "denominator": 112,
+    "covered": 29,
+    "notes": "products.json page 1 payload; not a full-site audit. 30-product task cap."
+  },
+  "business_acceptance": {
+    "status": "NOT_REVIEWED",
+    "accepted_by": null,
+    "accepted_at": null,
+    "reason": null,
+    "scope": "bounded 30-product sixmoondesigns.com run"
+  },
+  "runtime": {
+    "llm_calls": 0,
+    "raw_pages_retained": false,
+    "browser_launched": false,
+    "http_engine": "scrapling.FetcherSession (curl_cffi, static HTML)",
+    "concurrency": 1,
+    "request_interval_seconds": 1.1,
+    "max_attempts": 3
+  },
+  "quality_exceptions": [
+    {
+      "source_url": "https://www.sixmoondesigns.com/products/cnoc-curn",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "category": "not_provided"
+      }
+    },
+    {
+      "source_url": "https://www.sixmoondesigns.com/products/cnoc-thrubottle",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "category": "not_provided"
+      }
+    },
+    {
+      "source_url": "https://www.sixmoondesigns.com/products/vecto-x-3l-water-container-28mm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "category": "not_provided"
+      }
+    },
+    {
+      "source_url": "https://www.sixmoondesigns.com/products/vecto-2l-water-container-28mm-copy",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "category": "not_provided"
+      }
+    },
+    {
+      "source_url": "https://www.sixmoondesigns.com/products/seam-sealing-service-lunar-orbiter",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "category": "not_provided"
+      }
+    },
+    {
+      "source_url": "https://www.sixmoondesigns.com/products/lunar-orbiter-tent",
+      "description_status": "not_provided",
+      "partial_reason": null,
+      "missing_reasons": {
+        "description": "not_provided"
+      }
+    },
+    {
+      "source_url": "https://www.sixmoondesigns.com/products/grocery-go-getter",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "category": "not_provided"
+      }
+    },
+    {
+      "source_url": "https://www.sixmoondesigns.com/products/zip-pouches",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "category": "not_provided"
+      }
+    },
+    {
+      "source_url": "https://www.sixmoondesigns.com/products/shower-cap-pack-cover",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "category": "not_provided"
+      }
+    },
+    {
+      "source_url": "https://www.sixmoondesigns.com/products/passport-pouch",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "category": "not_provided"
+      }
+    },
+    {
+      "source_url": "https://www.sixmoondesigns.com/products/ul-laptop-sleeve",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "category": "not_provided"
+      }
+    },
+    {
+      "source_url": "https://www.sixmoondesigns.com/products/adventure-trekker-bundle",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "category": "not_provided"
+      }
+    },
+    {
+      "source_url": "https://www.sixmoondesigns.com/products/digital-nomad-bundle",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "category": "not_provided"
+      }
+    },
+    {
+      "source_url": "https://www.sixmoondesigns.com/products/49-inch-ultralight-tent-poles",
+      "description_status": "not_provided",
+      "partial_reason": null,
+      "missing_reasons": {
+        "description": "not_provided"
+      }
+    },
+    {
+      "source_url": "https://www.sixmoondesigns.com/products/45-inch-ultralight-tent-pole",
+      "description_status": "not_provided",
+      "partial_reason": null,
+      "missing_reasons": {
+        "description": "not_provided"
+      }
+    },
+    {
+      "source_url": "https://www.sixmoondesigns.com/products/ultralight-tent-footprint-groundsheet",
+      "description_status": "not_provided",
+      "partial_reason": null,
+      "missing_reasons": {
+        "description": "not_provided"
+      }
+    },
+    {
+      "source_url": "https://www.sixmoondesigns.com/products/all-day-carry-travel-backpack",
+      "description_status": "not_provided",
+      "partial_reason": null,
+      "missing_reasons": {
+        "description": "not_provided"
+      }
+    },
+    {
+      "source_url": "https://www.sixmoondesigns.com/products/backpacking-smd-packing-pod-xl",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "category": "not_provided"
+      }
+    }
+  ],
+  "errors": [],
+  "warnings": [],
+  "limitations": [
+    "Public JSON list path only; no product-page description enrichment.",
+    "30-product cap; products.json page 1 has 112 products, not a full-site claim.",
+    "US market is requested with ?country=US; without it the storefront localizes to CNY.",
+    "Descriptions are Shopify body_html; empty bodies are recorded as not_provided, never filled with names.",
+    "No login, cart, checkout, account or paid access."
+  ],
+  "artifacts": {
+    "valid_csv": "valid.csv",
+    "run_summary": "run-summary.json",
+    "diagnostics_dir": "diagnostics/d01-run-003/"
+  },
+  "discovery": {
+    "entry_url": "https://www.sixmoondesigns.com/?country=US",
+    "api_url": "https://www.sixmoondesigns.com/products.json?limit=250&page=1&country=US",
+    "products_in_payload": 112,
+    "kept_products": 30,
+    "currency": "USD",
+    "spot_check": {
+      "url": "https://www.sixmoondesigns.com/products/cnoc-curn?country=US",
+      "status": 200,
+      "price": "18.00",
+      "currency": "USD",
+      "verified": true
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "task_id": "d01-sixmoondesigns-d01-run-003-20261120T011333Z",
+  "label": "d01-run-003",
+  "command": "experiments/d01/sixmoondesigns/run.py --out-dir experiments/d01/sixmoondesigns --label d01-run-003",
+  "python": "3.13.13",
+  "platform": "win32",
+  "proxy_env_present": false
+}

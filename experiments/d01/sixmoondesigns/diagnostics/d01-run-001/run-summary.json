@@ -1,0 +1,58 @@
+{
+  "task_id": "d01-sixmoondesigns-d01-run-001-20261120T011156Z",
+  "label": "d01-run-001",
+  "plan_id": "sixmoondesigns-us-d01",
+  "plan_version": "2026.11.20-1",
+  "run_started_at": "2026-11-20T01:11:04Z",
+  "run_finished_at": "2026-11-20T01:11:56Z",
+  "elapsed_s": 52.31,
+  "state": "FINISHED",
+  "outcome": "COMPLETE",
+  "stop_reason": "PLAN_ERROR",
+  "stop_detail": "entry page has no Shopify.currency evidence",
+  "counts": {
+    "discovered_urls": 4,
+    "pending_navigation_entries": 0,
+    "product_candidates": 0,
+    "pending_products": 0,
+    "in_flight_products": 0,
+    "processed_products": 0,
+    "valid_products": 0,
+    "excluded_products": 0,
+    "failed_products": 0,
+    "partial_description_products": 0,
+    "description_not_provided_products": 0
+  },
+  "coverage": {
+    "status": "COMPLETE",
+    "denominator_source": "products.json?limit=250&page=1&country=US payload count",
+    "denominator": 0,
+    "covered": 0,
+    "notes": "products.json page 1 payload; not a full-site audit. 30-product task cap."
+  },
+  "requests": 2,
+  "retries": 1,
+  "per_purpose": {
+    "robots": 1,
+    "entry": 1
+  },
+  "per_status": {
+    "200": 2
+  },
+  "errors": [
+    {
+      "class": "PlanError",
+      "message": "entry page has no Shopify.currency evidence"
+    }
+  ],
+  "warnings": [],
+  "discovery": {
+    "entry_url": "https://www.sixmoondesigns.com/?country=US",
+    "api_url": "https://www.sixmoondesigns.com/products.json?limit=250&page=1&country=US",
+    "products_in_payload": 0,
+    "kept_products": 0,
+    "currency": null,
+    "spot_check": {}
+  },
+  "product_audits": []
+}

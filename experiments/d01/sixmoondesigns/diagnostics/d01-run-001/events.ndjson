@@ -1,0 +1,4 @@
+{"ts": "2026-11-20T01:11:04Z", "event": "run_start", "plan_id": "sixmoondesigns-us-d01", "max_products": 30, "max_seconds": 600.0}
+{"ts": "2026-11-20T01:11:06Z", "event": "request", "purpose": "robots", "url": "https://www.sixmoondesigns.com/robots.txt", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:11:56Z", "event": "request", "purpose": "entry", "url": "https://www.sixmoondesigns.com/?country=US", "status": 200, "attempt": 2}
+{"ts": "2026-11-20T01:11:56Z", "event": "run_stop", "reason": "PLAN_ERROR", "detail": "entry page has no Shopify.currency evidence"}
