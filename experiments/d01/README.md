@@ -10,6 +10,7 @@
 | S2 `skatepro.es` | [Scrapling 试点](skatepro/README.md)，`plan_id: skatepro-es-d01` | 通过（试点） | [run-log](skatepro/run-log.md)、`valid.csv`、`task-result.json`、`diagnostics/` |
 | S4 `sixmoondesigns.com` | [Scrapling 公开 JSON 试点](sixmoondesigns/README.md)，`plan_id: sixmoondesigns-us-d01` | 通过（试点） | [run-log](sixmoondesigns/run-log.md)、`valid.csv`、`task-result.json`、`diagnostics/` |
 | S5 `shopthebulkstore.com` | [Scrapling 分类目录试点](shopthebulkstore/README.md)，`plan_id: shopthebulkstore-us-d01` | 通过（试点） | [run-log](shopthebulkstore/run-log.md)、`valid.csv`、`task-result.json`、`diagnostics/` |
+| S6 `campsaver.com` | [chrome-late 挑战站试点](campsaver/README.md)，`plan_id: campsaver-us-d01` | 通过（试点） | [run-log](campsaver/run-log.md)、[fetch](campsaver/fetch.md)、`valid.csv`、`task-result.json`、`diagnostics/` |
 
 ## 边界
 
