@@ -1,0 +1,76 @@
+schema_version: "1.1"
+rule_id: "modellbahn-breiter-sitemap-gzip-runtime"
+rule_version: "2026.11.20-1"
+kind: declarative
+status: candidate
+created_at: "2026-11-20T16:30:00Z"
+updated_at: "2026-11-20T16:30:00Z"
+
+site:
+  name: "Modellbahn Breiter"
+  entry_urls: ["https://modellbahn-breiter.de/"]
+  allowed_origins: ["https://modellbahn-breiter.de"]
+  allowed_path_prefixes: ["/"]
+  market: "DE"
+  locale: "de-DE"
+  currency: "EUR"
+
+scope:
+  include: ['/\d+/[^/]+$']
+  exclude:
+    - "/warenkorb"
+    - "/checkout"
+    - "/konto"
+    - "/navigation/"
+  max_products: 30
+  max_seconds: 120
+  notes: "P1 sitemap gzip discovery smoke: sitemap index plus one .xml.gz child; first 30 product-like URLs; no product fetch."
+
+capabilities:
+  discovery: true
+  product: false
+
+discovery:
+  sources:
+    - type: "sitemap"
+      urls: ["https://modellbahn-breiter.de/sitemap.xml"]
+      sitemap_patterns: ["sitemap-modellbahn-breiter-de-1"]
+      max_sitemaps: 1
+  product_url_patterns: ['/\d+/[^/]+$']
+  url_identity: "canonical"
+  limits:
+    max_navigation: 3
+    max_products: 30
+
+fetch:
+  default_engine: "static"
+  concurrency: 1
+  delay_ms: 1000
+  retry: {max_attempts: 2, backoff_ms: 1000}
+  timeout_ms: 60000
+  challenge: "stop_and_record"
+
+output:
+  url_list:
+    enabled: true
+    columns: ["url", "source", "status", "title"]
+    format: "csv"
+  product_csv:
+    enabled: false
+  task_result: true
+
+task_defaults:
+  max_urls: 30
+  max_products: 30
+  max_seconds: 120
+  max_attempts: 2
+  retry_backoff_ms: 1000
+  concurrency:
+    navigation: 1
+    product: 1
+
+compatibility:
+  os: ["windows", "linux", "wsl2"]
+  runtime: "python>=3.11"
+
+notes: "S? sitemap gzip validation: index 4 children, select modellbahn-breiter-de-1, decompress and take first 30 product-like URLs. Derived from docs/12."
