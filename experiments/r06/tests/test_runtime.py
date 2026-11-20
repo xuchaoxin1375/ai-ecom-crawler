@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import gzip
 import json
 import sqlite3
 import sys
@@ -11,6 +12,8 @@ import threading
 import unittest
 from contextlib import contextmanager
 from pathlib import Path
+
+import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -27,6 +30,24 @@ PRODUCT = "https://www.familidoo.fr/fr/cat/1-a.html"
 ROBOTS = "https://www.familidoo.fr/robots.txt"
 
 ROBOTS_OK = "User-agent: *\nAllow: /\n"
+SITEMAP = "https://www.familidoo.fr/sitemap-products.xml"
+SITEMAP_INDEX = "https://www.familidoo.fr/sitemap.xml"
+SITEMAP_XML = (
+    '<?xml version="1.0" encoding="UTF-8"?>'
+    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+    f"<url><loc>{PRODUCT}</loc></url>"
+    f"<url><loc>{ENTRY}</loc></url>"
+    "</urlset>"
+)
+SITEMAP_INDEX_XML = (
+    '<?xml version="1.0" encoding="UTF-8"?>'
+    '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+    f"<sitemap><loc>{SITEMAP}</loc></sitemap>"
+    "</sitemapindex>"
+)
+LISTING = "https://www.familidoo.fr/fr/list?page=1"
+PRODUCT2 = "https://www.familidoo.fr/fr/cat/2-b.html"
+PRODUCT3 = "https://www.familidoo.fr/fr/cat/3-c.html"
 ENTRY_HTML = (
     "<html><body>"
     '<a class="product_img_link" href="/fr/cat/1-a.html">Product</a>'
@@ -54,7 +75,7 @@ PRODUCT_HTML = (
 
 
 class FakeFetcher:
-    def __init__(self, pages: dict[str, tuple[int, str]]) -> None:
+    def __init__(self, pages: dict[str, tuple[int, str | bytes]]) -> None:
         self.pages = pages
         self.calls: list[str] = []
         self.requests = 0
@@ -64,7 +85,8 @@ class FakeFetcher:
         self.calls.append(url)
         self.requests += 1
         status, body = self.pages.get(url, (404, ""))
-        return FetchResult(status=status, url=url, body=body.encode("utf-8"))
+        raw = body if isinstance(body, bytes) else body.encode("utf-8")
+        return FetchResult(status=status, url=url, body=raw)
 
 
 class BlockingFetcher(FakeFetcher):
@@ -125,6 +147,27 @@ def make_task(task_type: str, task_id: str | None = None) -> Task:
 def read_csv(path: Path) -> list[list[str]]:
     with path.open(encoding="utf-8", newline="") as handle:
         return list(csv.reader(handle))
+
+
+def sources_rule(root: Path, sources: list[dict[str, object]]):
+    data = yaml.safe_load(PLAN.read_text(encoding="utf-8"))
+    data["schema_version"] = "1.1"
+    data["site"]["allowed_path_prefixes"] = ["/"]
+    data["discovery"] = {
+        "sources": sources,
+        "product_url_patterns": ["^/fr/cat/"],
+        "url_identity": "canonical",
+        "limits": {"max_navigation": 10, "max_products": 10},
+    }
+    path = root / "sources-rule.yaml"
+    path.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
+    return load_rule(path)
+
+
+def listing_html(product: str, next_href: str | None = None) -> str:
+    link = f'<a class="product_img_link" href="{product}">Product</a>'
+    nxt = f'<a rel="next" href="{next_href}">Next</a>' if next_href else ""
+    return f"<html><body>{link}{nxt}</body></html>"
 
 
 class RuleTests(unittest.TestCase):
@@ -383,6 +426,270 @@ class RobotsTests(unittest.TestCase):
             self.assertEqual(task_result["counts"]["valid_urls"], 1)
             self.assertEqual(task_result["counts"]["excluded_urls"], 0)
             self.assertFalse((root / "tasks" / task.task_id / "robots.txt").exists())
+
+
+class SitemapTests(unittest.TestCase):
+    def test_sitemap_discovery_outputs_product_urls(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = TaskStore(root / "tasks.db")
+            rule = sources_rule(root, [{"type": "sitemap", "urls": [SITEMAP]}])
+            task = make_task("discovery", "sitemap-discovery")
+            store.create_task(task)
+            fetcher = FakeFetcher({SITEMAP: (200, SITEMAP_XML)})
+            TaskRunner(
+                store, rule, task, fetcher=fetcher, out_root=root / "tasks"
+            ).run()
+            self.assertNotIn(PRODUCT, fetcher.calls)
+            result = json.loads(
+                (root / "tasks" / task.task_id / "task-result.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(result["counts"]["navigation_urls"], 1)
+            self.assertEqual(result["counts"]["url_candidates"], 1)
+            self.assertEqual(result["counts"]["valid_urls"], 1)
+            self.assertEqual(result["outcome"], "COMPLETED")
+            rows = read_csv(root / "tasks" / task.task_id / "urls.csv")
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(rows[1][0], PRODUCT)
+
+    def test_sitemap_index_follows_child(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = TaskStore(root / "tasks.db")
+            rule = sources_rule(root, [{"type": "sitemap", "urls": [SITEMAP_INDEX]}])
+            task = make_task("discovery", "sitemap-index")
+            store.create_task(task)
+            fetcher = FakeFetcher(
+                {
+                    SITEMAP_INDEX: (200, SITEMAP_INDEX_XML),
+                    SITEMAP: (200, SITEMAP_XML),
+                }
+            )
+            TaskRunner(
+                store, rule, task, fetcher=fetcher, out_root=root / "tasks"
+            ).run()
+            result = json.loads(
+                (root / "tasks" / task.task_id / "task-result.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(result["counts"]["navigation_urls"], 2)
+            self.assertEqual(result["counts"]["valid_urls"], 1)
+
+    def test_sitemap_gzip_is_decompressed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = TaskStore(root / "tasks.db")
+            rule = sources_rule(root, [{"type": "sitemap", "urls": [SITEMAP]}])
+            task = make_task("discovery", "sitemap-gzip")
+            store.create_task(task)
+            fetcher = FakeFetcher(
+                {SITEMAP: (200, gzip.compress(SITEMAP_XML.encode("utf-8")))}
+            )
+            TaskRunner(
+                store, rule, task, fetcher=fetcher, out_root=root / "tasks"
+            ).run()
+            result = json.loads(
+                (root / "tasks" / task.task_id / "task-result.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(result["counts"]["valid_urls"], 1)
+            self.assertEqual(result["outcome"], "COMPLETED")
+
+    def test_sitemap_product_task_fetches_product(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = TaskStore(root / "tasks.db")
+            rule = sources_rule(root, [{"type": "sitemap", "urls": [SITEMAP]}])
+            task = make_task("product", "sitemap-product")
+            store.create_task(task)
+            fetcher = FakeFetcher(
+                {
+                    SITEMAP: (200, SITEMAP_XML),
+                    PRODUCT: (200, PRODUCT_HTML),
+                }
+            )
+            TaskRunner(
+                store, rule, task, fetcher=fetcher, out_root=root / "tasks"
+            ).run()
+            self.assertIn(PRODUCT, fetcher.calls)
+            result = json.loads(
+                (root / "tasks" / task.task_id / "task-result.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(result["counts"]["valid_products"], 1)
+            self.assertEqual(result["outcome"], "COMPLETED")
+            rows = read_csv(root / "tasks" / task.task_id / "products.csv")
+            self.assertEqual(len(rows), 2)
+
+    def test_robots_sitemap_source_is_used(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = TaskStore(root / "tasks.db")
+            rule = sources_rule(root, [{"type": "sitemap", "robots": True}])
+            task = make_task("discovery", "sitemap-robots")
+            store.create_task(task)
+            fetcher = FakeFetcher(
+                {
+                    ROBOTS: (
+                        200,
+                        f"User-agent: *\nDisallow: /\nSitemap: {SITEMAP}\n",
+                    ),
+                    SITEMAP: (200, SITEMAP_XML),
+                }
+            )
+            TaskRunner(
+                store, rule, task, fetcher=fetcher, out_root=root / "tasks"
+            ).run()
+            result = json.loads(
+                (root / "tasks" / task.task_id / "task-result.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(result["access"]["robots_sitemaps"], [SITEMAP])
+            self.assertEqual(result["counts"]["valid_urls"], 1)
+            self.assertFalse(
+                (root / "tasks" / task.task_id / "robots.txt").exists()
+            )
+
+
+class ListingTests(unittest.TestCase):
+    def test_page_param_follows_pages(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = TaskStore(root / "tasks.db")
+            rule = sources_rule(
+                root,
+                [
+                    {
+                        "type": "listing",
+                        "url": LISTING,
+                        "product_link_selector": "a.product_img_link",
+                        "advance": {
+                            "type": "page_param",
+                            "param": "page",
+                            "max_pages": 3,
+                        },
+                    }
+                ],
+            )
+            task = make_task("discovery", "listing-pages")
+            store.create_task(task)
+            fetcher = FakeFetcher(
+                {
+                    LISTING: (200, listing_html(PRODUCT)),
+                    "https://www.familidoo.fr/fr/list?page=2": (
+                        200,
+                        listing_html(PRODUCT2),
+                    ),
+                    "https://www.familidoo.fr/fr/list?page=3": (
+                        200,
+                        listing_html(PRODUCT3),
+                    ),
+                }
+            )
+            TaskRunner(
+                store, rule, task, fetcher=fetcher, out_root=root / "tasks"
+            ).run()
+            result = json.loads(
+                (root / "tasks" / task.task_id / "task-result.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(result["counts"]["navigation_urls"], 3)
+            self.assertEqual(result["counts"]["url_candidates"], 3)
+            self.assertEqual(result["counts"]["valid_urls"], 3)
+            rows = read_csv(root / "tasks" / task.task_id / "urls.csv")
+            self.assertEqual(len(rows), 4)
+            self.assertNotIn(PRODUCT, fetcher.calls)
+
+    def test_next_link_follows_href(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = TaskStore(root / "tasks.db")
+            rule = sources_rule(
+                root,
+                [
+                    {
+                        "type": "listing",
+                        "url": LISTING,
+                        "product_link_selector": "a.product_img_link",
+                        "advance": {
+                            "type": "next_link",
+                            "selector": "a[rel=next]",
+                            "max_pages": 5,
+                        },
+                    }
+                ],
+            )
+            task = make_task("discovery", "listing-next")
+            store.create_task(task)
+            fetcher = FakeFetcher(
+                {
+                    LISTING: (200, listing_html(PRODUCT, "/fr/list?page=2")),
+                    "https://www.familidoo.fr/fr/list?page=2": (
+                        200,
+                        listing_html(PRODUCT2),
+                    ),
+                }
+            )
+            TaskRunner(
+                store, rule, task, fetcher=fetcher, out_root=root / "tasks"
+            ).run()
+            result = json.loads(
+                (root / "tasks" / task.task_id / "task-result.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(result["counts"]["navigation_urls"], 2)
+            self.assertEqual(result["counts"]["valid_urls"], 2)
+
+    def test_listing_product_task_fetches_products(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = TaskStore(root / "tasks.db")
+            rule = sources_rule(
+                root,
+                [
+                    {
+                        "type": "listing",
+                        "url": LISTING,
+                        "product_link_selector": "a.product_img_link",
+                        "advance": {
+                            "type": "page_param",
+                            "param": "page",
+                            "max_pages": 2,
+                        },
+                    }
+                ],
+            )
+            task = make_task("product", "listing-product")
+            store.create_task(task)
+            fetcher = FakeFetcher(
+                {
+                    LISTING: (200, listing_html(PRODUCT)),
+                    "https://www.familidoo.fr/fr/list?page=2": (
+                        200,
+                        listing_html(PRODUCT2),
+                    ),
+                    PRODUCT: (200, PRODUCT_HTML),
+                    PRODUCT2: (200, PRODUCT_HTML.replace(PRODUCT, PRODUCT2)),
+                }
+            )
+            TaskRunner(
+                store, rule, task, fetcher=fetcher, out_root=root / "tasks"
+            ).run()
+            result = json.loads(
+                (root / "tasks" / task.task_id / "task-result.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(result["counts"]["valid_products"], 2)
+            self.assertEqual(result["outcome"], "COMPLETED")
 
 
 class ProductTests(unittest.TestCase):
