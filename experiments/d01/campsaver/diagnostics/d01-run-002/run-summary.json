@@ -1,0 +1,778 @@
+{
+  "task_id": "d01-campsaver-d01-run-002-20261120T015135Z",
+  "label": "d01-run-002",
+  "plan_id": "campsaver-us-d01",
+  "plan_version": "2026.11.20-1",
+  "run_started_at": "2026-11-20T01:51:35Z",
+  "run_finished_at": "2026-11-20T01:51:35Z",
+  "elapsed_s": 0.5,
+  "state": "FINISHED",
+  "outcome": "PARTIAL",
+  "stop_reason": "BUDGET_EXHAUSTED",
+  "counts": {
+    "discovered_urls": 31,
+    "pending_navigation_entries": 0,
+    "product_candidates": 30,
+    "pending_products": 0,
+    "in_flight_products": 0,
+    "processed_products": 30,
+    "valid_products": 30,
+    "excluded_products": 0,
+    "failed_products": 0,
+    "partial_description_products": 0,
+    "description_not_provided_products": 0,
+    "description_fallback_products": 0
+  },
+  "coverage": {
+    "status": "PARTIAL",
+    "denominator_source": "Sleeping Pads category page title 'TOP 144 Sleeping Pads Products in 2026'",
+    "denominator": 144,
+    "covered": 30,
+    "notes": "Sleeping Pads category page 1; bounded 30-product sample. The category page title said 144 products; this is not a full-site claim."
+  },
+  "requests": 32,
+  "errors": [],
+  "warnings": [],
+  "discovery": {
+    "entry_url": "https://www.campsaver.com/sleeping-pads.html",
+    "category_total": 144,
+    "category_page_cards": 72,
+    "selected_products": 30,
+    "batch_sizes": [
+      3,
+      10,
+      10,
+      7
+    ],
+    "product_sample_url": "https://www.campsaver.com/thermarest-neoair-xtherm-nxt-max-sleeping-pad.html",
+    "target_requests": 32
+  },
+  "product_audits": [
+    {
+      "source_url": "https://www.campsaver.com/big-agnes-twistercane-bio-foam-sleeping-pad.html",
+      "name": "Big Agnes TwisterCane Bio Foam Sleeping Pad",
+      "price_amount": "47.49",
+      "price_currency": "USD",
+      "description_status": "complete",
+      "description_chars": 849,
+      "category": "Big Agnes Base Camping Pads",
+      "brand": "Big Agnes",
+      "attributes": "Condition#Open Box, Dealer DMO|New",
+      "availability": [
+        "https://schema.org/InStock"
+      ],
+      "offer_count": 2,
+      "offer_conditions": [
+        "https://schema.org/NewCondition"
+      ],
+      "variant_count": 2,
+      "missing_reasons": {},
+      "outcome": "valid",
+      "title": "Big Agnes TwisterCane Bio Foam Sleeping Pad — CampSaver",
+      "batch_dir": "s6-batch-test",
+      "jsonld_products": 1
+    },
+    {
+      "source_url": "https://www.campsaver.com/big-agnes-twistercane-bio-foam-hiking-seat.html",
+      "name": "Big Agnes TwisterCane BioFoam Hiking Seat",
+      "price_amount": "24.89",
+      "price_currency": "USD",
+      "description_status": "complete",
+      "description_chars": 696,
+      "category": "Big Agnes Pad Accessories",
+      "brand": "Big Agnes",
+      "attributes": "",
+      "availability": [
+        "https://schema.org/InStock"
+      ],
+      "offer_count": 1,
+      "offer_conditions": [
+        "https://schema.org/NewCondition"
+      ],
+      "variant_count": 0,
+      "missing_reasons": {},
+      "outcome": "valid",
+      "title": "Big Agnes TwisterCane BioFoam Hiking Seat PTCBFHS21 — CampSaver",
+      "batch_dir": "s6-batch-test",
+      "jsonld_products": 1
+    },
+    {
+      "source_url": "https://www.campsaver.com/nemo-equipment-tensor-extreme-conditions-sleeping-pad.html",
+      "name": "NEMO Equipment Tensor Extreme Conditions Sleeping Pad",
+      "price_amount": "189.49",
+      "price_currency": "USD",
+      "description_status": "complete",
+      "description_chars": 2739,
+      "category": "Nemo Base Camping Pads",
+      "brand": "NEMO Equipment",
+      "attributes": "Height#3.5 in~Condition#Open Box, Dealer DMO|New~Length#72 in|76 in~Width#20 in|25 in~Weight#1.125 lb|1.4 lb|1.06 lb|1.3 lb~Sleeping Pad Size#Regular|Regular Wide|Regular Mummy|Long Wide~Packed Size#10 x 4 in|10.5 x 4.5 in~Bag Shape#Rectangle|Mummy",
+      "availability": [
+        "https://schema.org/InStock"
+      ],
+      "offer_count": 5,
+      "offer_conditions": [
+        "https://schema.org/NewCondition"
+      ],
+      "variant_count": 5,
+      "missing_reasons": {},
+      "outcome": "valid",
+      "title": "NEMO Equipment Tensor Extreme Conditions Sleeping Pad & Free 2 Day Shipping — CampSaver",
+      "batch_dir": "s6-batch-test",
+      "jsonld_products": 1
+    },
+    {
+      "source_url": "https://www.campsaver.com/big-agnes-rapide-sl-insulated-tent-tapered-floor-pad.html",
+      "name": "Big Agnes Rapide SL Insulated Tent Floor Pad",
+      "price_amount": "339.95",
+      "price_currency": "USD",
+      "description_status": "complete",
+      "description_chars": 1271,
+      "category": "Big Agnes Base Camping Pads",
+      "brand": "Big Agnes",
+      "attributes": "",
+      "availability": [
+        "https://schema.org/InStock"
+      ],
+      "offer_count": 1,
+      "offer_conditions": [
+        "https://schema.org/NewCondition"
+      ],
+      "variant_count": 0,
+      "missing_reasons": {},
+      "outcome": "valid",
+      "title": "Big Agnes Rapide SL Insulated Tent Floor Pad & Free 2 Day Shipping — CampSaver",
+      "batch_dir": "s6-batch-002",
+      "jsonld_products": 1
+    },
+    {
+      "source_url": "https://www.campsaver.com/big-agnes-rapide-sl-insulated-sleeping-pad.html",
+      "name": "Big Agnes Rapide SL Insulated Sleeping Pad",
+      "price_amount": "146.03",
+      "price_currency": "USD",
+      "description_status": "complete",
+      "description_chars": 2202,
+      "category": "Big Agnes Base Camping Pads",
+      "brand": "Big Agnes",
+      "attributes": "Color#Orange|Zirkel Alpenglow~Length#78 in|72 in|66 in~Width#25 in|20 in|40 in~Weight#26 oz|19 oz|18 oz|24 oz|37 oz~Sleeping Pad Size#Long Wide|Long|Regular|Petite|Regular Wide|Double Wide~Packed Size#5.5x8.5 in|4.8x7.5 in|4.5x8 in|4.5x7.5 in|4.5x7 in|5x8.5 in|5x7 in|65.5x10.5 in~Style#Air Pad",
+      "availability": [
+        "https://schema.org/InStock"
+      ],
+      "offer_count": 8,
+      "offer_conditions": [
+        "https://schema.org/NewCondition"
+      ],
+      "variant_count": 8,
+      "missing_reasons": {},
+      "outcome": "valid",
+      "title": "Big Agnes Rapide SL Insulated Sleeping Pad & Free 2 Day Shipping — CampSaver",
+      "batch_dir": "s6-batch-002",
+      "jsonld_products": 1
+    },
+    {
+      "source_url": "https://www.campsaver.com/exped-megamat-duo-queen.html",
+      "name": "Exped MegaMat Duo QUEEN",
+      "price_amount": "549.95",
+      "price_currency": "USD",
+      "description_status": "complete",
+      "description_chars": 2722,
+      "category": "Exped Sleeping Pads",
+      "brand": "Exped",
+      "attributes": "",
+      "availability": [
+        "https://schema.org/InStock"
+      ],
+      "offer_count": 1,
+      "offer_conditions": [
+        "https://schema.org/NewCondition"
+      ],
+      "variant_count": 0,
+      "missing_reasons": {},
+      "outcome": "valid",
+      "title": "Exped MegaMat Duo QUEEN 7640277846449 with Free S&H — CampSaver",
+      "batch_dir": "s6-batch-002",
+      "jsonld_products": 1
+    },
+    {
+      "source_url": "https://www.campsaver.com/nemo-equipment-tensor-elite-ultralight-insulated-sleeping-pad.html",
+      "name": "NEMO Equipment Tensor Elite Ultralight Insulated Sleeping Pad",
+      "price_amount": "219.95",
+      "price_currency": "USD",
+      "description_status": "complete",
+      "description_chars": 1292,
+      "category": "Nemo Base Camping Pads",
+      "brand": "NEMO Equipment",
+      "attributes": "Length#72 in|63 in~Weight#8.5 oz|7.6 oz~Sleeping Pad Size#Regular|Short",
+      "availability": [
+        "https://schema.org/InStock",
+        "https://schema.org/BackOrder"
+      ],
+      "offer_count": 2,
+      "offer_conditions": [
+        "https://schema.org/NewCondition"
+      ],
+      "variant_count": 2,
+      "missing_reasons": {},
+      "outcome": "valid",
+      "title": "NEMO Equipment Tensor Elite Ultralight Insulated Sleeping Pad with Free S&H — CampSaver",
+      "batch_dir": "s6-batch-002",
+      "jsonld_products": 1
+    },
+    {
+      "source_url": "https://www.campsaver.com/nemo-equipment-tensor-all-season-sleeping-pad.html",
+      "name": "NEMO Equipment Tensor All-Season Sleeping Pad",
+      "price_amount": "195.12",
+      "price_currency": "USD",
+      "description_status": "complete",
+      "description_chars": 2311,
+      "category": "Nemo Sleeping Pads",
+      "brand": "NEMO Equipment",
+      "attributes": "Height#3.5 in~Style#Ultralight~Sleeping Pad Size#Long|Regular|Regular Wide~Sleeping Pad Type#Rectangular|Mummy",
+      "availability": [
+        "https://schema.org/InStock"
+      ],
+      "offer_count": 4,
+      "offer_conditions": [
+        "https://schema.org/NewCondition"
+      ],
+      "variant_count": 4,
+      "missing_reasons": {},
+      "outcome": "valid",
+      "title": "NEMO Equipment Tensor All-Season Sleeping Pad & Free 2 Day Shipping — CampSaver",
+      "batch_dir": "s6-batch-002",
+      "jsonld_products": 1
+    },
+    {
+      "source_url": "https://www.campsaver.com/big-agnes-zoom-ul-insulated-pad.html",
+      "name": "Big Agnes Zoom UL Insulated Sleeping Pad",
+      "price_amount": "140.54",
+      "price_currency": "USD",
+      "description_status": "complete",
+      "description_chars": 1783,
+      "category": "Big Agnes Base Camping Pads",
+      "brand": "Big Agnes",
+      "attributes": "Height#72 in|78 in~Length#72 in|78 in~Width#20 in|25 in~Weight#14 oz|17 oz|18 oz~Sleeping Pad Size#Regular|Regular Wide|Long Wide",
+      "availability": [
+        "https://schema.org/InStock"
+      ],
+      "offer_count": 3,
+      "offer_conditions": [
+        "https://schema.org/NewCondition"
+      ],
+      "variant_count": 3,
+      "missing_reasons": {},
+      "outcome": "valid",
+      "title": "Big Agnes Zoom UL Insulated Sleeping Pad & Free 2 Day Shipping — CampSaver",
+      "batch_dir": "s6-batch-002",
+      "jsonld_products": 1
+    },
+    {
+      "source_url": "https://www.campsaver.com/big-agnes-campmeister-deluxe-insulated-sleeping-pad.html",
+      "name": "Big Agnes Campmeister Deluxe Insulated Sleeping Pad",
+      "price_amount": "269.95",
+      "price_currency": "USD",
+      "description_status": "complete",
+      "description_chars": 2169,
+      "category": "Big Agnes Base Camping Pads",
+      "brand": "Big Agnes",
+      "attributes": "Length#72 in|78 in~Width#25 in|30 in~Weight#32 oz|35 oz|40 oz~Sleeping Pad Size#Regular Wide|Extra Wide Long~Packed Size#5.5x8 in|5.5x9 in|6.5x11 in",
+      "availability": [
+        "https://schema.org/InStock"
+      ],
+      "offer_count": 3,
+      "offer_conditions": [
+        "https://schema.org/NewCondition"
+      ],
+      "variant_count": 3,
+      "missing_reasons": {},
+      "outcome": "valid",
+      "title": "Big Agnes Campmeister Deluxe Insulated Sleeping Pad & Free 2 Day Shipping — CampSaver",
+      "batch_dir": "s6-batch-002",
+      "jsonld_products": 1
+    },
+    {
+      "source_url": "https://www.campsaver.com/thermarest-neoair-xlite-nxt-max-sleeping-pad.html",
+      "name": "Therm-a-Rest NeoAir XLite NXT MAX Sleeping Pad",
+      "price_amount": "219.95",
+      "price_currency": "USD",
+      "description_status": "complete",
+      "description_chars": 2079,
+      "category": "Thermarest Backpacking Pads",
+      "brand": "Therm-a-Rest",
+      "attributes": "Length#72 in|77 in~Weight#1.3 lb|1.4 lb~Sleeping Pad Size#Regular Wide|Large",
+      "availability": [
+        "https://schema.org/InStock"
+      ],
+      "offer_count": 2,
+      "offer_conditions": [
+        "https://schema.org/NewCondition"
+      ],
+      "variant_count": 2,
+      "missing_reasons": {},
+      "outcome": "valid",
+      "title": "Therm-a-Rest NeoAir XLite NXT MAX Sleeping Pad & Free 2 Day Shipping — CampSaver",
+      "batch_dir": "s6-batch-002",
+      "jsonld_products": 1
+    },
+    {
+      "source_url": "https://www.campsaver.com/thermarest-u24-neoair-xtherm-nxt-max-pad.html",
+      "name": "Therm-a-Rest NeoLoft Sleeping Pad",
+      "price_amount": "249.95",
+      "price_currency": "USD",
+      "description_status": "complete",
+      "description_chars": 3486,
+      "category": "Thermarest Base Camping Pads",
+      "brand": "Therm-a-Rest",
+      "attributes": "Length#73 in|78 in~Width#22 in|26 in~Weight#710 g|850 g|910 g~Sleeping Pad Size#Regular|Regular Wide|Large~Packed Size#9.5 x 5.7 in|11.5 x 6 in~Sleeping Pad Type#Air Pad|Inflatable Sleeping Pad~Style#Inflatable",
+      "availability": [
+        "https://schema.org/InStock"
+      ],
+      "offer_count": 3,
+      "offer_conditions": [
+        "https://schema.org/NewCondition"
+      ],
+      "variant_count": 3,
+      "missing_reasons": {},
+      "outcome": "valid",
+      "title": "Therm-a-Rest NeoLoft Sleeping Pad with Free S&H — CampSaver",
+      "batch_dir": "s6-batch-002",
+      "jsonld_products": 1
+    },
+    {
+      "source_url": "https://www.campsaver.com/big-agnes-circle-back-sleeping-pad.html",
+      "name": "Big Agnes Circle Back Sleeping Pad",
+      "price_amount": "169.95",
+      "price_currency": "USD",
+      "description_status": "complete",
+      "description_chars": 384,
+      "category": "Big Agnes Base Camping Pads",
+      "brand": "Big Agnes",
+      "attributes": "Length#78 in|72 in~Weight#36 oz|34 oz~Sleeping Pad Size#Wide|Long|Regular Wide",
+      "availability": [
+        "https://schema.org/InStock"
+      ],
+      "offer_count": 2,
+      "offer_conditions": [
+        "https://schema.org/NewCondition"
+      ],
+      "variant_count": 2,
+      "missing_reasons": {},
+      "outcome": "valid",
+      "title": "Big Agnes Circle Back Sleeping Pad & Free 2 Day Shipping — CampSaver",
+      "batch_dir": "s6-batch-002",
+      "jsonld_products": 1
+    },
+    {
+      "source_url": "https://www.campsaver.com/exped-luxemat-auto-sleeping-pad.html",
+      "name": "Exped LuxeMat Auto Sleeping Pad",
+      "price_amount": "434.96",
+      "price_currency": "USD",
+      "description_status": "complete",
+      "description_chars": 1804,
+      "category": "Exped Sleeping Pads",
+      "brand": "Exped",
+      "attributes": "",
+      "availability": [
+        "https://schema.org/InStock"
+      ],
+      "offer_count": 1,
+      "offer_conditions": [
+        "https://schema.org/NewCondition"
+      ],
+      "variant_count": 0,
+      "missing_reasons": {},
+      "outcome": "valid",
+      "title": "Exped LuxeMat Auto Sleeping Pad 7640423641683 , 25% Off with Free S&H — CampSaver",
+      "batch_dir": "s6-batch-003",
+      "jsonld_products": 1
+    },
+    {
+      "source_url": "https://www.campsaver.com/big-agnes-captain-comfort-deluxe-camp-sleeping-pad.html",
+      "name": "Big Agnes Captain Comfort Deluxe Camp Sleeping Pad",
+      "price_amount": "278.10",
+      "price_currency": "USD",
+      "description_status": "complete",
+      "description_chars": 1578,
+      "category": "Big Agnes Base Camping Pads",
+      "brand": "Big Agnes",
+      "attributes": "Color#Gibralter Sea|Blue~Height#5 in~Width#41 in|52 in|23 in~Packed Size#28 x 69 cm|11 x 27 in|11x17 in~Fabric/Material#75D Polyester~Length#78 in~Style#Self-inflating foam-core|Extra Wide Long~Weight#6.6 lb~Sleeping Pad Size#Double Wide|Extra Wide Long~Bag Shape#Rectangular|Rectangle",
+      "availability": [
+        "https://schema.org/InStock",
+        "https://schema.org/BackOrder"
+      ],
+      "offer_count": 3,
+      "offer_conditions": [
+        "https://schema.org/NewCondition"
+      ],
+      "variant_count": 3,
+      "missing_reasons": {},
+      "outcome": "valid",
+      "title": "Big Agnes Captain Comfort Deluxe Camp Sleeping Pad with Free S&H — CampSaver",
+      "batch_dir": "s6-batch-003",
+      "jsonld_products": 1
+    },
+    {
+      "source_url": "https://www.campsaver.com/exped-deepsleep-duo-mat-cyldr.html",
+      "name": "Exped DeepSleep Duo Mat",
+      "price_amount": "224.96",
+      "price_currency": "USD",
+      "description_status": "complete",
+      "description_chars": 2333,
+      "category": "Exped Sleeping Pads",
+      "brand": "Exped",
+      "attributes": "",
+      "availability": [
+        "https://schema.org/InStock"
+      ],
+      "offer_count": 1,
+      "offer_conditions": [
+        "https://schema.org/NewCondition"
+      ],
+      "variant_count": 0,
+      "missing_reasons": {},
+      "outcome": "valid",
+      "title": "Exped DeepSleep Duo Mat 7640277846548 , 19% Off with Free S&H — CampSaver",
+      "batch_dir": "s6-batch-003",
+      "jsonld_products": 1
+    },
+    {
+      "source_url": "https://www.campsaver.com/nemo-equipment-tensor-trail-sleeping-pad.html",
+      "name": "NEMO Equipment Tensor Trail Sleeping Pad",
+      "price_amount": "125.99",
+      "price_currency": "USD",
+      "description_status": "complete",
+      "description_chars": 1911,
+      "category": "Nemo Sleeping Pads",
+      "brand": "NEMO Equipment",
+      "attributes": "Sleeping Pad Size#Regular Wide|Regular|Long~Sleeping Pad Type#Rectangular|Mummy",
+      "availability": [
+        "https://schema.org/InStock",
+        "https://schema.org/BackOrder"
+      ],
+      "offer_count": 3,
+      "offer_conditions": [
+        "https://schema.org/NewCondition"
+      ],
+      "variant_count": 3,
+      "missing_reasons": {},
+      "outcome": "valid",
+      "title": "NEMO Equipment Tensor Trail Sleeping Pad , Up to 34% Off with Free S&H — CampSaver",
+      "batch_dir": "s6-batch-003",
+      "jsonld_products": 1
+    },
+    {
+      "source_url": "https://www.campsaver.com/thermarest-thermarest-luxurymap-sleeping-bag.html",
+      "name": "Therm-a-Rest Luxury Map Sleeping Pad",
+      "price_amount": "189.95",
+      "price_currency": "USD",
+      "description_status": "complete",
+      "description_chars": 1532,
+      "category": "Thermarest Sleeping Pads",
+      "brand": "Therm-a-Rest",
+      "attributes": "Length#77 in|72 in~Width#30 in|20 in~Weight#5.1 lb|3.3 lb~Sleeping Pad Size#Extra Large|Regular",
+      "availability": [
+        "https://schema.org/InStock",
+        "https://schema.org/BackOrder"
+      ],
+      "offer_count": 2,
+      "offer_conditions": [
+        "https://schema.org/NewCondition"
+      ],
+      "variant_count": 2,
+      "missing_reasons": {},
+      "outcome": "valid",
+      "title": "Therm-a-Rest Luxury Map Sleeping Pad with Free S&H — CampSaver",
+      "batch_dir": "s6-batch-003",
+      "jsonld_products": 1
+    },
+    {
+      "source_url": "https://www.campsaver.com/thermarest-2025-trail-pro-max-pad.html",
+      "name": "Therm-a-Rest Trail Pro MAX Sleeping Pad",
+      "price_amount": "122.49",
+      "price_currency": "USD",
+      "description_status": "complete",
+      "description_chars": 2396,
+      "category": "Thermarest Base Camping Pads",
+      "brand": "Therm-a-Rest",
+      "attributes": "Color#Campanula|Tide~Condition#Open Box, Dealer DMO|New~Length#77 in|72 in~Weight#1.24 kg|1.16 kg~Sleeping Pad Size#Large|Regular Wide~Bag Shape#Rectangle",
+      "availability": [
+        "https://schema.org/InStock"
+      ],
+      "offer_count": 4,
+      "offer_conditions": [
+        "https://schema.org/NewCondition"
+      ],
+      "variant_count": 4,
+      "missing_reasons": {},
+      "outcome": "valid",
+      "title": "Therm-a-Rest Trail Pro MAX Sleeping Pad with Free S&H — CampSaver",
+      "batch_dir": "s6-batch-003",
+      "jsonld_products": 1
+    },
+    {
+      "source_url": "https://www.campsaver.com/nemo-astro-insulated-sleeping-pad-jbnxh.html",
+      "name": "NEMO Equipment Astro Insulated Sleeping Pad",
+      "price_amount": "140.49",
+      "price_currency": "USD",
+      "description_status": "complete",
+      "description_chars": 1944,
+      "category": "Nemo Base Camping Pads",
+      "brand": "NEMO Equipment",
+      "attributes": "Condition#Open Box, Dealer DMO|New~Length#72 in|76 in~Weight#1.1 lb|2.1 lb~Sleeping Pad Size#Regular|Long Wide~Packed Size#8.5 x 4.5 in|9.5 x 4.5 in",
+      "availability": [
+        "https://schema.org/InStock"
+      ],
+      "offer_count": 4,
+      "offer_conditions": [
+        "https://schema.org/NewCondition"
+      ],
+      "variant_count": 4,
+      "missing_reasons": {},
+      "outcome": "valid",
+      "title": "NEMO Equipment Astro Insulated Sleeping Pad with Free S&H — CampSaver",
+      "batch_dir": "s6-batch-003",
+      "jsonld_products": 1
+    },
+    {
+      "source_url": "https://www.campsaver.com/big-agnes-divide-insulated-sleeping-pad.html",
+      "name": "Big Agnes Divide Insulated Sleeping Pad",
+      "price_amount": "103.20",
+      "price_currency": "USD",
+      "description_status": "complete",
+      "description_chars": 1696,
+      "category": "Big Agnes Base Camping Pads",
+      "brand": "Big Agnes",
+      "attributes": "Height#78 in|66 in|72 in~Condition#Open Box, Dealer DMO|New~Length#25 in|20 in|50 in~Sleeping Pad Size#Long Wide|Petite|Regular|Regular Wide|Double Wide",
+      "availability": [
+        "https://schema.org/InStock"
+      ],
+      "offer_count": 6,
+      "offer_conditions": [
+        "https://schema.org/NewCondition"
+      ],
+      "variant_count": 6,
+      "missing_reasons": {},
+      "outcome": "valid",
+      "title": "Big Agnes Divide Insulated Sleeping Pad & Free 2 Day Shipping — CampSaver",
+      "batch_dir": "s6-batch-003",
+      "jsonld_products": 1
+    },
+    {
+      "source_url": "https://www.campsaver.com/thermarest-neoair-xtherm-nxt-sleeping-pad.html",
+      "name": "Therm-a-Rest NeoAir XTherm NXT Sleeping Pad",
+      "price_amount": "229.95",
+      "price_currency": "USD",
+      "description_status": "complete",
+      "description_chars": 1557,
+      "category": "Thermarest Backpacking Pads",
+      "brand": "Therm-a-Rest",
+      "attributes": "Length#72 in|77 in~Sleeping Pad Size#Regular|Regular Wide|Large~Packed Size#9x4.5 in|11x5 in",
+      "availability": [
+        "https://schema.org/InStock",
+        "https://schema.org/BackOrder"
+      ],
+      "offer_count": 3,
+      "offer_conditions": [
+        "https://schema.org/NewCondition"
+      ],
+      "variant_count": 3,
+      "missing_reasons": {},
+      "outcome": "valid",
+      "title": "Therm-a-Rest NeoAir XTherm NXT Sleeping Pad with Free S&H — CampSaver",
+      "batch_dir": "s6-batch-003",
+      "jsonld_products": 1
+    },
+    {
+      "source_url": "https://www.campsaver.com/nemo-astro-sleeping-pad.html",
+      "name": "NEMO Equipment Astro Sleeping Pad",
+      "price_amount": "129.95",
+      "price_currency": "USD",
+      "description_status": "complete",
+      "description_chars": 1478,
+      "category": "Nemo Base Camping Pads",
+      "brand": "NEMO Equipment",
+      "attributes": "Length#72 in|76 in~Weight#1.25 lb~Sleeping Pad Size#Regular|Long Wide",
+      "availability": [
+        "https://schema.org/InStock"
+      ],
+      "offer_count": 2,
+      "offer_conditions": [
+        "https://schema.org/NewCondition"
+      ],
+      "variant_count": 2,
+      "missing_reasons": {},
+      "outcome": "valid",
+      "title": "NEMO Equipment Astro Sleeping Pad with Free S&H — CampSaver",
+      "batch_dir": "s6-batch-003",
+      "jsonld_products": 1
+    },
+    {
+      "source_url": "https://www.campsaver.com/exped-ultra-6-5r-sleeping-pad.html",
+      "name": "Exped Ultra 6.5R Sleeping Pad",
+      "price_amount": "149.96",
+      "price_currency": "USD",
+      "description_status": "complete",
+      "description_chars": 1744,
+      "category": "Exped Sleeping Pads",
+      "brand": "Exped",
+      "attributes": "Fabric/Material#Recycled 20 D Ripstop Polyester~Length#72 in|183 cm|197 cm~Weight#12.5 oz|540 g|590 g~Sleeping Pad Size#Medium|Medium Wide|Long Wide",
+      "availability": [
+        "https://schema.org/InStock",
+        "https://schema.org/BackOrder"
+      ],
+      "offer_count": 3,
+      "offer_conditions": [
+        "https://schema.org/NewCondition"
+      ],
+      "variant_count": 3,
+      "missing_reasons": {},
+      "outcome": "valid",
+      "title": "Exped Ultra 6.5R Sleeping Pad , Up to 25% Off with Free S&H — CampSaver",
+      "batch_dir": "s6-batch-004",
+      "jsonld_products": 1
+    },
+    {
+      "source_url": "https://www.campsaver.com/exped-ultra-7r-mummy-sleeping-mat.html",
+      "name": "Exped Ultra 7R Mummy Sleeping Mat",
+      "price_amount": "159.99",
+      "price_currency": "USD",
+      "description_status": "complete",
+      "description_chars": 1149,
+      "category": "Exped Base Camping Pads",
+      "brand": "Exped",
+      "attributes": "Color#Charcoal|Lichen~Length#183 cm|197 cm~Weight#655 g|690 g~Sleeping Pad Size#Medium Wide|Long Wide",
+      "availability": [
+        "https://schema.org/InStock"
+      ],
+      "offer_count": 2,
+      "offer_conditions": [
+        "https://schema.org/NewCondition"
+      ],
+      "variant_count": 2,
+      "missing_reasons": {},
+      "outcome": "valid",
+      "title": "Exped Ultra 7R Mummy Sleeping Mat , Up to 27% Off with Free S&H — CampSaver",
+      "batch_dir": "s6-batch-004",
+      "jsonld_products": 1
+    },
+    {
+      "source_url": "https://www.campsaver.com/therm-a-rest-trail-pro-sleep-pad.html",
+      "name": "Therm-a-Rest Trail Pro Sleeping Pad",
+      "price_amount": "159.95",
+      "price_currency": "USD",
+      "description_status": "complete",
+      "description_chars": 2167,
+      "category": "Thermarest Backpacking Pads",
+      "brand": "Therm-a-Rest",
+      "attributes": "Sleeping Pad Size#Regular|Regular Wide",
+      "availability": [
+        "https://schema.org/InStock"
+      ],
+      "offer_count": 2,
+      "offer_conditions": [
+        "https://schema.org/NewCondition"
+      ],
+      "variant_count": 2,
+      "missing_reasons": {},
+      "outcome": "valid",
+      "title": "Therm-a-Rest Trail Pro Sleeping Pad with Free S&H — CampSaver",
+      "batch_dir": "s6-batch-004",
+      "jsonld_products": 1
+    },
+    {
+      "source_url": "https://www.campsaver.com/exped-megamat-duo-gxyic.html",
+      "name": "Exped MegaMat Duo",
+      "price_amount": "299.96",
+      "price_currency": "USD",
+      "description_status": "complete",
+      "description_chars": 2675,
+      "category": "Exped Sleeping Pads",
+      "brand": "Exped",
+      "attributes": "",
+      "availability": [
+        "https://schema.org/InStock"
+      ],
+      "offer_count": 1,
+      "offer_conditions": [
+        "https://schema.org/NewCondition"
+      ],
+      "variant_count": 0,
+      "missing_reasons": {},
+      "outcome": "valid",
+      "title": "Exped MegaMat Duo 7640277846425 , 18% Off with Free S&H — CampSaver",
+      "batch_dir": "s6-batch-004",
+      "jsonld_products": 1
+    },
+    {
+      "source_url": "https://www.campsaver.com/exped-ultra-8r-sleeping-pad.html",
+      "name": "Exped Ultra 8R Sleeping Pad",
+      "price_amount": "172.46",
+      "price_currency": "USD",
+      "description_status": "complete",
+      "description_chars": 1762,
+      "category": "Exped Sleeping Pads",
+      "brand": "Exped",
+      "attributes": "Fabric/Material#Recycled 20 D Ripstop Polyester~Length#72 in|77.6 in|183 cm~Sleeping Pad Size#Medium Wide|Long Wide|Medium~Weight#26 oz|560 g",
+      "availability": [
+        "https://schema.org/InStock"
+      ],
+      "offer_count": 3,
+      "offer_conditions": [
+        "https://schema.org/NewCondition"
+      ],
+      "variant_count": 3,
+      "missing_reasons": {},
+      "outcome": "valid",
+      "title": "Exped Ultra 8R Sleeping Pad , Up to 25% Off with Free S&H — CampSaver",
+      "batch_dir": "s6-batch-004",
+      "jsonld_products": 1
+    },
+    {
+      "source_url": "https://www.campsaver.com/exped-deepsleep-duo-mat.html",
+      "name": "Exped DeepSleep Duo+ Mat",
+      "price_amount": "243.71",
+      "price_currency": "USD",
+      "description_status": "complete",
+      "description_chars": 2409,
+      "category": "Exped Sleeping Pads",
+      "brand": "Exped",
+      "attributes": "",
+      "availability": [
+        "https://schema.org/InStock"
+      ],
+      "offer_count": 1,
+      "offer_conditions": [
+        "https://schema.org/NewCondition"
+      ],
+      "variant_count": 0,
+      "missing_reasons": {},
+      "outcome": "valid",
+      "title": "Exped DeepSleep Duo+ Mat 7640277846555 , 18% Off with Free S&H — CampSaver",
+      "batch_dir": "s6-batch-004",
+      "jsonld_products": 1
+    },
+    {
+      "source_url": "https://www.campsaver.com/exped-megamat-duo.html",
+      "name": "Exped MegaMat Duo+",
+      "price_amount": "337.46",
+      "price_currency": "USD",
+      "description_status": "complete",
+      "description_chars": 2694,
+      "category": "Exped Sleeping Pads",
+      "brand": "Exped",
+      "attributes": "",
+      "availability": [
+        "https://schema.org/InStock"
+      ],
+      "offer_count": 1,
+      "offer_conditions": [
+        "https://schema.org/NewCondition"
+      ],
+      "variant_count": 0,
+      "missing_reasons": {},
+      "outcome": "valid",
+      "title": "Exped MegaMat Duo+ 7640277846432 , 19% Off with Free S&H — CampSaver",
+      "batch_dir": "s6-batch-004",
+      "jsonld_products": 1
+    }
+  ]
+}

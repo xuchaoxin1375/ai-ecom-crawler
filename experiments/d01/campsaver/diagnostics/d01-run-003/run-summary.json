@@ -1,0 +1,202 @@
+{
+  "task_id": "d01-campsaver-d01-run-003-20261120T015637Z",
+  "label": "d01-run-003",
+  "plan_id": "campsaver-us-d01",
+  "plan_version": "2026.11.20-1",
+  "run_started_at": "2026-11-20T01:56:37Z",
+  "run_finished_at": "2026-11-20T01:56:37Z",
+  "elapsed_s": 0.0,
+  "state": "FINISHED",
+  "outcome": "PARTIAL",
+  "stop_reason": "BUDGET_EXHAUSTED",
+  "counts": {
+    "discovered_urls": 31,
+    "pending_navigation_entries": 0,
+    "product_candidates": 30,
+    "pending_products": 0,
+    "in_flight_products": 0,
+    "processed_products": 30,
+    "valid_products": 0,
+    "excluded_products": 0,
+    "failed_products": 30,
+    "partial_description_products": 0,
+    "description_not_provided_products": 0,
+    "description_fallback_products": 0
+  },
+  "coverage": {
+    "status": "PARTIAL",
+    "denominator_source": "Sleeping Pads category page title 'TOP 144 Sleeping Pads Products in 2026'",
+    "denominator": 144,
+    "covered": 0,
+    "notes": "Sleeping Pads category page 1; bounded 30-product sample. The category page title said 144 products; this is not a full-site claim."
+  },
+  "requests": 32,
+  "errors": [],
+  "warnings": [],
+  "discovery": {
+    "entry_url": "https://www.campsaver.com/sleeping-pads.html",
+    "category_total": 144,
+    "category_page_cards": 72,
+    "selected_products": 30,
+    "batch_sizes": [
+      3,
+      10,
+      10,
+      7
+    ],
+    "product_sample_url": "https://www.campsaver.com/thermarest-neoair-xtherm-nxt-max-sleeping-pad.html",
+    "target_requests": 32
+  },
+  "product_audits": [
+    {
+      "source_url": "https://www.campsaver.com/big-agnes-twistercane-bio-foam-sleeping-pad.html",
+      "outcome": "failed",
+      "reason": "missing_html"
+    },
+    {
+      "source_url": "https://www.campsaver.com/big-agnes-twistercane-bio-foam-hiking-seat.html",
+      "outcome": "failed",
+      "reason": "missing_html"
+    },
+    {
+      "source_url": "https://www.campsaver.com/nemo-equipment-tensor-extreme-conditions-sleeping-pad.html",
+      "outcome": "failed",
+      "reason": "missing_html"
+    },
+    {
+      "source_url": "https://www.campsaver.com/big-agnes-rapide-sl-insulated-tent-tapered-floor-pad.html",
+      "outcome": "failed",
+      "reason": "missing_html"
+    },
+    {
+      "source_url": "https://www.campsaver.com/big-agnes-rapide-sl-insulated-sleeping-pad.html",
+      "outcome": "failed",
+      "reason": "missing_html"
+    },
+    {
+      "source_url": "https://www.campsaver.com/exped-megamat-duo-queen.html",
+      "outcome": "failed",
+      "reason": "missing_html"
+    },
+    {
+      "source_url": "https://www.campsaver.com/nemo-equipment-tensor-elite-ultralight-insulated-sleeping-pad.html",
+      "outcome": "failed",
+      "reason": "missing_html"
+    },
+    {
+      "source_url": "https://www.campsaver.com/nemo-equipment-tensor-all-season-sleeping-pad.html",
+      "outcome": "failed",
+      "reason": "missing_html"
+    },
+    {
+      "source_url": "https://www.campsaver.com/big-agnes-zoom-ul-insulated-pad.html",
+      "outcome": "failed",
+      "reason": "missing_html"
+    },
+    {
+      "source_url": "https://www.campsaver.com/big-agnes-campmeister-deluxe-insulated-sleeping-pad.html",
+      "outcome": "failed",
+      "reason": "missing_html"
+    },
+    {
+      "source_url": "https://www.campsaver.com/thermarest-neoair-xlite-nxt-max-sleeping-pad.html",
+      "outcome": "failed",
+      "reason": "missing_html"
+    },
+    {
+      "source_url": "https://www.campsaver.com/thermarest-u24-neoair-xtherm-nxt-max-pad.html",
+      "outcome": "failed",
+      "reason": "missing_html"
+    },
+    {
+      "source_url": "https://www.campsaver.com/big-agnes-circle-back-sleeping-pad.html",
+      "outcome": "failed",
+      "reason": "missing_html"
+    },
+    {
+      "source_url": "https://www.campsaver.com/exped-luxemat-auto-sleeping-pad.html",
+      "outcome": "failed",
+      "reason": "missing_html"
+    },
+    {
+      "source_url": "https://www.campsaver.com/big-agnes-captain-comfort-deluxe-camp-sleeping-pad.html",
+      "outcome": "failed",
+      "reason": "missing_html"
+    },
+    {
+      "source_url": "https://www.campsaver.com/exped-deepsleep-duo-mat-cyldr.html",
+      "outcome": "failed",
+      "reason": "missing_html"
+    },
+    {
+      "source_url": "https://www.campsaver.com/nemo-equipment-tensor-trail-sleeping-pad.html",
+      "outcome": "failed",
+      "reason": "missing_html"
+    },
+    {
+      "source_url": "https://www.campsaver.com/thermarest-thermarest-luxurymap-sleeping-bag.html",
+      "outcome": "failed",
+      "reason": "missing_html"
+    },
+    {
+      "source_url": "https://www.campsaver.com/thermarest-2025-trail-pro-max-pad.html",
+      "outcome": "failed",
+      "reason": "missing_html"
+    },
+    {
+      "source_url": "https://www.campsaver.com/nemo-astro-insulated-sleeping-pad-jbnxh.html",
+      "outcome": "failed",
+      "reason": "missing_html"
+    },
+    {
+      "source_url": "https://www.campsaver.com/big-agnes-divide-insulated-sleeping-pad.html",
+      "outcome": "failed",
+      "reason": "missing_html"
+    },
+    {
+      "source_url": "https://www.campsaver.com/thermarest-neoair-xtherm-nxt-sleeping-pad.html",
+      "outcome": "failed",
+      "reason": "missing_html"
+    },
+    {
+      "source_url": "https://www.campsaver.com/nemo-astro-sleeping-pad.html",
+      "outcome": "failed",
+      "reason": "missing_html"
+    },
+    {
+      "source_url": "https://www.campsaver.com/exped-ultra-6-5r-sleeping-pad.html",
+      "outcome": "failed",
+      "reason": "missing_html"
+    },
+    {
+      "source_url": "https://www.campsaver.com/exped-ultra-7r-mummy-sleeping-mat.html",
+      "outcome": "failed",
+      "reason": "missing_html"
+    },
+    {
+      "source_url": "https://www.campsaver.com/therm-a-rest-trail-pro-sleep-pad.html",
+      "outcome": "failed",
+      "reason": "missing_html"
+    },
+    {
+      "source_url": "https://www.campsaver.com/exped-megamat-duo-gxyic.html",
+      "outcome": "failed",
+      "reason": "missing_html"
+    },
+    {
+      "source_url": "https://www.campsaver.com/exped-ultra-8r-sleeping-pad.html",
+      "outcome": "failed",
+      "reason": "missing_html"
+    },
+    {
+      "source_url": "https://www.campsaver.com/exped-deepsleep-duo-mat.html",
+      "outcome": "failed",
+      "reason": "missing_html"
+    },
+    {
+      "source_url": "https://www.campsaver.com/exped-megamat-duo.html",
+      "outcome": "failed",
+      "reason": "missing_html"
+    }
+  ]
+}

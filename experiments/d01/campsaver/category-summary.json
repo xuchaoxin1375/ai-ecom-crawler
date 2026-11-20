@@ -1,0 +1,12 @@
+{
+  "url": "https://www.campsaver.com/sleeping-pads.html",
+  "title": "TOP 144 Sleeping Pads Products in 2026 & Up to 34% Off",
+  "total": 144,
+  "page_cards": 72,
+  "pagination": "https://www.campsaver.com/sleeping-pads.html?_iv_page=2",
+  "denominator_source": "Sleeping Pads category page title 'TOP 144 Sleeping Pads Products in 2026'",
+  "product_sample_url": "https://www.campsaver.com/thermarest-neoair-xtherm-nxt-max-sleeping-pad.html",
+  "batch_sizes": [3, 10, 10, 7],
+  "target_requests": 32,
+  "notes": "1 category page + 1 product field sample + 30 product pages. The pilot used 3/10/10/7 tabs; the plan default is 3-5 tabs."
+}

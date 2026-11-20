@@ -1,0 +1,13 @@
+{
+  "task_id": "d01-campsaver-d01-run-002-20261120T015135Z",
+  "label": "d01-run-002",
+  "command": "experiments/d01/campsaver/run.py --batch-dir <batch-dir> --batch-dir <batch-dir> --batch-dir <batch-dir> --batch-dir <batch-dir> --order-file experiments/d01/campsaver/category-product-urls.txt --out-dir experiments/d01/campsaver --label d01-run-002",
+  "python": "3.13.13",
+  "platform": "win32",
+  "batch_dirs": [
+    "<batch-dir>",
+    "<batch-dir>",
+    "<batch-dir>",
+    "<batch-dir>"
+  ]
+}

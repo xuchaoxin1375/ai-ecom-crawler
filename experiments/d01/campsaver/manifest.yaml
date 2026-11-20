@@ -1,0 +1,279 @@
+schema_version: "1.0"
+plan_id: "campsaver-us-d01"
+plan_version: "2026.11.20-1"
+kind: "hybrid"
+status: "verified"
+created_at: "2026-11-20T01:45:00Z"
+updated_at: "2026-11-20T01:57:18Z"
+
+site:
+  name: "CampSaver"
+  entry_urls:
+    - "https://www.campsaver.com/"
+    - "https://www.campsaver.com/sleeping-pads.html"
+  allowed_origins:
+    - "https://www.campsaver.com"
+  allowed_path_prefixes:
+    - "/"
+  market: "US"
+  locale: "en-US"
+  currency: "USD"
+
+scope:
+  include:
+    - "https://www.campsaver.com/sleeping-pads.html"
+    - "https://www.campsaver.com/<product-slug>.html"
+  exclude:
+    - "/checkout"
+    - "/cart"
+    - "/customer"
+    - "/account"
+    - "/login"
+    - "/wishlist"
+    - "/compare"
+    - "/contact-us/"
+  default_mode: "bounded_sample"
+  max_products: 30
+  max_seconds: 600
+  notes: "Sleeping Pads category page 1; first 30 of 144 products. Challenge phase capped at 5 target requests / 3 minutes; after a product page is obtained, the 30-page / 10-minute D01 budget applies."
+
+discovery:
+  strategies:
+    - "category_grid"
+  category_url: "https://www.campsaver.com/sleeping-pads.html"
+  product_url_patterns:
+    - "^/[a-z0-9][a-z0-9-]*\\.html$"
+  product_card_selector: "div.gtmProduct a.grid__link"
+  product_sample_url: "https://www.campsaver.com/thermarest-neoair-xtherm-nxt-max-sleeping-pad.html"
+  url_identity: "canonical_path"
+  deduplication: "Normalize the canonical URL (drop query/fragment/trailing slash); one row per canonical product URL."
+  category_total:
+    value: 144
+    source: "category page title 'TOP 144 Sleeping Pads Products in 2026'"
+  currency_evidence:
+    primary: "Product JSON-LD offers[*].priceCurrency"
+    expected: "USD"
+  robots:
+    policy: "Use public category and product pages only; no login, cart, checkout, account, review, search or compare endpoints. The challenge is handled by the late-attach browser path; it is not bypassed by rotating proxies or by simulating the human challenge."
+  pagination:
+    type: "category_page"
+    page_size: 72
+    page_param: "_iv_page"
+    notes: "Category page 1 only. The page title said 144 products; the remaining 114 are outside this bounded run."
+
+fetch:
+  mode: "browser_late_attach"
+  engine: "system Chrome via chrome-late (resilient-browser-fetch)"
+  headless: false
+  batch_size_recommended: 4
+  batch_size_range: "3-5"
+  pilot_batch_sizes:
+    - 3
+    - 10
+    - 10
+    - 7
+  settle_ms: 3000
+  render_timeout_ms: 8000
+  page_timeout_ms: 120000
+  early_readiness: "title changes to the real page title and Product JSON-LD is present; do not wait for images, ads or networkidle"
+  per_url_type:
+    category:
+      engine: "chrome-late"
+      method: "GET"
+      expect_text: "Sleeping Pads"
+    product:
+      engine: "chrome-late"
+      method: "GET"
+      expect_text: "Product JSON-LD / product title"
+  rate_limit:
+    tabs_per_batch: 4
+    cooldown_seconds: 2
+  retry:
+    max_attempts_per_page: 1
+    max_batches: 5
+    stop_on_challenge_after_requests: 5
+    stop_on_challenge_after_seconds: 180
+    stop_on_401_403: true
+  stop_conditions:
+    - "challenge or blocked state on the category page"
+    - "no Product JSON-LD on a product page after the page title is real"
+    - "challenge phase exceeds 5 target requests or 3 minutes"
+    - "30 product pages or 600 seconds reached"
+
+extract:
+  source_type: "rendered_html_and_jsonld"
+  fields:
+    name:
+      source: "Product JSON-LD name"
+      required: true
+    price.amount:
+      source: "Product JSON-LD offers[*].price; minimum finite positive value"
+      required: true
+      normalize: "Two-decimal amount; include InStock and BackOrder offers; do not invent a package price."
+    price.currency:
+      source: "Product JSON-LD offers[*].priceCurrency"
+      required: true
+      normalize: "Uppercase ISO-4217-shaped code; must equal USD."
+    primary_image_url:
+      source: "Product JSON-LD image (string, list or object)"
+      required: true
+      normalize: "Absolute https URL."
+    description_html:
+      source: "Product JSON-LD description"
+      required: false
+      normalize: "HTML whitelist; decode entities; JSON-LD is parsed with strict=False because review bodies may contain literal newlines."
+    category:
+      source: "Visible breadcrumb, last non-Home crumb"
+      required: false
+    brand:
+      source: "Product JSON-LD brand.name, then manufacturer"
+      required: false
+    attributes:
+      source: "application/json variantSelector variants[*].specifications where is_differential=true"
+      required: false
+      normalize: "Union values with uom when present; serialize with backslash escaping."
+    source_url:
+      source: "link rel=canonical, then the fetched product URL"
+      required: true
+  jsonld:
+    parser: "json.loads(raw, strict=False)"
+    reason: "One product review body contained literal newlines inside a JSON string; strict=True rejects the whole block."
+
+normalize:
+  price:
+    choose: "lowest_public_positive_offer"
+    positive_only: true
+    includes_backorder_priced_offers: true
+    condition_note: "Offers are NewCondition in JSON-LD; variant attributes expose Open Box/New when the selector reports it. Price is product-level minimum, not variant-mapped."
+  description:
+    mode: "clean_html_whitelist"
+    statuses:
+      - "complete"
+      - "partial"
+      - "fallback"
+      - "not_provided"
+      - "failed"
+    empty_policy: "Keep the row only if the required fields exist; empty description is recorded as not_provided."
+  attributes:
+    only_differential: true
+    include_uom: true
+    serialize: "Length#72 in|78 in~Condition#Open Box, Dealer DMO|New with backslash escaping for \\, #, | and ~"
+  csv:
+    encoding: "utf-8"
+    columns: 9
+    formula_protection: "Prefix untrusted text cells starting with =, +, - or @ with a single quote; price_amount stays numeric."
+
+validate:
+  required_fields:
+    - "name"
+    - "price.amount"
+    - "price.currency"
+    - "primary_image_url"
+    - "source_url"
+  assertions:
+    - field: "price.amount"
+      op: ">"
+      value: 0
+    - field: "price.currency"
+      op: "matches"
+      value: "^[A-Z]{3}$"
+    - field: "price.currency"
+      op: "equals"
+      value: "USD"
+  description_statuses:
+    - "complete"
+    - "partial"
+    - "fallback"
+    - "not_provided"
+    - "failed"
+  excluded_reasons:
+    - "zero_or_missing_price"
+    - "missing_name"
+    - "missing_currency"
+    - "unexpected_currency"
+    - "missing_primary_image"
+    - "missing_source_url"
+    - "duplicate_source_url"
+  failed_reasons:
+    - "challenge_or_empty"
+    - "missing_saved_page"
+    - "missing_html"
+    - "html_parse_error"
+    - "no_product_jsonld"
+  metrics:
+    quality_exceptions: "Rows with non-complete description or missing optional category/brand."
+
+runtime:
+  entrypoint: "run.py"
+  language: "Python"
+  invocation: "python experiments/d01/campsaver/run.py --batch-dir /path/to/batch-001 --batch-dir /path/to/batch-002 --order-file experiments/d01/campsaver/category-product-urls.txt --out-dir experiments/d01/campsaver --label d01-run-001"
+  context: "Offline extraction from saved late-attach HTML; the browser fetch is documented in fetch.md and uses the resilient-browser-fetch scripts."
+  output_contract:
+    - "valid.csv (9 columns)"
+    - "task-result.json (09 state/outcome/stop_reason/counts/coverage/quality_exceptions)"
+    - "run-summary.json"
+    - "diagnostics/<label>/product-audit.jsonl"
+    - "diagnostics/<label>/excluded_products.csv"
+    - "diagnostics/<label>/failed_products.csv"
+    - "diagnostics/<label>/pending_products.csv"
+    - "diagnostics/<label>/batch-summary.json"
+    - "diagnostics/<label>/category-summary.json"
+    - "diagnostics/<label>/run-meta.json"
+  idempotency_key: "task_id + plan_version + canonical source_url"
+  cancellation: "Ctrl+C stops extraction; rerun with a new label. A cancelled run is not published as FINISHED."
+  resource_cleanup: "Extraction uses no browser; the fetch stage is responsible for recycling the browser profile and processes."
+
+entrypoint: "run.py"
+
+compatibility:
+  os:
+    - "windows"
+    - "linux"
+    - "wsl2"
+  runtime: "python>=3.11,<3.14"
+  dependencies:
+    - "lxml (extraction)"
+    - "resilient-browser-fetch skill scripts (fetch; chrome-late)"
+    - "playwright or patchright + system Chrome/Chromium/Edge (fetch)"
+  browser: "system Chrome via chrome-late; no headless matrix"
+  network: "public web; direct or an explicitly selected proxy; no credentials required"
+  secrets: "none required"
+  lockfile: "experiments/framework-compare/scrapling/uv.lock"
+
+evidence:
+  sample_urls:
+    - "https://www.campsaver.com/big-agnes-twistercane-bio-foam-sleeping-pad.html"
+    - "https://www.campsaver.com/nemo-equipment-tensor-extreme-conditions-sleeping-pad.html"
+    - "https://www.campsaver.com/thermarest-thermarest-luxurymap-sleeping-bag.html"
+  expected:
+    - url: "https://www.campsaver.com/big-agnes-twistercane-bio-foam-sleeping-pad.html"
+      name: "Big Agnes TwisterCane Bio Foam Sleeping Pad"
+      price.amount: 47.49
+      price.currency: "USD"
+      brand: "Big Agnes"
+    - url: "https://www.campsaver.com/nemo-equipment-tensor-extreme-conditions-sleeping-pad.html"
+      name: "NEMO Equipment Tensor Extreme Conditions Sleeping Pad"
+      price.amount: 189.49
+      price.currency: "USD"
+      brand: "NEMO Equipment"
+    - url: "https://www.campsaver.com/thermarest-thermarest-luxurymap-sleeping-bag.html"
+      name: "Therm-a-Rest Luxury Map Sleeping Pad"
+      price.amount: 189.95
+      price.currency: "USD"
+      brand: "Therm-a-Rest"
+  verified_at: "2026-11-20T01:57:18Z"
+  verification_scope: "D01 S6 pilot: 1 category page + 1 product field sample + 30 product pages via chrome-late; 30 valid, 0 excluded, 0 failed; USD 24.89-549.95; 30 complete descriptions; 22 products with differential variant attributes; 6 products with BackOrder offers. Extraction rerun d01-run-005 passed 30/30 and contains no local absolute paths. One page required json.loads(strict=False) because its review body contained literal newlines."
+  limitations:
+    - "30 of 144 Sleeping Pads products; page 1 only, not a full-site claim."
+    - "Pilot batch sizes were 3/10/10/7 tabs; 10-tab batches exceed the recommended 3-5 and are recorded as a limitation."
+    - "Challenge-site fetch depends on the resilient-browser-fetch chrome-late tools and system Chrome; extraction is offline."
+    - "Raw HTML pages live in temporary storage only and are not committed."
+    - "Variants are not split into separate rows; product-level price is the minimum public offer and attributes list differential options."
+    - "Prices, availability and BackOrder dates are a snapshot; no login, cart, checkout or account access was used."
+
+notes:
+  - "Challenge phase: one product sample and one category page; then product pages. Do not repeat the headless matrix."
+  - "Use 3-5 tabs per batch, not 10. Wait for the real title and Product JSON-LD, not images/ads/networkidle."
+  - "JSON-LD can contain literal newlines in review bodies; parse with strict=False."
+  - "The category page includes pad accessories and brand-specific subcategories; category is the last breadcrumb."
+  - "Do not add pagination or the remaining 114 products without a new scope decision and plan_version."
