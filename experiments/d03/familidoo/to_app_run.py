@@ -72,12 +72,20 @@ def parse_attributes(value: str) -> list[dict[str, Any]]:
     return groups
 
 
-def to_candidate(product: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
+def to_candidate(
+    product: dict[str, Any],
+    task: dict[str, Any],
+    *,
+    partial_reason: str | None = None,
+) -> dict[str, Any]:
     status = product.get("description_status")
     if not status:
         raise SystemExit(
             f"product has no explicit description_status: {product.get('source_url')}"
         )
+    reason = product.get("partial_reason")
+    if status.lower() == "partial" and partial_reason:
+        reason = partial_reason
     category = str(product.get("category") or "").strip()
     return {
         "source_url": product["source_url"],
@@ -93,7 +101,7 @@ def to_candidate(product: dict[str, Any], task: dict[str, Any]) -> dict[str, Any
         "description_html": product.get("description_html") or "",
         "description_format": "html",
         "description_status": status,
-        "partial_reason": product.get("partial_reason"),
+        "partial_reason": reason,
         "missing_reasons": product.get("missing_reasons") or {},
         "categories": [category] if category else [],
         "brand": product.get("brand") or None,
@@ -112,6 +120,11 @@ def main() -> int:
     parser.add_argument("--task-result", required=True, type=Path)
     parser.add_argument("--products", required=True, type=Path)
     parser.add_argument("--out-dir", required=True, type=Path)
+    parser.add_argument(
+        "--partial-reason",
+        default=None,
+        help="override the generic R06 partial-description reason",
+    )
     args = parser.parse_args()
 
     task = json.loads(args.task_result.read_text(encoding="utf-8"))
@@ -120,7 +133,10 @@ def main() -> int:
         for line in args.products.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
-    candidates = [to_candidate(product, task) for product in products]
+    candidates = [
+        to_candidate(product, task, partial_reason=args.partial_reason)
+        for product in products
+    ]
     args.out_dir.mkdir(parents=True, exist_ok=True)
     (args.out_dir / "task.json").write_text(
         json.dumps(task, ensure_ascii=False, indent=2) + "\n",
