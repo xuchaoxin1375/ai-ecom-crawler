@@ -1,0 +1,204 @@
+schema_version: "1.0"
+rule_id: "familidoo-fr-runtime"
+rule_version: "2026.11.20-1"
+kind: declarative
+status: candidate
+created_at: "2026-11-20T06:30:00Z"
+updated_at: "2026-11-20T06:30:00Z"
+
+site:
+  name: "Familidoo"
+  entry_urls: ["https://www.familidoo.fr/fr/"]
+  allowed_origins: ["https://www.familidoo.fr"]
+  allowed_path_prefixes: ["/fr/"]
+  market: "FR"
+  locale: "fr-FR"
+  currency: "EUR"
+
+scope:
+  include: ["/fr/*.html"]
+  exclude:
+    - "controller="
+    - "/panier"
+    - "/commande"
+    - "/mon-compte"
+  max_products: 20
+  max_seconds: 180
+  notes: "Bounded entry-page sample; not full-site coverage."
+
+capabilities:
+  discovery: true
+  product: true
+
+discovery:
+  strategies: ["entry_links"]
+  entry_url: "https://www.familidoo.fr/fr/"
+  link_selector: "a.product_img_link, article.js-product-miniature h3 a"
+  product_url_patterns: ['/fr/[^/]+/\d+-[^/]+\.html$']
+  url_identity: "canonical"
+  notes: "Product links shown on the homepage; no sitemap or category pagination in R16 v0."
+
+fetch:
+  default_engine: "static"
+  concurrency: 1
+  delay_ms: 1000
+  retry: {max_attempts: 2, backoff_ms: 1000}
+  timeout_ms: 45000
+  browser: false
+  login: false
+  challenge_handling: "none; stop and record"
+
+extract:
+  fields:
+    name:
+      required: true
+      fallbacks:
+        - {type: json_ld, path: "name", label: "json_ld"}
+        - {type: css_text, selector: 'h1[itemprop="name"]', label: "h1_itemprop"}
+        - {type: css_text, selector: "h1", label: "h1"}
+        - type: css_attr
+          selector: 'meta[property="og:title"]'
+          attr: "content"
+          label: "og_title"
+          strip_site_suffix: true
+        - {type: title, label: "title"}
+    price.amount:
+      required: true
+      fallbacks:
+        - type: json_ld
+          path: "offers.price"
+          label: "json_ld_offer_price"
+          take: "min_positive"
+          tax_basis: "unspecified"
+        - type: json_ld
+          path: "offers.priceSpecification.price"
+          label: "json_ld_price_specification"
+          take: "min_positive"
+          tax_basis: "unspecified"
+        - type: price_pair
+          label: "meta_price_pair"
+          gross: {selector: 'meta[property="product:price:amount"]', attr: "content"}
+          pretax: {selector: 'meta[property="product:pretax_price:amount"]', attr: "content"}
+          choose: "smaller"
+        - {type: css_attr, selector: '[itemprop="price"]', attr: "content", label: "itemprop_price"}
+        - {type: css_text, selector: ".current-price", label: "price_container"}
+    price.currency:
+      required: true
+      fallbacks:
+        - {type: json_ld, path: "offers.priceCurrency", label: "json_ld_currency"}
+        - type: css_attr
+          selector: 'meta[property="product:pretax_price:currency"]'
+          attr: "content"
+          label: "pretax_currency"
+        - {type: css_attr, selector: 'meta[property="product:price:currency"]', attr: "content", label: "meta_currency"}
+        - {type: css_attr, selector: 'meta[itemprop="priceCurrency"]', attr: "content", label: "itemprop_currency"}
+    primary_image_url:
+      required: true
+      fallbacks:
+        - {type: json_ld, path: "image", label: "json_ld_image"}
+        - type: css_attr
+          selector: 'meta[property="og:image"]'
+          attr: "content"
+          label: "og_image"
+          absolute: true
+        - {type: css_attr, selector: 'img[itemprop="image"]', attr: "src", label: "main_image", absolute: true}
+    description_html:
+      required: false
+      fallbacks:
+        - {type: json_ld, path: "description", label: "json_ld_description", description_status: "complete"}
+        - type: css_html
+          selector: "div.product_description_container"
+          label: "description_container"
+          description_status: "complete"
+        - {type: css_html, selector: "div.product-description", label: "description", description_status: "complete"}
+        - type: css_html
+          selector: "div.product-description-short"
+          label: "short_description"
+          description_status: "partial"
+    category:
+      required: false
+      fallbacks:
+        - type: breadcrumb
+          selector: 'nav.breadcrumb_nav span[itemprop="name"]'
+          label: "breadcrumb"
+          drop_last: true
+          exclude: ["accueil", "home"]
+        - {type: json_ld, path: "category", label: "json_ld_category"}
+    brand:
+      required: false
+      fallbacks:
+        - {type: json_ld, path: "brand.name", label: "json_ld_brand"}
+        - {type: css_text, selector: "div.product-manufacturer a", label: "manufacturer"}
+        - {type: css_text, selector: '[itemprop="brand"]', label: "itemprop_brand"}
+    options:
+      required: false
+      fallbacks:
+        - type: option_groups
+          group_selector: "div.product-variants .product-variants-item"
+          label_selector: "label"
+          option_selector: "select option"
+          radio_selector: 'input[type="radio"]'
+          label: "variant_groups"
+    source_url:
+      required: true
+      fallbacks:
+        - {type: canonical, label: "canonical"}
+
+normalize:
+  price:
+    tax_basis: "exclusive_or_inclusive"
+    choose: "smaller_public_pair"
+    positive_only: true
+  description:
+    mode: "clean_html"
+    statuses: ["complete", "partial", "not_provided", "failed"]
+  options:
+    exclude_quantity: true
+    strip_price_delta: true
+
+validate:
+  required_fields:
+    - "name"
+    - "price.amount"
+    - "price.currency"
+    - "primary_image_url"
+    - "source_url"
+  assertions:
+    - {field: "price.amount", op: ">", value: 0}
+    - {field: "price.currency", op: "matches", value: "^[A-Z]{3}$"}
+  partial_description: "allowed_with_flag"
+
+output:
+  url_list:
+    enabled: true
+    columns: ["url", "source", "status", "title"]
+    format: "csv"
+  product_csv:
+    enabled: true
+    columns: 9
+    format: "csv"
+  task_result: true
+
+task_defaults:
+  max_urls: 100
+  max_products: 20
+  max_seconds: 180
+  concurrency:
+    navigation: 1
+    product: 2
+
+compatibility:
+  os: ["windows", "linux", "wsl2"]
+  runtime: "python>=3.11"
+  dependencies: ["scrapling==0.5.1", "pyyaml==6.0.2", "lxml", "protego"]
+  browser: "none for static"
+
+evidence:
+  sample_urls: []
+  expected: []
+  verified_at: null
+  limitations:
+    - "R16 v0 runtime prototype; not D01 verified."
+    - "Bounded to links shown on the homepage; not full-site coverage."
+
+notes: "Derived from docs/18 and docs/19; discovery and product share this rule."
