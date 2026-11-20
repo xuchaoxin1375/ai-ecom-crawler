@@ -37,6 +37,7 @@ R06 验证两件事：
 | `plans/shopthebulkstore-pagination-runtime.yaml` | S5 分页规则包；`page_param`，3 页，只做 URL 发现 |
 | `plans/shopthebulkstore-html-index-runtime.yaml` | S5 HTML 索引规则包；`/all-products`，30 个 URL |
 | `plans/familidoo-html-index-runtime.yaml` | Familidoo HTML 索引规则包；首页＋1 层分类，31 个 URL |
+| `plans/modellbahn-breiter-sitemap-gzip-runtime.yaml` | Modellbahn sitemap gzip 规则包；1 个 gzip 子图，30 个 URL |
 | `plans/sixmoondesigns-products-json-runtime.yaml` | S4 公开 JSON 规则包；`products.json` 第 1 页，30 个 URL |
 | `plans/tognar-next-link-runtime.yaml` | Tognar `next_link` 规则包；`link[rel=next]`，3 页 30 个 URL |
 | `familidoo/` | 单次运行的 9 列 CSV、任务结果和 `r06-run-001`～`004` 诊断 |
@@ -47,6 +48,7 @@ R06 验证两件事：
 | `shopthebulkstore-pagination-demo/` | S5 分类分页：3 页，62 个商品 URL，不请求商品页 |
 | `shopthebulkstore-html-index-demo/` | S5 HTML 索引：1 请求，30 个商品 URL，不请求商品页 |
 | `familidoo-html-index-demo/` | Familidoo HTML 索引：5 请求，31 个商品 URL，1 层分类 |
+| `modellbahn-breiter-sitemap-gzip-demo/` | Modellbahn sitemap gzip：2 请求，30 个商品 URL |
 | `sixmoondesigns-public-json-demo/` | S4 公开 JSON：1 请求，30 个商品 URL，不请求商品页 |
 | `tognar-next-link-demo/` | Tognar `next_link`：3 页，30 个商品 URL，不请求商品页 |
 | `tests/` | 无网络契约、提取、任务账本和运行时测试 |
@@ -209,7 +211,11 @@ python experiments/r06/tools/validate_runtime.py --root experiments/r06/runtime-
 
 ### S1 sitemap discovery
 
-`javaestate-sitemap-demo/` 用 `plans/javaestate-sitemap-runtime.yaml` 直接读取 D01 的 product sitemap：1 次请求、30 个唯一商品 URL、`COMPLETED`，没有请求商品页。`javaestate-sitemap-index-demo/` 另用 `plans/javaestate-sitemap-index-runtime.yaml` 读 sitemap index，按 `sitemap_products` 过滤子图：2 次请求、30 个 URL。gzip 由无网络测试覆盖。详情见两个 demo 的 README。
+`javaestate-sitemap-demo/` 用 `plans/javaestate-sitemap-runtime.yaml` 直接读取 D01 的 product sitemap：1 次请求、30 个唯一商品 URL、`COMPLETED`，没有请求商品页。`javaestate-sitemap-index-demo/` 另用 `plans/javaestate-sitemap-index-runtime.yaml` 读 sitemap index，按 `sitemap_products` 过滤子图：2 次请求、30 个 URL。gzip 由 Modellbahn demo 和无网络测试覆盖。详情见两个 demo 的 README。
+
+### Modellbahn sitemap gzip
+
+`modellbahn-breiter-sitemap-gzip-demo/` 用 `plans/modellbahn-breiter-sitemap-gzip-runtime.yaml` 读 index 并只选第一个 `.xml.gz` 子图：2 次请求、30 个唯一商品候选 URL、`COMPLETED`；gzip 解压后 28,081 个 loc，启发式商品候选 23,488 个，按规则排除 4,593 个。首个请求到结束约 84 秒，主要耗时在解压和解析。详情见 [`modellbahn-breiter-sitemap-gzip-demo/README.md`](modellbahn-breiter-sitemap-gzip-demo/README.md)。
 
 ### S5 category pagination
 
@@ -236,7 +242,7 @@ python experiments/r06/tools/validate_runtime.py --root experiments/r06/runtime-
 - 入口页只展示 6 个商品，未做 10～20 个随机抽样；6／6 是小样本全量，不是全站覆盖。
 - familidoo 只验证一个站点、一次运行；shopthebulkstore 是第二站 10 商品有界样本；没有独立复跑和跨环境导入。
 - 只支持静态 HTML；没有浏览器、登录、挑战处理或 JavaScript 渲染。
-- sitemap、`page_param`、`next_link`、`html_index`（含 1 层分类）和 `public_json` 已有真实站点有界验证；没有单 source seeds 列表、POST／GraphQL、load more／无限滚动或详情补全；多个 sources 有测试。
+- sitemap（含 gzip）、`page_param`、`next_link`、`html_index`（含 1 层分类）和 `public_json` 已有真实站点有界验证；没有单 source seeds 列表、POST／GraphQL、load more／无限滚动或详情补全；多个 sources 有测试。
 - 运行时只有单 worker；有逻辑对账和失败分类测试，但没有跨进程锁、队列或真实进程崩溃演练；暂停／恢复只在无网络测试中验证过。
 - 单次运行执行器没有任务控制；任务控制只在 `runtime/` 中实现。
 - 没有 Web UI；`task list/status` 是 CLI。
@@ -245,7 +251,7 @@ python experiments/r06/tools/validate_runtime.py --root experiments/r06/runtime-
 ## 下一步
 
 - 第二站已复测（`shopthebulkstore-demo`），只新增规则包，运行时公共代码不变。
-- S1 sitemap direct／index（各 30 URL）、S5 `page_param`（62 URL）、Tognar `next_link`（30 URL）、S5 `html_index`（30 URL）、Familidoo `html_index`（31 URL，1 层分类）和 S4 `public_json`（30 URL）已完成；下一步补单 source seeds 和 POST／GraphQL；复杂分页按 ADR 0007 暂缓。
+- S1 sitemap direct／index（各 30 URL）、Modellbahn sitemap gzip（30 URL）、S5 `page_param`（62 URL）、Tognar `next_link`（30 URL）、S5 `html_index`（30 URL）、Familidoo `html_index`（31 URL，1 层分类）和 S4 `public_json`（30 URL）已完成；下一步补单 source seeds 和 POST／GraphQL；复杂分页按 ADR 0007 暂缓。
 - 把“两个任务并行 + 同域限速 + 暂停／取消”做成真实站点的验收记录，而不只用 fake fetcher。
 - 补跨进程 worker 或至少一个单 worker 的崩溃恢复演练。
 - 维护、漂移和长期稳定性仍后置（J08）；本轮不据此判断维护成本。
