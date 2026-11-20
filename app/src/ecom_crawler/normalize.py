@@ -535,6 +535,7 @@ def clean_description_html(value: str) -> str:
     cleaned = _inner_html(root)
     cleaned = re.sub(r"<p>\s*</p>", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"<li>\s*</li>", "", cleaned, flags=re.IGNORECASE)
+    cleaned = cleaned.replace("\r\n", "\n").replace("\r", "\n")
     return cleaned.replace("\xa0", " ").strip()
 
 

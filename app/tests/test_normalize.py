@@ -90,6 +90,12 @@ class TextTests(unittest.TestCase):
         raw = "<p>Copy</p><ul><li>One</li></ul><table><tr><td>A</td><td>B</td></tr></table>"
         self.assertEqual(clean_description_html(raw), raw)
 
+    def test_clean_html_normalizes_line_endings(self) -> None:
+        self.assertEqual(
+            clean_description_html("<p>Line 1\r\nLine 2</p>"),
+            "<p>Line 1\nLine 2</p>",
+        )
+
     def test_plain_text_is_wrapped(self) -> None:
         self.assertEqual(
             text_to_html("Line 1\nLine 2\n\n第二段 <tag>"),

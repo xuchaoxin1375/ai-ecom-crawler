@@ -1,0 +1,7 @@
+scrapling==0.5.1
+curl_cffi==0.17.0
+patchright==1.64.4
+browserforge==1.2.4
+pyyaml==6.0.3
+lxml>=5.3,<7
+protego>=0.3,<1
