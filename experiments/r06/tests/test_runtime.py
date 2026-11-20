@@ -123,6 +123,18 @@ class RuleTests(unittest.TestCase):
             with self.assertRaises(RuleError):
                 load_rule(path)
 
+    def test_rejects_invalid_scope_regex(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "rule.yaml"
+            path.write_text(
+                PLAN.read_text(encoding="utf-8").replace(
+                    "'/fr/.*\\.html$'", "'/fr/(unclosed'"
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaises(RuleError):
+                load_rule(path)
+
 
 class StoreTests(unittest.TestCase):
     def test_item_claim_and_reset(self) -> None:

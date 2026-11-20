@@ -1,5 +1,5 @@
 {
-  "task_id": "familidoo-fr-r06-r06-run-003",
+  "task_id": "familidoo-fr-r06-r06-run-004",
   "plan_id": "familidoo-fr-r06",
   "plan_version": "2026.11.20-1",
   "market": "FR",
@@ -8,8 +8,8 @@
   "outcome": "COMPLETED",
   "stop_reason": "NATURAL_END",
   "stop_detail": "entry-page sample exhausted",
-  "started_at": "2026-11-20T06:21:13Z",
-  "finished_at": "2026-11-20T06:21:29Z",
+  "started_at": "2026-11-20T11:45:27Z",
+  "finished_at": "2026-11-20T11:45:46Z",
   "counts": {
     "discovered_urls": 7,
     "pending_navigation_entries": 0,

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import csv
-import fnmatch
 import json
 import re
 import time
@@ -227,7 +226,7 @@ def discover_urls(page: HtmlPage, plan: dict[str, Any], *, limit: int) -> list[s
     discovery = plan["discovery"]
     site = plan["site"]
     entry_url = plan_entry_url(plan)
-    includes = plan["scope"].get("include", [])
+    includes = [re.compile(pattern) for pattern in plan["scope"].get("include", [])]
     excludes = [re.compile(pattern) for pattern in plan["scope"].get("exclude", [])]
     patterns = [re.compile(pattern) for pattern in discovery.get("product_url_patterns", [])]
     origins = {normalize_origin(origin) for origin in site["allowed_origins"]}
@@ -247,7 +246,7 @@ def discover_urls(page: HtmlPage, plan: dict[str, Any], *, limit: int) -> list[s
             continue
         if prefixes and not any(parsed.path.startswith(prefix) for prefix in prefixes):
             continue
-        if includes and not any(fnmatch.fnmatch(parsed.path, pattern) for pattern in includes):
+        if includes and not any(pattern.search(parsed.path) for pattern in includes):
             continue
         if any(pattern.search(absolute) for pattern in excludes):
             continue

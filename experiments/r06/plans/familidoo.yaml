@@ -16,7 +16,7 @@ site:
   currency: "EUR"
 
 scope:
-  include: ["/fr/*.html"]
+  include: ['/fr/.*\.html$']
   exclude:
     - "controller="
     - "/panier"
@@ -173,7 +173,7 @@ runtime:
 compatibility:
   os: ["windows", "linux", "wsl2"]
   runtime: "python>=3.11"
-  dependencies: ["scrapling==0.5.1", "pyyaml==6.0.2", "lxml", "protego"]
+  dependencies: ["scrapling==0.5.1", "pyyaml==6.0.3", "lxml", "protego"]
   browser: "none for static"
   network: "public web; no proxy required in this run"
 

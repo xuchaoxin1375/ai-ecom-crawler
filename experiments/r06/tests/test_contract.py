@@ -94,6 +94,14 @@ class ManifestTests(unittest.TestCase):
 
             validate_plan(plan)
 
+    def test_rejects_invalid_scope_regex(self) -> None:
+        plan = copy.deepcopy(load_plan(PLAN_PATH))
+        plan["scope"]["include"] = ["/fr/(unclosed"]
+        with self.assertRaises(PlanError):
+            from executor.manifest import validate_plan
+
+            validate_plan(plan)
+
     def test_rejects_delay_below_one_second(self) -> None:
         plan = copy.deepcopy(load_plan(PLAN_PATH))
         plan["fetch"]["delay_ms"] = 500
@@ -123,6 +131,17 @@ class DiscoveryTests(unittest.TestCase):
                 "https://www.familidoo.fr/fr/cat/3-c.html",
             ],
         )
+
+    def test_scope_include_uses_regex(self) -> None:
+        plan = copy.deepcopy(load_plan(PLAN_PATH))
+        plan["scope"]["include"] = [r"^/fr/cat/"]
+        page = HtmlPage(
+            '<a class="product_img_link" href="/fr/cat/1-a.html">A</a>'
+            '<a class="product_img_link" href="/fr/other/2-b.html">B</a>',
+            "https://www.familidoo.fr/fr/",
+        )
+        urls = discover_urls(page, plan, limit=10)
+        self.assertEqual(urls, ["https://www.familidoo.fr/fr/cat/1-a.html"])
 
 
 class ValidationTests(unittest.TestCase):

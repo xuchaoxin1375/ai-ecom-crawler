@@ -196,6 +196,8 @@ def _validate_common(data: dict[str, Any]) -> None:
         raise RuleError("scope.include must be a list")
     if not isinstance(scope.get("exclude", []), list):
         raise RuleError("scope.exclude must be a list")
+    _validate_regex_list(scope.get("include", []), "scope.include")
+    _validate_regex_list(scope.get("exclude", []), "scope.exclude")
 
     capabilities = _require_mapping(data["capabilities"], "capabilities")
     for key in ("discovery", "product"):
@@ -299,3 +301,13 @@ def _require_list(value: Any, name: str) -> list[Any]:
     if not isinstance(value, list):
         raise RuleError(f"{name} must be a list")
     return value
+
+
+def _validate_regex_list(values: list[Any], name: str) -> None:
+    for pattern in values:
+        if not isinstance(pattern, str) or not pattern:
+            raise RuleError(f"{name} entries must be non-empty strings")
+        try:
+            re.compile(pattern)
+        except re.error as exc:
+            raise RuleError(f"invalid {name} regex: {exc}") from exc
