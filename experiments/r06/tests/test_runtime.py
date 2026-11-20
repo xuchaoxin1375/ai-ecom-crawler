@@ -1286,6 +1286,61 @@ class RecoveryTests(unittest.TestCase):
             self.assertEqual(result["recovery"]["failed"], 1)
             self.assertEqual(result["outcome"], "FAILED")
 
+    def test_orphaned_running_task_is_requeued_and_finished(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = TaskStore(root / "tasks.db")
+            task = make_task("product", "orphan-running")
+            task.state = "RUNNING"
+            store.create_task(task)
+
+            @contextmanager
+            def factory(rule: object, limiter: object):
+                yield FakeFetcher(
+                    {
+                        ENTRY: (200, ENTRY_HTML),
+                        PRODUCT: (200, PRODUCT_HTML),
+                    }
+                )
+
+            Worker(
+                store,
+                out_root=root / "tasks",
+                fetcher_factory=factory,
+            ).run_once()
+            stored = store.get_task(task.task_id)
+            assert stored is not None
+            self.assertEqual(stored.state, "FINISHED")
+            self.assertEqual(stored.outcome, "COMPLETED")
+            result = json.loads(
+                (root / "tasks" / task.task_id / "task-result.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(result["counts"]["valid_products"], 1)
+
+    def test_orphaned_pausing_and_cancelling_states_resolve(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = TaskStore(root / "tasks.db")
+            paused = make_task("discovery", "orphan-pausing")
+            paused.state = "PAUSING"
+            cancelled = make_task("discovery", "orphan-cancelling")
+            cancelled.state = "CANCELLING"
+            store.create_task(paused)
+            store.create_task(cancelled)
+
+            recovery = store.recover_orphaned_tasks()
+            self.assertEqual(recovery["paused"], 1)
+            self.assertEqual(recovery["cancelled"], 1)
+            paused_after = store.get_task(paused.task_id)
+            cancelled_after = store.get_task(cancelled.task_id)
+            assert paused_after is not None and cancelled_after is not None
+            self.assertEqual(paused_after.state, "PAUSED")
+            self.assertEqual(cancelled_after.state, "CANCELLED")
+            self.assertEqual(cancelled_after.outcome, "CANCELLED")
+            self.assertEqual(cancelled_after.stop_reason, "USER_CANCELLED")
+
     def test_plan_version_mismatch_fails_task(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

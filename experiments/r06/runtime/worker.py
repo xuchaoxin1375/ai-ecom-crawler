@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -19,6 +20,8 @@ from .runner import TaskRunner
 from .store import TaskStore
 
 FetcherFactory = Callable[[RulePackage, DomainLimiter], Any]
+
+logger = logging.getLogger(__name__)
 
 
 @contextmanager
@@ -58,6 +61,9 @@ class Worker:
 
     def run_once(self, poll_interval: float = 0.2) -> int:
         self.out_root.mkdir(parents=True, exist_ok=True)
+        recovery = self.store.recover_orphaned_tasks()
+        if recovery["recovered"]:
+            logger.warning("recovered orphaned tasks: %s", recovery)
         running: dict[str, threading.Thread] = {}
         while True:
             for task in self.store.list_tasks({"QUEUED"}):

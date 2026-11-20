@@ -57,6 +57,7 @@ R06 验证两件事：
 | `tools/validate_output.py` | 单次运行输出校验器 |
 | `tools/validate_runtime.py` | 运行时 demo 校验器 |
 | `tools/control_smoke.py` | 真实规则包的暂停／恢复或取消冒烟 |
+| `tools/crash_smoke.py` | 强杀 worker 子进程并验证重启恢复 |
 
 ## 运行
 
@@ -248,13 +249,17 @@ python experiments/r06/tools/validate_runtime.py --root experiments/r06/runtime-
 
 `tognar-control-demo/` 用 `tools/control_smoke.py` 对同一规则包跑两个任务：`tognar-pause-resume` 第 3 秒暂停，12 个商品后为 `PAUSED`，恢复后完成 30 个 URL；`tognar-cancel` 第 3 秒取消，最终 `CANCELLED`，迟到结果按 FAILED 拒收。仍是同进程 `Worker`，不是跨进程。详情见 [`tognar-control-demo/README.md`](tognar-control-demo/README.md)。
 
+### Tognar crash recovery
+
+`tognar-crash-demo/` 用 `tools/crash_smoke.py` 在第 5 秒强杀 worker 子进程：任务保持 `RUNNING`，导航 1 个 `DONE`、1 个 `IN_FLIGHT`，商品 12 个；新 worker 自动重排并对账（`in_flight=1`、`reset=1`），最终 3 个导航／30 个商品，`FINISHED`／`COMPLETED`。详情见 [`tognar-crash-demo/README.md`](tognar-crash-demo/README.md)。
+
 ## 局限
 
 - 入口页只展示 6 个商品，未做 10～20 个随机抽样；6／6 是小样本全量，不是全站覆盖。
 - familidoo 只验证一个站点、一次运行；shopthebulkstore 是第二站 10 商品有界样本；没有独立复跑和跨环境导入。
 - 只支持静态 HTML；没有浏览器、登录、挑战处理或 JavaScript 渲染。
 - sitemap（含 gzip）、`page_param`、`next_link`、`html_index`（含 1 层分类）和 `public_json` 已有真实站点有界验证，offset 另用公开 API 冒烟；cursor 仍只有 fixture；没有单 source seeds 列表、POST／GraphQL、load more／无限滚动或详情补全；多个 sources 有测试。
-- 运行时只有单 worker；有逻辑对账和失败分类测试，但没有跨进程锁、队列或真实进程崩溃演练；暂停／恢复／取消已在 Tognar 同进程真实站点验证，跨进程未验证。
+- 运行时只有单 worker；有逻辑对账和失败分类测试，单 worker 强杀恢复已在 Tognar 演练；但没有跨进程锁、队列或租约，多进程未验证。
 - 单次运行执行器没有任务控制；任务控制只在 `runtime/` 中实现。
 - 没有 Web UI；`task list/status` 是 CLI。
 - `pyyaml` 通过 `uv run --with` 临时提供；共享基线锁在 `baseline/`，尚未并入 Scrapling 项目的锁文件。
@@ -264,5 +269,5 @@ python experiments/r06/tools/validate_runtime.py --root experiments/r06/runtime-
 - 第二站已复测（`shopthebulkstore-demo`），只新增规则包，运行时公共代码不变。
 - S1 sitemap direct／index（各 30 URL）、Modellbahn sitemap gzip（30 URL）、S5 `page_param`（62 URL）、Tognar `next_link`（30 URL）、S5 `html_index`（30 URL）、Familidoo `html_index`（31 URL，1 层分类）、S4 `public_json`（30 URL）和 DummyJSON offset（20 URL）已完成；下一步补单 source seeds 和 POST／GraphQL；复杂分页按 ADR 0007 暂缓。
 - 把“两个任务并行 + 同域限速 + 暂停／取消”做成真实站点的验收记录，而不只用 fake fetcher。
-- 补跨进程 worker 或至少一个单 worker 的崩溃恢复演练。
+- 补跨进程 worker 和租约；单 worker 强杀恢复已完成。
 - 维护、漂移和长期稳定性仍后置（J08）；本轮不据此判断维护成本。
