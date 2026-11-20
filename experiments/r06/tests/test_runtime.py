@@ -982,6 +982,54 @@ class ListingTests(unittest.TestCase):
             self.assertEqual(result["counts"]["navigation_urls"], 2)
             self.assertEqual(result["counts"]["valid_urls"], 2)
 
+    def test_next_link_head_link_selector(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = TaskStore(root / "tasks.db")
+            rule = sources_rule(
+                root,
+                [
+                    {
+                        "type": "listing",
+                        "url": LISTING,
+                        "product_link_selector": "a.product_img_link",
+                        "advance": {
+                            "type": "next_link",
+                            "selector": "link[rel=next]",
+                            "max_pages": 2,
+                        },
+                    }
+                ],
+            )
+            task = make_task("discovery", "listing-next-head")
+            store.create_task(task)
+            first_page = (
+                "<html><head>"
+                '<link rel="next" href="/fr/list?page=2">'
+                "</head><body>"
+                f'<a class="product_img_link" href="{PRODUCT}">Product</a>'
+                "</body></html>"
+            )
+            fetcher = FakeFetcher(
+                {
+                    LISTING: (200, first_page),
+                    "https://www.familidoo.fr/fr/list?page=2": (
+                        200,
+                        listing_html(PRODUCT2),
+                    ),
+                }
+            )
+            TaskRunner(
+                store, rule, task, fetcher=fetcher, out_root=root / "tasks"
+            ).run()
+            result = json.loads(
+                (root / "tasks" / task.task_id / "task-result.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(result["counts"]["navigation_urls"], 2)
+            self.assertEqual(result["counts"]["valid_urls"], 2)
+
     def test_listing_product_task_fetches_products(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
