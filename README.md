@@ -9,6 +9,8 @@
 | `AGENTS.md` | 代理执行约定：站点评估入口、已有结论复用与探测预算 |
 | `docs/` | 业务核心：需求、数据标准、流程、交付、验收、界面、Agent 约定、方案契约、状态契约、实施路线、需求对照、验收基准站点、框架对比实验、技术选型 ADR、方法指导、合成示例 |
 | `scripts/export_docs.py` | 生成可分发的文档 ZIP 与 `manifest.json`，并可按清单复核 |
+| `scripts/setup_crawl_env.py` | 创建仓库外的共享 uv venv，安装采集基线并执行冒烟 |
+| `baseline/` | 共用采集基础环境的顶层依赖、跨平台锁文件和说明；venv 不提交 |
 | `experiments/framework-compare/` | 框架对比实验代码、探针与结果；不进入业务正文 |
 | `experiments/d01/` | D01 单站试点方案包与运行证据；当前含 S1、S2、S4、S5、S6 |
 | `experiments/r04/` | R04 旧任务对照试点；当前含 familidoo 新流程侧 |
@@ -20,6 +22,14 @@
 新 Agent 或接手方先读[项目定位、可行性与改进路线](docs/00-项目定位与可行性.md)了解主旨、类似物和改进路线，再读[交接文档](docs/15-交接.md)了解当前状态、已验证覆盖、下一批测试队列和操作命令；仓库根 `HANDOFF.md` 只是入口指针。
 
 从 [`docs/README.md`](docs/README.md) 开始阅读，按其中的阅读顺序进入各主题。
+
+创建或刷新共用采集环境（可选，默认写到仓库外）：
+
+```powershell
+python scripts/setup_crawl_env.py
+```
+
+环境定义、依赖请求和边界见 `docs/20-构建环境与依赖基线.md` 与 `baseline/README.md`。
 
 导出文档包（需要 Python 3.11+）：
 
