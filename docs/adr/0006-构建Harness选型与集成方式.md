@@ -7,7 +7,7 @@ updated: 2026-11-20
 
 ## 状态与适用范围
 
-**Proposed**。项目方于 2026-11-20 确认 v1 采用 OpenCode + HTTP/SSE；实现、契约测试和端到端验证尚未开始，验证后转 Accepted。
+**Proposed**。项目方于 2026-11-20 确认 v1 采用 OpenCode + HTTP/SSE，并确认高自动化、常见依赖预置和宽容隔离方向；实现、契约测试和端到端验证尚未开始，验证后转 Accepted。
 
 本文决定参考 harness、集成协议、适配器边界和构建会话的暂停／取消／恢复映射。构建会话契约以 [构建 Agent Harness 契约](0005-构建Agent与Harness契约.md) 为准；采集任务状态以 [任务状态与计数契约](../09-任务状态与计数契约.md) 和 [采集规则与任务运行时](../19-采集规则与任务运行时.md) 为准；方案包以 [采集方案与兼容契约](../08-采集方案与兼容契约.md) 为准。本文不改变执行期，也不把 harness 引入运行期。
 
@@ -16,6 +16,8 @@ updated: 2026-11-20
 - ADR 0005 只定义“任何 harness 必须满足什么”，没有决定用哪个 harness、怎么接。
 - 现有执行端和原型是 Python；构建服务按 Python 优先；如果改用 Node，进程内 SDK 才成为候选。本地单用户；v1 一次一个构建会话；Web UI 通过本地 API 查看和控制。
 - 构建期需要多轮对话、工具审批、暂停／取消、事件流、会话恢复和产物收集；一次性 CLI 不够。
+- 目标是尽量不打断构建：常规分析、工作区读写、浏览器和公开网页访问自动放行；只在未知依赖、系统级操作、密钥和访问控制边界询问。
+- 常见采集依赖预置；缺失依赖走结构化请求，避免 Agent 在缺包上反复试错。
 - 当前默认模型是 DeepSeek V4.1 Flash；选型不能把方案包或构建流程锁死到单一模型厂商。
 - OpenCode HTTP API 标注 experimental；需要版本锁定、适配器隔离和契约测试。
 
@@ -29,6 +31,7 @@ v1 采用 **OpenCode** 作为参考 harness，模型默认 DeepSeek V4.1 Flash�
 
 - 支持自定义 provider，当前 DeepSeek 默认可直接用；不把方案包绑定到模型厂商。
 - 有权限规则和 `ask` 审批，能实现构建会话的权限门和暂停门。
+- 权限 hook 支持在自动放行的同时实现暂停门；不必把所有工具都设成 `ask`。
 - 有 session、event、permission、interrupt、model、export/import 接口，覆盖构建期控制面。
 - 已有 ACP 和 HTTP 两种语言无关集成方式；Python 服务不需要嵌入 TypeScript SDK。
 - 与 `07` 的参考默认和现有实验一致，迁移成本最低。
@@ -70,10 +73,13 @@ v1 采用 **任务服务托管的 `opencode serve` 子进程 + HTTP/SSE 适配**
 | `send_prompt(build_id, text)` | 提交构建指令 |
 | `stream_events(build_id)` | 订阅并归一化事件 |
 | `reply_permission(build_id, request_id, decision)` | `once`／`always`／`reject` |
+| `request_dependency(build_id, request)` | 校验基线／allowlist，安装依赖或生成审批 |
 | `pause(build_id)`／`resume(build_id)` | 暂停和恢复 |
 | `cancel(build_id)` | 中断并回收 |
 | `collect_artifacts(build_id)` | 收集方案包、证据和结果 |
 | `close(build_id)` | 关闭 session／server，记录残留 |
+
+`request_dependency` 由 BuildService 暴露为 Agent 工具；Agent 不直接调用宿主包管理器。
 
 `OpenCodeHttpAdapter` 使用的端点（v1 最小集）：
 
@@ -94,6 +100,7 @@ v1 采用 **任务服务托管的 `opencode serve` 子进程 + HTTP/SSE 适配**
 - `session.tool.called`、`session.tool.success`、`session.tool.failed` → `tool_started`、`tool_finished`。
 - `permission.asked`、`permission.replied` → `permission_requested`、`permission_replied`。
 - `session.text.delta` → `message_delta`，只用于 UI，不写私有推理。
+- `request_dependency` 的结果 → `dependency_requested`、`dependency_installed`、`dependency_failed`。
 - `session.execution.failed`、`session.execution.interrupted` → `error`、`finished`。
 - 其他事件保留原始类型和摘要，写入 `out/session.ndjson`，不把原始事件当业务结果。
 
@@ -103,16 +110,17 @@ v1 采用 **任务服务托管的 `opencode serve` 子进程 + HTTP/SSE 适配**
 
 | 操作 | 实现 | 边界 |
 | --- | --- | --- |
-| 暂停 | 停止派发新 prompt；工作区权限基线设为 `ask`；服务扣住新的权限回复；等待已启动工具结束 | 当前模型调用或工具可能跑完；不承诺暂停推理 |
+| 暂停 | 停止派发新 prompt；`pause-gate` 插件在权限 hook 中把动作提升为 `ask`；服务扣住请求；等待已启动工具结束 | 当前模型调用或工具可能跑完；不承诺暂停推理 |
 | 恢复 | 释放扣住的权限；继续同一 session；必要时补一条“继续”指令 | 方案版本、模型、工作区和 OpenCode 版本必须兼容 |
 | 取消 | `interrupt`；拒绝所有 pending 权限；关闭 session（v1 单构建时关闭 server）；回收进程、浏览器和临时目录 | 取消是终态，不恢复；迟到事件按 `build_id` 和代次拒收 |
 | 崩溃恢复 | 重启后对账：未结会话按兼容性标 `RUNNING`、`PAUSED` 或 `FINISHED`；`CANCELLING` 继续完成取消；孤儿 server 按 PID／端口／工作区回收；未知在途工具标失败 | 不把未知在途当成功；不重复写产物 |
 
 暂停门的具体做法：
 
-- 每个构建工作区生成 `opencode.json`，权限策略以 `ask` 为基线；服务按“运行中”策略自动批准允许的工具，按“暂停中”策略扣住回复。
-- 有副作用的工具（shell、edit、webfetch、浏览器）必须走审批；后续稳定后，只读工具可以按策略 `allow`，但暂停只保证不再启动新的需审批工具。
-- 如果后续要更硬的暂停点，用 OpenCode 插件在工具调用前检查暂停标志；v1 先用权限门，避免维护插件。
+- 每个构建工作区加载 `pause-gate` 插件；插件在 `ctx.permission.hook("evaluate")` 中读取 `control/pause.json`。
+- 暂停时，插件把进入权限检查的工具动作提升为 `ask`，BuildService 扣住权限请求；恢复时回复 `once`，工具继续。
+- 这样常规动作可以 `allow`，暂停仍能在工具执行前生效；显式配置的 `deny` 仍然最终生效，插件不能把它改成 `allow`。
+- 控制文件不可读或插件异常时 fail closed，按暂停处理并记录错误。
 
 恢复条件：
 
@@ -120,9 +128,26 @@ v1 采用 **任务服务托管的 `opencode serve` 子进程 + HTTP/SSE 适配**
 - OpenCode 版本和适配器版本兼容；不兼容时新建 build，旧 build 保留证据。
 - server 已退出时，优先 export/import 或同一 session 重新加载；无法恢复对话时，用工作区产物和 `session.ndjson` 重新开始，不假装恢复。
 
+### 权限基线
+
+默认策略是“常规放行、高风险询问、硬边界拒绝”；完整矩阵和预检见[构建环境与依赖基线](../20-构建环境与依赖基线.md)。
+
+- `allow`：工作区内读写、业务文档只读、浏览器、公开网页、工作区内命令、基线或 allowlist 依赖。
+- `ask`：未知依赖、系统级包、全局配置、工作区外访问、密钥使用、超出允许 origin 的网络。
+- `deny`：用户主目录、凭据和密钥、日常浏览器 profile、登录／付费／验证码／访问控制绕过、git push、外部消息、购买、系统服务。
+- `allow` 仍受工作区、origin、超时、输出上限和配额约束；不是无边界。
+
+### 依赖基线
+
+- 常见采集运行时、Python 库、浏览器和 CLI 预置；基线版本和预检见[构建环境与依赖基线](../20-构建环境与依赖基线.md)。
+- Agent 通过 `request_dependency` 工具请求缺失依赖；基线已有直接返回，allowlist 自动装入构建环境，未知或系统级走一次性审批。
+- 安装只写构建 venv 或工具缓存，不写全局 site-packages 或系统目录；记录包、版本、来源、许可和结果。
+- 依赖安装失败返回 stderr 摘要和 fallback，不循环重试。
+
 ### 安全与隔离
 
-- OpenCode 的权限规则是审批层，不是沙箱；shell 仍以宿主权限运行。不可信站点必须在独立 OS 用户、容器或 VM 中构建。
+- 首选专用设备、VM 或容器；允许较宽的读写和网络，换取分析效率；没有专用环境时用独立 OS 用户和独立浏览器 profile。
+- OpenCode 的权限规则是审批层，不是沙箱；宽容隔离不等于无边界，硬拒绝项仍由配置和 OS 执行。
 - 工作区只放本次构建输入和产物；业务文档以只读方式提供；不把仓库根目录、用户主目录或密钥目录暴露给 Agent。
 - 浏览器使用独立 profile，按构建回收；不复用日常浏览器 profile。
 - 密钥由宿主注入环境变量，不写入提示词、日志、工作区或方案包。
@@ -143,22 +168,26 @@ v1 采用 **任务服务托管的 `opencode serve` 子进程 + HTTP/SSE 适配**
 - OpenCode 不再支持当前 provider／模型，或 DeepSeek 的接入与维护成本明显高于替代方案。
 - 构建服务需要多租户或远程 worker，而 HTTP server 的隔离、鉴权和配额无法满足；重新评估 ACP 或 Codex。
 - 内置沙箱或强制审批成为硬门槛，OpenCode 的权限层无法通过 OS 隔离补足；重新评估 Codex。
+- 依赖基线无法覆盖常见站点，或安装／升级成本长期高于收益；重新评估基线范围。
 - v1 实测显示暂停、取消或恢复语义无法在权限门实现，或事件丢失影响验收。
 
 ## 后果
 
 - 需要新增 `HarnessAdapter`、`OpenCodeHttpAdapter`、server 进程管理、权限桥、事件归一化和契约测试。
+- 需要 `pause-gate` 插件、`request_dependency` 工具、基线预检和依赖记录。
+- 需要专用设备／VM／容器或独立 OS 用户的基线镜像；具体包版本见[构建环境与依赖基线](../20-构建环境与依赖基线.md)。
 - 需要每个构建工作区的 `opencode.json` 模板和只读文档挂载策略。
 - Web UI 需要展示构建会话事件、权限请求和产物；不能把构建会话状态映射成采集任务状态。
 - v1 一次一个构建会话；并发构建后置。
 - 运行期仍然零 LLM；方案包独立执行不变。
 
-## 待确认
+## 实现前检查
 
-- v1 权限基线：所有工具 `ask`，还是只对有副作用工具 `ask`？建议先全部 `ask`，稳定后再放宽只读工具。
-- 是否允许 Agent 自动安装依赖？ADR 0005 建议不允许，本文沿用。
-- Windows 隔离方式：独立 OS 用户、容器还是 VM？需要按目标机器能力验证。
-- ACP 适配器的优先级：备选还是一等实现？建议先备选，HTTP 契约稳定后再评估。
+- 基线版本、镜像源和 allowlist 包集在[构建环境与依赖基线](../20-构建环境与依赖基线.md)中锁定并预检。
+- `pause-gate` 插件的控制文件、权限 hook 和恢复流程需要端到端验证。
+- `request_dependency` 工具的审批、隔离安装和失败回退需要验证。
+- 目标机器采用专用设备、VM、容器还是独立 OS 用户，按现场条件选择；不阻塞设计。
+- ACP 适配器维持备选，HTTP 契约稳定后再评估。
 
 ## 参考
 
@@ -168,6 +197,7 @@ v1 采用 **任务服务托管的 `opencode serve` 子进程 + HTTP/SSE 适配**
 - [任务状态与计数契约](../09-任务状态与计数契约.md)
 - [采集方案与兼容契约](../08-采集方案与兼容契约.md)
 - [采集规则与任务运行时](../19-采集规则与任务运行时.md)
+- [构建环境与依赖基线](../20-构建环境与依赖基线.md)
 - OpenCode ACP：<https://opencode.ai/docs/cli/acp>
 - OpenCode 客户端与服务：<https://opencode.ai/docs/build/client>
 - OpenCode API：<https://opencode.ai/docs/api>
