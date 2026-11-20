@@ -137,6 +137,14 @@ v1 采用 **任务服务托管的 `opencode serve` 子进程 + HTTP/SSE 适配**
 - HTTP API 标注 experimental；ACP 作为备选适配器，HTTP 不可用时可以切换，但切换要重新验证暂停、取消和恢复语义。
 - 方案包不写入 harness 名称、版本、会话路径或模型私有字段；换 harness 不影响执行期。
 
+### 重选条件
+
+- OpenCode HTTP API 连续两个小版本破坏本文端点或事件 schema，且适配器无法在合理工作量内兼容。
+- OpenCode 不再支持当前 provider／模型，或 DeepSeek 的接入与维护成本明显高于替代方案。
+- 构建服务需要多租户或远程 worker，而 HTTP server 的隔离、鉴权和配额无法满足；重新评估 ACP 或 Codex。
+- 内置沙箱或强制审批成为硬门槛，OpenCode 的权限层无法通过 OS 隔离补足；重新评估 Codex。
+- v1 实测显示暂停、取消或恢复语义无法在权限门实现，或事件丢失影响验收。
+
 ## 后果
 
 - 需要新增 `HarnessAdapter`、`OpenCodeHttpAdapter`、server 进程管理、权限桥、事件归一化和契约测试。
