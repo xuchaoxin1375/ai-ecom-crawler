@@ -44,6 +44,7 @@ python scripts/export_docs.py
 
 ```powershell
 python scripts/check_docs_links.py
+python scripts/check_examples.py
 python scripts/export_docs.py
 python scripts/export_docs.py --check dist/ai-ecom-crawler-docs.zip
 ```
