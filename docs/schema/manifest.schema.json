@@ -481,6 +481,14 @@
               "type": "number",
               "exclusiveMinimum": 0
             },
+            "max_attempts": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "retry_backoff_ms": {
+              "type": "number",
+              "minimum": 0
+            },
             "concurrency": {
               "type": "object",
               "properties": {

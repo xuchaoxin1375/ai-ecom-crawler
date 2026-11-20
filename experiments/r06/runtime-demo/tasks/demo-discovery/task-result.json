@@ -1,16 +1,16 @@
 {
   "task_id": "demo-discovery",
   "task_type": "discovery",
-  "rule_id": "familidoo-fr-runtime",
-  "rule_version": "2026.11.20-1",
+  "plan_id": "familidoo-fr-runtime",
+  "plan_version": "2026.11.20-1",
   "market": "FR",
   "locale": "fr-FR",
   "state": "FINISHED",
   "outcome": "COMPLETED",
   "stop_reason": "NATURAL_END",
   "stop_detail": "entry-page sample exhausted",
-  "started_at": "2026-11-20T07:20:14Z",
-  "finished_at": "2026-11-20T07:20:18Z",
+  "started_at": "2026-11-20T12:26:20Z",
+  "finished_at": "2026-11-20T12:26:24Z",
   "counts": {
     "navigation_urls": 1,
     "discovered_urls": 7,
@@ -19,6 +19,20 @@
     "valid_urls": 6,
     "excluded_urls": 0,
     "failed_urls": 0
+  },
+  "failure_classes": {
+    "transient": 0,
+    "permanent": 0,
+    "blocked": 0,
+    "unknown": 0
+  },
+  "recovery": {
+    "in_flight": 0,
+    "reset": 0,
+    "failed": 0,
+    "orphan_files_removed": 0,
+    "stale_result": false,
+    "corrupt_product_lines": 0
   },
   "coverage": {
     "status": "PARTIAL",
@@ -40,7 +54,7 @@
     "products": []
   },
   "runtime": {
-    "executor": "r06-runtime/0.1",
+    "executor": "r06-runtime/0.2",
     "llm_calls": 0,
     "raw_pages_retained": false,
     "http_engine": "scrapling.FetcherSession (curl_cffi, static HTML)"
@@ -53,8 +67,14 @@
     "max_products": 20,
     "max_urls": 100,
     "max_seconds": 180.0,
+    "max_attempts": 2,
     "browser_launched": false,
     "login_used": false
+  },
+  "resources": {
+    "browser_launched": false,
+    "processes": [],
+    "orphan_files_removed": 0
   },
   "limitations": [
     "Bounded to links accepted from the entry page; not full-site coverage.",

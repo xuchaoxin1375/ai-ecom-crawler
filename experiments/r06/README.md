@@ -14,7 +14,10 @@ R06 验证两件事：
 - 静态 HTTP（Scrapling `FetcherSession`），请求间隔不低于 1000ms；
 - 字段回退类型：`json_ld`、`css_text`、`css_attr`、`css_html`、`title`、`breadcrumb`、`option_groups`、`price_pair`、`canonical`、`constant`；
 - 9 列业务 CSV、`task-result.json`、`run-summary.json` 和诊断文件；
-- 任务账本、discovery／product 两种任务、SQLite 工作项检查点、并行 worker、暂停／恢复／取消。
+- 任务账本、discovery／product 两种任务、SQLite 工作项检查点、并行 worker、暂停／恢复／取消；
+- `failure_class`（`transient`／`permanent`／`blocked`）、任务级 `max_attempts`、临时失败退避；
+- JSON／CSV 原子替换、JSONL 单次追加＋fsync、残缺尾行修复；
+- 启动对账（`IN_FLIGHT` 重置或耗尽失败、方案版本校验、临时文件清理）和 `plan_*` 输出。
 
 暂不支持 sitemap／分类分页、浏览器渲染、登录、跨进程队列、Web UI 和完整 NDJSON 协议；这些不在 R16 v0 范围内。
 
@@ -152,8 +155,8 @@ python -m uv run --project experiments/framework-compare/scrapling --with "pyyam
 
 | 任务 | 类型 | 结果 | 请求 | 起止 |
 | --- | --- | --- | --- | --- |
-| `demo-discovery` | discovery | 6 个 URL，`COMPLETED` | 2（robots＋入口） | 07:20:14–07:20:18 |
-| `demo-product` | product | 6 个商品，`COMPLETED` | 8（robots＋入口＋6 商品） | 07:20:14–07:20:24 |
+| `demo-discovery` | discovery | 6 个 URL，`COMPLETED` | 2（robots＋入口） | 12:26:20–12:26:24 |
+| `demo-product` | product | 6 个商品，`COMPLETED` | 8（robots＋入口＋6 商品） | 12:26:20–12:26:38 |
 
 两个任务同一秒启动，discovery 先结束，product 继续；同域请求由全局限速器按 1 rps 串行，输出目录和计数互不污染。`demo-discovery` 没有请求商品页，验证了“只发现网址、不提取商品”的任务类型。
 
@@ -174,7 +177,10 @@ python experiments/r06/tools/validate_runtime.py --root experiments/r06/runtime-
 - discovery 任务不请求商品页；
 - product 任务输出 9 列；
 - 两个任务必须同时进入 fetcher（`threading.Barrier`）才继续，验证 worker 并行启动；
-- 暂停到 `PAUSED` 后恢复，最终 `COMPLETED`。
+- 暂停到 `PAUSED` 后恢复，最终 `COMPLETED`；
+- 临时失败重试、重试耗尽、401／403 阻塞分类；
+- `IN_FLIGHT` 对账重置、尝试次数耗尽失败、方案版本不匹配；
+- `plan_*` 输出和原子写／JSONL 追加。
 
 ## 局限
 
@@ -182,10 +188,10 @@ python experiments/r06/tools/validate_runtime.py --root experiments/r06/runtime-
 - 只验证一个站点、一次运行；没有独立复跑和跨环境导入。
 - 只支持静态 HTML；没有浏览器、登录、挑战处理或 JavaScript 渲染。
 - 只支持一个入口页；没有 sitemap、分类分页、公开 JSON 或详情补全。
-- 运行时只有单 worker；没有跨进程锁、队列、真实崩溃恢复演练；暂停／恢复只在无网络测试中验证过。
+- 运行时只有单 worker；有逻辑对账和失败分类测试，但没有跨进程锁、队列或真实进程崩溃演练；暂停／恢复只在无网络测试中验证过。
 - 单次运行执行器没有任务控制；任务控制只在 `runtime/` 中实现。
 - 没有 Web UI；`task list/status` 是 CLI。
-- `pyyaml` 通过 `uv run --with` 临时提供，尚未加入 Scrapling 项目的锁文件。
+- `pyyaml` 通过 `uv run --with` 临时提供；共享基线锁在 `baseline/`，尚未并入 Scrapling 项目的锁文件。
 
 ## 下一步
 

@@ -1,16 +1,16 @@
 {
   "task_id": "demo-product",
   "task_type": "product",
-  "rule_id": "familidoo-fr-runtime",
-  "rule_version": "2026.11.20-1",
+  "plan_id": "familidoo-fr-runtime",
+  "plan_version": "2026.11.20-1",
   "market": "FR",
   "locale": "fr-FR",
   "state": "FINISHED",
   "outcome": "COMPLETED",
   "stop_reason": "NATURAL_END",
   "stop_detail": "entry-page sample exhausted",
-  "started_at": "2026-11-20T07:20:14Z",
-  "finished_at": "2026-11-20T07:20:24Z",
+  "started_at": "2026-11-20T12:26:20Z",
+  "finished_at": "2026-11-20T12:26:38Z",
   "counts": {
     "navigation_urls": 1,
     "discovered_urls": 7,
@@ -22,6 +22,20 @@
     "excluded_products": 0,
     "failed_products": 0,
     "partial_description_products": 0
+  },
+  "failure_classes": {
+    "transient": 0,
+    "permanent": 0,
+    "blocked": 0,
+    "unknown": 0
+  },
+  "recovery": {
+    "in_flight": 0,
+    "reset": 0,
+    "failed": 0,
+    "orphan_files_removed": 0,
+    "stale_result": false,
+    "corrupt_product_lines": 0
   },
   "coverage": {
     "status": "PARTIAL",
@@ -39,14 +53,6 @@
   },
   "quality_exceptions": [
     {
-      "source_url": "https://www.familidoo.fr/fr/poussette-quadruple/74464-poussette-4-places-lidoo-lite-cosmic-black-0615402035002.html",
-      "description_status": "complete",
-      "partial_reason": null,
-      "missing_reasons": {
-        "brand": "NOT_PROVIDED"
-      }
-    },
-    {
       "source_url": "https://www.familidoo.fr/fr/poussette-quadruple/8-poussette-4-places-lidoo-star-dj04frl-4712928372676.html",
       "description_status": "complete",
       "partial_reason": null,
@@ -55,7 +61,7 @@
       }
     },
     {
-      "source_url": "https://www.familidoo.fr/fr/poussette-compacte/183-poussette-compacte-lidoo-one-noire-4712928373475.html",
+      "source_url": "https://www.familidoo.fr/fr/poussette-quadruple/74464-poussette-4-places-lidoo-lite-cosmic-black-0615402035002.html",
       "description_status": "complete",
       "partial_reason": null,
       "missing_reasons": {
@@ -64,6 +70,14 @@
     },
     {
       "source_url": "https://www.familidoo.fr/fr/poussette-quadruple/193-poussette-4-places-lidoo-city-h4e-full-grey-4712928374274.html",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED"
+      }
+    },
+    {
+      "source_url": "https://www.familidoo.fr/fr/poussette-compacte/183-poussette-compacte-lidoo-one-noire-4712928373475.html",
       "description_status": "complete",
       "partial_reason": null,
       "missing_reasons": {
@@ -91,13 +105,6 @@
     "policy": "Choose the smaller public pretax/gross pair per docs/02.",
     "products": [
       {
-        "source_url": "https://www.familidoo.fr/fr/poussette-quadruple/74464-poussette-4-places-lidoo-lite-cosmic-black-0615402035002.html",
-        "displayed": 615.0,
-        "pretax": 512.5,
-        "chosen": 512.5,
-        "basis": "exclusive"
-      },
-      {
         "source_url": "https://www.familidoo.fr/fr/poussette-quadruple/8-poussette-4-places-lidoo-star-dj04frl-4712928372676.html",
         "displayed": 799.0,
         "pretax": 665.833333,
@@ -105,10 +112,10 @@
         "basis": "exclusive"
       },
       {
-        "source_url": "https://www.familidoo.fr/fr/poussette-compacte/183-poussette-compacte-lidoo-one-noire-4712928373475.html",
-        "displayed": 89.0,
-        "pretax": 74.166666,
-        "chosen": 74.166666,
+        "source_url": "https://www.familidoo.fr/fr/poussette-quadruple/74464-poussette-4-places-lidoo-lite-cosmic-black-0615402035002.html",
+        "displayed": 615.0,
+        "pretax": 512.5,
+        "chosen": 512.5,
         "basis": "exclusive"
       },
       {
@@ -116,6 +123,13 @@
         "displayed": 899.0,
         "pretax": 749.166667,
         "chosen": 749.166667,
+        "basis": "exclusive"
+      },
+      {
+        "source_url": "https://www.familidoo.fr/fr/poussette-compacte/183-poussette-compacte-lidoo-one-noire-4712928373475.html",
+        "displayed": 89.0,
+        "pretax": 74.166666,
+        "chosen": 74.166666,
         "basis": "exclusive"
       },
       {
@@ -135,7 +149,7 @@
     ]
   },
   "runtime": {
-    "executor": "r06-runtime/0.1",
+    "executor": "r06-runtime/0.2",
     "llm_calls": 0,
     "raw_pages_retained": false,
     "http_engine": "scrapling.FetcherSession (curl_cffi, static HTML)"
@@ -148,8 +162,14 @@
     "max_products": 20,
     "max_urls": 100,
     "max_seconds": 180.0,
+    "max_attempts": 2,
     "browser_launched": false,
     "login_used": false
+  },
+  "resources": {
+    "browser_launched": false,
+    "processes": [],
+    "orphan_files_removed": 0
   },
   "limitations": [
     "Bounded to links accepted from the entry page; not full-site coverage.",

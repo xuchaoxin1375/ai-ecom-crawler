@@ -269,6 +269,15 @@ def _validate_task_defaults(value: Any) -> None:
         not isinstance(defaults["max_seconds"], (int, float)) or defaults["max_seconds"] <= 0
     ):
         raise RuleError("task_defaults.max_seconds must be positive")
+    if "max_attempts" in defaults and (
+        not isinstance(defaults["max_attempts"], int) or defaults["max_attempts"] < 1
+    ):
+        raise RuleError("task_defaults.max_attempts must be a positive integer")
+    if "retry_backoff_ms" in defaults and (
+        not isinstance(defaults["retry_backoff_ms"], (int, float))
+        or defaults["retry_backoff_ms"] < 0
+    ):
+        raise RuleError("task_defaults.retry_backoff_ms must be non-negative")
     concurrency = defaults.get("concurrency", {})
     if concurrency:
         concurrency = _require_mapping(concurrency, "task_defaults.concurrency")
