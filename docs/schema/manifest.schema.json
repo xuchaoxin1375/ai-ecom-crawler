@@ -156,6 +156,13 @@
                   "max_sitemaps": {
                     "type": "integer",
                     "minimum": 1
+                  },
+                  "sitemap_patterns": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
                   }
                 },
                 "additionalProperties": false

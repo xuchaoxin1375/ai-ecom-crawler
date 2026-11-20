@@ -53,6 +53,7 @@ class SchemaTests(unittest.TestCase):
                 {
                     "type": "sitemap",
                     "urls": ["https://www.familidoo.fr/sitemap.xml"],
+                    "sitemap_patterns": ["sitemap_products"],
                 }
             ],
             "product_url_patterns": ["/fr/.*\\.html$"],

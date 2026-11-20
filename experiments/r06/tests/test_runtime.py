@@ -32,6 +32,7 @@ ROBOTS = "https://www.familidoo.fr/robots.txt"
 ROBOTS_OK = "User-agent: *\nAllow: /\n"
 SITEMAP = "https://www.familidoo.fr/sitemap-products.xml"
 SITEMAP_INDEX = "https://www.familidoo.fr/sitemap.xml"
+SITEMAP_IMAGES = "https://www.familidoo.fr/sitemap-images.xml"
 SITEMAP_XML = (
     '<?xml version="1.0" encoding="UTF-8"?>'
     '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
@@ -43,6 +44,13 @@ SITEMAP_INDEX_XML = (
     '<?xml version="1.0" encoding="UTF-8"?>'
     '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
     f"<sitemap><loc>{SITEMAP}</loc></sitemap>"
+    "</sitemapindex>"
+)
+SITEMAP_INDEX_WITH_IMAGES_XML = (
+    '<?xml version="1.0" encoding="UTF-8"?>'
+    '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+    f"<sitemap><loc>{SITEMAP}</loc></sitemap>"
+    f"<sitemap><loc>{SITEMAP_IMAGES}</loc></sitemap>"
     "</sitemapindex>"
 )
 LISTING = "https://www.familidoo.fr/fr/list?page=1"
@@ -483,6 +491,40 @@ class SitemapTests(unittest.TestCase):
             TaskRunner(
                 store, rule, task, fetcher=fetcher, out_root=root / "tasks"
             ).run()
+            result = json.loads(
+                (root / "tasks" / task.task_id / "task-result.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(result["counts"]["navigation_urls"], 2)
+            self.assertEqual(result["counts"]["valid_urls"], 1)
+
+    def test_sitemap_index_filters_children(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = TaskStore(root / "tasks.db")
+            rule = sources_rule(
+                root,
+                [
+                    {
+                        "type": "sitemap",
+                        "urls": [SITEMAP_INDEX],
+                        "sitemap_patterns": ["sitemap-products"],
+                    }
+                ],
+            )
+            task = make_task("discovery", "sitemap-filter")
+            store.create_task(task)
+            fetcher = FakeFetcher(
+                {
+                    SITEMAP_INDEX: (200, SITEMAP_INDEX_WITH_IMAGES_XML),
+                    SITEMAP: (200, SITEMAP_XML),
+                }
+            )
+            TaskRunner(
+                store, rule, task, fetcher=fetcher, out_root=root / "tasks"
+            ).run()
+            self.assertNotIn(SITEMAP_IMAGES, fetcher.calls)
             result = json.loads(
                 (root / "tasks" / task.task_id / "task-result.json").read_text(
                     encoding="utf-8"

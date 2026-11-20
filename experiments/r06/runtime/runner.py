@@ -546,19 +546,35 @@ class TaskRunner:
             if _local_name(element.tag).lower() == "loc" and element.text
         ]
         if root_name == "sitemapindex":
+            patterns = [
+                re.compile(pattern)
+                for pattern in item.result.get("sitemap_patterns", [])
+            ]
+            children = [
+                location
+                for location in locations
+                if not patterns
+                or any(pattern.search(location) for pattern in patterns)
+            ]
             added = 0
             skipped = 0
-            for location in locations[: self._max_sitemaps]:
+            for location in children[: self._max_sitemaps]:
                 if not self._is_allowed_url(location):
                     skipped += 1
                     continue
-                if self._add_navigation(location, source="sitemap", parent=item.url):
+                if self._add_navigation(
+                    location,
+                    source="sitemap",
+                    parent=item.url,
+                    result={"sitemap_patterns": []},
+                ):
                     added += 1
                 else:
                     skipped += 1
             return "DONE", {
                 "sitemap_type": "index",
                 "children": len(locations),
+                "matched": len(children),
                 "added": added,
                 "skipped": skipped,
             }
@@ -653,7 +669,13 @@ class TaskRunner:
                 if source.get("robots") is True:
                     urls.extend(self._robots_sitemaps)
                 for url in dict.fromkeys(urls):
-                    self._add_navigation(url, source="sitemap")
+                    self._add_navigation(
+                        url,
+                        source="sitemap",
+                        result={
+                            "sitemap_patterns": source.get("sitemap_patterns", [])
+                        },
+                    )
             elif source_type == "listing":
                 url = str(source.get("url") or source.get("seed") or "")
                 if not url:
