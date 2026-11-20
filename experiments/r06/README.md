@@ -34,6 +34,7 @@ R06 验证两件事：
 | `plans/shopthebulkstore-runtime.yaml` | 第二站规则包；分类页入口，10 个商品 |
 | `plans/javaestate-sitemap-runtime.yaml` | S1 direct product sitemap 规则包；只做 URL 发现 |
 | `plans/javaestate-sitemap-index-runtime.yaml` | S1 sitemap index 规则包；按 `sitemap_products` 过滤子图 |
+| `plans/javaestate-robots-sitemap-runtime.yaml` | S1 robots `Sitemap:` 行规则包；3 请求，30 个 URL |
 | `plans/shopthebulkstore-pagination-runtime.yaml` | S5 分页规则包；`page_param`，3 页，只做 URL 发现 |
 | `plans/shopthebulkstore-html-index-runtime.yaml` | S5 HTML 索引规则包；`/all-products`，30 个 URL |
 | `plans/familidoo-html-index-runtime.yaml` | Familidoo HTML 索引规则包；首页＋1 层分类，31 个 URL |
@@ -46,6 +47,7 @@ R06 验证两件事：
 | `shopthebulkstore-demo/` | 第二站复用：只加规则包，分类页 10 个商品 |
 | `javaestate-sitemap-demo/` | S1 direct sitemap：1 请求，30 个商品 URL，不请求商品页 |
 | `javaestate-sitemap-index-demo/` | S1 sitemap index：2 请求，过滤子图，30 个商品 URL |
+| `javaestate-robots-sitemap-demo/` | S1 robots `Sitemap:` 行：3 请求，30 个商品 URL |
 | `shopthebulkstore-pagination-demo/` | S5 分类分页：3 页，62 个商品 URL，不请求商品页 |
 | `shopthebulkstore-html-index-demo/` | S5 HTML 索引：1 请求，30 个商品 URL，不请求商品页 |
 | `familidoo-html-index-demo/` | Familidoo HTML 索引：5 请求，31 个商品 URL，1 层分类 |
@@ -215,7 +217,7 @@ python experiments/r06/tools/validate_runtime.py --root experiments/r06/runtime-
 
 ### S1 sitemap discovery
 
-`javaestate-sitemap-demo/` 用 `plans/javaestate-sitemap-runtime.yaml` 直接读取 D01 的 product sitemap：1 次请求、30 个唯一商品 URL、`COMPLETED`，没有请求商品页。`javaestate-sitemap-index-demo/` 另用 `plans/javaestate-sitemap-index-runtime.yaml` 读 sitemap index，按 `sitemap_products` 过滤子图：2 次请求、30 个 URL。gzip 由 Modellbahn demo 和无网络测试覆盖。详情见两个 demo 的 README。
+`javaestate-sitemap-demo/` 用 `plans/javaestate-sitemap-runtime.yaml` 直接读取 D01 的 product sitemap：1 次请求、30 个唯一商品 URL、`COMPLETED`，没有请求商品页。`javaestate-sitemap-index-demo/` 另用 `plans/javaestate-sitemap-index-runtime.yaml` 读 sitemap index，按 `sitemap_products` 过滤子图：2 次请求、30 个 URL。`javaestate-robots-sitemap-demo/` 不写 sitemap URL，只从 robots 保留 `Sitemap:` 行：3 次请求、30 个 URL，事件记录保留 1 条 Sitemap 行。gzip 由 Modellbahn demo 和无网络测试覆盖。详情见各 demo 的 README。
 
 ### Modellbahn sitemap gzip
 
@@ -258,7 +260,7 @@ python experiments/r06/tools/validate_runtime.py --root experiments/r06/runtime-
 - 入口页只展示 6 个商品，未做 10～20 个随机抽样；6／6 是小样本全量，不是全站覆盖。
 - familidoo 只验证一个站点、一次运行；shopthebulkstore 是第二站 10 商品有界样本；没有独立复跑和跨环境导入。
 - 只支持静态 HTML；没有浏览器、登录、挑战处理或 JavaScript 渲染。
-- sitemap（含 gzip）、`page_param`、`next_link`、`html_index`（含 1 层分类）和 `public_json` 已有真实站点有界验证，offset 另用公开 API 冒烟；cursor 仍只有 fixture；没有单 source seeds 列表、POST／GraphQL、load more／无限滚动或详情补全；多个 sources 有测试。
+- sitemap（含 gzip 和 robots `Sitemap:` 行）、`page_param`、`next_link`、`html_index`（含 1 层分类）和 `public_json` 已有真实站点有界验证，offset 另用公开 API 冒烟；cursor 仍只有 fixture；没有单 source seeds 列表、POST／GraphQL、load more／无限滚动或详情补全；多个 sources 有测试。
 - 运行时只有单 worker；有逻辑对账和失败分类测试，单 worker 强杀恢复已在 Tognar 演练；但没有跨进程锁、队列或租约，多进程未验证。
 - 单次运行执行器没有任务控制；任务控制只在 `runtime/` 中实现。
 - 没有 Web UI；`task list/status` 是 CLI。
@@ -267,7 +269,7 @@ python experiments/r06/tools/validate_runtime.py --root experiments/r06/runtime-
 ## 下一步
 
 - 第二站已复测（`shopthebulkstore-demo`），只新增规则包，运行时公共代码不变。
-- S1 sitemap direct／index（各 30 URL）、Modellbahn sitemap gzip（30 URL）、S5 `page_param`（62 URL）、Tognar `next_link`（30 URL）、S5 `html_index`（30 URL）、Familidoo `html_index`（31 URL，1 层分类）、S4 `public_json`（30 URL）和 DummyJSON offset（20 URL）已完成；下一步补单 source seeds 和 POST／GraphQL；复杂分页按 ADR 0007 暂缓。
+- S1 sitemap direct／index／robots 行（各 30 URL）、Modellbahn sitemap gzip（30 URL）、S5 `page_param`（62 URL）、Tognar `next_link`（30 URL）、S5 `html_index`（30 URL）、Familidoo `html_index`（31 URL，1 层分类）、S4 `public_json`（30 URL）和 DummyJSON offset（20 URL）已完成；下一步补单 source seeds 和 POST／GraphQL；复杂分页按 ADR 0007 暂缓。
 - 把“两个任务并行 + 同域限速 + 暂停／取消”做成真实站点的验收记录，而不只用 fake fetcher。
 - 补跨进程 worker 和租约；单 worker 强杀恢复已完成。
 - 维护、漂移和长期稳定性仍后置（J08）；本轮不据此判断维护成本。
