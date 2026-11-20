@@ -254,6 +254,8 @@ class TaskRunner:
             return self._process_listing(item, result)
         if item.item_type == "navigation" and item.discovered_from == "html_index":
             return self._process_html_index(item, result)
+        if item.item_type == "navigation" and item.discovered_from == "public_json":
+            return self._process_public_json(item, result)
         if item.item_type == "navigation" and item.discovered_from == "sitemap":
             return self._process_sitemap(item, result)
 
@@ -290,6 +292,110 @@ class TaskRunner:
             "price_currency": record.price_currency,
             "product": payload,
         }
+
+    def _process_public_json(
+        self, item: WorkItem, result: Any
+    ) -> tuple[str, dict[str, Any]]:
+        try:
+            payload = json.loads(result.body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            return "FAILED", {
+                "reason": "public_json_parse_error",
+                "failure_class": "permanent",
+                "error": str(exc),
+            }
+        items = _json_get(payload, str(item.result.get("items_path", "")))
+        if not isinstance(items, list):
+            return "FAILED", {
+                "reason": "public_json_items_not_found",
+                "failure_class": "permanent",
+            }
+
+        added = 0
+        for entry in items:
+            if not isinstance(entry, dict):
+                continue
+            raw_url: Any = None
+            url_field = item.result.get("url_field")
+            if url_field:
+                raw_url = _json_get(entry, str(url_field))
+            if raw_url is None and item.result.get("url_template"):
+                try:
+                    raw_url = str(item.result["url_template"]).format(**entry)
+                except KeyError:
+                    continue
+            if not raw_url:
+                continue
+            absolute = urljoin(item.url, str(raw_url))
+            if not self._is_product_candidate(absolute):
+                continue
+            if self._add_product_item(
+                absolute, parent=item.url, source="public_json"
+            ):
+                added += 1
+
+        pagination = item.result.get("pagination", {"type": "none"})
+        next_url, state = self._next_public_json_url(item, payload, pagination)
+        if added and next_url:
+            self._add_navigation(
+                next_url,
+                source="public_json",
+                parent=item.url,
+                result={**item.result, **state},
+            )
+        return "DONE", {
+            "items": len(items),
+            "added": added,
+            "next": next_url,
+            "stop": "no_new_items" if added == 0 else None,
+        }
+
+    def _next_public_json_url(
+        self, item: WorkItem, payload: Any, pagination: dict[str, Any]
+    ) -> tuple[str | None, dict[str, Any]]:
+        pagination_type = str(pagination.get("type", "none"))
+        if pagination_type == "none":
+            return None, {}
+        max_pages = max(1, int(pagination.get("max_pages", 20)))
+        if int(item.result.get("page", 1)) >= max_pages:
+            return None, {}
+        if pagination_type == "page_param":
+            param = str(pagination.get("param", "page"))
+            page = int(item.result.get("page", 1)) + 1
+            return _with_query(item.url, {param: page}), {"page": page}
+        if pagination_type == "offset":
+            offset = int(item.result.get("offset", pagination.get("offset", 0)))
+            page_size = int(pagination.get("page_size", 20))
+            total = _json_get(payload, str(pagination.get("total_path", "")))
+            if isinstance(total, int) and offset + page_size >= total:
+                return None, {}
+            next_offset = offset + page_size
+            next_url = _with_query(
+                item.url,
+                {
+                    str(pagination.get("offset_param", "offset")): next_offset,
+                    str(pagination.get("limit_param", "limit")): page_size,
+                },
+            )
+            return next_url, {
+                "offset": next_offset,
+                "page": int(item.result.get("page", 1)) + 1,
+            }
+        if pagination_type == "cursor":
+            next_cursor = _json_get(
+                payload, str(pagination.get("next_cursor_path", ""))
+            )
+            if not next_cursor or next_cursor == item.result.get("cursor"):
+                return None, {}
+            next_url = _with_query(
+                item.url,
+                {str(pagination.get("cursor_param", "cursor")): next_cursor},
+            )
+            return next_url, {
+                "cursor": next_cursor,
+                "page": int(item.result.get("page", 1)) + 1,
+            }
+        return None, {}
 
     def _process_html_index(
         self, item: WorkItem, result: Any
@@ -576,6 +682,24 @@ class TaskRunner:
                         "link_selector": source.get("link_selector")
                         or self.rule.discovery.get("link_selector", ""),
                         "category_patterns": source.get("category_patterns", []),
+                    },
+                )
+            elif source_type == "public_json":
+                url = str(source.get("url") or "")
+                if not url:
+                    continue
+                pagination = source.get("pagination", {"type": "none"})
+                self._add_navigation(
+                    url,
+                    source="public_json",
+                    result={
+                        "items_path": source.get("items_path"),
+                        "url_field": source.get("url_field"),
+                        "url_template": source.get("url_template"),
+                        "pagination": pagination,
+                        "page": int(pagination.get("start", 1)),
+                        "offset": int(pagination.get("offset", 0)),
+                        "cursor": None,
                     },
                 )
 
@@ -1132,6 +1256,40 @@ def _record_payload(record: Any) -> dict[str, Any]:
         "price_pretax": record.price_pretax,
         "tax_basis": record.tax_basis,
     }
+
+
+def _json_get(value: Any, path: str) -> Any:
+    if not path:
+        return value
+    current = value
+    for part in path.split("."):
+        if isinstance(current, dict):
+            current = current.get(part)
+        elif isinstance(current, list) and part.isdigit():
+            index = int(part)
+            current = current[index] if 0 <= index < len(current) else None
+        else:
+            return None
+        if current is None:
+            return None
+    return current
+
+
+def _with_query(url: str, values: dict[str, Any]) -> str:
+    parsed = urlparse(url)
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    for key, value in values.items():
+        query[str(key)] = str(value)
+    return urlunparse(
+        (
+            parsed.scheme,
+            parsed.netloc,
+            parsed.path,
+            parsed.params,
+            urlencode(query, doseq=True),
+            "",
+        )
+    )
 
 
 def _local_name(tag: str) -> str:

@@ -16,7 +16,7 @@ SCHEMA_VERSIONS = {"1.0", "1.1"}
 RULE_STATUSES = {"candidate", "verified", "deprecated"}
 SUPPORTED_KINDS = {"declarative"}
 SUPPORTED_DISCOVERY = {"entry_links"}
-SUPPORTED_SOURCES = {"entry_links", "sitemap", "listing", "html_index"}
+SUPPORTED_SOURCES = {"entry_links", "sitemap", "listing", "html_index", "public_json"}
 SUPPORTED_ADVANCE = {"none", "page_param", "next_link"}
 CORE_FIELDS = {"name", "price.amount", "price.currency", "primary_image_url", "source_url"}
 RULE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,80}$")
@@ -366,6 +366,8 @@ def _validate_sources(value: Any, discovery: dict[str, Any]) -> None:
                 or source["max_depth"] < 0
             ):
                 raise RuleError(f"{path}.max_depth must be a non-negative integer")
+        if source_type == "public_json":
+            _validate_public_json_source(source, path)
         if source_type == "sitemap":
             urls = source.get("urls", [])
             if not isinstance(urls, list):
@@ -433,6 +435,44 @@ def _validate_advance(value: Any, path: str) -> None:
         or advance["max_pages"] < 1
     ):
         raise RuleError(f"{path}.advance.max_pages must be a positive integer")
+
+
+def _validate_public_json_source(source: dict[str, Any], path: str) -> None:
+    _require_string(source.get("url"), f"{path}.url")
+    method = str(source.get("method", "GET")).upper()
+    if method != "GET":
+        raise RuleError(f"{path}.method must be GET in the current runtime")
+    _require_string(source.get("items_path"), f"{path}.items_path")
+    if not source.get("url_field") and not source.get("url_template"):
+        raise RuleError(f"{path} needs url_field or url_template")
+    if "url_field" in source:
+        _require_string(source.get("url_field"), f"{path}.url_field")
+    if "url_template" in source:
+        _require_string(source.get("url_template"), f"{path}.url_template")
+    pagination = source.get("pagination", {"type": "none"})
+    pagination = _require_mapping(pagination, f"{path}.pagination")
+    pagination_type = str(pagination.get("type", "none"))
+    if pagination_type not in {"none", "page_param", "offset", "cursor"}:
+        raise RuleError(f"unsupported {path}.pagination.type: {pagination_type!r}")
+    for key in ("param", "offset_param", "limit_param", "cursor_param", "next_cursor_path"):
+        if key in pagination:
+            _require_string(pagination.get(key), f"{path}.pagination.{key}")
+    for key in ("start", "offset"):
+        if key in pagination and (
+            isinstance(pagination[key], bool)
+            or not isinstance(pagination[key], int)
+            or pagination[key] < 0
+        ):
+            raise RuleError(f"{path}.pagination.{key} must be a non-negative integer")
+    for key in ("max_pages", "page_size"):
+        if key in pagination and (
+            isinstance(pagination[key], bool)
+            or not isinstance(pagination[key], int)
+            or pagination[key] < 1
+        ):
+            raise RuleError(f"{path}.pagination.{key} must be a positive integer")
+    if pagination_type == "cursor" and not pagination.get("next_cursor_path"):
+        raise RuleError(f"{path}.pagination.next_cursor_path is required for cursor")
 
 
 def _validate_task_defaults(value: Any) -> None:

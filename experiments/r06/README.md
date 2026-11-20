@@ -10,7 +10,7 @@ R06 验证两件事：
 这是原型，不是生产执行器。当前支持：
 
 - `kind: declarative`；
-- `discovery.strategies: ["entry_links"]`，或 `discovery.sources` 的 `sitemap`（urlset／index／gzip，支持 robots `Sitemap:` 行探测）、`listing`（`page_param`／`next_link`）、`html_index`（有限深度分类递归）；
+- `discovery.strategies: ["entry_links"]`，或 `discovery.sources` 的 `sitemap`（urlset／index／gzip，支持 robots `Sitemap:` 行探测）、`listing`（`page_param`／`next_link`）、`html_index`（有限深度分类递归）、`public_json`（GET，page／offset／cursor）；
 - 静态 HTTP（Scrapling `FetcherSession`），请求间隔不低于 1000ms；
 - 字段回退类型：`json_ld`、`css_text`、`css_attr`、`css_html`、`title`、`breadcrumb`、`option_groups`、`price_pair`、`canonical`、`constant`；
 - 9 列业务 CSV、`task-result.json`、`run-summary.json` 和诊断文件；
@@ -35,12 +35,14 @@ R06 验证两件事：
 | `plans/javaestate-sitemap-runtime.yaml` | S1 sitemap 规则包；只做 URL 发现 |
 | `plans/shopthebulkstore-pagination-runtime.yaml` | S5 分页规则包；`page_param`，3 页，只做 URL 发现 |
 | `plans/shopthebulkstore-html-index-runtime.yaml` | S5 HTML 索引规则包；`/all-products`，30 个 URL |
+| `plans/sixmoondesigns-products-json-runtime.yaml` | S4 公开 JSON 规则包；`products.json` 第 1 页，30 个 URL |
 | `familidoo/` | 单次运行的 9 列 CSV、任务结果和 `r06-run-001`～`004` 诊断 |
 | `runtime-demo/` | 两个任务并行：discovery URL 清单和 product 9 列 CSV |
 | `shopthebulkstore-demo/` | 第二站复用：只加规则包，分类页 10 个商品 |
 | `javaestate-sitemap-demo/` | S1 sitemap：1 请求，30 个商品 URL，不请求商品页 |
 | `shopthebulkstore-pagination-demo/` | S5 分类分页：3 页，62 个商品 URL，不请求商品页 |
 | `shopthebulkstore-html-index-demo/` | S5 HTML 索引：1 请求，30 个商品 URL，不请求商品页 |
+| `sixmoondesigns-public-json-demo/` | S4 公开 JSON：1 请求，30 个商品 URL，不请求商品页 |
 | `tests/` | 无网络契约、提取、任务账本和运行时测试 |
 | `tools/validate_output.py` | 单次运行输出校验器 |
 | `tools/validate_runtime.py` | 运行时 demo 校验器 |
@@ -184,6 +186,7 @@ python experiments/r06/tools/validate_runtime.py --root experiments/r06/runtime-
 - sitemap urlset／index／gzip 解析，sitemap 来源 discovery 不请求商品页；
 - listing 的 `page_param`／`next_link` 推进、末页和去重；
 - html_index 的单页链接、有限深度分类递归和 `max_depth`；
+- public_json 的 page／offset／cursor 解析和 `url_template`；
 - robots 不阻断，且只保留 `Sitemap:` 行；
 - SQLite 任务账本、工作项去重、claim／reset；
 - discovery 任务不请求商品页；
@@ -210,12 +213,16 @@ python experiments/r06/tools/validate_runtime.py --root experiments/r06/runtime-
 
 `shopthebulkstore-html-index-demo/` 用 `plans/shopthebulkstore-html-index-runtime.yaml` 从 `/all-products` 取前 30 个商品 URL：1 次请求、`COMPLETED`，没有 XML sitemap，也没有请求商品页。`max_depth: 0`；分类递归由 fixture 覆盖。详情见 [`shopthebulkstore-html-index-demo/README.md`](shopthebulkstore-html-index-demo/README.md)。
 
+### S4 public JSON
+
+`sixmoondesigns-public-json-demo/` 用 `plans/sixmoondesigns-products-json-runtime.yaml` 读取 `products.json` 第 1 页：1 次请求、30 个唯一商品 URL、`COMPLETED`，没有请求商品页或 sitemap。`url_template` 按 `handle` 生成商品 URL；后续页和 offset／cursor 由 fixture 覆盖。详情见 [`sixmoondesigns-public-json-demo/README.md`](sixmoondesigns-public-json-demo/README.md)。
+
 ## 局限
 
 - 入口页只展示 6 个商品，未做 10～20 个随机抽样；6／6 是小样本全量，不是全站覆盖。
 - familidoo 只验证一个站点、一次运行；shopthebulkstore 是第二站 10 商品有界样本；没有独立复跑和跨环境导入。
 - 只支持静态 HTML；没有浏览器、登录、挑战处理或 JavaScript 渲染。
-- sitemap、`page_param` 和 `html_index` 已有真实站点有界验证；没有多种子、公开 JSON、load more／无限滚动或详情补全。
+- sitemap、`page_param`、`html_index` 和 `public_json` 已有真实站点有界验证；没有多种子、POST／GraphQL、load more／无限滚动或详情补全。
 - 运行时只有单 worker；有逻辑对账和失败分类测试，但没有跨进程锁、队列或真实进程崩溃演练；暂停／恢复只在无网络测试中验证过。
 - 单次运行执行器没有任务控制；任务控制只在 `runtime/` 中实现。
 - 没有 Web UI；`task list/status` 是 CLI。
@@ -224,7 +231,7 @@ python experiments/r06/tools/validate_runtime.py --root experiments/r06/runtime-
 ## 下一步
 
 - 第二站已复测（`shopthebulkstore-demo`），只新增规则包，运行时公共代码不变。
-- S1 sitemap（30 URL）、S5 `page_param`（62 URL）和 S5 `html_index`（30 URL）已完成；下一步补多种子、`next_link` 真实站点和公开 JSON；复杂分页按 ADR 0007 暂缓。
+- S1 sitemap（30 URL）、S5 `page_param`（62 URL）、S5 `html_index`（30 URL）和 S4 `public_json`（30 URL）已完成；下一步补多种子、`next_link` 真实站点和 POST／GraphQL；复杂分页按 ADR 0007 暂缓。
 - 把“两个任务并行 + 同域限速 + 暂停／取消”做成真实站点的验收记录，而不只用 fake fetcher。
 - 补跨进程 worker 或至少一个单 worker 的崩溃恢复演练。
 - 维护、漂移和长期稳定性仍后置（J08）；本轮不据此判断维护成本。

@@ -231,6 +231,85 @@
                   }
                 },
                 "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": ["type", "url", "items_path"],
+                "properties": {
+                  "type": {
+                    "const": "public_json"
+                  },
+                  "url": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "method": {
+                    "const": "GET"
+                  },
+                  "items_path": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "url_field": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "url_template": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "pagination": {
+                    "type": "object",
+                    "required": ["type"],
+                    "properties": {
+                      "type": {
+                        "enum": ["none", "page_param", "offset", "cursor"]
+                      },
+                      "param": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "start": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "offset": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "offset_param": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "limit_param": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "page_size": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "max_pages": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "cursor_param": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "next_cursor_path": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "total_path": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
               }
             ]
           }
