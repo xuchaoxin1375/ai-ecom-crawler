@@ -11,6 +11,7 @@
 | `scripts/export_docs.py` | 生成可分发的文档 ZIP 与 `manifest.json`，并可按清单复核 |
 | `experiments/framework-compare/` | 框架对比实验代码、探针与结果；不进入业务正文 |
 | `experiments/d01/` | D01 单站试点方案包与运行证据；当前含 S1 javaestate |
+| `experiments/r04/` | R04 旧任务对照试点；当前含 familidoo 新流程侧 |
 | `dist/` | 导出产物，默认不提交 |
 
 ## 快速开始

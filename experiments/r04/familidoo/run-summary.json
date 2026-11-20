@@ -1,0 +1,25 @@
+{
+  "task_id": "r04-familidoo-r04-run-003",
+  "label": "r04-run-003",
+  "plan_id": "familidoo-fr-r04",
+  "plan_version": "2026.11.20-1",
+  "run_started_at": "2026-11-20T03:02:39Z",
+  "run_finished_at": "2026-11-20T03:02:52Z",
+  "elapsed_s": 13.28,
+  "build_started_at": "2026-11-20T02:56:00Z",
+  "first_valid_at": "2026-11-20T03:02:44Z",
+  "first_valid_product_s": 404.0,
+  "requests": 8,
+  "retries": 0,
+  "per_purpose": {
+    "robots": 1,
+    "entry": 1,
+    "product": 6
+  },
+  "valid_products": 6,
+  "failed_products": 0,
+  "excluded_products": 0,
+  "stop_reason": "FINISHED",
+  "stop_detail": "bounded homepage sample; not full-site coverage",
+  "http_engine": "scrapling.FetcherSession (curl_cffi, static HTML)"
+}

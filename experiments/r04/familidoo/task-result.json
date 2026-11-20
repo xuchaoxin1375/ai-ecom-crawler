@@ -1,0 +1,124 @@
+{
+  "task_id": "r04-familidoo-r04-run-003",
+  "plan_id": "familidoo-fr-r04",
+  "plan_version": "2026.11.20-1",
+  "state": "FINISHED",
+  "outcome": "PARTIAL",
+  "stop_reason": "FINISHED",
+  "stop_detail": "bounded homepage sample; not full-site coverage",
+  "counts": {
+    "discovered_urls": 6,
+    "pending_navigation_entries": 0,
+    "product_candidates": 6,
+    "pending_products": 0,
+    "in_flight_products": 0,
+    "processed_products": 6,
+    "valid_products": 6,
+    "excluded_products": 0,
+    "failed_products": 0,
+    "partial_description_products": 0
+  },
+  "coverage": {
+    "status": "PARTIAL",
+    "denominator_source": "homepage product links",
+    "denominator": 6,
+    "covered": 6,
+    "notes": "Only the product links shown on the homepage were in scope; this is not full-site coverage."
+  },
+  "pricing": {
+    "policy": "choose the smaller public pretax/gross pair per docs/02; basis is recorded per product",
+    "products": [
+      {
+        "source_url": "https://www.familidoo.fr/fr/poussette-quadruple/74464-poussette-4-places-lidoo-lite-cosmic-black-0615402035002.html",
+        "displayed": 615.0,
+        "pretax": 512.5,
+        "chosen": 512.5,
+        "basis": "exclusive"
+      },
+      {
+        "source_url": "https://www.familidoo.fr/fr/poussette-quadruple/8-poussette-4-places-lidoo-star-dj04frl-4712928372676.html",
+        "displayed": 799.0,
+        "pretax": 665.833333,
+        "chosen": 665.833333,
+        "basis": "exclusive"
+      },
+      {
+        "source_url": "https://www.familidoo.fr/fr/poussette-quadruple/193-poussette-4-places-lidoo-city-h4e-full-grey-4712928374274.html",
+        "displayed": 899.0,
+        "pretax": 749.166667,
+        "chosen": 749.166667,
+        "basis": "exclusive"
+      },
+      {
+        "source_url": "https://www.familidoo.fr/fr/poussette-compacte/183-poussette-compacte-lidoo-one-noire-4712928373475.html",
+        "displayed": 89.0,
+        "pretax": 74.166666,
+        "chosen": 74.166666,
+        "basis": "exclusive"
+      },
+      {
+        "source_url": "https://www.familidoo.fr/fr/libeca/316-veilleuse-5-en-1-baby-dream-machine-0617092971653.html",
+        "displayed": 39.0,
+        "pretax": 32.5,
+        "chosen": 32.5,
+        "basis": "exclusive"
+      },
+      {
+        "source_url": "https://www.familidoo.fr/fr/iglu/74427-bascule-en-mousse-iglu-banane-4751005644831.html",
+        "displayed": 59.5,
+        "pretax": 49.583334,
+        "chosen": 49.583334,
+        "basis": "exclusive"
+      }
+    ]
+  },
+  "quality_exceptions": [
+    {
+      "source_url": "https://www.familidoo.fr/fr/poussette-quadruple/74464-poussette-4-places-lidoo-lite-cosmic-black-0615402035002.html",
+      "field": "brand",
+      "reason": "not_exposed"
+    },
+    {
+      "source_url": "https://www.familidoo.fr/fr/poussette-quadruple/8-poussette-4-places-lidoo-star-dj04frl-4712928372676.html",
+      "field": "brand",
+      "reason": "not_exposed"
+    },
+    {
+      "source_url": "https://www.familidoo.fr/fr/poussette-quadruple/193-poussette-4-places-lidoo-city-h4e-full-grey-4712928374274.html",
+      "field": "brand",
+      "reason": "not_exposed"
+    },
+    {
+      "source_url": "https://www.familidoo.fr/fr/poussette-compacte/183-poussette-compacte-lidoo-one-noire-4712928373475.html",
+      "field": "brand",
+      "reason": "not_exposed"
+    },
+    {
+      "source_url": "https://www.familidoo.fr/fr/libeca/316-veilleuse-5-en-1-baby-dream-machine-0617092971653.html",
+      "field": "brand",
+      "reason": "not_exposed"
+    },
+    {
+      "source_url": "https://www.familidoo.fr/fr/iglu/74427-bascule-en-mousse-iglu-banane-4751005644831.html",
+      "field": "brand",
+      "reason": "not_exposed"
+    }
+  ],
+  "access": {
+    "entry_url": "https://www.familidoo.fr/fr/",
+    "robots_url": "https://www.familidoo.fr/robots.txt",
+    "user_agent": "ai-ecom-crawler-r04",
+    "delay_s": 1.0,
+    "max_products": 6,
+    "max_seconds": 120.0,
+    "browser_launched": false,
+    "login_used": false
+  },
+  "limitations": [
+    "Bounded to the product links shown on the homepage; not full-site coverage.",
+    "Static HTML only; no browser rendering or JavaScript-only tabs.",
+    "Price uses the smaller public pretax/gross pair (docs/02 default); tax basis is recorded per product.",
+    "Brand is left empty when the page does not expose a manufacturer; it is not inferred from the product name.",
+    "No login, cart, checkout, account, search, challenge or access-control bypass."
+  ]
+}
