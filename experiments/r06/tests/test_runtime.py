@@ -46,6 +46,8 @@ SITEMAP_INDEX_XML = (
     "</sitemapindex>"
 )
 LISTING = "https://www.familidoo.fr/fr/list?page=1"
+SITE_MAP = "https://www.familidoo.fr/fr/site-map"
+CATEGORY = "https://www.familidoo.fr/fr/categories/"
 PRODUCT2 = "https://www.familidoo.fr/fr/cat/2-b.html"
 PRODUCT3 = "https://www.familidoo.fr/fr/cat/3-c.html"
 ENTRY_HTML = (
@@ -168,6 +170,15 @@ def listing_html(product: str, next_href: str | None = None) -> str:
     link = f'<a class="product_img_link" href="{product}">Product</a>'
     nxt = f'<a rel="next" href="{next_href}">Next</a>' if next_href else ""
     return f"<html><body>{link}{nxt}</body></html>"
+
+
+def html_index_html(product: str | None, category: str | None) -> str:
+    links = []
+    if product:
+        links.append(f'<a href="{product}">Product</a>')
+    if category:
+        links.append(f'<a href="{category}">Category</a>')
+    return f"<html><body>{''.join(links)}</body></html>"
 
 
 class RuleTests(unittest.TestCase):
@@ -555,6 +566,80 @@ class SitemapTests(unittest.TestCase):
             self.assertFalse(
                 (root / "tasks" / task.task_id / "robots.txt").exists()
             )
+
+
+class HtmlIndexTests(unittest.TestCase):
+    def test_html_index_follows_category_once(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = TaskStore(root / "tasks.db")
+            rule = sources_rule(
+                root,
+                [
+                    {
+                        "type": "html_index",
+                        "url": SITE_MAP,
+                        "link_selector": "a",
+                        "category_patterns": ["^/fr/categories/"],
+                        "max_depth": 1,
+                    }
+                ],
+            )
+            task = make_task("discovery", "html-index")
+            store.create_task(task)
+            fetcher = FakeFetcher(
+                {
+                    SITE_MAP: (200, html_index_html(PRODUCT, "/fr/categories/")),
+                    CATEGORY: (200, html_index_html(PRODUCT2, None)),
+                }
+            )
+            TaskRunner(
+                store, rule, task, fetcher=fetcher, out_root=root / "tasks"
+            ).run()
+            result = json.loads(
+                (root / "tasks" / task.task_id / "task-result.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(result["counts"]["navigation_urls"], 2)
+            self.assertEqual(result["counts"]["url_candidates"], 2)
+            self.assertEqual(result["counts"]["valid_urls"], 2)
+            self.assertNotIn(PRODUCT, fetcher.calls)
+            self.assertNotIn(PRODUCT2, fetcher.calls)
+
+    def test_html_index_respects_max_depth_zero(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = TaskStore(root / "tasks.db")
+            rule = sources_rule(
+                root,
+                [
+                    {
+                        "type": "html_index",
+                        "url": SITE_MAP,
+                        "link_selector": "a",
+                        "category_patterns": ["^/fr/categories/"],
+                        "max_depth": 0,
+                    }
+                ],
+            )
+            task = make_task("discovery", "html-index-depth")
+            store.create_task(task)
+            fetcher = FakeFetcher(
+                {
+                    SITE_MAP: (200, html_index_html(PRODUCT, "/fr/categories/")),
+                }
+            )
+            TaskRunner(
+                store, rule, task, fetcher=fetcher, out_root=root / "tasks"
+            ).run()
+            result = json.loads(
+                (root / "tasks" / task.task_id / "task-result.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(result["counts"]["navigation_urls"], 1)
+            self.assertEqual(result["counts"]["valid_urls"], 1)
 
 
 class ListingTests(unittest.TestCase):

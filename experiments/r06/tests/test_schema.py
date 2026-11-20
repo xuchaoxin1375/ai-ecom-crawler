@@ -88,6 +88,23 @@ class SchemaTests(unittest.TestCase):
         }
         self._assert_valid(rule)
 
+    def test_html_index_sources_rule_matches_schema(self) -> None:
+        rule = copy.deepcopy(self.rule)
+        rule["schema_version"] = "1.1"
+        rule["discovery"] = {
+            "sources": [
+                {
+                    "type": "html_index",
+                    "url": "https://www.familidoo.fr/fr/site-map",
+                    "link_selector": "a",
+                    "category_patterns": ["^/fr/categories/"],
+                    "max_depth": 1,
+                }
+            ],
+            "product_url_patterns": ["/fr/.*\\.html$"],
+        }
+        self._assert_valid(rule)
+
     def test_missing_capabilities_is_rejected(self) -> None:
         rule = copy.deepcopy(self.rule)
         del rule["capabilities"]
