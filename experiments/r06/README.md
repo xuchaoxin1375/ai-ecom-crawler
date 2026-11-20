@@ -55,6 +55,9 @@ R06 验证两件事：
 | `sixmoondesigns-public-json-demo/` | S4 公开 JSON：1 请求，30 个商品 URL，不请求商品页 |
 | `dummyjson-public-json-offset-demo/` | 公开 API offset：2 请求，20 个 URL |
 | `tognar-next-link-demo/` | Tognar `next_link`：3 页，30 个商品 URL，不请求商品页 |
+| `tognar-control-demo/` | Tognar 暂停／恢复与取消：2 个任务 |
+| `tognar-crash-demo/` | Tognar 强杀 worker 后单 worker 恢复：30 个 URL |
+| `tognar-budget-demo/` | Tognar 预算停止：6 秒 24 URL、12 秒 30 URL，均为 PARTIAL |
 | `tests/` | 无网络契约、提取、任务账本和运行时测试 |
 | `tools/validate_output.py` | 单次运行输出校验器 |
 | `tools/validate_runtime.py` | 运行时 demo 校验器 |
@@ -254,6 +257,10 @@ python experiments/r06/tools/validate_runtime.py --root experiments/r06/runtime-
 ### Tognar crash recovery
 
 `tognar-crash-demo/` 用 `tools/crash_smoke.py` 在第 5 秒强杀 worker 子进程：任务保持 `RUNNING`，导航 1 个 `DONE`、1 个 `IN_FLIGHT`，商品 12 个；新 worker 自动重排并对账（`in_flight=1`、`reset=1`），最终 3 个导航／30 个商品，`FINISHED`／`COMPLETED`。详情见 [`tognar-crash-demo/README.md`](tognar-crash-demo/README.md)。
+
+### Tognar budget stop
+
+`tognar-budget-demo/` 用同一规则包验证 `max_seconds`：6 秒任务取 2 页 24 URL 后 `PARTIAL`／`BUDGET_EXHAUSTED`，第 3 页仍在队列；12 秒任务取 3 页 30 URL，但预算在任务边界耗尽，仍标 `PARTIAL`。详情见 [`tognar-budget-demo/README.md`](tognar-budget-demo/README.md)。
 
 ## 局限
 
