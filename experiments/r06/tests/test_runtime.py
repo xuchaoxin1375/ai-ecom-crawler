@@ -315,13 +315,13 @@ class DiscoveryTests(unittest.TestCase):
             self.assertEqual(task_result["counts"]["valid_urls"], 1)
 
 
-class DiscoveryExcludedTests(unittest.TestCase):
-    def test_robots_excluded_url_is_counted(self) -> None:
+class RobotsTests(unittest.TestCase):
+    def test_robots_disallow_does_not_block_discovery(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             store = TaskStore(root / "tasks.db")
             rule = load_rule(PLAN)
-            task = make_task("discovery", "robots-excluded")
+            task = make_task("discovery", "robots-disallow")
             store.create_task(task)
             fetcher = FakeFetcher(
                 {
@@ -337,11 +337,52 @@ class DiscoveryExcludedTests(unittest.TestCase):
             )
             counts = task_result["counts"]
             self.assertEqual(counts["url_candidates"], 1)
-            self.assertEqual(counts["excluded_urls"], 1)
-            self.assertEqual(counts["valid_urls"], 0)
+            self.assertEqual(counts["excluded_urls"], 0)
+            self.assertEqual(counts["valid_urls"], 1)
             self.assertEqual(task_result["outcome"], "COMPLETED")
             rows = read_csv(root / "tasks" / task.task_id / "urls.csv")
-            self.assertEqual(len(rows), 1)
+            self.assertEqual(len(rows), 2)
+            self.assertFalse(
+                (root / "tasks" / task.task_id / "robots.txt").exists(),
+                "full robots.txt must not be retained",
+            )
+
+    def test_robots_probe_keeps_only_sitemap_lines(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = TaskStore(root / "tasks.db")
+            rule = load_rule(PLAN)
+            rule.raw["discovery"]["robots_sitemap"] = True
+            task = make_task("discovery", "robots-sitemap")
+            store.create_task(task)
+            sitemap = "https://www.familidoo.fr/sitemap.xml"
+            fetcher = FakeFetcher(
+                {
+                    ROBOTS: (
+                        200,
+                        (
+                            "User-agent: *\n"
+                            "Disallow: /fr/cat/\n"
+                            f"Sitemap: {sitemap}\n"
+                            "Sitemap: https://www.familidoo.fr/sitemap-products.xml\n"
+                        ),
+                    ),
+                    ENTRY: (200, ENTRY_HTML),
+                }
+            )
+            TaskRunner(store, rule, task, fetcher=fetcher, out_root=root / "tasks").run()
+            task_result = json.loads(
+                (root / "tasks" / task.task_id / "task-result.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(
+                task_result["access"]["robots_sitemaps"],
+                [sitemap, "https://www.familidoo.fr/sitemap-products.xml"],
+            )
+            self.assertEqual(task_result["counts"]["valid_urls"], 1)
+            self.assertEqual(task_result["counts"]["excluded_urls"], 0)
+            self.assertFalse((root / "tasks" / task.task_id / "robots.txt").exists())
 
 
 class ProductTests(unittest.TestCase):
