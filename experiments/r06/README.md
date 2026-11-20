@@ -32,14 +32,16 @@ R06 验证两件事：
 | `plans/familidoo.yaml` | 单次运行的站点声明式方案 |
 | `plans/familidoo-runtime.yaml` | 运行时规则包；discovery 和 product 共用 |
 | `plans/shopthebulkstore-runtime.yaml` | 第二站规则包；分类页入口，10 个商品 |
-| `plans/javaestate-sitemap-runtime.yaml` | S1 sitemap 规则包；只做 URL 发现 |
+| `plans/javaestate-sitemap-runtime.yaml` | S1 direct product sitemap 规则包；只做 URL 发现 |
+| `plans/javaestate-sitemap-index-runtime.yaml` | S1 sitemap index 规则包；按 `sitemap_products` 过滤子图 |
 | `plans/shopthebulkstore-pagination-runtime.yaml` | S5 分页规则包；`page_param`，3 页，只做 URL 发现 |
 | `plans/shopthebulkstore-html-index-runtime.yaml` | S5 HTML 索引规则包；`/all-products`，30 个 URL |
 | `plans/sixmoondesigns-products-json-runtime.yaml` | S4 公开 JSON 规则包；`products.json` 第 1 页，30 个 URL |
 | `familidoo/` | 单次运行的 9 列 CSV、任务结果和 `r06-run-001`～`004` 诊断 |
 | `runtime-demo/` | 两个任务并行：discovery URL 清单和 product 9 列 CSV |
 | `shopthebulkstore-demo/` | 第二站复用：只加规则包，分类页 10 个商品 |
-| `javaestate-sitemap-demo/` | S1 sitemap：1 请求，30 个商品 URL，不请求商品页 |
+| `javaestate-sitemap-demo/` | S1 direct sitemap：1 请求，30 个商品 URL，不请求商品页 |
+| `javaestate-sitemap-index-demo/` | S1 sitemap index：2 请求，过滤子图，30 个商品 URL |
 | `shopthebulkstore-pagination-demo/` | S5 分类分页：3 页，62 个商品 URL，不请求商品页 |
 | `shopthebulkstore-html-index-demo/` | S5 HTML 索引：1 请求，30 个商品 URL，不请求商品页 |
 | `sixmoondesigns-public-json-demo/` | S4 公开 JSON：1 请求，30 个商品 URL，不请求商品页 |
@@ -183,7 +185,7 @@ python experiments/r06/tools/validate_runtime.py --root experiments/r06/runtime-
 无网络测试覆盖：
 
 - 规则加载与非法发现策略拒绝；
-- sitemap urlset／index／gzip 解析，sitemap 来源 discovery 不请求商品页；
+- sitemap urlset／index／gzip 解析、`sitemap_patterns` 子图过滤，sitemap 来源 discovery 不请求商品页；
 - listing 的 `page_param`／`next_link` 推进、末页和去重；
 - html_index 的单页链接、有限深度分类递归和 `max_depth`；
 - public_json 的 page／offset／cursor 解析和 `url_template`；
@@ -203,7 +205,7 @@ python experiments/r06/tools/validate_runtime.py --root experiments/r06/runtime-
 
 ### S1 sitemap discovery
 
-`javaestate-sitemap-demo/` 用 `plans/javaestate-sitemap-runtime.yaml` 直接读取 D01 的 product sitemap：1 次请求、30 个唯一商品 URL、`COMPLETED`，没有请求商品页。sitemap index 跟随和 gzip 由无网络测试覆盖；真实站点只验证了 product sitemap 的 urlset。详情见 [`javaestate-sitemap-demo/README.md`](javaestate-sitemap-demo/README.md)。
+`javaestate-sitemap-demo/` 用 `plans/javaestate-sitemap-runtime.yaml` 直接读取 D01 的 product sitemap：1 次请求、30 个唯一商品 URL、`COMPLETED`，没有请求商品页。`javaestate-sitemap-index-demo/` 另用 `plans/javaestate-sitemap-index-runtime.yaml` 读 sitemap index，按 `sitemap_products` 过滤子图：2 次请求、30 个 URL。gzip 由无网络测试覆盖。详情见两个 demo 的 README。
 
 ### S5 category pagination
 
@@ -231,7 +233,7 @@ python experiments/r06/tools/validate_runtime.py --root experiments/r06/runtime-
 ## 下一步
 
 - 第二站已复测（`shopthebulkstore-demo`），只新增规则包，运行时公共代码不变。
-- S1 sitemap（30 URL）、S5 `page_param`（62 URL）、S5 `html_index`（30 URL）和 S4 `public_json`（30 URL）已完成；下一步补多种子、`next_link` 真实站点和 POST／GraphQL；复杂分页按 ADR 0007 暂缓。
+- S1 sitemap direct／index（各 30 URL）、S5 `page_param`（62 URL）、S5 `html_index`（30 URL）和 S4 `public_json`（30 URL）已完成；下一步补多种子、`next_link` 真实站点和 POST／GraphQL；复杂分页按 ADR 0007 暂缓。
 - 把“两个任务并行 + 同域限速 + 暂停／取消”做成真实站点的验收记录，而不只用 fake fetcher。
 - 补跨进程 worker 或至少一个单 worker 的崩溃恢复演练。
 - 维护、漂移和长期稳定性仍后置（J08）；本轮不据此判断维护成本。

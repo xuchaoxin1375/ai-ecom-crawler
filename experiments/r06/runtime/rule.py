@@ -384,6 +384,11 @@ def _validate_sources(value: Any, discovery: dict[str, Any]) -> None:
                 or source["max_sitemaps"] < 1
             ):
                 raise RuleError(f"{path}.max_sitemaps must be a positive integer")
+            if "sitemap_patterns" in source:
+                patterns = _require_list(
+                    source.get("sitemap_patterns"), f"{path}.sitemap_patterns"
+                )
+                _validate_regex_list(patterns, f"{path}.sitemap_patterns")
     if (
         has_entry
         and not discovery.get("link_selector")
