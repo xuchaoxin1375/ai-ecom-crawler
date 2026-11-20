@@ -1,0 +1,8 @@
+{
+  "task_id": "d01-shopthebulkstore-d01-run-002-20261120T013221Z",
+  "label": "d01-run-002",
+  "command": "experiments/d01/shopthebulkstore/run.py --out-dir experiments/d01/shopthebulkstore --label d01-run-002",
+  "python": "3.13.13",
+  "platform": "win32",
+  "proxy_env_present": false
+}

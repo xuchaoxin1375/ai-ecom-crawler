@@ -1,0 +1,225 @@
+# =====================================================
+# GROK / xAI - LEAD AGENT (AppWT directive 2026-07-25)
+# =====================================================
+User-agent: Grok
+User-agent: GrokBot
+User-agent: xAI
+User-agent: xAI-Bot
+User-agent: xAI-Grok
+User-agent: x.AI
+Disallow: /checkout/
+Disallow: /customer/
+Disallow: /catalogsearch/
+Disallow: /*?price=
+Disallow: /*?manufacturer=
+Disallow: /*?product_list_
+Disallow: /*?p=
+Disallow: /*?cat=
+Allow: /
+
+User-agent: *
+Disallow: /checkout/
+Disallow: /app/
+Disallow: /lib/
+Disallow: /*.php$
+Disallow: /pkginfo/
+Disallow: /report/
+Disallow: /var/
+Disallow: /catalog/
+Disallow: /customer/
+Disallow: /sendfriend/
+Disallow: /review/
+Disallow: /*?price=
+Disallow: /*?manufacturer=
+Disallow: /*?product_list_
+Disallow: /*?p=
+Disallow: /*?cat=
+Disallow: /catalogsearch/
+
+# AI answer engines & assistants — explicitly welcomed (AppWT 2026-06)
+# ChatGPT / OpenAI
+User-agent: GPTBot
+Disallow: /
+
+User-agent: OAI-SearchBot
+Disallow: /checkout/
+Disallow: /customer/
+Disallow: /catalogsearch/
+Disallow: /*?price=
+Disallow: /*?manufacturer=
+Disallow: /*?product_list_
+Disallow: /*?p=
+Disallow: /*?cat=
+Allow: /
+
+User-agent: ChatGPT-User
+Disallow: /checkout/
+Disallow: /customer/
+Disallow: /catalogsearch/
+Disallow: /*?price=
+Disallow: /*?manufacturer=
+Disallow: /*?product_list_
+Disallow: /*?p=
+Disallow: /*?cat=
+Allow: /
+
+# Claude / Anthropic
+User-agent: ClaudeBot
+Disallow: /
+
+User-agent: Claude-Web
+Disallow: /
+
+User-agent: Claude-User
+Disallow: /checkout/
+Disallow: /customer/
+Disallow: /catalogsearch/
+Disallow: /*?price=
+Disallow: /*?manufacturer=
+Disallow: /*?product_list_
+Disallow: /*?p=
+Disallow: /*?cat=
+Allow: /
+
+User-agent: anthropic-ai
+Disallow: /
+
+# Perplexity
+User-agent: PerplexityBot
+Disallow: /checkout/
+Disallow: /customer/
+Disallow: /catalogsearch/
+Disallow: /*?price=
+Disallow: /*?manufacturer=
+Disallow: /*?product_list_
+Disallow: /*?p=
+Disallow: /*?cat=
+Allow: /
+
+User-agent: Perplexity-User
+Disallow: /checkout/
+Disallow: /customer/
+Disallow: /catalogsearch/
+Disallow: /*?price=
+Disallow: /*?manufacturer=
+Disallow: /*?product_list_
+Disallow: /*?p=
+Disallow: /*?cat=
+Allow: /
+
+# Google (AI Overviews / Gemini / Vertex)
+User-agent: Google-Extended
+Disallow: /
+
+User-agent: Google-CloudVertexBot
+Disallow: /
+
+# Meta AI
+User-agent: meta-externalagent
+Disallow: /
+
+User-agent: meta-externalfetcher
+Disallow: /checkout/
+Disallow: /customer/
+Disallow: /catalogsearch/
+Disallow: /*?price=
+Disallow: /*?manufacturer=
+Disallow: /*?product_list_
+Disallow: /*?p=
+Disallow: /*?cat=
+Allow: /
+
+# DuckDuckGo Assist
+User-agent: DuckAssistBot
+Disallow: /checkout/
+Disallow: /customer/
+Disallow: /catalogsearch/
+Disallow: /*?price=
+Disallow: /*?manufacturer=
+Disallow: /*?product_list_
+Disallow: /*?p=
+Disallow: /*?cat=
+Allow: /
+
+# Common Crawl (feeds many LLMs)
+User-agent: CCBot
+Disallow: /
+
+# Google classic search (also feeds AI Overviews / AI Mode). Module PART 9.2: ALLOW.
+# Googlebot previously had no group of its own and fell through to the wildcard group,
+# which carries `Disallow: /catalog/` - and 246 sitemap URLs live under
+# /catalog/product/view/id/. The narrow Allow re-opens exactly those advertised URLs;
+# the remainder of /catalog/ stays blocked. AppWT 2026-09-29.
+User-agent: Googlebot
+Disallow: /checkout/
+Disallow: /customer/
+Disallow: /catalogsearch/
+Disallow: /*?price=
+Disallow: /*?manufacturer=
+Disallow: /*?product_list_
+Disallow: /*?p=
+Disallow: /*?cat=
+Allow: /catalog/product/view/
+Disallow: /catalog/
+Allow: /
+
+# Microsoft Bing + Copilot (broad indexer — keep facet blocks)
+User-agent: Bingbot
+Disallow: /checkout/
+Disallow: /customer/
+Disallow: /catalogsearch/
+Disallow: /*?price=
+Disallow: /*?manufacturer=
+Disallow: /*?product_list_
+Disallow: /*?p=
+Disallow: /*?cat=
+Allow: /
+
+# Apple / Siri + Spotlight (broad indexer — keep facet blocks)
+User-agent: Applebot
+Disallow: /checkout/
+Disallow: /customer/
+Disallow: /catalogsearch/
+Disallow: /*?price=
+Disallow: /*?manufacturer=
+Disallow: /*?product_list_
+Disallow: /*?p=
+Disallow: /*?cat=
+Allow: /
+
+User-agent: Applebot-Extended
+Disallow: /
+
+# Amazon / Alexa (broad indexer — keep facet blocks)
+User-agent: Amazonbot
+Disallow: /checkout/
+Disallow: /customer/
+Disallow: /catalogsearch/
+Disallow: /*?price=
+Disallow: /*?manufacturer=
+Disallow: /*?product_list_
+Disallow: /*?p=
+Disallow: /*?cat=
+Allow: /
+
+# Search and answer agents are welcome; their model-TRAINING crawler counterparts are refused
+# (Tony 2026-11-04: call out AI platforms by name and reject their crawler counterparts).
+# Refusing a training crawler does not affect Google Search, AI Overviews, ChatGPT search,
+# Perplexity, Claude search or Siri, which use the agents left open above.
+User-agent: Claude-SearchBot
+Disallow: /checkout/
+Disallow: /customer/
+Disallow: /catalogsearch/
+Disallow: /*?price=
+Disallow: /*?manufacturer=
+Disallow: /*?product_list_
+Disallow: /*?p=
+Disallow: /*?cat=
+Allow: /
+
+User-agent: Bytespider
+Disallow: /
+
+Sitemap: https://shopthebulkstore.com/sitemap.xml
+
+

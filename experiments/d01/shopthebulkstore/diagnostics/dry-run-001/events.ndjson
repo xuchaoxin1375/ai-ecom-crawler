@@ -1,0 +1,10 @@
+{"ts": "2026-11-20T01:27:51Z", "event": "run_start", "plan_id": "shopthebulkstore-us-d01", "max_products": 3, "max_seconds": 600.0}
+{"ts": "2026-11-20T01:27:52Z", "event": "request", "purpose": "robots", "url": "https://shopthebulkstore.com/robots.txt", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:27:54Z", "event": "request", "purpose": "sitemap", "url": "https://shopthebulkstore.com/sitemap.xml", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:27:57Z", "event": "request", "purpose": "category", "url": "https://shopthebulkstore.com/candy/bulk-candy-unwrapped", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:27:59Z", "event": "request", "purpose": "product", "url": "https://shopthebulkstore.com/boston-baked-beans", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:27:59Z", "event": "product_valid", "source_url": "https://shopthebulkstore.com/boston-baked-beans", "price": "5.99", "currency": "USD", "description_status": "complete", "price_unit": "per_lb"}
+{"ts": "2026-11-20T01:28:01Z", "event": "request", "purpose": "product", "url": "https://shopthebulkstore.com/candy-corn", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:28:01Z", "event": "product_valid", "source_url": "https://shopthebulkstore.com/candy-corn", "price": "4.49", "currency": "USD", "description_status": "complete", "price_unit": "per_lb"}
+{"ts": "2026-11-20T01:28:03Z", "event": "request", "purpose": "product", "url": "https://shopthebulkstore.com/halloween-caramel-apple-candy-corn", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:28:03Z", "event": "product_valid", "source_url": "https://shopthebulkstore.com/halloween-caramel-apple-candy-corn", "price": "4.49", "currency": "USD", "description_status": "complete", "price_unit": "per_lb"}

@@ -1,0 +1,134 @@
+{
+  "task_id": "d01-shopthebulkstore-d01-run-002-20261120T013221Z",
+  "plan_id": "shopthebulkstore-us-d01",
+  "plan_version": "2026.11.20-1",
+  "market": "US",
+  "locale": "en-US",
+  "state": "FINISHED",
+  "outcome": "PARTIAL",
+  "stop_reason": "BUDGET_EXHAUSTED",
+  "stop_detail": "task cap reached: processed 30 products; category page declares 62",
+  "started_at": "2026-11-20T01:31:14Z",
+  "finished_at": "2026-11-20T01:32:21Z",
+  "counts": {
+    "discovered_urls": 33,
+    "pending_navigation_entries": 0,
+    "product_candidates": 30,
+    "pending_products": 0,
+    "in_flight_products": 0,
+    "processed_products": 30,
+    "valid_products": 30,
+    "excluded_products": 0,
+    "failed_products": 0,
+    "partial_description_products": 0,
+    "description_not_provided_products": 0,
+    "description_fallback_products": 0
+  },
+  "coverage": {
+    "status": "PARTIAL",
+    "denominator_source": "Candy Unwrapped category page toolbar item count",
+    "denominator": 62,
+    "covered": 30,
+    "notes": "Candy Unwrapped category page 1; bounded 30-product sample. Build-time /all-products page showed 'Items 1-30 of 2381'; that is not this run's discovery denominator and is not a full-site claim."
+  },
+  "business_acceptance": {
+    "status": "NOT_REVIEWED",
+    "accepted_by": null,
+    "accepted_at": null,
+    "reason": null,
+    "scope": "bounded 30-product shopthebulkstore.com Candy Unwrapped category run"
+  },
+  "runtime": {
+    "llm_calls": 0,
+    "raw_pages_retained": false,
+    "browser_launched": false,
+    "http_engine": "scrapling.FetcherSession (curl_cffi, static HTML)",
+    "concurrency": 1,
+    "request_interval_seconds": 1.1,
+    "max_attempts": 3
+  },
+  "quality_exceptions": [
+    {
+      "source_url": "https://shopthebulkstore.com/coconut-bon-bons",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "not_provided"
+      }
+    },
+    {
+      "source_url": "https://shopthebulkstore.com/coconut-macaroons",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "not_provided"
+      }
+    },
+    {
+      "source_url": "https://shopthebulkstore.com/flying-saucers",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "not_provided"
+      }
+    },
+    {
+      "source_url": "https://shopthebulkstore.com/flying-saucers-sour",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "not_provided"
+      }
+    },
+    {
+      "source_url": "https://shopthebulkstore.com/jordan-almonds-assorted",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "not_provided"
+      }
+    },
+    {
+      "source_url": "https://shopthebulkstore.com/jordan-almonds-white",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "not_provided"
+      }
+    }
+  ],
+  "errors": [],
+  "warnings": [],
+  "limitations": [
+    "Category page 1 only; 30 of 62 Candy Unwrapped products, not a full-site claim.",
+    "Static HTML path only; no browser fingerprint or challenge handling was exercised.",
+    "Price is recorded as the public per-unit price (often per lb); it is not multiplied by package weight.",
+    "Out-of-stock products with a public price remain valid; add-to-cart visibility is not a validity rule.",
+    "Descriptions come from the overview/description DOM blocks; JSON-LD descriptions are fallback only.",
+    "No login, cart, checkout, account, review or catalogsearch endpoints are requested."
+  ],
+  "artifacts": {
+    "valid_csv": "valid.csv",
+    "run_summary": "run-summary.json",
+    "diagnostics_dir": "diagnostics/d01-run-002/"
+  },
+  "discovery": {
+    "entry_url": "https://shopthebulkstore.com/candy/bulk-candy-unwrapped",
+    "category_url": "https://shopthebulkstore.com/candy/bulk-candy-unwrapped",
+    "category_total": 62,
+    "category_page_products": 30,
+    "selected_products": 30,
+    "sitemap_url": "https://shopthebulkstore.com/sitemap.xml",
+    "sitemap_status": "FETCHED",
+    "sitemap_locs": 2528,
+    "sitemap_cross_check": {
+      "matched": 30,
+      "total": 30
+    },
+    "price_unit_counts": {
+      "per_lb": 27,
+      "per_bag": 1,
+      "per_oz": 2
+    }
+  }
+}

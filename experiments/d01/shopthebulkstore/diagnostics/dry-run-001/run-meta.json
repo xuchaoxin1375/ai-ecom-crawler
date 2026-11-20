@@ -1,0 +1,8 @@
+{
+  "task_id": "d01-shopthebulkstore-dry-run-001-20261120T012803Z",
+  "label": "dry-run-001",
+  "command": "experiments/d01/shopthebulkstore/run.py --out-dir experiments/d01/shopthebulkstore --label dry-run-001 --max-products 3",
+  "python": "3.13.13",
+  "platform": "win32",
+  "proxy_env_present": false
+}

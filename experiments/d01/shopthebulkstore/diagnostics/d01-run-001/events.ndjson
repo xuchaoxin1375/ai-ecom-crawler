@@ -1,0 +1,64 @@
+{"ts": "2026-11-20T01:29:28Z", "event": "run_start", "plan_id": "shopthebulkstore-us-d01", "max_products": 30, "max_seconds": 600.0}
+{"ts": "2026-11-20T01:29:29Z", "event": "request", "purpose": "robots", "url": "https://shopthebulkstore.com/robots.txt", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:29:31Z", "event": "request", "purpose": "sitemap", "url": "https://shopthebulkstore.com/sitemap.xml", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:29:34Z", "event": "request", "purpose": "category", "url": "https://shopthebulkstore.com/candy/bulk-candy-unwrapped", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:29:36Z", "event": "request", "purpose": "product", "url": "https://shopthebulkstore.com/boston-baked-beans", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:29:36Z", "event": "product_valid", "source_url": "https://shopthebulkstore.com/boston-baked-beans", "price": "5.99", "currency": "USD", "description_status": "complete", "price_unit": "per_lb"}
+{"ts": "2026-11-20T01:29:38Z", "event": "request", "purpose": "product", "url": "https://shopthebulkstore.com/candy-corn", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:29:38Z", "event": "product_valid", "source_url": "https://shopthebulkstore.com/candy-corn", "price": "4.49", "currency": "USD", "description_status": "complete", "price_unit": "per_lb"}
+{"ts": "2026-11-20T01:29:40Z", "event": "request", "purpose": "product", "url": "https://shopthebulkstore.com/halloween-caramel-apple-candy-corn", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:29:40Z", "event": "product_valid", "source_url": "https://shopthebulkstore.com/halloween-caramel-apple-candy-corn", "price": "4.49", "currency": "USD", "description_status": "complete", "price_unit": "per_lb"}
+{"ts": "2026-11-20T01:29:42Z", "event": "request", "purpose": "product", "url": "https://shopthebulkstore.com/candy-pebbles", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:29:42Z", "event": "product_valid", "source_url": "https://shopthebulkstore.com/candy-pebbles", "price": "7.99", "currency": "USD", "description_status": "complete", "price_unit": "per_lb"}
+{"ts": "2026-11-20T01:29:44Z", "event": "request", "purpose": "product", "url": "https://shopthebulkstore.com/candy-sours-cherry", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:29:44Z", "event": "product_valid", "source_url": "https://shopthebulkstore.com/candy-sours-cherry", "price": "7.99", "currency": "USD", "description_status": "complete", "price_unit": "per_lb"}
+{"ts": "2026-11-20T01:29:46Z", "event": "request", "purpose": "product", "url": "https://shopthebulkstore.com/caramel-coconut-tips", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:29:46Z", "event": "product_valid", "source_url": "https://shopthebulkstore.com/caramel-coconut-tips", "price": "7.99", "currency": "USD", "description_status": "complete", "price_unit": "per_lb"}
+{"ts": "2026-11-20T01:29:48Z", "event": "request", "purpose": "product", "url": "https://shopthebulkstore.com/cinnamon-imperials", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:29:48Z", "event": "product_valid", "source_url": "https://shopthebulkstore.com/cinnamon-imperials", "price": "6.99", "currency": "USD", "description_status": "complete", "price_unit": "per_lb"}
+{"ts": "2026-11-20T01:29:50Z", "event": "request", "purpose": "product", "url": "https://shopthebulkstore.com/sanded-anise-squares", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:29:50Z", "event": "product_valid", "source_url": "https://shopthebulkstore.com/sanded-anise-squares", "price": "4.49", "currency": "USD", "description_status": "complete", "price_unit": "per_lb"}
+{"ts": "2026-11-20T01:29:53Z", "event": "request", "purpose": "product", "url": "https://shopthebulkstore.com/sanded-cinnamon-drops", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:29:53Z", "event": "product_valid", "source_url": "https://shopthebulkstore.com/sanded-cinnamon-drops", "price": "4.49", "currency": "USD", "description_status": "complete", "price_unit": "per_lb"}
+{"ts": "2026-11-20T01:29:55Z", "event": "request", "purpose": "product", "url": "https://shopthebulkstore.com/sanded-ginger-drops", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:29:55Z", "event": "product_valid", "source_url": "https://shopthebulkstore.com/sanded-ginger-drops", "price": "4.49", "currency": "USD", "description_status": "complete", "price_unit": "per_lb"}
+{"ts": "2026-11-20T01:29:57Z", "event": "request", "purpose": "product", "url": "https://shopthebulkstore.com/sanded-apple-drops", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:29:57Z", "event": "product_valid", "source_url": "https://shopthebulkstore.com/sanded-apple-drops", "price": "4.49", "currency": "USD", "description_status": "complete", "price_unit": "per_lb"}
+{"ts": "2026-11-20T01:29:59Z", "event": "request", "purpose": "product", "url": "https://shopthebulkstore.com/sanded-horehound-drops", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:29:59Z", "event": "product_valid", "source_url": "https://shopthebulkstore.com/sanded-horehound-drops", "price": "4.49", "currency": "USD", "description_status": "complete", "price_unit": "per_lb"}
+{"ts": "2026-11-20T01:30:01Z", "event": "request", "purpose": "product", "url": "https://shopthebulkstore.com/sanded-lemon-drops", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:30:01Z", "event": "product_valid", "source_url": "https://shopthebulkstore.com/sanded-lemon-drops", "price": "4.49", "currency": "USD", "description_status": "complete", "price_unit": "per_lb"}
+{"ts": "2026-11-20T01:30:04Z", "event": "request", "purpose": "product", "url": "https://shopthebulkstore.com/claeys-sanded-raspberry-drops", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:30:04Z", "event": "product_valid", "source_url": "https://shopthebulkstore.com/claeys-sanded-raspberry-drops", "price": "4.49", "currency": "USD", "description_status": "complete", "price_unit": "per_lb"}
+{"ts": "2026-11-20T01:30:07Z", "event": "request", "purpose": "product", "url": "https://shopthebulkstore.com/sanded-rootbeer-drops", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:30:07Z", "event": "product_valid", "source_url": "https://shopthebulkstore.com/sanded-rootbeer-drops", "price": "4.49", "currency": "USD", "description_status": "complete", "price_unit": "per_lb"}
+{"ts": "2026-11-20T01:30:10Z", "event": "request", "purpose": "product", "url": "https://shopthebulkstore.com/sanded-sassafras-drops", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:30:10Z", "event": "product_valid", "source_url": "https://shopthebulkstore.com/sanded-sassafras-drops", "price": "4.49", "currency": "USD", "description_status": "complete", "price_unit": "per_lb"}
+{"ts": "2026-11-20T01:30:12Z", "event": "request", "purpose": "product", "url": "https://shopthebulkstore.com/sanded-watermelon-drops", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:30:12Z", "event": "product_valid", "source_url": "https://shopthebulkstore.com/sanded-watermelon-drops", "price": "4.49", "currency": "USD", "description_status": "complete", "price_unit": "per_lb"}
+{"ts": "2026-11-20T01:30:14Z", "event": "request", "purpose": "product", "url": "https://shopthebulkstore.com/sanded-wild-cherry-drops", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:30:14Z", "event": "product_valid", "source_url": "https://shopthebulkstore.com/sanded-wild-cherry-drops", "price": "4.49", "currency": "USD", "description_status": "complete", "price_unit": "per_lb"}
+{"ts": "2026-11-20T01:30:16Z", "event": "request", "purpose": "product", "url": "https://shopthebulkstore.com/coconut-bon-bons", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:30:16Z", "event": "product_valid", "source_url": "https://shopthebulkstore.com/coconut-bon-bons", "price": "5.99", "currency": "USD", "description_status": "complete", "price_unit": "unknown"}
+{"ts": "2026-11-20T01:30:18Z", "event": "request", "purpose": "product", "url": "https://shopthebulkstore.com/coconut-macaroons", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:30:18Z", "event": "product_valid", "source_url": "https://shopthebulkstore.com/coconut-macaroons", "price": "8.99", "currency": "USD", "description_status": "complete", "price_unit": "per_lb"}
+{"ts": "2026-11-20T01:30:20Z", "event": "request", "purpose": "product", "url": "https://shopthebulkstore.com/flying-saucers", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:30:20Z", "event": "product_valid", "source_url": "https://shopthebulkstore.com/flying-saucers", "price": "2.44", "currency": "USD", "description_status": "complete", "price_unit": "per_oz"}
+{"ts": "2026-11-20T01:30:22Z", "event": "request", "purpose": "product", "url": "https://shopthebulkstore.com/flying-saucers-sour", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:30:22Z", "event": "product_valid", "source_url": "https://shopthebulkstore.com/flying-saucers-sour", "price": "2.50", "currency": "USD", "description_status": "complete", "price_unit": "per_oz"}
+{"ts": "2026-11-20T01:30:24Z", "event": "request", "purpose": "product", "url": "https://shopthebulkstore.com/french-burnt-peanuts", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:30:24Z", "event": "product_valid", "source_url": "https://shopthebulkstore.com/french-burnt-peanuts", "price": "5.99", "currency": "USD", "description_status": "complete", "price_unit": "per_lb"}
+{"ts": "2026-11-20T01:30:27Z", "event": "request", "purpose": "product", "url": "https://shopthebulkstore.com/hot-tamales", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:30:27Z", "event": "product_valid", "source_url": "https://shopthebulkstore.com/hot-tamales", "price": "5.99", "currency": "USD", "description_status": "complete", "price_unit": "per_lb"}
+{"ts": "2026-11-20T01:30:28Z", "event": "request", "purpose": "product", "url": "https://shopthebulkstore.com/jelly-beans-assorted", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:30:28Z", "event": "product_valid", "source_url": "https://shopthebulkstore.com/jelly-beans-assorted", "price": "3.99", "currency": "USD", "description_status": "complete", "price_unit": "per_lb"}
+{"ts": "2026-11-20T01:30:31Z", "event": "request", "purpose": "product", "url": "https://shopthebulkstore.com/jelly-beans-licorice", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:30:31Z", "event": "product_valid", "source_url": "https://shopthebulkstore.com/jelly-beans-licorice", "price": "3.99", "currency": "USD", "description_status": "complete", "price_unit": "per_lb"}
+{"ts": "2026-11-20T01:30:33Z", "event": "request", "purpose": "product", "url": "https://shopthebulkstore.com/jelly-beans-starburst", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:30:33Z", "event": "product_valid", "source_url": "https://shopthebulkstore.com/jelly-beans-starburst", "price": "5.99", "currency": "USD", "description_status": "complete", "price_unit": "per_lb"}
+{"ts": "2026-11-20T01:30:35Z", "event": "request", "purpose": "product", "url": "https://shopthebulkstore.com/jordan-almonds-assorted", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:30:35Z", "event": "product_valid", "source_url": "https://shopthebulkstore.com/jordan-almonds-assorted", "price": "11.99", "currency": "USD", "description_status": "complete", "price_unit": "per_lb"}
+{"ts": "2026-11-20T01:30:37Z", "event": "request", "purpose": "product", "url": "https://shopthebulkstore.com/jordan-almonds-white", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:30:37Z", "event": "product_valid", "source_url": "https://shopthebulkstore.com/jordan-almonds-white", "price": "11.99", "currency": "USD", "description_status": "complete", "price_unit": "per_lb"}
+{"ts": "2026-11-20T01:30:40Z", "event": "request", "purpose": "product", "url": "https://shopthebulkstore.com/ju-ju-coins-assorted-fruits", "status": 200, "attempt": 1}
+{"ts": "2026-11-20T01:30:40Z", "event": "product_valid", "source_url": "https://shopthebulkstore.com/ju-ju-coins-assorted-fruits", "price": "4.29", "currency": "USD", "description_status": "complete", "price_unit": "per_lb"}

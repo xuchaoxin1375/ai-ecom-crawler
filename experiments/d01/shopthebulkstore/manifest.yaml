@@ -1,0 +1,289 @@
+schema_version: "1.0"
+plan_id: "shopthebulkstore-us-d01"
+plan_version: "2026.11.20-1"
+kind: "program"
+status: "verified"
+created_at: "2026-11-20T01:20:00Z"
+updated_at: "2026-11-20T01:32:21Z"
+
+site:
+  name: "The Bulk Store"
+  entry_urls:
+    - "https://shopthebulkstore.com/"
+    - "https://shopthebulkstore.com/candy/bulk-candy-unwrapped"
+  allowed_origins:
+    - "https://shopthebulkstore.com"
+    - "https://www.shopthebulkstore.com"
+  allowed_path_prefixes:
+    - "/"
+    - "/candy/"
+    - "/media/"
+  market: "US"
+  locale: "en-US"
+  currency: "USD"
+
+scope:
+  include:
+    - "https://shopthebulkstore.com/candy/bulk-candy-unwrapped"
+    - "https://shopthebulkstore.com/<product-slug>"
+    - "https://shopthebulkstore.com/sitemap.xml"
+  exclude:
+    - "/checkout/"
+    - "/customer/"
+    - "/cart/"
+    - "/catalog/"
+    - "/catalogsearch/"
+    - "/review/"
+    - "/sendfriend/"
+    - "/wishlist/"
+    - "/checkout/cart/"
+  default_mode: "bounded_sample"
+  max_products: 30
+  max_seconds: 600
+  notes: "Candy Unwrapped category page 1 only; first 30 of 62 products, list + product pages. No login, cart, checkout, account, review or search endpoints."
+
+discovery:
+  strategies:
+    - "category_grid"
+    - "sitemap_cross_check"
+  category_url: "https://shopthebulkstore.com/candy/bulk-candy-unwrapped"
+  sitemap_url: "https://shopthebulkstore.com/sitemap.xml"
+  product_url_patterns:
+    - "^/[a-z0-9][a-z0-9-]*$"
+  product_link_selector: "a.product-item-link"
+  url_identity: "canonical_path"
+  deduplication: "Normalize the canonical URL (drop query/fragment/trailing slash); one row per canonical product URL."
+  currency_evidence:
+    primary: "Product JSON-LD offers.priceCurrency"
+    fallback: "meta product:price:currency and DOM [itemprop=priceCurrency]"
+    expected: "USD"
+  robots:
+    url: "https://shopthebulkstore.com/robots.txt"
+    policy: "Fetch robots.txt before business URLs. The '*' group disallows /checkout/, /customer/, /catalog/, /catalogsearch/, /review/, /sendfriend/ and query-string filters; only allowed category, product and sitemap paths are requested. The site has separate AI-bot groups; this plan uses the ordinary desktop client path and does not switch user agents to evade those groups."
+  pagination:
+    type: "category_page"
+    page_size: 30
+    page_param: "p"
+    notes: "Category page 1 only. The toolbar said 'Items 1-30 of 62' at build time; the remaining 32 products are outside this bounded run."
+
+fetch:
+  default_engine: "scrapling.FetcherSession (curl_cffi, static HTML)"
+  per_url_type:
+    robots:
+      engine: "static"
+      method: "GET"
+      follow_redirects: true
+    sitemap:
+      engine: "static"
+      method: "GET"
+      follow_redirects: true
+    category:
+      engine: "static"
+      method: "GET"
+      follow_redirects: true
+    product:
+      engine: "static"
+      method: "GET"
+      follow_redirects: true
+  rate_limit:
+    concurrency: 1
+    delay_ms: 1100
+  retry:
+    max_attempts: 3
+    backoff: "2s/4s for transport or 5xx; Retry-After for 429, capped at 60s"
+    stop_on_persistent_429: true
+    stop_on_401_403: true
+    max_consecutive_product_failures: 5
+  timeout_ms: 45000
+  session:
+    reuse: "one FetcherSession for the whole run"
+    cookies_required: false
+    browser_required: false
+  stop_conditions:
+    - "HTTP 429 persists after 3 attempts or Retry-After exceeds 60s"
+    - "HTTP 401/403 on a business URL"
+    - "category page returns no product links"
+    - "5 consecutive product failures"
+    - "wall-clock budget of 600s is exhausted"
+
+extract:
+  source_type: "html"
+  fields:
+    name:
+      source: "Product JSON-LD name, then h1, then og:title"
+      required: true
+    price.amount:
+      source: "Product JSON-LD offers.price or offers.lowPrice; fallback meta product:price:amount and the main price box"
+      required: true
+      normalize: "Lowest finite positive offer; keep the per-unit public price, never multiply by package weight."
+    price.currency:
+      source: "Product JSON-LD offers.priceCurrency; fallback meta product:price:currency"
+      required: true
+      normalize: "Uppercase ISO-4217-shaped code; must equal the plan's USD market."
+    primary_image_url:
+      source: "Product JSON-LD image[0], then og:image, then the gallery image"
+      required: true
+      normalize: "Absolute https URL."
+    description_html:
+      source: "DOM .product.attribute.overview .value and .product.attribute.description .value; JSON-LD description only as fallback"
+      required: false
+      normalize: "DOM order, subset dedupe, whitelist cleaning; preserve tables/lists; add a visible unit note only when the description blocks do not contain it."
+    category:
+      source: "BreadcrumbList or the visible breadcrumb, last non-Home crumb"
+      required: false
+    brand:
+      source: "Product JSON-LD brand.name, then DOM [itemprop=brand], .product-brand, or Brand/Manufacturer attribute row"
+      required: false
+    options:
+      source: "super_attribute selects, swatch-attribute nodes and Magento jsonConfig attributes"
+      required: false
+      normalize: "Union values; drop quantity; serialize with backslash escaping."
+    source_url:
+      source: "link rel=canonical, then the fetched product URL"
+      required: true
+    price_unit:
+      source: "Visible description/price text such as 'Price is per lb.' or 'Price is per item.'"
+      required: false
+      normalize: "Internal audit only: per_lb/per_item/per_oz/per_bag/per_box/per_dozen/per_pack/unknown; not a 9-column CSV field."
+
+normalize:
+  price:
+    choose: "lowest_public_positive_offer"
+    positive_only: true
+    includes_out_of_stock_priced_products: true
+    unit_price_policy: "Keep the public unit price (often per lb); do not convert to a package price."
+  description:
+    mode: "clean_html_whitelist"
+    block_order: "overview/description DOM order"
+    subset_dedupe: "Drop a block whose text is contained in a longer block."
+    statuses:
+      - "complete"
+      - "partial"
+      - "fallback"
+      - "not_provided"
+      - "failed"
+    partial_rule: "A description that only repeats the product name and/or the price unit is partial, not complete."
+    empty_policy: "Keep the row valid with description_html empty and status not_provided; record in quality_exceptions."
+    unit_note: "If the visible price area states a unit and the description blocks do not, prepend the visible unit sentence as a separate paragraph."
+  options:
+    exclude_quantity: true
+    serialize: "Size#S|M~Color#Red|Blue with backslash escaping for \\, #, | and ~"
+  csv:
+    encoding: "utf-8"
+    columns: 9
+    formula_protection: "Prefix untrusted text cells starting with =, +, - or @ with a single quote; price_amount stays numeric."
+
+validate:
+  required_fields:
+    - "name"
+    - "price.amount"
+    - "price.currency"
+    - "primary_image_url"
+    - "source_url"
+  assertions:
+    - field: "price.amount"
+      op: ">"
+      value: 0
+    - field: "price.currency"
+      op: "matches"
+      value: "^[A-Z]{3}$"
+    - field: "price.currency"
+      op: "equals"
+      value: "USD"
+  description_statuses:
+    - "complete"
+    - "partial"
+    - "fallback"
+    - "not_provided"
+    - "failed"
+  excluded_reasons:
+    - "zero_or_missing_price"
+    - "missing_name"
+    - "missing_currency"
+    - "unexpected_currency"
+    - "missing_primary_image"
+    - "missing_source_url"
+    - "duplicate_source_url"
+  metrics:
+    quality_exceptions: "Rows with non-complete description or missing optional category/brand."
+    price_unit_counts: "Internal per-unit distribution; at least one per_lb expected for this category."
+
+runtime:
+  entrypoint: "run.py"
+  language: "Python"
+  invocation: "python -m uv run --project experiments/framework-compare/scrapling python experiments/d01/shopthebulkstore/run.py --out-dir experiments/d01/shopthebulkstore --label d01-run-001"
+  context: "CLI arguments only; no build-session state, cookies or secrets."
+  output_contract:
+    - "valid.csv (9 columns)"
+    - "task-result.json (09 state/outcome/stop_reason/counts/coverage/quality_exceptions)"
+    - "run-summary.json"
+    - "diagnostics/<label>/events.ndjson"
+    - "diagnostics/<label>/excluded_products.csv"
+    - "diagnostics/<label>/failed_products.csv"
+    - "diagnostics/<label>/pending_products.csv"
+    - "diagnostics/<label>/product-audit.jsonl"
+    - "diagnostics/<label>/robots.txt"
+    - "diagnostics/<label>/category-summary.json"
+    - "diagnostics/<label>/category-product-urls.txt"
+    - "diagnostics/<label>/sitemap-crosscheck.json"
+  idempotency_key: "task_id + plan_version + canonical source_url"
+  cancellation: "Ctrl+C closes the FetcherSession; rerun with a new label. A cancelled run is not published as FINISHED."
+  resource_cleanup: "One in-process HTTP session; no browser process."
+
+entrypoint: "run.py"
+
+compatibility:
+  os:
+    - "windows"
+    - "linux"
+    - "wsl2"
+  runtime: "python>=3.11,<3.14"
+  dependencies:
+    - "scrapling[fetchers]==0.5.1"
+    - "lxml (installed with Scrapling)"
+  browser: "none; static FetcherSession only"
+  network: "public web; environment HTTP_PROXY/HTTPS_PROXY may be present, values are injected by the environment"
+  secrets: "none required"
+  lockfile: "experiments/framework-compare/scrapling/uv.lock"
+
+evidence:
+  sample_urls:
+    - "https://shopthebulkstore.com/boston-baked-beans"
+    - "https://shopthebulkstore.com/candy-corn"
+    - "https://shopthebulkstore.com/halloween-caramel-apple-candy-corn"
+  expected:
+    - url: "https://shopthebulkstore.com/boston-baked-beans"
+      name: "Boston Baked Beans"
+      price.amount: 5.99
+      price.currency: "USD"
+      price_unit: "per_lb"
+      brand: "Ferrara"
+    - url: "https://shopthebulkstore.com/candy-corn"
+      name: "Candy Corn"
+      price.amount: 4.49
+      price.currency: "USD"
+      price_unit: "per_lb"
+      brand: "Zachary"
+    - url: "https://shopthebulkstore.com/halloween-caramel-apple-candy-corn"
+      name: "Candy Corn Caramel Apple"
+      price.amount: 4.49
+      price.currency: "USD"
+      price_unit: "per_lb"
+      availability: "OutOfStock"
+  verified_at: "2026-11-20T01:32:21Z"
+  verification_scope: "D01 S5 pilot: diagnostics/d01-run-002 (33 requests, 30 valid, 0 excluded, 0 failed, 66.67s, USD 2.44-11.99, 27 per_lb / 2 per_oz / 1 per_bag, 6 brand not_provided, 3 OutOfStock kept). Sitemap cross-check 30/30. Same-plan rerun d01-run-001 vs d01-run-002 had 0 business-field audit differences; only the Coconut Bon Bons unit changed from unknown to per_bag after the unit regex fix."
+  limitations:
+    - "Category page 1 only; 30 of 62 Candy Unwrapped products, not a full-site claim."
+    - "Category and product URLs are HTML paths; sitemap has 2,528 locs but only 2 /catalog/product/view URLs. The category page is the primary discovery source, sitemap is a cross-check."
+    - "The site's robots.txt has AI-bot-specific disallow groups; this plan uses the ordinary desktop client path and does not switch user agents to evade them."
+    - "Out-of-stock products remain valid when name, price, currency, image and source URL are present."
+    - "Description blocks can be short; a name/price-unit-only description is marked partial, not complete."
+    - "No browser fingerprint, challenge handling, login, cart or checkout was exercised."
+
+notes:
+  - "The site's canonical product URLs use the no-www host shopthebulkstore.com; the plan uses that host. The www form is listed only as an allowed origin."
+  - "The price is the public per-unit price, often per lb; do not multiply by a package weight or infer a package price."
+  - "The first description block often contains the product name and the unit sentence; the overview block often contains the marketing text. Both are kept in DOM order when they are not subsets."
+  - "Unit detection must accept sizes in the unit phrase, e.g. 'Price is per 12oz. bag'; the first run recorded it as unknown and the fix records per_bag with the exact text retained."
+  - "The category toolbar total (62) is the coverage denominator for this bounded category run; /all-products showed 2,381 items at build time and is not this run's denominator."
+  - "Do not add pagination or the remaining 32 category products without a new scope decision and plan_version."

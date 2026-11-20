@@ -1,0 +1,137 @@
+{
+  "task_id": "d01-shopthebulkstore-dry-run-001-20261120T012803Z",
+  "label": "dry-run-001",
+  "plan_id": "shopthebulkstore-us-d01",
+  "plan_version": "2026.11.20-1",
+  "run_started_at": "2026-11-20T01:27:51Z",
+  "run_finished_at": "2026-11-20T01:28:03Z",
+  "elapsed_s": 12.01,
+  "state": "FINISHED",
+  "outcome": "PARTIAL",
+  "stop_reason": "BUDGET_EXHAUSTED",
+  "stop_detail": "task cap reached: processed 3 products; category page declares 62",
+  "counts": {
+    "discovered_urls": 3,
+    "pending_navigation_entries": 0,
+    "product_candidates": 3,
+    "pending_products": 0,
+    "in_flight_products": 0,
+    "processed_products": 3,
+    "valid_products": 3,
+    "excluded_products": 0,
+    "failed_products": 0,
+    "partial_description_products": 0,
+    "description_not_provided_products": 0,
+    "description_fallback_products": 0
+  },
+  "coverage": {
+    "status": "PARTIAL",
+    "denominator_source": "Candy Unwrapped category page toolbar item count",
+    "denominator": 62,
+    "covered": 3,
+    "notes": "Candy Unwrapped category page 1; bounded 30-product sample. Build-time /all-products page showed 'Items 1-30 of 2381'; that is not this run's discovery denominator and is not a full-site claim."
+  },
+  "requests": 6,
+  "retries": 0,
+  "per_purpose": {
+    "robots": 1,
+    "sitemap": 1,
+    "category": 1,
+    "product": 3
+  },
+  "per_status": {
+    "200": 6
+  },
+  "errors": [],
+  "warnings": [],
+  "discovery": {
+    "entry_url": "https://shopthebulkstore.com/candy/bulk-candy-unwrapped",
+    "category_url": "https://shopthebulkstore.com/candy/bulk-candy-unwrapped",
+    "category_total": 62,
+    "category_page_products": 30,
+    "selected_products": 3,
+    "sitemap_url": "https://shopthebulkstore.com/sitemap.xml",
+    "sitemap_status": "FETCHED",
+    "sitemap_locs": 2528,
+    "sitemap_cross_check": {
+      "matched": 3,
+      "total": 3
+    },
+    "price_unit_counts": {
+      "per_lb": 3
+    }
+  },
+  "product_audits": [
+    {
+      "source_url": "https://shopthebulkstore.com/boston-baked-beans",
+      "fetched_url": "https://shopthebulkstore.com/boston-baked-beans",
+      "name": "Boston Baked Beans",
+      "price_amount": "5.99",
+      "price_currency": "USD",
+      "description_status": "complete",
+      "description_chars": 275,
+      "category": "Candy Unwrapped",
+      "brand": "Ferrara",
+      "price_unit": "per_lb",
+      "price_unit_text": "Price is per lb",
+      "availability": "https://schema.org/InStock",
+      "sku": "0594-00",
+      "attributes": "",
+      "breadcrumbs": [
+        "Candy",
+        "Candy Unwrapped"
+      ],
+      "missing_reasons": {},
+      "outcome": "valid",
+      "jsonld_products": 1
+    },
+    {
+      "source_url": "https://shopthebulkstore.com/candy-corn",
+      "fetched_url": "https://shopthebulkstore.com/candy-corn",
+      "name": "Candy Corn",
+      "price_amount": "4.49",
+      "price_currency": "USD",
+      "description_status": "complete",
+      "description_chars": 219,
+      "category": "Halloween Candy Unwrapped",
+      "brand": "Zachary",
+      "price_unit": "per_lb",
+      "price_unit_text": "Price is per lb",
+      "availability": "https://schema.org/InStock",
+      "sku": "0429-00",
+      "attributes": "",
+      "breadcrumbs": [
+        "Halloween",
+        "Halloween Candy",
+        "Halloween Candy Unwrapped"
+      ],
+      "missing_reasons": {},
+      "outcome": "valid",
+      "jsonld_products": 1
+    },
+    {
+      "source_url": "https://shopthebulkstore.com/halloween-caramel-apple-candy-corn",
+      "fetched_url": "https://shopthebulkstore.com/halloween-caramel-apple-candy-corn",
+      "name": "Candy Corn Caramel Apple",
+      "price_amount": "4.49",
+      "price_currency": "USD",
+      "description_status": "complete",
+      "description_chars": 250,
+      "category": "Halloween Candy Unwrapped",
+      "brand": "Zachary",
+      "price_unit": "per_lb",
+      "price_unit_text": "Price is per lb",
+      "availability": "https://schema.org/OutOfStock",
+      "sku": "HALL-10",
+      "attributes": "",
+      "breadcrumbs": [
+        "Halloween",
+        "Halloween Candy",
+        "Halloween Candy Unwrapped"
+      ],
+      "missing_reasons": {},
+      "outcome": "valid",
+      "jsonld_products": 1
+    }
+  ]
+}

@@ -9,6 +9,7 @@
 | S1 `javaestate.com` | [Scrapling 试点](javaestate/README.md)，`plan_id: javaestate-us-d01` | 通过（试点） | [run-log](javaestate/run-log.md)、`valid.csv`、`task-result.json`、`diagnostics/` |
 | S2 `skatepro.es` | [Scrapling 试点](skatepro/README.md)，`plan_id: skatepro-es-d01` | 通过（试点） | [run-log](skatepro/run-log.md)、`valid.csv`、`task-result.json`、`diagnostics/` |
 | S4 `sixmoondesigns.com` | [Scrapling 公开 JSON 试点](sixmoondesigns/README.md)，`plan_id: sixmoondesigns-us-d01` | 通过（试点） | [run-log](sixmoondesigns/run-log.md)、`valid.csv`、`task-result.json`、`diagnostics/` |
+| S5 `shopthebulkstore.com` | [Scrapling 分类目录试点](shopthebulkstore/README.md)，`plan_id: shopthebulkstore-us-d01` | 通过（试点） | [run-log](shopthebulkstore/run-log.md)、`valid.csv`、`task-result.json`、`diagnostics/` |
 
 ## 边界
 
