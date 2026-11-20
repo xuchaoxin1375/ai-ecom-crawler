@@ -97,13 +97,113 @@
     },
     "discovery": {
       "type": "object",
-      "required": ["strategies", "link_selector", "product_url_patterns"],
+      "anyOf": [
+        {
+          "required": ["strategies", "link_selector", "product_url_patterns"]
+        },
+        {
+          "required": ["sources", "product_url_patterns"]
+        }
+      ],
       "properties": {
         "strategies": {
           "type": "array",
           "minItems": 1,
           "items": {
             "enum": ["entry_links"]
+          }
+        },
+        "sources": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "required": ["type"],
+                "properties": {
+                  "type": {
+                    "const": "entry_links"
+                  },
+                  "url": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "link_selector": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": ["type"],
+                "properties": {
+                  "type": {
+                    "const": "sitemap"
+                  },
+                  "urls": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uri"
+                    }
+                  },
+                  "robots": {
+                    "type": "boolean"
+                  },
+                  "max_sitemaps": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": ["type", "url"],
+                "properties": {
+                  "type": {
+                    "const": "listing"
+                  },
+                  "url": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "product_link_selector": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "advance": {
+                    "type": "object",
+                    "required": ["type"],
+                    "properties": {
+                      "type": {
+                        "enum": ["none", "page_param", "next_link"]
+                      },
+                      "param": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "selector": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "start": {
+                        "type": "integer"
+                      },
+                      "max_pages": {
+                        "type": "integer",
+                        "minimum": 1
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              }
+            ]
           }
         },
         "entry_url": {
@@ -315,7 +415,7 @@
       ],
       "properties": {
         "schema_version": {
-          "const": "1.0"
+          "enum": ["1.0", "1.1"]
         },
         "rule_id": {
           "type": "string",
@@ -558,7 +658,7 @@
       ],
       "properties": {
         "schema_version": {
-          "const": "1.0"
+          "enum": ["1.0", "1.1"]
         },
         "plan_id": {
           "type": "string",

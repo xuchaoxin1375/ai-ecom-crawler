@@ -12,10 +12,12 @@ from executor.manifest import validate_plan
 
 from .models import TASK_TYPES, utc_now
 
-SCHEMA_VERSIONS = {"1.0"}
+SCHEMA_VERSIONS = {"1.0", "1.1"}
 RULE_STATUSES = {"candidate", "verified", "deprecated"}
 SUPPORTED_KINDS = {"declarative"}
 SUPPORTED_DISCOVERY = {"entry_links"}
+SUPPORTED_SOURCES = {"entry_links", "sitemap", "listing"}
+SUPPORTED_ADVANCE = {"none", "page_param", "next_link"}
 CORE_FIELDS = {"name", "price.amount", "price.currency", "primary_image_url", "source_url"}
 RULE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,80}$")
 
@@ -92,7 +94,41 @@ class RulePackage:
 
     @property
     def entry_url(self) -> str:
+        sources = self.discovery.get("sources")
+        if isinstance(sources, list):
+            for source in sources:
+                if not isinstance(source, dict):
+                    continue
+                if source.get("url"):
+                    return str(source["url"])
+                if source.get("urls"):
+                    return str(source["urls"][0])
         return str(self.discovery.get("entry_url") or self.site["entry_urls"][0])
+
+    @property
+    def sources(self) -> list[dict[str, Any]]:
+        sources = self.discovery.get("sources")
+        if isinstance(sources, list) and sources:
+            return [dict(source) for source in sources if isinstance(source, dict)]
+        strategies = self.discovery.get("strategies", [])
+        normalized: list[dict[str, Any]] = []
+        if "entry_links" in strategies:
+            normalized.append(
+                {
+                    "type": "entry_links",
+                    "url": self.entry_url,
+                    "link_selector": self.discovery.get("link_selector", ""),
+                }
+            )
+        if normalized:
+            return normalized
+        return [
+            {
+                "type": "entry_links",
+                "url": self.entry_url,
+                "link_selector": self.discovery.get("link_selector", ""),
+            }
+        ]
 
     def supports(self, task_type: str) -> bool:
         return bool(self.capabilities.get(task_type))
@@ -112,6 +148,15 @@ class RulePackage:
 
     def product_plan(self) -> dict[str, Any]:
         """Return a plan dict compatible with the R06 extractor/validator."""
+        discovery = self.discovery
+        if "sources" in discovery:
+            discovery = {
+                "strategies": ["entry_links"],
+                "entry_url": self.entry_url,
+                "link_selector": discovery.get("link_selector") or "a",
+                "product_url_patterns": discovery.get("product_url_patterns", []),
+                "url_identity": discovery.get("url_identity", "canonical"),
+            }
         return {
             "schema_version": "1.0",
             "plan_id": self.rule_id,
@@ -122,7 +167,7 @@ class RulePackage:
             "updated_at": self.raw.get("updated_at", utc_now()),
             "site": self.site,
             "scope": self.scope,
-            "discovery": self.discovery,
+            "discovery": discovery,
             "fetch": self.fetch,
             "extract": self.raw.get("extract", {}),
             "normalize": self.raw.get("normalize", {}),
@@ -207,16 +252,30 @@ def _validate_common(data: dict[str, Any]) -> None:
         raise RuleError("at least one capability must be true")
 
     discovery = _require_mapping(data["discovery"], "discovery")
-    strategies = _require_list(discovery.get("strategies"), "discovery.strategies")
-    if not strategies:
-        raise RuleError("discovery.strategies must not be empty")
-    unsupported = set(strategies) - SUPPORTED_DISCOVERY
-    if unsupported:
-        raise RuleError(
-            f"v1 runtime supports discovery.strategies={sorted(SUPPORTED_DISCOVERY)}; "
-            f"unsupported: {sorted(unsupported)}"
-        )
-    _require_string(discovery.get("link_selector"), "discovery.link_selector")
+    sources = discovery.get("sources")
+    strategies = discovery.get("strategies")
+    if sources is not None:
+        _validate_sources(sources, discovery)
+        if strategies is not None:
+            strategies = _require_list(strategies, "discovery.strategies")
+            unsupported = set(strategies) - {"entry_links"}
+            if unsupported:
+                raise RuleError(
+                    "when discovery.sources is present, discovery.strategies "
+                    f"may only be ['entry_links']; got {sorted(unsupported)}"
+                )
+    else:
+        strategies = _require_list(strategies, "discovery.strategies")
+        if not strategies:
+            raise RuleError("discovery.strategies must not be empty")
+        unsupported = set(strategies) - SUPPORTED_DISCOVERY
+        if unsupported:
+            raise RuleError(
+                f"v1 runtime supports discovery.strategies={sorted(SUPPORTED_DISCOVERY)}; "
+                f"unsupported: {sorted(unsupported)}"
+            )
+        if "entry_links" in strategies:
+            _require_string(discovery.get("link_selector"), "discovery.link_selector")
     patterns = _require_list(
         discovery.get("product_url_patterns"), "discovery.product_url_patterns"
     )
@@ -258,6 +317,96 @@ def _validate_common(data: dict[str, Any]) -> None:
         for key in ("extract", "normalize", "validate"):
             if key not in data:
                 raise RuleError(f"product capability needs {key}")
+
+
+def _validate_sources(value: Any, discovery: dict[str, Any]) -> None:
+    sources = _require_list(value, "discovery.sources")
+    if not sources:
+        raise RuleError("discovery.sources must not be empty")
+    has_entry = False
+    has_listing = False
+    for index, source in enumerate(sources):
+        path = f"discovery.sources[{index}]"
+        source = _require_mapping(source, path)
+        source_type = _require_string(source.get("type"), f"{path}.type")
+        if source_type not in SUPPORTED_SOURCES:
+            raise RuleError(
+                f"unsupported discovery source type {source_type!r}; "
+                f"supported: {sorted(SUPPORTED_SOURCES)}"
+            )
+        if source_type == "entry_links":
+            has_entry = True
+            if "url" in source:
+                _require_string(source.get("url"), f"{path}.url")
+            if "link_selector" in source:
+                _require_string(source.get("link_selector"), f"{path}.link_selector")
+        if source_type == "listing":
+            has_listing = True
+            _require_string(source.get("url") or source.get("seed"), f"{path}.url")
+            if "product_link_selector" in source:
+                _require_string(
+                    source.get("product_link_selector"),
+                    f"{path}.product_link_selector",
+                )
+            _validate_advance(source.get("advance", {"type": "none"}), path)
+        if source_type == "sitemap":
+            urls = source.get("urls", [])
+            if not isinstance(urls, list):
+                raise RuleError(f"{path}.urls must be a list")
+            for url in urls:
+                _require_string(url, f"{path}.urls[]")
+            if not urls and source.get("robots") is not True:
+                raise RuleError(f"{path} needs urls or robots=true")
+            if "robots" in source and not isinstance(source["robots"], bool):
+                raise RuleError(f"{path}.robots must be a boolean")
+            if "max_sitemaps" in source and (
+                isinstance(source["max_sitemaps"], bool)
+                or not isinstance(source["max_sitemaps"], int)
+                or source["max_sitemaps"] < 1
+            ):
+                raise RuleError(f"{path}.max_sitemaps must be a positive integer")
+    if (
+        has_entry
+        and not discovery.get("link_selector")
+        and not any(
+            source.get("type") == "entry_links" and source.get("link_selector")
+            for source in sources
+        )
+    ):
+        raise RuleError("entry_links source needs a link_selector")
+    if (
+        has_listing
+        and not discovery.get("link_selector")
+        and not any(
+            source.get("type") == "listing" and source.get("product_link_selector")
+            for source in sources
+        )
+    ):
+        raise RuleError("listing source needs product_link_selector")
+
+
+def _validate_advance(value: Any, path: str) -> None:
+    advance = _require_mapping(value, f"{path}.advance")
+    advance_type = _require_string(advance.get("type"), f"{path}.advance.type")
+    if advance_type not in SUPPORTED_ADVANCE:
+        raise RuleError(
+            f"unsupported {path}.advance.type {advance_type!r}; "
+            f"supported: {sorted(SUPPORTED_ADVANCE)}"
+        )
+    if advance_type == "page_param":
+        _require_string(advance.get("param", "page"), f"{path}.advance.param")
+    if advance_type == "next_link" and "selector" in advance:
+        _require_string(advance.get("selector"), f"{path}.advance.selector")
+    if "start" in advance and (
+        isinstance(advance["start"], bool) or not isinstance(advance["start"], int)
+    ):
+        raise RuleError(f"{path}.advance.start must be an integer")
+    if "max_pages" in advance and (
+        isinstance(advance["max_pages"], bool)
+        or not isinstance(advance["max_pages"], int)
+        or advance["max_pages"] < 1
+    ):
+        raise RuleError(f"{path}.advance.max_pages must be a positive integer")
 
 
 def _validate_task_defaults(value: Any) -> None:

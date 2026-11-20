@@ -1,0 +1,75 @@
+schema_version: "1.1"
+rule_id: "javaestate-sitemap-runtime"
+rule_version: "2026.11.20-1"
+kind: declarative
+status: candidate
+created_at: "2026-11-20T13:00:00Z"
+updated_at: "2026-11-20T13:00:00Z"
+
+site:
+  name: "Java Estate"
+  entry_urls: ["https://javaestate.com/"]
+  allowed_origins: ["https://javaestate.com"]
+  allowed_path_prefixes: ["/"]
+  market: "US"
+  locale: "en-US"
+  currency: "USD"
+
+scope:
+  include: ['^/products/[^/]+$']
+  exclude:
+    - "/cart"
+    - "/checkout"
+    - "/account"
+    - "/orders"
+  max_products: 30
+  max_seconds: 120
+  notes: "P1 sitemap discovery smoke: first 30 product URLs from the D01 product sitemap; no product fetch."
+
+capabilities:
+  discovery: true
+  product: false
+
+discovery:
+  sources:
+    - type: "sitemap"
+      urls:
+        - "https://javaestate.com/sitemap_products_1.xml?from=7233447460934&to=10283359469638"
+  product_url_patterns: ['^/products/[^/]+$']
+  url_identity: "canonical"
+  limits:
+    max_navigation: 5
+    max_products: 30
+
+fetch:
+  default_engine: "static"
+  concurrency: 1
+  delay_ms: 1000
+  retry: {max_attempts: 2, backoff_ms: 1000}
+  timeout_ms: 45000
+  challenge: "stop_and_record"
+
+output:
+  url_list:
+    enabled: true
+    columns: ["url", "source", "status", "title"]
+    format: "csv"
+  product_csv:
+    enabled: false
+  task_result: true
+
+task_defaults:
+  max_urls: 30
+  max_products: 30
+  max_seconds: 120
+  max_attempts: 2
+  retry_backoff_ms: 1000
+  concurrency:
+    navigation: 1
+    product: 1
+
+compatibility:
+  os: ["windows", "linux", "wsl2"]
+  runtime: "python>=3.11"
+
+notes: "S1 sitemap discovery; product URLs only, no product pages; generated from experiments/d01/javaestate."

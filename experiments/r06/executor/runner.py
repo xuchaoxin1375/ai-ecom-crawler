@@ -222,7 +222,13 @@ def normalize_url(value: str) -> str:
     )
 
 
-def discover_urls(page: HtmlPage, plan: dict[str, Any], *, limit: int) -> list[str]:
+def discover_urls(
+    page: HtmlPage,
+    plan: dict[str, Any],
+    *,
+    limit: int,
+    selector: str | None = None,
+) -> list[str]:
     discovery = plan["discovery"]
     site = plan["site"]
     entry_url = plan_entry_url(plan)
@@ -234,7 +240,7 @@ def discover_urls(page: HtmlPage, plan: dict[str, Any], *, limit: int) -> list[s
 
     results: list[str] = []
     seen: set[str] = set()
-    for element in page.css(discovery["link_selector"]):
+    for element in page.css(selector or discovery["link_selector"]):
         href = element.get("href")
         if not href:
             continue

@@ -45,6 +45,49 @@ class SchemaTests(unittest.TestCase):
     def test_single_run_plan_matches_schema(self) -> None:
         self._assert_valid(self.plan)
 
+    def test_sitemap_sources_rule_matches_schema(self) -> None:
+        rule = copy.deepcopy(self.rule)
+        rule["schema_version"] = "1.1"
+        rule["discovery"] = {
+            "sources": [
+                {
+                    "type": "sitemap",
+                    "urls": ["https://www.familidoo.fr/sitemap.xml"],
+                }
+            ],
+            "product_url_patterns": ["/fr/.*\\.html$"],
+        }
+        self._assert_valid(rule)
+
+    def test_robots_sitemap_source_matches_schema(self) -> None:
+        rule = copy.deepcopy(self.rule)
+        rule["schema_version"] = "1.1"
+        rule["discovery"] = {
+            "sources": [{"type": "sitemap", "robots": True}],
+            "product_url_patterns": ["/fr/.*\\.html$"],
+        }
+        self._assert_valid(rule)
+
+    def test_listing_sources_rule_matches_schema(self) -> None:
+        rule = copy.deepcopy(self.rule)
+        rule["schema_version"] = "1.1"
+        rule["discovery"] = {
+            "sources": [
+                {
+                    "type": "listing",
+                    "url": "https://www.familidoo.fr/fr/list",
+                    "product_link_selector": "a.product_img_link",
+                    "advance": {
+                        "type": "page_param",
+                        "param": "page",
+                        "max_pages": 3,
+                    },
+                }
+            ],
+            "product_url_patterns": ["/fr/.*\\.html$"],
+        }
+        self._assert_valid(rule)
+
     def test_missing_capabilities_is_rejected(self) -> None:
         rule = copy.deepcopy(self.rule)
         del rule["capabilities"]

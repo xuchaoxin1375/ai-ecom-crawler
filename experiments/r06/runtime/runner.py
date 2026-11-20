@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import csv
+import gzip
 import hashlib
 import io
 import json
+import re
 import threading
 import time
+import xml.etree.ElementTree as ET
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 from executor.extract import HtmlPage, extract_product
 from executor.normalize import csv_safe, format_price
@@ -68,6 +71,32 @@ class TaskRunner:
         self._write_lock = threading.Lock()
         self._recovery: dict[str, Any] = {}
         self._corrupt_products = 0
+        self._includes = [re.compile(pattern) for pattern in rule.scope.get("include", [])]
+        self._excludes = [re.compile(pattern) for pattern in rule.scope.get("exclude", [])]
+        self._product_patterns = [
+            re.compile(pattern)
+            for pattern in rule.discovery.get("product_url_patterns", [])
+        ]
+        discovery_limits = rule.discovery.get("limits", {})
+        self._max_navigation = max(
+            1,
+            int(
+                task.limits.get(
+                    "max_navigation", discovery_limits.get("max_navigation", 100)
+                )
+            ),
+        )
+        sitemap_limits = [
+            int(source.get("max_sitemaps", discovery_limits.get("max_sitemaps", 50)))
+            for source in rule.sources
+            if source.get("type") == "sitemap"
+        ]
+        self._max_sitemaps = max(
+            1,
+            min(sitemap_limits)
+            if sitemap_limits
+            else int(discovery_limits.get("max_sitemaps", 50)),
+        )
 
     def run(self) -> str:
         self.out_dir.mkdir(parents=True, exist_ok=True)
@@ -91,7 +120,7 @@ class TaskRunner:
         control = "FINISHED"
         try:
             self._probe_robots_sitemaps()
-            self._seed_entry()
+            self._seed_sources()
             control = self._loop()
         except StopTask as exc:
             self._stop_reason = exc.reason
@@ -221,6 +250,11 @@ class TaskRunner:
         if not result.ok:
             return self._failure(item, "permanent", f"http_{result.status}")
 
+        if item.item_type == "navigation" and item.discovered_from == "listing":
+            return self._process_listing(item, result)
+        if item.item_type == "navigation" and item.discovered_from == "sitemap":
+            return self._process_sitemap(item, result)
+
         page = HtmlPage(result.body, result.url)
         if item.item_type == "navigation":
             remaining = self._remaining_product_limit()
@@ -255,6 +289,168 @@ class TaskRunner:
             "product": payload,
         }
 
+    def _process_listing(
+        self, item: WorkItem, result: Any
+    ) -> tuple[str, dict[str, Any]]:
+        page = HtmlPage(result.body, result.url)
+        remaining = self._remaining_product_limit()
+        if remaining <= 0:
+            return "DONE", {"links": 0, "added": 0, "limit_reached": True}
+        selector = str(item.result.get("link_selector") or "")
+        urls = discover_urls(
+            page,
+            self.rule.raw,
+            limit=remaining,
+            selector=selector or None,
+        )
+        added = 0
+        for url in urls:
+            if self._add_product_item(url, parent=item.url, source="listing"):
+                added += 1
+        advance = item.result.get("advance", {"type": "none"})
+        next_url = self._next_listing_url(item, page, advance) if added else None
+        if next_url:
+            next_page = int(item.result.get("page", 1)) + 1
+            self._add_navigation(
+                next_url,
+                source="listing",
+                parent=item.url,
+                result={**item.result, "page": next_page},
+            )
+        return "DONE", {
+            "links": len(urls),
+            "added": added,
+            "next": next_url,
+            "stop": "no_new_items" if added == 0 else None,
+        }
+
+    def _next_listing_url(
+        self, item: WorkItem, page: HtmlPage, advance: dict[str, Any]
+    ) -> str | None:
+        advance_type = str(advance.get("type", "none"))
+        if advance_type not in {"page_param", "next_link"}:
+            return None
+        current = int(item.result.get("page", 1))
+        default_max = int(self.rule.discovery.get("limits", {}).get("max_pages", 20))
+        max_pages = max(1, int(advance.get("max_pages", default_max)))
+        if current >= max_pages:
+            return None
+        if advance_type == "page_param":
+            param = str(advance.get("param", "page"))
+            parsed = urlparse(item.url)
+            query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+            query[param] = str(current + 1)
+            return urlunparse(
+                (
+                    parsed.scheme,
+                    parsed.netloc,
+                    parsed.path,
+                    parsed.params,
+                    urlencode(query, doseq=True),
+                    "",
+                )
+            )
+        selector = str(advance.get("selector") or "a[rel=next]")
+        elements = page.css(selector)
+        if not elements:
+            return None
+        href = elements[0].get("href")
+        if not href:
+            return None
+        return urljoin(item.url, href.strip())
+
+    def _process_sitemap(
+        self, item: WorkItem, result: Any
+    ) -> tuple[str, dict[str, Any]]:
+        body = result.body
+        if body[:2] == b"\x1f\x8b":
+            try:
+                body = gzip.decompress(body)
+            except OSError as exc:
+                return "FAILED", {
+                    "reason": "sitemap_gzip_error",
+                    "failure_class": "permanent",
+                    "error": str(exc),
+                }
+        try:
+            root = ET.fromstring(body)
+        except ET.ParseError as exc:
+            return "FAILED", {
+                "reason": "sitemap_parse_error",
+                "failure_class": "permanent",
+                "error": str(exc),
+            }
+
+        root_name = _local_name(root.tag).lower()
+        locations = [
+            element.text.strip()
+            for element in root.iter()
+            if _local_name(element.tag).lower() == "loc" and element.text
+        ]
+        if root_name == "sitemapindex":
+            added = 0
+            skipped = 0
+            for location in locations[: self._max_sitemaps]:
+                if not self._is_allowed_url(location):
+                    skipped += 1
+                    continue
+                if self._add_navigation(location, source="sitemap", parent=item.url):
+                    added += 1
+                else:
+                    skipped += 1
+            return "DONE", {
+                "sitemap_type": "index",
+                "children": len(locations),
+                "added": added,
+                "skipped": skipped,
+            }
+
+        if root_name == "urlset":
+            candidates = 0
+            added = 0
+            excluded = 0
+            for location in locations:
+                if not self._is_product_candidate(location):
+                    excluded += 1
+                    continue
+                candidates += 1
+                if self._add_product_item(
+                    location, parent=item.url, source="sitemap"
+                ):
+                    added += 1
+            return "DONE", {
+                "sitemap_type": "urlset",
+                "locations": len(locations),
+                "product_candidates": candidates,
+                "added": added,
+                "excluded": excluded,
+            }
+
+        return "FAILED", {
+            "reason": "unsupported_sitemap_root",
+            "failure_class": "permanent",
+            "root": root_name,
+        }
+
+    def _is_product_candidate(self, url: str) -> bool:
+        parsed = urlparse(url)
+        if parsed.scheme not in {"http", "https"}:
+            return False
+        if not self._is_allowed_url(url):
+            return False
+        if self._includes and not any(
+            pattern.search(parsed.path) for pattern in self._includes
+        ):
+            return False
+        if any(pattern.search(url) for pattern in self._excludes):
+            return False
+        return not (
+            self._product_patterns
+            and not any(
+                pattern.search(parsed.path) for pattern in self._product_patterns
+            )
+        )
+
     def _failure(
         self,
         item: WorkItem,
@@ -286,23 +482,71 @@ class TaskRunner:
         base = max(float(raw), 0.0) / 1000
         return min(base * (2 ** max(attempt - 1, 0)), 5.0)
 
-    def _seed_entry(self) -> None:
-        normalized = _normalize_url(self.rule.entry_url)
+    def _seed_sources(self) -> None:
+        for source in self.rule.sources:
+            source_type = str(source.get("type", "entry_links"))
+            if source_type == "entry_links":
+                self._add_navigation(
+                    str(source.get("url") or self.rule.entry_url),
+                    source="entry_links",
+                )
+            elif source_type == "sitemap":
+                urls = list(source.get("urls") or [])
+                if source.get("robots") is True:
+                    urls.extend(self._robots_sitemaps)
+                for url in dict.fromkeys(urls):
+                    self._add_navigation(url, source="sitemap")
+            elif source_type == "listing":
+                url = str(source.get("url") or source.get("seed") or "")
+                if not url:
+                    continue
+                advance = source.get("advance", {"type": "none"})
+                self._add_navigation(
+                    url,
+                    source="listing",
+                    result={
+                        "advance": advance,
+                        "page": int(advance.get("start", 1)),
+                        "link_selector": source.get("product_link_selector")
+                        or self.rule.discovery.get("link_selector", ""),
+                    },
+                )
+
+    def _add_navigation(
+        self,
+        url: str,
+        *,
+        source: str,
+        parent: str | None = None,
+        result: dict[str, Any] | None = None,
+    ) -> bool:
+        if not self._is_allowed_url(url):
+            return False
+        if (
+            self.store.count_items(self.task.task_id, "navigation")
+            >= self._max_navigation
+        ):
+            return False
+        normalized = _normalize_url(url)
         item_id = hashlib.sha1(f"nav:{normalized}".encode()).hexdigest()[:16]
-        self.store.add_item(
+        return self.store.add_item(
             WorkItem(
                 task_id=self.task.task_id,
                 item_id=item_id,
                 item_type="navigation",
-                url=self.rule.entry_url,
+                url=url,
                 normalized_url=normalized,
                 stage="discover",
                 state="PENDING",
-                discovered_from="entry",
+                parent_url=parent,
+                discovered_from=source,
+                result=result or {},
             )
         )
 
-    def _add_product_item(self, url: str, *, parent: str) -> bool:
+    def _add_product_item(
+        self, url: str, *, parent: str, source: str = "entry_links"
+    ) -> bool:
         if self._remaining_product_limit() <= 0:
             return False
         normalized = _normalize_url(url)
@@ -319,7 +563,7 @@ class TaskRunner:
             stage="discover" if discovery else "fetch",
             state=state,
             parent_url=parent,
-            discovered_from="entry_links",
+            discovered_from=source,
             result=result,
         )
         added = self.store.add_item(item)
@@ -416,6 +660,9 @@ class TaskRunner:
         sitemap = discovery.get("sitemap")
         if isinstance(sitemap, dict) and sitemap.get("robots") is True:
             return True
+        for source in self.rule.sources:
+            if source.get("type") == "sitemap" and source.get("robots") is True:
+                return True
         strategies = discovery.get("strategies", [])
         return "sitemap" in strategies and not discovery.get("sitemap_urls")
 
@@ -572,13 +819,13 @@ class TaskRunner:
             coverage = _coverage(
                 counts["url_candidates"],
                 counts["valid_urls"] + counts["excluded_urls"] + counts["failed_urls"],
-                "entry-page URL candidates",
+                "declared-source URL candidates",
             )
         else:
             coverage = _coverage(
                 counts["product_candidates"],
                 counts["processed_products"],
-                "entry-page product candidates",
+                "declared-source product candidates",
             )
         quality_exceptions = []
         for product in self._products:
@@ -596,7 +843,7 @@ class TaskRunner:
                 }
             )
         limitations = [
-            "Bounded to links accepted from the entry page; not full-site coverage.",
+            "Bounded to the declared discovery sources and limits; not full-site coverage.",
             "Static HTML only; no browser rendering, login or access-control bypass.",
             "Runtime LLM calls: 0; no raw page HTML is retained.",
         ]
@@ -624,7 +871,7 @@ class TaskRunner:
                 "accepted_by": None,
                 "accepted_at": None,
                 "reason": "R06 runtime prototype; no business sign-off yet.",
-                "scope": "entry-page sample declared by the rule",
+                "scope": "discovery sources declared by the rule",
             },
             "quality_exceptions": quality_exceptions,
             "pricing": {
@@ -648,6 +895,7 @@ class TaskRunner:
             },
             "access": {
                 "entry_url": self.rule.entry_url,
+                "sources": [str(source.get("type")) for source in self.rule.sources],
                 "robots_url": self._robots_url,
                 "robots_status": self._robots_status,
                 "robots_sitemaps": self._robots_sitemaps,
@@ -817,6 +1065,10 @@ def _record_payload(record: Any) -> dict[str, Any]:
         "price_pretax": record.price_pretax,
         "tax_basis": record.tax_basis,
     }
+
+
+def _local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
 
 
 def _normalize_url(url: str) -> str:
