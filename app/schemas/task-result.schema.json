@@ -1,0 +1,211 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/ecom-crawler/task-result.schema.json",
+  "title": "D02 task result",
+  "description": "Machine projection of docs/09 for product exports. Additional fields are allowed for forward compatibility.",
+  "type": "object",
+  "required": [
+    "task_id",
+    "task_type",
+    "plan_id",
+    "plan_version",
+    "market",
+    "locale",
+    "state",
+    "outcome",
+    "stop_reason",
+    "started_at",
+    "finished_at",
+    "counts",
+    "coverage",
+    "business_acceptance",
+    "quality_exceptions"
+  ],
+  "properties": {
+    "synthetic_example": {
+      "type": "boolean"
+    },
+    "task_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "task_type": {
+      "enum": ["product", "discovery"]
+    },
+    "plan_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "plan_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "market": {
+      "type": "string",
+      "minLength": 1
+    },
+    "locale": {
+      "type": "string",
+      "minLength": 1
+    },
+    "state": {
+      "enum": [
+        "DRAFT",
+        "QUEUED",
+        "RUNNING",
+        "PAUSING",
+        "PAUSED",
+        "CANCELLING",
+        "CANCELLED",
+        "FINISHED"
+      ]
+    },
+    "outcome": {
+      "enum": ["COMPLETED", "PARTIAL", "FAILED", "CANCELLED"]
+    },
+    "stop_reason": {
+      "enum": [
+        "NATURAL_END",
+        "BUDGET_EXHAUSTED",
+        "ACCESS_DENIED",
+        "QUALITY_BLOCKED",
+        "ENVIRONMENT_ERROR",
+        "PLAN_ERROR",
+        "USER_CANCELLED",
+        "OTHER"
+      ]
+    },
+    "started_at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "finished_at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "counts": {
+      "type": "object",
+      "required": [
+        "discovered_urls",
+        "pending_navigation_entries",
+        "product_candidates",
+        "pending_products",
+        "in_flight_products",
+        "processed_products",
+        "valid_products",
+        "excluded_products",
+        "failed_products",
+        "partial_description_products"
+      ],
+      "properties": {
+        "discovered_urls": {"type": "integer", "minimum": 0},
+        "pending_navigation_entries": {"type": "integer", "minimum": 0},
+        "product_candidates": {"type": "integer", "minimum": 0},
+        "pending_products": {"type": "integer", "minimum": 0},
+        "in_flight_products": {"type": "integer", "minimum": 0},
+        "processed_products": {"type": "integer", "minimum": 0},
+        "valid_products": {"type": "integer", "minimum": 0},
+        "excluded_products": {"type": "integer", "minimum": 0},
+        "failed_products": {"type": "integer", "minimum": 0},
+        "partial_description_products": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": true
+    },
+    "coverage": {
+      "type": "object",
+      "required": ["status", "denominator_source", "denominator", "covered", "notes"],
+      "properties": {
+        "status": {
+          "enum": ["KNOWN", "PARTIAL", "UNKNOWN"]
+        },
+        "denominator_source": {
+          "type": ["string", "null"]
+        },
+        "denominator": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "covered": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "notes": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "business_acceptance": {
+      "type": "object",
+      "required": ["status", "accepted_by", "accepted_at", "reason", "scope"],
+      "properties": {
+        "status": {
+          "enum": ["NOT_REVIEWED", "ACCEPTED_BY_USER", "REJECTED_BY_USER"]
+        },
+        "accepted_by": {
+          "type": ["string", "null"]
+        },
+        "accepted_at": {
+          "type": ["string", "null"]
+        },
+        "reason": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "quality_exceptions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "source_url",
+          "description_status",
+          "partial_reason",
+          "missing_reasons"
+        ],
+        "properties": {
+          "source_url": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description_status": {
+            "enum": [
+              "COMPLETE",
+              "PARTIAL",
+              "SUMMARY_FALLBACK",
+              "NOT_PROVIDED",
+              "FAILED"
+            ]
+          },
+          "partial_reason": {
+            "type": ["string", "null"]
+          },
+          "missing_reasons": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "properties": {
+        "llm_calls": {"type": "integer", "minimum": 0},
+        "raw_pages_retained": {"type": "boolean"}
+      },
+      "additionalProperties": true
+    },
+    "limitations": {
+      "type": "array",
+      "items": {"type": "string"}
+    }
+  },
+  "additionalProperties": true
+}
