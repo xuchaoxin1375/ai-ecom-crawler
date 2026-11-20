@@ -45,6 +45,33 @@ class PriceTests(unittest.TestCase):
         self.assertIsNone(pretax)
 
 
+class NameTests(unittest.TestCase):
+    def test_h1_wins_over_title(self) -> None:
+        page = Selector(
+            content=(
+                "<html><head><title>Product - Shop</title>"
+                '<meta property="og:site_name" content="Shop"></head>'
+                "<body><h1>Product H1</h1></body></html>"
+            ),
+            url="https://example.test/p",
+        )
+        name, source = run.extract_name(page)
+        self.assertEqual(name, "Product H1")
+        self.assertEqual(source, "h1")
+
+    def test_title_fallback_strips_site_name(self) -> None:
+        page = Selector(
+            content=(
+                "<html><head><title>Product - Shop</title>"
+                '<meta property="og:site_name" content="Shop"></head><body></body></html>'
+            ),
+            url="https://example.test/p",
+        )
+        name, source = run.extract_name(page)
+        self.assertEqual(name, "Product")
+        self.assertEqual(source, "title")
+
+
 class DescriptionTests(unittest.TestCase):
     def test_clean_removes_read_more_and_scripts(self) -> None:
         raw = (
