@@ -16,7 +16,6 @@ from urllib.parse import urlparse, urlunparse
 from executor.extract import HtmlPage, extract_product
 from executor.normalize import csv_safe, format_price
 from executor.runner import CSV_COLUMNS, build_record, discover_urls, validate_product
-from protego import Protego
 
 from .atomic import append_jsonl, write_json, write_text
 from .models import Task, WorkItem, utc_now
@@ -59,10 +58,9 @@ class TaskRunner:
         self.progress_path = self.out_dir / "task-progress.json"
         self._products: list[dict[str, Any]] = []
         self._seen_canonical: set[str] = set()
-        self._robots: Protego | None = None
         self._robots_url = ""
         self._robots_status = 0
-        self._robots_text = ""
+        self._robots_sitemaps: list[str] = []
         self._started_monotonic = time.monotonic()
         self._stop_reason = "NATURAL_END"
         self._stop_detail = "entry-page sample exhausted"
@@ -92,7 +90,7 @@ class TaskRunner:
         )
         control = "FINISHED"
         try:
-            self._load_robots()
+            self._probe_robots_sitemaps()
             self._seed_entry()
             control = self._loop()
         except StopTask as exc:
@@ -211,8 +209,6 @@ class TaskRunner:
             futures.pop(future, None)
 
     def _process_item(self, item: WorkItem) -> tuple[str, dict[str, Any]]:
-        if not self._can_fetch(item.url):
-            return "EXCLUDED", {"reason": "robots_disallowed"}
         result = self.fetcher.get(item.url)
         if result.status == 0:
             return self._failure(
@@ -309,16 +305,11 @@ class TaskRunner:
     def _add_product_item(self, url: str, *, parent: str) -> bool:
         if self._remaining_product_limit() <= 0:
             return False
-        allowed = self._can_fetch(url)
         normalized = _normalize_url(url)
         item_id = hashlib.sha1(normalized.encode()).hexdigest()[:16]
         discovery = self.task.task_type == "discovery"
-        if allowed:
-            state = "DONE" if discovery else "PENDING"
-            result = {"status": "discovered", "source": parent} if discovery else {}
-        else:
-            state = "EXCLUDED"
-            result = {"status": "excluded", "reason": "robots_disallowed"}
+        state = "DONE" if discovery else "PENDING"
+        result = {"status": "discovered", "source": parent} if discovery else {}
         item = WorkItem(
             task_id=self.task.task_id,
             item_id=item_id,
@@ -344,10 +335,7 @@ class TaskRunner:
                     "result": result,
                 },
             )
-            if state == "DONE":
-                self._event("url_discovered", url=url, source=parent)
-            else:
-                self._event("url_excluded", url=url, reason="robots_disallowed")
+            self._event("url_discovered", url=url, source=parent)
         return added
 
     def _finish_item(
@@ -421,35 +409,48 @@ class TaskRunner:
             return False
         return True
 
-    def _load_robots(self) -> None:
+    def _should_probe_robots(self) -> bool:
+        discovery = self.rule.discovery
+        if discovery.get("robots_sitemap") is True:
+            return True
+        sitemap = discovery.get("sitemap")
+        if isinstance(sitemap, dict) and sitemap.get("robots") is True:
+            return True
+        strategies = discovery.get("strategies", [])
+        return "sitemap" in strategies and not discovery.get("sitemap_urls")
+
+    def _probe_robots_sitemaps(self) -> None:
+        """Read robots only for `Sitemap:` lines; never store or enforce rules."""
+        if not self._should_probe_robots():
+            return
         parsed = urlparse(self.rule.entry_url)
         self._robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
         result = self.fetcher.get(self._robots_url)
         self._robots_status = result.status
-        self._robots_text = result.body.decode("utf-8", "replace")
-        (self.out_dir / "robots.txt").write_text(self._robots_text, encoding="utf-8")
-        if result.status == 404:
-            self._robots = None
-        elif result.ok:
-            try:
-                self._robots = Protego.parse(self._robots_text.removeprefix("\ufeff"))
-            except Exception as exc:
-                raise StopTask("PLAN_ERROR", f"cannot parse robots.txt: {exc}") from exc
-            if not self._robots.can_fetch(self.rule.entry_url, "*"):
-                raise StopTask("ACCESS_DENIED", "robots.txt disallows the entry URL")
-        elif result.status in {401, 403, 429}:
-            raise StopTask("ACCESS_DENIED", f"robots.txt HTTP {result.status}")
-        else:
-            raise StopTask(
-                "ENVIRONMENT_ERROR",
-                f"robots.txt unavailable: HTTP {result.status} {result.error}".strip(),
+        if not result.ok:
+            self._event(
+                "robots_probe_failed",
+                url=self._robots_url,
+                status=result.status,
+                error=result.error,
             )
-        self._event("robots_loaded", url=self._robots_url, status=result.status)
-
-    def _can_fetch(self, url: str) -> bool:
-        if self._robots is None:
-            return True
-        return self._robots.can_fetch(url, "*")
+            return
+        text = result.body.decode("utf-8", "replace").removeprefix("\ufeff")
+        for line in text.splitlines():
+            stripped = line.strip()
+            if not stripped.lower().startswith("sitemap:"):
+                continue
+            value = stripped.split(":", 1)[1].strip()
+            if value and value not in self._robots_sitemaps:
+                self._robots_sitemaps.append(value)
+            if len(self._robots_sitemaps) >= 20:
+                break
+        self._event(
+            "robots_sitemaps_probed",
+            url=self._robots_url,
+            status=result.status,
+            sitemaps=len(self._robots_sitemaps),
+        )
 
     def _is_allowed_url(self, url: str) -> bool:
         parsed = urlparse(url)
@@ -649,6 +650,8 @@ class TaskRunner:
                 "entry_url": self.rule.entry_url,
                 "robots_url": self._robots_url,
                 "robots_status": self._robots_status,
+                "robots_sitemaps": self._robots_sitemaps,
+                "robots_policy": "sitemap_line_only",
                 "delay_ms": self.rule.fetch.get("delay_ms", 1000),
                 "max_products": self.task.limits.get("max_products"),
                 "max_urls": self.task.limits.get("max_urls"),
