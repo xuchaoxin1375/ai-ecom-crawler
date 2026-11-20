@@ -50,6 +50,8 @@ SITE_MAP = "https://www.familidoo.fr/fr/site-map"
 CATEGORY = "https://www.familidoo.fr/fr/categories/"
 PRODUCT2 = "https://www.familidoo.fr/fr/cat/2-b.html"
 PRODUCT3 = "https://www.familidoo.fr/fr/cat/3-c.html"
+PUBLIC_JSON = "https://www.familidoo.fr/products.json?page=1"
+PUBLIC_JSON_2 = "https://www.familidoo.fr/products.json?page=2"
 ENTRY_HTML = (
     "<html><body>"
     '<a class="product_img_link" href="/fr/cat/1-a.html">Product</a>'
@@ -566,6 +568,113 @@ class SitemapTests(unittest.TestCase):
             self.assertFalse(
                 (root / "tasks" / task.task_id / "robots.txt").exists()
             )
+
+
+class PublicJsonTests(unittest.TestCase):
+    def test_public_json_page_param(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = TaskStore(root / "tasks.db")
+            rule = sources_rule(
+                root,
+                [
+                    {
+                        "type": "public_json",
+                        "url": PUBLIC_JSON,
+                        "items_path": "products",
+                        "url_field": "url",
+                        "pagination": {
+                            "type": "page_param",
+                            "param": "page",
+                            "max_pages": 2,
+                        },
+                    }
+                ],
+            )
+            task = make_task("discovery", "public-json")
+            store.create_task(task)
+            fetcher = FakeFetcher(
+                {
+                    PUBLIC_JSON: (
+                        200,
+                        json.dumps(
+                            {"products": [{"url": PRODUCT}, {"url": PRODUCT2}]}
+                        ),
+                    ),
+                    PUBLIC_JSON_2: (
+                        200,
+                        json.dumps({"products": [{"url": PRODUCT3}]}),
+                    ),
+                }
+            )
+            TaskRunner(
+                store, rule, task, fetcher=fetcher, out_root=root / "tasks"
+            ).run()
+            result = json.loads(
+                (root / "tasks" / task.task_id / "task-result.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(result["counts"]["navigation_urls"], 2)
+            self.assertEqual(result["counts"]["valid_urls"], 3)
+            self.assertNotIn(PRODUCT, fetcher.calls)
+
+    def test_public_json_offset(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = TaskStore(root / "tasks.db")
+            start = "https://www.familidoo.fr/products.json?offset=0&limit=2"
+            second = "https://www.familidoo.fr/products.json?offset=2&limit=2"
+            rule = sources_rule(
+                root,
+                [
+                    {
+                        "type": "public_json",
+                        "url": start,
+                        "items_path": "products",
+                        "url_field": "url",
+                        "pagination": {
+                            "type": "offset",
+                            "offset_param": "offset",
+                            "limit_param": "limit",
+                            "page_size": 2,
+                            "max_pages": 2,
+                            "total_path": "total",
+                        },
+                    }
+                ],
+            )
+            task = make_task("discovery", "public-json-offset")
+            store.create_task(task)
+            fetcher = FakeFetcher(
+                {
+                    start: (
+                        200,
+                        json.dumps(
+                            {
+                                "products": [{"url": PRODUCT}, {"url": PRODUCT2}],
+                                "total": 3,
+                            }
+                        ),
+                    ),
+                    second: (
+                        200,
+                        json.dumps(
+                            {"products": [{"url": PRODUCT3}], "total": 3}
+                        ),
+                    ),
+                }
+            )
+            TaskRunner(
+                store, rule, task, fetcher=fetcher, out_root=root / "tasks"
+            ).run()
+            result = json.loads(
+                (root / "tasks" / task.task_id / "task-result.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(result["counts"]["navigation_urls"], 2)
+            self.assertEqual(result["counts"]["valid_urls"], 3)
 
 
 class HtmlIndexTests(unittest.TestCase):

@@ -105,6 +105,27 @@ class SchemaTests(unittest.TestCase):
         }
         self._assert_valid(rule)
 
+    def test_public_json_sources_rule_matches_schema(self) -> None:
+        rule = copy.deepcopy(self.rule)
+        rule["schema_version"] = "1.1"
+        rule["discovery"] = {
+            "sources": [
+                {
+                    "type": "public_json",
+                    "url": "https://www.familidoo.fr/products.json?page=1",
+                    "items_path": "products",
+                    "url_field": "url",
+                    "pagination": {
+                        "type": "page_param",
+                        "param": "page",
+                        "max_pages": 2,
+                    },
+                }
+            ],
+            "product_url_patterns": ["/fr/.*\\.html$"],
+        }
+        self._assert_valid(rule)
+
     def test_missing_capabilities_is_rejected(self) -> None:
         rule = copy.deepcopy(self.rule)
         del rule["capabilities"]
