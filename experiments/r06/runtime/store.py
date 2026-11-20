@@ -317,6 +317,72 @@ class TaskStore:
                 raise
         return {"in_flight": len(rows), "reset": reset, "failed": failed}
 
+    def recover_orphaned_tasks(self) -> dict[str, int]:
+        """Requeue tasks left RUNNING by a crashed single-process worker.
+
+        A task paused during shutdown becomes PAUSED; a task cancelled during
+        shutdown becomes CANCELLED. This assumes one worker process; a
+        multi-process worker needs leases before calling it.
+        """
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                rows = connection.execute(
+                    """
+                    SELECT task_id, state FROM tasks
+                    WHERE state IN ('RUNNING', 'PAUSING', 'CANCELLING')
+                    """
+                ).fetchall()
+                now = utc_now()
+                requeued = 0
+                paused = 0
+                cancelled = 0
+                for row in rows:
+                    if row["state"] == "RUNNING":
+                        connection.execute(
+                            """
+                            UPDATE tasks
+                            SET state = 'QUEUED', outcome = NULL,
+                                stop_reason = NULL, finished_at = NULL,
+                                updated_at = ?
+                            WHERE task_id = ?
+                            """,
+                            (now, row["task_id"]),
+                        )
+                        requeued += 1
+                    elif row["state"] == "PAUSING":
+                        connection.execute(
+                            """
+                            UPDATE tasks
+                            SET state = 'PAUSED', updated_at = ?
+                            WHERE task_id = ?
+                            """,
+                            (now, row["task_id"]),
+                        )
+                        paused += 1
+                    else:
+                        connection.execute(
+                            """
+                            UPDATE tasks
+                            SET state = 'CANCELLED', outcome = 'CANCELLED',
+                                stop_reason = 'USER_CANCELLED',
+                                finished_at = ?, updated_at = ?
+                            WHERE task_id = ?
+                            """,
+                            (now, now, row["task_id"]),
+                        )
+                        cancelled += 1
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+        return {
+            "recovered": len(rows),
+            "requeued": requeued,
+            "paused": paused,
+            "cancelled": cancelled,
+        }
+
     def reset_in_flight(self, task_id: str) -> int:
         with self._connect() as connection:
             cursor = connection.execute(
