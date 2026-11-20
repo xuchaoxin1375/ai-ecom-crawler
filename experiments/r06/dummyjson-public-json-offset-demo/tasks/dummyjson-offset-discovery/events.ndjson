@@ -1,0 +1,25 @@
+{"ts": "2026-11-20T15:09:09Z", "event": "task_reconciled", "in_flight": 0, "reset": 0, "failed": 0, "orphan_files_removed": 0, "stale_result": false, "corrupt_product_lines": 0}
+{"ts": "2026-11-20T15:09:09Z", "event": "task_started", "task_type": "discovery", "plan_id": "dummyjson-public-json-offset-runtime"}
+{"ts": "2026-11-20T15:09:11Z", "event": "url_discovered", "url": "https://dummyjson.com/products/1", "source": "https://dummyjson.com/products?limit=10&skip=0"}
+{"ts": "2026-11-20T15:09:11Z", "event": "url_discovered", "url": "https://dummyjson.com/products/2", "source": "https://dummyjson.com/products?limit=10&skip=0"}
+{"ts": "2026-11-20T15:09:11Z", "event": "url_discovered", "url": "https://dummyjson.com/products/3", "source": "https://dummyjson.com/products?limit=10&skip=0"}
+{"ts": "2026-11-20T15:09:11Z", "event": "url_discovered", "url": "https://dummyjson.com/products/4", "source": "https://dummyjson.com/products?limit=10&skip=0"}
+{"ts": "2026-11-20T15:09:11Z", "event": "url_discovered", "url": "https://dummyjson.com/products/5", "source": "https://dummyjson.com/products?limit=10&skip=0"}
+{"ts": "2026-11-20T15:09:11Z", "event": "url_discovered", "url": "https://dummyjson.com/products/6", "source": "https://dummyjson.com/products?limit=10&skip=0"}
+{"ts": "2026-11-20T15:09:11Z", "event": "url_discovered", "url": "https://dummyjson.com/products/7", "source": "https://dummyjson.com/products?limit=10&skip=0"}
+{"ts": "2026-11-20T15:09:11Z", "event": "url_discovered", "url": "https://dummyjson.com/products/8", "source": "https://dummyjson.com/products?limit=10&skip=0"}
+{"ts": "2026-11-20T15:09:11Z", "event": "url_discovered", "url": "https://dummyjson.com/products/9", "source": "https://dummyjson.com/products?limit=10&skip=0"}
+{"ts": "2026-11-20T15:09:11Z", "event": "url_discovered", "url": "https://dummyjson.com/products/10", "source": "https://dummyjson.com/products?limit=10&skip=0"}
+{"ts": "2026-11-20T15:09:11Z", "event": "item_finished", "item_type": "navigation", "url": "https://dummyjson.com/products?limit=10&skip=0", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-20T15:09:12Z", "event": "url_discovered", "url": "https://dummyjson.com/products/11", "source": "https://dummyjson.com/products?limit=10&skip=10"}
+{"ts": "2026-11-20T15:09:12Z", "event": "url_discovered", "url": "https://dummyjson.com/products/12", "source": "https://dummyjson.com/products?limit=10&skip=10"}
+{"ts": "2026-11-20T15:09:12Z", "event": "url_discovered", "url": "https://dummyjson.com/products/13", "source": "https://dummyjson.com/products?limit=10&skip=10"}
+{"ts": "2026-11-20T15:09:12Z", "event": "url_discovered", "url": "https://dummyjson.com/products/14", "source": "https://dummyjson.com/products?limit=10&skip=10"}
+{"ts": "2026-11-20T15:09:12Z", "event": "url_discovered", "url": "https://dummyjson.com/products/15", "source": "https://dummyjson.com/products?limit=10&skip=10"}
+{"ts": "2026-11-20T15:09:12Z", "event": "url_discovered", "url": "https://dummyjson.com/products/16", "source": "https://dummyjson.com/products?limit=10&skip=10"}
+{"ts": "2026-11-20T15:09:12Z", "event": "url_discovered", "url": "https://dummyjson.com/products/17", "source": "https://dummyjson.com/products?limit=10&skip=10"}
+{"ts": "2026-11-20T15:09:12Z", "event": "url_discovered", "url": "https://dummyjson.com/products/18", "source": "https://dummyjson.com/products?limit=10&skip=10"}
+{"ts": "2026-11-20T15:09:12Z", "event": "url_discovered", "url": "https://dummyjson.com/products/19", "source": "https://dummyjson.com/products?limit=10&skip=10"}
+{"ts": "2026-11-20T15:09:12Z", "event": "url_discovered", "url": "https://dummyjson.com/products/20", "source": "https://dummyjson.com/products?limit=10&skip=10"}
+{"ts": "2026-11-20T15:09:12Z", "event": "item_finished", "item_type": "navigation", "url": "https://dummyjson.com/products?limit=10&skip=10", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-20T15:09:12Z", "event": "task_finished", "state": "FINISHED", "outcome": "COMPLETED", "stop_reason": "NATURAL_END"}

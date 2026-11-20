@@ -1,0 +1,80 @@
+schema_version: "1.1"
+rule_id: "dummyjson-public-json-offset-runtime"
+rule_version: "2026.11.20-1"
+kind: declarative
+status: candidate
+created_at: "2026-11-20T17:00:00Z"
+updated_at: "2026-11-20T17:00:00Z"
+
+site:
+  name: "DummyJSON public API sandbox"
+  entry_urls: ["https://dummyjson.com/products?limit=10&skip=0"]
+  allowed_origins: ["https://dummyjson.com"]
+  allowed_path_prefixes: ["/"]
+  market: "US"
+  locale: "en-US"
+  currency: "USD"
+
+scope:
+  include: ['^/products/\d+$']
+  exclude: []
+  max_products: 20
+  max_seconds: 60
+  notes: "P1 public_json offset smoke: two pages of 10, first 20 product URLs; sandbox API, not commerce acceptance."
+
+capabilities:
+  discovery: true
+  product: false
+
+discovery:
+  sources:
+    - type: "public_json"
+      url: "https://dummyjson.com/products?limit=10&skip=0"
+      items_path: "products"
+      url_template: "https://dummyjson.com/products/{id}"
+      pagination:
+        type: "offset"
+        offset_param: "skip"
+        limit_param: "limit"
+        page_size: 10
+        offset: 0
+        total_path: "total"
+        max_pages: 2
+  product_url_patterns: ['^/products/\d+$']
+  url_identity: "canonical"
+  limits:
+    max_navigation: 3
+    max_products: 20
+
+fetch:
+  default_engine: "static"
+  concurrency: 1
+  delay_ms: 1000
+  retry: {max_attempts: 2, backoff_ms: 1000}
+  timeout_ms: 30000
+  challenge: "stop_and_record"
+
+output:
+  url_list:
+    enabled: true
+    columns: ["url", "source", "status", "title"]
+    format: "csv"
+  product_csv:
+    enabled: false
+  task_result: true
+
+task_defaults:
+  max_urls: 20
+  max_products: 20
+  max_seconds: 60
+  max_attempts: 2
+  retry_backoff_ms: 1000
+  concurrency:
+    navigation: 1
+    product: 1
+
+compatibility:
+  os: ["windows", "linux", "wsl2"]
+  runtime: "python>=3.11"
+
+notes: "Public API sandbox for offset pagination; total_path stops at two pages; no product fetch. Not a commerce site."
