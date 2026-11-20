@@ -1,0 +1,10 @@
+{"ts": "2026-11-20T23:12:25Z", "event": "task_reconciled", "in_flight": 0, "reset": 0, "failed": 0, "orphan_files_removed": 0, "stale_result": false, "corrupt_product_lines": 0}
+{"ts": "2026-11-20T23:12:25Z", "event": "task_started", "task_type": "product", "plan_id": "decohappy-fr-a08"}
+{"ts": "2026-11-20T23:12:30Z", "event": "item_finished", "item_type": "navigation", "url": "https://decohappy.com/fr", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-20T23:12:31Z", "event": "item_finished", "item_type": "product", "url": "https://decohappy.com/fr/products/sticker-mural-pour-enfant-carte-du-monde-politique-coloree", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-20T23:12:32Z", "event": "item_finished", "item_type": "product", "url": "https://decohappy.com/fr/products/sticker-train-animaux-heureux", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-20T23:12:33Z", "event": "item_finished", "item_type": "product", "url": "https://decohappy.com/fr/products/sticker-mural-pour-enfant-carte-du-monde-animaux-couleurs-vintage", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-20T23:12:34Z", "event": "item_finished", "item_type": "product", "url": "https://decohappy.com/fr/products/sticker-mural-pour-enfant-avion-danimaux-heureux", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-20T23:12:35Z", "event": "item_finished", "item_type": "product", "url": "https://decohappy.com/fr/products/sticker-mural-pour-enfant-cactus-metre", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-20T23:12:36Z", "event": "item_finished", "item_type": "product", "url": "https://decohappy.com/fr/products/sticker-damour-de-koalas", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-20T23:12:36Z", "event": "task_finished", "state": "FINISHED", "outcome": "COMPLETED", "stop_reason": "NATURAL_END"}

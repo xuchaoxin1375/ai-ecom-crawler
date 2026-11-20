@@ -1,0 +1,260 @@
+schema_version: "1.1"
+rule_id: "decohappy-fr-a08"
+rule_version: "2026.11.21-1"
+kind: declarative
+status: candidate
+created_at: "2026-11-21T07:10:00+08:00"
+updated_at: "2026-11-21T07:16:47+08:00"
+
+site:
+  name: "Decohappy"
+  entry_urls: ["https://decohappy.com/fr"]
+  allowed_origins: ["https://decohappy.com"]
+  allowed_path_prefixes: ["/fr", "/fr/"]
+  market: "FR"
+  locale: "fr-FR"
+  currency: "EUR"
+
+scope:
+  include: ['^/fr/products/[^/]+$']
+  exclude:
+    - "/cart"
+    - "/checkout"
+    - "/account"
+    - "/collections/"
+    - "/pages/"
+    - "/blogs/"
+    - "/search"
+  max_products: 6
+  max_seconds: 180
+  notes: "A08 bounded 6-product sample from the homepage; not full-site coverage."
+
+capabilities:
+  discovery: true
+  product: true
+
+discovery:
+  strategies: ["entry_links"]
+  entry_url: "https://decohappy.com/fr"
+  link_selector: 'a[href*="/products/"]'
+  product_url_patterns: ['^/fr/products/[^/]+$']
+  url_identity: "canonical"
+  notes: "Homepage product cards; no sitemap or collection pagination in A08."
+
+fetch:
+  default_engine: "static"
+  concurrency: 1
+  delay_ms: 1000
+  retry: {max_attempts: 2, backoff_ms: 1000}
+  timeout_ms: 45000
+  browser: false
+  login: false
+  challenge_handling: "none; stop and record"
+
+extract:
+  fields:
+    name:
+      required: true
+      fallbacks:
+        - {type: css_text, selector: "h1", label: "h1"}
+        - {type: json_ld, path: "name", label: "json_ld_name"}
+        - type: css_attr
+          selector: 'meta[property="og:title"]'
+          attr: "content"
+          label: "og_title"
+          strip_site_suffix: true
+        - {type: title, label: "title"}
+    price.amount:
+      required: true
+      fallbacks:
+        - type: json_ld
+          path: "offers.price"
+          label: "json_ld_offer_price"
+          take: "min_positive"
+          tax_basis: "unspecified"
+        - type: json_ld
+          path: "offers.priceSpecification.price"
+          label: "json_ld_price_specification"
+          take: "min_positive"
+          tax_basis: "unspecified"
+        - type: price_pair
+          label: "meta_price_pair"
+          gross: {selector: 'meta[property="product:price:amount"]', attr: "content"}
+          pretax: {selector: 'meta[property="product:pretax_price:amount"]', attr: "content"}
+          choose: "smaller"
+        - {type: css_attr, selector: '[itemprop="price"]', attr: "content", label: "itemprop_price"}
+        - {type: css_text, selector: ".price__current", label: "price_current"}
+        - {type: css_text, selector: ".price-item--regular", label: "price_regular"}
+        - {type: css_text, selector: ".product__price", label: "product_price"}
+    price.currency:
+      required: true
+      fallbacks:
+        - {type: json_ld, path: "offers.priceCurrency", label: "json_ld_currency"}
+        - type: css_attr
+          selector: 'meta[property="product:price:currency"]'
+          attr: "content"
+          label: "meta_currency"
+        - type: css_attr
+          selector: 'meta[property="og:price:currency"]'
+          attr: "content"
+          label: "og_currency"
+        - type: css_attr
+          selector: '[itemprop="priceCurrency"]'
+          attr: "content"
+          label: "itemprop_currency"
+    primary_image_url:
+      required: true
+      fallbacks:
+        - {type: json_ld, path: "image", label: "json_ld_image"}
+        - type: css_attr
+          selector: 'meta[property="og:image"]'
+          attr: "content"
+          label: "og_image"
+          absolute: true
+        - type: css_attr
+          selector: 'img[itemprop="image"]'
+          attr: "src"
+          label: "itemprop_image"
+          absolute: true
+        - type: css_attr
+          selector: ".product__media img"
+          attr: "src"
+          label: "product_media"
+          absolute: true
+    description_html:
+      required: false
+      fallbacks:
+        - type: css_html
+          selector: "div[class='rte']"
+          label: "marketing_rte"
+          description_status: "partial"
+        - type: css_html
+          selector: "div.accordion__content.rte"
+          label: "specs_accordion"
+          description_status: "partial"
+        - type: css_html
+          selector: "div.product__description"
+          label: "product_description"
+          description_status: "complete"
+        - type: css_html
+          selector: "div.product-single__description"
+          label: "product_single_description"
+          description_status: "complete"
+        - type: css_html
+          selector: "div.product__description--short"
+          label: "short_description"
+          description_status: "partial"
+    category:
+      required: false
+      fallbacks:
+        - type: breadcrumb
+          selector: "nav.breadcrumbs a"
+          label: "breadcrumbs"
+          drop_last: true
+          exclude: ["accueil", "home", "fr"]
+        - type: breadcrumb
+          selector: 'nav[aria-label="Breadcrumb"] a'
+          label: "breadcrumb_aria"
+          drop_last: true
+          exclude: ["accueil", "home", "fr"]
+        - type: breadcrumb
+          selector: "nav.breadcrumb a"
+          label: "breadcrumb_nav"
+          drop_last: true
+          exclude: ["accueil", "home", "fr"]
+        - type: breadcrumb
+          selector: ".breadcrumb a"
+          label: "breadcrumb_class"
+          drop_last: true
+          exclude: ["accueil", "home", "fr"]
+        - {type: json_ld, path: "category", label: "json_ld_category"}
+    brand:
+      required: false
+      fallbacks:
+        - {type: json_ld, path: "brand.name", label: "json_ld_brand"}
+        - {type: css_text, selector: ".product__vendor", label: "vendor"}
+        - {type: css_text, selector: '[itemprop="brand"]', label: "itemprop_brand"}
+    options:
+      required: false
+      fallbacks:
+        - type: option_groups
+          group_selector: "variant-selects .product-form__input, .product-form__input"
+          label_selector: "legend, label"
+          option_selector: "select option"
+          radio_selector: 'input[type="radio"]'
+          label: "variant_groups"
+    source_url:
+      required: true
+      fallbacks:
+        - {type: canonical, label: "canonical"}
+
+normalize:
+  price:
+    tax_basis: "unspecified"
+    choose: "smaller_public_pair"
+    positive_only: true
+  description:
+    mode: "clean_html"
+    statuses: ["complete", "partial", "not_provided", "failed"]
+  options:
+    exclude_quantity: true
+    strip_price_delta: true
+
+validate:
+  required_fields:
+    - "name"
+    - "price.amount"
+    - "price.currency"
+    - "primary_image_url"
+    - "source_url"
+  assertions:
+    - {field: "price.amount", op: ">", value: 0}
+    - {field: "price.currency", op: "matches", value: "^[A-Z]{3}$"}
+  partial_description: "allowed_with_flag"
+
+output:
+  url_list:
+    enabled: true
+    columns: ["url", "source", "status", "title"]
+    format: "csv"
+  product_csv:
+    enabled: true
+    columns: 9
+    format: "csv"
+  task_result: true
+
+task_defaults:
+  max_urls: 10
+  max_products: 6
+  max_seconds: 180
+  concurrency:
+    navigation: 1
+    product: 1
+
+compatibility:
+  os: ["windows", "linux", "wsl2"]
+  runtime: "python>=3.11"
+  dependencies: ["scrapling==0.5.1", "pyyaml==6.0.3", "lxml", "protego"]
+  browser: "none for static"
+
+evidence:
+  sample_urls:
+    - "https://decohappy.com/fr"
+    - "https://decohappy.com/fr/products/sticker-mural-pour-enfant-carte-du-monde-politique-coloree"
+    - "https://decohappy.com/fr/products/sticker-train-animaux-heureux"
+    - "https://decohappy.com/fr/products/sticker-mural-pour-enfant-carte-du-monde-animaux-couleurs-vintage"
+    - "https://decohappy.com/fr/products/sticker-mural-pour-enfant-avion-danimaux-heureux"
+    - "https://decohappy.com/fr/products/sticker-mural-pour-enfant-cactus-metre"
+    - "https://decohappy.com/fr/products/sticker-damour-de-koalas"
+  expected:
+    - "6 valid products from the homepage sample"
+    - "partial descriptions: marketing copy retained, specs accordion not merged"
+  verified_at: "2026-11-21T07:16:47+08:00"
+  limitations:
+    - "A08 bounded blind build; 6 homepage products; not full-site coverage."
+    - "20 target requests including 5 build probes and two revision runs."
+    - "Descriptions are partial: marketing copy retained; measurement/specs accordion not merged."
+    - "Brand is not provided on product pages."
+    - "Execution uses the R06 runtime prototype; production executor is D04."
+
+notes: "A08 blind build: homepage probe only; first plan failed on entry prefix, second on description/category/options; third run 6/6. Product JSON-LD is ProductGroup, not Product."

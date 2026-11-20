@@ -1,0 +1,100 @@
+{
+  "task_id": "a08-product-003",
+  "task_type": "product",
+  "plan_id": "decohappy-fr-a08",
+  "plan_version": "2026.11.21-1",
+  "market": "FR",
+  "locale": "fr-FR",
+  "state": "FINISHED",
+  "outcome": "COMPLETED",
+  "stop_reason": "NATURAL_END",
+  "started_at": "2026-11-20T23:16:40Z",
+  "finished_at": "2026-11-20T23:16:47Z",
+  "counts": {
+    "discovered_urls": 7,
+    "pending_navigation_entries": 0,
+    "product_candidates": 6,
+    "pending_products": 0,
+    "in_flight_products": 0,
+    "processed_products": 6,
+    "valid_products": 6,
+    "excluded_products": 0,
+    "failed_products": 0,
+    "partial_description_products": 6
+  },
+  "coverage": {
+    "status": "PARTIAL",
+    "denominator_source": "declared-source product candidates",
+    "denominator": 6,
+    "covered": 6,
+    "notes": "Bounded sample from one entry page; not full-site coverage."
+  },
+  "business_acceptance": {
+    "status": "NOT_REVIEWED",
+    "accepted_by": null,
+    "accepted_at": null,
+    "reason": "R06 runtime prototype; no business sign-off yet.",
+    "scope": "discovery sources declared by the rule"
+  },
+  "quality_exceptions": [
+    {
+      "source_url": "https://decohappy.com/fr/products/sticker-damour-de-koalas",
+      "description_status": "PARTIAL",
+      "partial_reason": "Measurement/specs accordion not merged; marketing copy retained.",
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED"
+      }
+    },
+    {
+      "source_url": "https://decohappy.com/fr/products/sticker-mural-pour-enfant-avion-danimaux-heureux",
+      "description_status": "PARTIAL",
+      "partial_reason": "Measurement/specs accordion not merged; marketing copy retained.",
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED"
+      }
+    },
+    {
+      "source_url": "https://decohappy.com/fr/products/sticker-mural-pour-enfant-cactus-metre",
+      "description_status": "PARTIAL",
+      "partial_reason": "Measurement/specs accordion not merged; marketing copy retained.",
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED"
+      }
+    },
+    {
+      "source_url": "https://decohappy.com/fr/products/sticker-mural-pour-enfant-carte-du-monde-animaux-couleurs-vintage",
+      "description_status": "PARTIAL",
+      "partial_reason": "Measurement/specs accordion not merged; marketing copy retained.",
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED"
+      }
+    },
+    {
+      "source_url": "https://decohappy.com/fr/products/sticker-mural-pour-enfant-carte-du-monde-politique-coloree",
+      "description_status": "PARTIAL",
+      "partial_reason": "Measurement/specs accordion not merged; marketing copy retained.",
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED"
+      }
+    },
+    {
+      "source_url": "https://decohappy.com/fr/products/sticker-train-animaux-heureux",
+      "description_status": "PARTIAL",
+      "partial_reason": "Measurement/specs accordion not merged; marketing copy retained.",
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED"
+      }
+    }
+  ],
+  "runtime": {
+    "llm_calls": 0,
+    "raw_pages_retained": false
+  },
+  "limitations": [
+    "Bounded to the declared discovery sources and limits; not full-site coverage.",
+    "Static HTML only; no browser rendering, login or access-control bypass.",
+    "Runtime LLM calls: 0; no raw page HTML is retained.",
+    "A08 bounded blind build; 6 homepage products; not full-site coverage.",
+    "Execution uses the R06 runtime prototype; production executor is D04."
+  ]
+}

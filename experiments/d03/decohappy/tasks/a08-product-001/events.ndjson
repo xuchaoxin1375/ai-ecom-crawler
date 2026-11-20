@@ -1,0 +1,3 @@
+{"ts": "2026-11-20T23:11:45Z", "event": "task_reconciled", "in_flight": 0, "reset": 0, "failed": 0, "orphan_files_removed": 0, "stale_result": false, "corrupt_product_lines": 0}
+{"ts": "2026-11-20T23:11:45Z", "event": "task_started", "task_type": "product", "plan_id": "decohappy-fr-a08"}
+{"ts": "2026-11-20T23:11:45Z", "event": "task_finished", "state": "FINISHED", "outcome": "FAILED", "stop_reason": "NATURAL_END"}
