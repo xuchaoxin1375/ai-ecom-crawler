@@ -89,6 +89,26 @@ class SchemaTests(unittest.TestCase):
         }
         self._assert_valid(rule)
 
+    def test_next_link_listing_rule_matches_schema(self) -> None:
+        rule = copy.deepcopy(self.rule)
+        rule["schema_version"] = "1.1"
+        rule["discovery"] = {
+            "sources": [
+                {
+                    "type": "listing",
+                    "url": "https://www.tognar.com/ski-wax-and-snowboard-wax/",
+                    "product_link_selector": ".productGrid .card-title a",
+                    "advance": {
+                        "type": "next_link",
+                        "selector": "link[rel=next]",
+                        "max_pages": 3,
+                    },
+                }
+            ],
+            "product_url_patterns": ["^/[a-z0-9][a-z0-9-]+/$"],
+        }
+        self._assert_valid(rule)
+
     def test_html_index_sources_rule_matches_schema(self) -> None:
         rule = copy.deepcopy(self.rule)
         rule["schema_version"] = "1.1"
