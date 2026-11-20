@@ -16,7 +16,7 @@ SCHEMA_VERSIONS = {"1.0", "1.1"}
 RULE_STATUSES = {"candidate", "verified", "deprecated"}
 SUPPORTED_KINDS = {"declarative"}
 SUPPORTED_DISCOVERY = {"entry_links"}
-SUPPORTED_SOURCES = {"entry_links", "sitemap", "listing"}
+SUPPORTED_SOURCES = {"entry_links", "sitemap", "listing", "html_index"}
 SUPPORTED_ADVANCE = {"none", "page_param", "next_link"}
 CORE_FIELDS = {"name", "price.amount", "price.currency", "primary_image_url", "source_url"}
 RULE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,80}$")
@@ -325,6 +325,7 @@ def _validate_sources(value: Any, discovery: dict[str, Any]) -> None:
         raise RuleError("discovery.sources must not be empty")
     has_entry = False
     has_listing = False
+    has_html_index = False
     for index, source in enumerate(sources):
         path = f"discovery.sources[{index}]"
         source = _require_mapping(source, path)
@@ -349,6 +350,22 @@ def _validate_sources(value: Any, discovery: dict[str, Any]) -> None:
                     f"{path}.product_link_selector",
                 )
             _validate_advance(source.get("advance", {"type": "none"}), path)
+        if source_type == "html_index":
+            has_html_index = True
+            _require_string(source.get("url") or source.get("seed"), f"{path}.url")
+            if "link_selector" in source:
+                _require_string(source.get("link_selector"), f"{path}.link_selector")
+            if "category_patterns" in source:
+                patterns = _require_list(
+                    source.get("category_patterns"), f"{path}.category_patterns"
+                )
+                _validate_regex_list(patterns, f"{path}.category_patterns")
+            if "max_depth" in source and (
+                isinstance(source["max_depth"], bool)
+                or not isinstance(source["max_depth"], int)
+                or source["max_depth"] < 0
+            ):
+                raise RuleError(f"{path}.max_depth must be a non-negative integer")
         if source_type == "sitemap":
             urls = source.get("urls", [])
             if not isinstance(urls, list):
@@ -383,6 +400,15 @@ def _validate_sources(value: Any, discovery: dict[str, Any]) -> None:
         )
     ):
         raise RuleError("listing source needs product_link_selector")
+    if (
+        has_html_index
+        and not discovery.get("link_selector")
+        and not any(
+            source.get("type") == "html_index" and source.get("link_selector")
+            for source in sources
+        )
+    ):
+        raise RuleError("html_index source needs link_selector")
 
 
 def _validate_advance(value: Any, path: str) -> None:

@@ -1,0 +1,34 @@
+{"ts": "2026-11-20T14:00:34Z", "event": "task_reconciled", "in_flight": 0, "reset": 0, "failed": 0, "orphan_files_removed": 0, "stale_result": false, "corrupt_product_lines": 0}
+{"ts": "2026-11-20T14:00:34Z", "event": "task_started", "task_type": "discovery", "plan_id": "shopthebulkstore-html-index-runtime"}
+{"ts": "2026-11-20T14:00:42Z", "event": "url_discovered", "url": "https://shopthebulkstore.com/cinn-a-rock-cinnamon-rock-candy", "source": "https://shopthebulkstore.com/all-products"}
+{"ts": "2026-11-20T14:00:42Z", "event": "url_discovered", "url": "https://shopthebulkstore.com/step-brothers-prestige-worldwide-mic-check-mints", "source": "https://shopthebulkstore.com/all-products"}
+{"ts": "2026-11-20T14:00:42Z", "event": "url_discovered", "url": "https://shopthebulkstore.com/100-filled-mix", "source": "https://shopthebulkstore.com/all-products"}
+{"ts": "2026-11-20T14:00:42Z", "event": "url_discovered", "url": "https://shopthebulkstore.com/4d-gummy-drinks", "source": "https://shopthebulkstore.com/all-products"}
+{"ts": "2026-11-20T14:00:42Z", "event": "url_discovered", "url": "https://shopthebulkstore.com/4d-gummy-lucky-fish-peach-mango", "source": "https://shopthebulkstore.com/all-products"}
+{"ts": "2026-11-20T14:00:42Z", "event": "url_discovered", "url": "https://shopthebulkstore.com/4d-gummy-mermaid-jewels", "source": "https://shopthebulkstore.com/all-products"}
+{"ts": "2026-11-20T14:00:42Z", "event": "url_discovered", "url": "https://shopthebulkstore.com/4d-gummy-pear-burst", "source": "https://shopthebulkstore.com/all-products"}
+{"ts": "2026-11-20T14:00:42Z", "event": "url_discovered", "url": "https://shopthebulkstore.com/6-cinnamon-sticks", "source": "https://shopthebulkstore.com/all-products"}
+{"ts": "2026-11-20T14:00:42Z", "event": "url_discovered", "url": "https://shopthebulkstore.com/a-christmas-story-chocolate-walnut-fudge", "source": "https://shopthebulkstore.com/all-products"}
+{"ts": "2026-11-20T14:00:42Z", "event": "url_discovered", "url": "https://shopthebulkstore.com/a-christmas-story-creamy-chocolate-fudge", "source": "https://shopthebulkstore.com/all-products"}
+{"ts": "2026-11-20T14:00:42Z", "event": "url_discovered", "url": "https://shopthebulkstore.com/a-w-root-beer-cotton-candy", "source": "https://shopthebulkstore.com/all-products"}
+{"ts": "2026-11-20T14:00:42Z", "event": "url_discovered", "url": "https://shopthebulkstore.com/aero-choco-hazelnut-share-a-bubble-bar", "source": "https://shopthebulkstore.com/all-products"}
+{"ts": "2026-11-20T14:00:42Z", "event": "url_discovered", "url": "https://shopthebulkstore.com/aero-coconut-share-a-bubble-bar", "source": "https://shopthebulkstore.com/all-products"}
+{"ts": "2026-11-20T14:00:42Z", "event": "url_discovered", "url": "https://shopthebulkstore.com/aero-delightful-peppermint", "source": "https://shopthebulkstore.com/all-products"}
+{"ts": "2026-11-20T14:00:42Z", "event": "url_discovered", "url": "https://shopthebulkstore.com/aero-festive-orange-share-a-bubble-bar", "source": "https://shopthebulkstore.com/all-products"}
+{"ts": "2026-11-20T14:00:42Z", "event": "url_discovered", "url": "https://shopthebulkstore.com/aero-melts-neapolitan-ice-cream", "source": "https://shopthebulkstore.com/all-products"}
+{"ts": "2026-11-20T14:00:42Z", "event": "url_discovered", "url": "https://shopthebulkstore.com/aero-orange-melts", "source": "https://shopthebulkstore.com/all-products"}
+{"ts": "2026-11-20T14:00:42Z", "event": "url_discovered", "url": "https://shopthebulkstore.com/aero-pistachio", "source": "https://shopthebulkstore.com/all-products"}
+{"ts": "2026-11-20T14:00:42Z", "event": "url_discovered", "url": "https://shopthebulkstore.com/aero-purely-chocolate", "source": "https://shopthebulkstore.com/all-products"}
+{"ts": "2026-11-20T14:00:42Z", "event": "url_discovered", "url": "https://shopthebulkstore.com/aero-s-mores", "source": "https://shopthebulkstore.com/all-products"}
+{"ts": "2026-11-20T14:00:42Z", "event": "url_discovered", "url": "https://shopthebulkstore.com/aero-scoops-choco-strawberry", "source": "https://shopthebulkstore.com/all-products"}
+{"ts": "2026-11-20T14:00:42Z", "event": "url_discovered", "url": "https://shopthebulkstore.com/aero-scoops-double-chocolate", "source": "https://shopthebulkstore.com/all-products"}
+{"ts": "2026-11-20T14:00:42Z", "event": "url_discovered", "url": "https://shopthebulkstore.com/aero-scoops-vanilla-bean", "source": "https://shopthebulkstore.com/all-products"}
+{"ts": "2026-11-20T14:00:42Z", "event": "url_discovered", "url": "https://shopthebulkstore.com/aero-strawberry-scoop", "source": "https://shopthebulkstore.com/all-products"}
+{"ts": "2026-11-20T14:00:42Z", "event": "url_discovered", "url": "https://shopthebulkstore.com/aero-truffle-black-forest-cake", "source": "https://shopthebulkstore.com/all-products"}
+{"ts": "2026-11-20T14:00:42Z", "event": "url_discovered", "url": "https://shopthebulkstore.com/aero-truffle-brownie", "source": "https://shopthebulkstore.com/all-products"}
+{"ts": "2026-11-20T14:00:42Z", "event": "url_discovered", "url": "https://shopthebulkstore.com/aero-truffle-chocolate-mousse", "source": "https://shopthebulkstore.com/all-products"}
+{"ts": "2026-11-20T14:00:42Z", "event": "url_discovered", "url": "https://shopthebulkstore.com/aero-truffle-salted-caramel-fudge", "source": "https://shopthebulkstore.com/all-products"}
+{"ts": "2026-11-20T14:00:42Z", "event": "url_discovered", "url": "https://shopthebulkstore.com/aero-truffle-tiramisu", "source": "https://shopthebulkstore.com/all-products"}
+{"ts": "2026-11-20T14:00:42Z", "event": "url_discovered", "url": "https://shopthebulkstore.com/airheads-blue-raspberry", "source": "https://shopthebulkstore.com/all-products"}
+{"ts": "2026-11-20T14:00:42Z", "event": "item_finished", "item_type": "navigation", "url": "https://shopthebulkstore.com/all-products", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-20T14:00:42Z", "event": "task_finished", "state": "FINISHED", "outcome": "COMPLETED", "stop_reason": "NATURAL_END"}

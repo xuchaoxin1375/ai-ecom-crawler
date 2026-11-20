@@ -252,6 +252,8 @@ class TaskRunner:
 
         if item.item_type == "navigation" and item.discovered_from == "listing":
             return self._process_listing(item, result)
+        if item.item_type == "navigation" and item.discovered_from == "html_index":
+            return self._process_html_index(item, result)
         if item.item_type == "navigation" and item.discovered_from == "sitemap":
             return self._process_sitemap(item, result)
 
@@ -287,6 +289,56 @@ class TaskRunner:
             "price_amount": record.price_amount,
             "price_currency": record.price_currency,
             "product": payload,
+        }
+
+    def _process_html_index(
+        self, item: WorkItem, result: Any
+    ) -> tuple[str, dict[str, Any]]:
+        page = HtmlPage(result.body, result.url)
+        selector = str(
+            item.result.get("link_selector")
+            or self.rule.discovery.get("link_selector", "")
+        )
+        depth = int(item.result.get("depth", 0))
+        max_depth = int(item.result.get("max_depth", 2))
+        patterns = [
+            re.compile(pattern)
+            for pattern in item.result.get("category_patterns", [])
+        ]
+        products = 0
+        categories = 0
+        links = 0
+        for element in page.css(selector):
+            href = element.get("href")
+            if not href:
+                continue
+            absolute = urljoin(item.url, href.strip())
+            if not self._is_allowed_url(absolute):
+                continue
+            links += 1
+            if self._is_product_candidate(absolute):
+                if self._add_product_item(
+                    absolute, parent=item.url, source="html_index"
+                ):
+                    products += 1
+                continue
+            if depth >= max_depth or not patterns:
+                continue
+            parsed = urlparse(absolute)
+            if any(
+                pattern.search(parsed.path) for pattern in patterns
+            ) and self._add_navigation(
+                absolute,
+                source="html_index",
+                parent=item.url,
+                result={**item.result, "depth": depth + 1},
+            ):
+                categories += 1
+        return "DONE", {
+            "links": links,
+            "added_products": products,
+            "added_categories": categories,
+            "depth": depth,
         }
 
     def _process_listing(
@@ -509,6 +561,21 @@ class TaskRunner:
                         "page": int(advance.get("start", 1)),
                         "link_selector": source.get("product_link_selector")
                         or self.rule.discovery.get("link_selector", ""),
+                    },
+                )
+            elif source_type == "html_index":
+                url = str(source.get("url") or source.get("seed") or "")
+                if not url:
+                    continue
+                self._add_navigation(
+                    url,
+                    source="html_index",
+                    result={
+                        "depth": 0,
+                        "max_depth": int(source.get("max_depth", 2)),
+                        "link_selector": source.get("link_selector")
+                        or self.rule.discovery.get("link_selector", ""),
+                        "category_patterns": source.get("category_patterns", []),
                     },
                 )
 
