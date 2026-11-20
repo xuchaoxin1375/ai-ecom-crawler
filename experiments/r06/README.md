@@ -39,6 +39,7 @@ R06 验证两件事：
 | `plans/familidoo-html-index-runtime.yaml` | Familidoo HTML 索引规则包；首页＋1 层分类，31 个 URL |
 | `plans/modellbahn-breiter-sitemap-gzip-runtime.yaml` | Modellbahn sitemap gzip 规则包；1 个 gzip 子图，30 个 URL |
 | `plans/sixmoondesigns-products-json-runtime.yaml` | S4 公开 JSON 规则包；`products.json` 第 1 页，30 个 URL |
+| `plans/dummyjson-public-json-offset-runtime.yaml` | 公开 API offset 规则包；2 页 20 个 URL |
 | `plans/tognar-next-link-runtime.yaml` | Tognar `next_link` 规则包；`link[rel=next]`，3 页 30 个 URL |
 | `familidoo/` | 单次运行的 9 列 CSV、任务结果和 `r06-run-001`～`004` 诊断 |
 | `runtime-demo/` | 两个任务并行：discovery URL 清单和 product 9 列 CSV |
@@ -50,6 +51,7 @@ R06 验证两件事：
 | `familidoo-html-index-demo/` | Familidoo HTML 索引：5 请求，31 个商品 URL，1 层分类 |
 | `modellbahn-breiter-sitemap-gzip-demo/` | Modellbahn sitemap gzip：2 请求，30 个商品 URL |
 | `sixmoondesigns-public-json-demo/` | S4 公开 JSON：1 请求，30 个商品 URL，不请求商品页 |
+| `dummyjson-public-json-offset-demo/` | 公开 API offset：2 请求，20 个 URL |
 | `tognar-next-link-demo/` | Tognar `next_link`：3 页，30 个商品 URL，不请求商品页 |
 | `tests/` | 无网络契约、提取、任务账本和运行时测试 |
 | `tools/validate_output.py` | 单次运行输出校验器 |
@@ -232,7 +234,11 @@ python experiments/r06/tools/validate_runtime.py --root experiments/r06/runtime-
 
 ### S4 public JSON
 
-`sixmoondesigns-public-json-demo/` 用 `plans/sixmoondesigns-products-json-runtime.yaml` 读取 `products.json` 第 1 页：1 次请求、30 个唯一商品 URL、`COMPLETED`，没有请求商品页或 sitemap。`url_template` 按 `handle` 生成商品 URL；后续页和 offset／cursor 由 fixture 覆盖。详情见 [`sixmoondesigns-public-json-demo/README.md`](sixmoondesigns-public-json-demo/README.md)。
+`sixmoondesigns-public-json-demo/` 用 `plans/sixmoondesigns-products-json-runtime.yaml` 读取 `products.json` 第 1 页：1 次请求、30 个唯一商品 URL、`COMPLETED`，没有请求商品页或 sitemap。`url_template` 按 `handle` 生成商品 URL；后续页和 cursor 由 fixture 覆盖。详情见 [`sixmoondesigns-public-json-demo/README.md`](sixmoondesigns-public-json-demo/README.md)。
+
+### DummyJSON public JSON offset
+
+`dummyjson-public-json-offset-demo/` 用 `plans/dummyjson-public-json-offset-runtime.yaml` 跑公开 API 的两页 offset（`skip=0`、`skip=10`）：2 次请求、20 个唯一 URL、`COMPLETED`；第 2 页后按 `max_pages` 停止。它是公开 API 技术冒烟，不是电商站点验收。详情见 [`dummyjson-public-json-offset-demo/README.md`](dummyjson-public-json-offset-demo/README.md)。
 
 ### Tognar next_link
 
@@ -247,7 +253,7 @@ python experiments/r06/tools/validate_runtime.py --root experiments/r06/runtime-
 - 入口页只展示 6 个商品，未做 10～20 个随机抽样；6／6 是小样本全量，不是全站覆盖。
 - familidoo 只验证一个站点、一次运行；shopthebulkstore 是第二站 10 商品有界样本；没有独立复跑和跨环境导入。
 - 只支持静态 HTML；没有浏览器、登录、挑战处理或 JavaScript 渲染。
-- sitemap（含 gzip）、`page_param`、`next_link`、`html_index`（含 1 层分类）和 `public_json` 已有真实站点有界验证；没有单 source seeds 列表、POST／GraphQL、load more／无限滚动或详情补全；多个 sources 有测试。
+- sitemap（含 gzip）、`page_param`、`next_link`、`html_index`（含 1 层分类）和 `public_json` 已有真实站点有界验证，offset 另用公开 API 冒烟；cursor 仍只有 fixture；没有单 source seeds 列表、POST／GraphQL、load more／无限滚动或详情补全；多个 sources 有测试。
 - 运行时只有单 worker；有逻辑对账和失败分类测试，但没有跨进程锁、队列或真实进程崩溃演练；暂停／恢复／取消已在 Tognar 同进程真实站点验证，跨进程未验证。
 - 单次运行执行器没有任务控制；任务控制只在 `runtime/` 中实现。
 - 没有 Web UI；`task list/status` 是 CLI。
@@ -256,7 +262,7 @@ python experiments/r06/tools/validate_runtime.py --root experiments/r06/runtime-
 ## 下一步
 
 - 第二站已复测（`shopthebulkstore-demo`），只新增规则包，运行时公共代码不变。
-- S1 sitemap direct／index（各 30 URL）、Modellbahn sitemap gzip（30 URL）、S5 `page_param`（62 URL）、Tognar `next_link`（30 URL）、S5 `html_index`（30 URL）、Familidoo `html_index`（31 URL，1 层分类）和 S4 `public_json`（30 URL）已完成；下一步补单 source seeds 和 POST／GraphQL；复杂分页按 ADR 0007 暂缓。
+- S1 sitemap direct／index（各 30 URL）、Modellbahn sitemap gzip（30 URL）、S5 `page_param`（62 URL）、Tognar `next_link`（30 URL）、S5 `html_index`（30 URL）、Familidoo `html_index`（31 URL，1 层分类）、S4 `public_json`（30 URL）和 DummyJSON offset（20 URL）已完成；下一步补单 source seeds 和 POST／GraphQL；复杂分页按 ADR 0007 暂缓。
 - 把“两个任务并行 + 同域限速 + 暂停／取消”做成真实站点的验收记录，而不只用 fake fetcher。
 - 补跨进程 worker 或至少一个单 worker 的崩溃恢复演练。
 - 维护、漂移和长期稳定性仍后置（J08）；本轮不据此判断维护成本。
