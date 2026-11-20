@@ -1,0 +1,15 @@
+{
+  "task_id": "tognar-pause-resume",
+  "task_type": "discovery",
+  "state": "PAUSED",
+  "updated_at": "2026-11-20T15:05:34Z",
+  "counts": {
+    "navigation_urls": 2,
+    "discovered_urls": 14,
+    "url_candidates": 12,
+    "pending_urls": 0,
+    "valid_urls": 12,
+    "excluded_urls": 0,
+    "failed_urls": 0
+  }
+}
