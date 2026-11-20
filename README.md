@@ -7,6 +7,7 @@
 | 路径 | 作用 |
 | --- | --- |
 | `AGENTS.md` | 代理执行约定：站点评估入口、已有结论复用与探测预算 |
+| `app/` | 生产应用承载目录（monorepo）；当前只有边界说明，不进入文档导出包 |
 | `docs/` | 业务核心：需求、数据标准、流程、交付、验收、界面、Agent 约定、方案契约、状态契约、实施路线、需求对照、验收基准站点、框架对比实验、技术选型 ADR、方法指导、合成示例 |
 | `scripts/export_docs.py` | 生成可分发的文档 ZIP 与 `manifest.json`，并可按清单复核 |
 | `scripts/setup_crawl_env.py` | 创建仓库外的共享 uv venv，安装采集基线并执行冒烟 |
@@ -47,14 +48,18 @@ python scripts/export_docs.py
 python scripts/export_docs.py --check dist/ai-ecom-crawler-docs.zip
 ```
 
-R06 原型测试见 [`experiments/r06/README.md`](experiments/r06/README.md)；Schema 测试需要 `jsonschema`，缺依赖时跳过不算全绿。
+R06 原型测试见 [`experiments/r06/README.md`](experiments/r06/README.md)。完整测试必须带 `jsonschema`，Schema 测试不得 skip；缺依赖时先安装再跑，带 skip 的结果不算通过。
 
 ## 当前状态与边界
 
-- 这是业务与验收基线，不是生产应用实现；`experiments/d01/javaestate` 是有限的单站试点，`experiments/r06/` 是单站执行器与任务运行时原型，都不能当作完整采集应用。仓库内的技术选型 ADR 是 Proposed 提议，需 D01 完整验证，不表示已经结项或通过。
+- 这是业务与验收基线，不是生产应用实现；`experiments/d01/javaestate` 是有限的单站试点，`experiments/r06/` 是单站执行器与任务运行时原型，都不能当作完整采集应用。D01 已由用户授权代理签字为“有条件通过（试点）”；ADR 0001～0003 已 Accepted，0004～0007 仍为 Proposed 并写明退出条件，详见[G0 结项记录](docs/24-G0结项记录.md)。
 - 参考实现来自 `skills-for-developer` 真源中的 `resilient-browser-fetch`；本仓库不附源码副本，方法摘要见 `docs/方法指导/04-浏览器与会话复用.md`，需要代码时按当前上游版本验证。
 - 文档包不包含真实商品网页、生产数据库、密钥、登录会话或浏览器二进制。
-- 分发前请确认文档与上游参考的使用范围；仓库本身未声明开源许可证，上游 `resilient-browser-fetch` 为 MIT 许可。
+- 分发前请确认文档与上游参考的使用范围；本仓库最终闭源，原创代码与文档未授予开源复用许可（见 `LICENSE`），第三方网站内容、商标、商品数据和样本页面不在授权范围内；第三方依赖和上游 `resilient-browser-fetch` 保留各自许可证。
+
+## 许可证
+
+本仓库最终闭源，原创代码与文档未授予开源复用许可；根目录 [`LICENSE`](LICENSE) 是“保留所有权利”声明。第三方网站内容、商标、商品数据和样本页面仍归各自权利人；第三方依赖保留各自许可证。生产化、对外分发和版权内容再发布前，按 `docs/17-合规检查清单.md` 和 `docs/24-G0结项记录.md` 重新确认。
 
 ## 维护
 

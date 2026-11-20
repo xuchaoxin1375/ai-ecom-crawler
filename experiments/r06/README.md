@@ -76,7 +76,7 @@ python -m uv run --project experiments/framework-compare/scrapling --with "pyyam
 
 复跑请使用新的 `--label`，保留已有诊断；不要覆盖 `r06-run-001`～`003`。根目录的 CSV 和 JSON 是最近一次运行，诊断目录按 label 分开。
 
-测试（包含 Schema；`jsonschema` 缺失时 Schema 会 skip，不算全绿）：
+测试（包含 Schema；`jsonschema` 缺失时先补依赖再跑，不允许 skip）：
 
 ```powershell
 python -m uv run --project experiments/framework-compare/scrapling --with "pyyaml==6.0.3" `
