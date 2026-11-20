@@ -1,0 +1,209 @@
+schema_version: "1.0"
+rule_id: "shopthebulkstore-us-r06"
+rule_version: "2026.11.20-1"
+kind: declarative
+status: candidate
+created_at: "2026-11-20T12:30:00Z"
+updated_at: "2026-11-20T12:30:00Z"
+
+site:
+  name: "The Bulk Store"
+  entry_urls: ["https://shopthebulkstore.com/candy/bulk-candy-unwrapped"]
+  allowed_origins: ["https://shopthebulkstore.com"]
+  allowed_path_prefixes: ["/"]
+  market: "US"
+  locale: "en-US"
+  currency: "USD"
+
+scope:
+  include: ['^/[a-z0-9][a-z0-9-]*$']
+  exclude:
+    - "/checkout/"
+    - "/customer/"
+    - "/cart/"
+    - "/catalog/"
+    - "/catalogsearch/"
+    - "/review/"
+    - "/sendfriend/"
+    - "/wishlist/"
+  max_products: 10
+  max_seconds: 180
+  notes: "Second-site smoke: category page 1 only; 10 products; not full-site coverage."
+
+capabilities:
+  discovery: true
+  product: true
+
+discovery:
+  strategies: ["entry_links"]
+  entry_url: "https://shopthebulkstore.com/candy/bulk-candy-unwrapped"
+  link_selector: "a.product-item-link"
+  product_url_patterns: ['^/[a-z0-9][a-z0-9-]*$']
+  url_identity: "canonical"
+  notes: "Category page 1 only; no sitemap or pagination in this smoke."
+
+fetch:
+  default_engine: "static"
+  concurrency: 1
+  delay_ms: 1000
+  retry: {max_attempts: 2, backoff_ms: 1000}
+  timeout_ms: 45000
+  browser: false
+  login: false
+  challenge_handling: "none; stop and record"
+
+extract:
+  fields:
+    name:
+      required: true
+      fallbacks:
+        - {type: json_ld, path: "name", label: "json_ld"}
+        - {type: css_text, selector: "h1", label: "h1"}
+        - type: css_attr
+          selector: 'meta[property="og:title"]'
+          attr: "content"
+          label: "og_title"
+          strip_site_suffix: true
+    price.amount:
+      required: true
+      fallbacks:
+        - type: json_ld
+          path: "offers.price"
+          label: "json_ld_offer_price"
+          take: "min_positive"
+          tax_basis: "unspecified"
+        - type: json_ld
+          path: "offers.lowPrice"
+          label: "json_ld_low_price"
+          take: "min_positive"
+          tax_basis: "unspecified"
+        - type: css_attr
+          selector: 'meta[property="product:price:amount"]'
+          attr: "content"
+          label: "meta_price"
+        - {type: css_text, selector: ".price", label: "price_container"}
+    price.currency:
+      required: true
+      fallbacks:
+        - {type: json_ld, path: "offers.priceCurrency", label: "json_ld_currency"}
+        - type: css_attr
+          selector: 'meta[property="product:price:currency"]'
+          attr: "content"
+          label: "meta_currency"
+        - type: css_attr
+          selector: '[itemprop="priceCurrency"]'
+          attr: "content"
+          label: "itemprop_currency"
+    primary_image_url:
+      required: true
+      fallbacks:
+        - {type: json_ld, path: "image", label: "json_ld_image"}
+        - type: css_attr
+          selector: 'meta[property="og:image"]'
+          attr: "content"
+          label: "og_image"
+          absolute: true
+        - type: css_attr
+          selector: 'img[itemprop="image"]'
+          attr: "src"
+          label: "main_image"
+          absolute: true
+    description_html:
+      required: false
+      fallbacks:
+        - {type: json_ld, path: "description", label: "json_ld_description", description_status: "complete"}
+        - type: css_html
+          selector: ".product.attribute.overview .value"
+          label: "overview"
+          description_status: "complete"
+        - type: css_html
+          selector: ".product.attribute.description .value"
+          label: "description"
+          description_status: "complete"
+    category:
+      required: false
+      fallbacks:
+        - type: breadcrumb
+          selector: '.breadcrumbs a, nav.breadcrumb a'
+          label: "breadcrumb"
+          drop_last: true
+          exclude: ["home"]
+        - {type: json_ld, path: "category", label: "json_ld_category"}
+    brand:
+      required: false
+      fallbacks:
+        - {type: json_ld, path: "brand.name", label: "json_ld_brand"}
+        - {type: css_text, selector: '[itemprop="brand"]', label: "itemprop_brand"}
+        - {type: css_text, selector: ".product-brand", label: "product_brand"}
+    source_url:
+      required: true
+      fallbacks:
+        - {type: canonical, label: "canonical"}
+
+normalize:
+  price:
+    tax_basis: "unspecified"
+    choose: "lowest_positive"
+    positive_only: true
+  description:
+    mode: "clean_html"
+    statuses: ["complete", "partial", "not_provided", "failed"]
+  options:
+    exclude_quantity: true
+    strip_price_delta: true
+
+validate:
+  required_fields:
+    - "name"
+    - "price.amount"
+    - "price.currency"
+    - "primary_image_url"
+    - "source_url"
+  assertions:
+    - {field: "price.amount", op: ">", value: 0}
+    - {field: "price.currency", op: "matches", value: "^[A-Z]{3}$"}
+  partial_description: "allowed_with_flag"
+
+output:
+  url_list:
+    enabled: true
+    columns: ["url", "source", "status", "title"]
+    format: "csv"
+  product_csv:
+    enabled: true
+    columns: 9
+    format: "csv"
+  task_result: true
+
+task_defaults:
+  max_urls: 100
+  max_products: 10
+  max_seconds: 180
+  max_attempts: 2
+  retry_backoff_ms: 1000
+  concurrency:
+    navigation: 1
+    product: 1
+
+compatibility:
+  os: ["windows", "linux", "wsl2"]
+  runtime: "python>=3.11"
+  dependencies: ["scrapling==0.5.1", "pyyaml==6.0.3", "lxml", "protego"]
+  browser: "none for static"
+  network: "public web; site is US-facing"
+
+evidence:
+  sample_urls:
+    - "https://shopthebulkstore.com/boston-baked-beans"
+  expected:
+    - url: "https://shopthebulkstore.com/boston-baked-beans"
+      name: "Boston Baked Beans"
+      price.amount: 5.99
+      price.currency: "USD"
+  verified_at: null
+  limitations:
+    - "Second-site declarative smoke; not D01 verified."
+    - "Category page 1 only; 10 products; not full-site coverage."
+    - "Price is per lb; keep the public unit price, do not multiply by package weight."
+
+notes: "Derived from experiments/d01/shopthebulkstore/manifest.yaml. Only the category entry, link selector and product URL pattern are site-specific."

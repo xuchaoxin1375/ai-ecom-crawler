@@ -31,8 +31,10 @@ R06 验证两件事：
 | `runtime/` | 任务运行时：SQLite 账本、工作项、discovery／product、并行 worker |
 | `plans/familidoo.yaml` | 单次运行的站点声明式方案 |
 | `plans/familidoo-runtime.yaml` | 运行时规则包；discovery 和 product 共用 |
+| `plans/shopthebulkstore-runtime.yaml` | 第二站规则包；分类页入口，10 个商品 |
 | `familidoo/` | 单次运行的 9 列 CSV、任务结果和 `r06-run-001`～`004` 诊断 |
 | `runtime-demo/` | 两个任务并行：discovery URL 清单和 product 9 列 CSV |
+| `shopthebulkstore-demo/` | 第二站复用：只加规则包，分类页 10 个商品 |
 | `tests/` | 无网络契约、提取、任务账本和运行时测试 |
 | `tools/validate_output.py` | 单次运行输出校验器 |
 | `tools/validate_runtime.py` | 运行时 demo 校验器 |
@@ -182,10 +184,14 @@ python experiments/r06/tools/validate_runtime.py --root experiments/r06/runtime-
 - `IN_FLIGHT` 对账重置、尝试次数耗尽失败、方案版本不匹配；
 - `plan_*` 输出和原子写／JSONL 追加。
 
+### 第二站复用
+
+`shopthebulkstore-demo/` 用分类页入口和 `plans/shopthebulkstore-runtime.yaml` 跑出 discovery 10 URL、product 10 商品（10／10 有效，USD，按磅价保留），运行时公共代码没有改动。它证明第二个站点只需新增规则包；不证明 sitemap、分类分页、浏览器或挑战路径。详情见 [`shopthebulkstore-demo/README.md`](shopthebulkstore-demo/README.md)。
+
 ## 局限
 
 - 入口页只展示 6 个商品，未做 10～20 个随机抽样；6／6 是小样本全量，不是全站覆盖。
-- 只验证一个站点、一次运行；没有独立复跑和跨环境导入。
+- familidoo 只验证一个站点、一次运行；shopthebulkstore 是第二站 10 商品有界样本；没有独立复跑和跨环境导入。
 - 只支持静态 HTML；没有浏览器、登录、挑战处理或 JavaScript 渲染。
 - 只支持一个入口页；没有 sitemap、分类分页、公开 JSON 或详情补全。
 - 运行时只有单 worker；有逻辑对账和失败分类测试，但没有跨进程锁、队列或真实进程崩溃演练；暂停／恢复只在无网络测试中验证过。
@@ -195,8 +201,8 @@ python experiments/r06/tools/validate_runtime.py --root experiments/r06/runtime-
 
 ## 下一步
 
-- 用第二个站复测“只写方案、不写代码”，避免把单站结果当成通用结论。
-- 增加 `sitemap` 或分类入口，才能做 10～20 个商品的随机抽查和更完整的范围。
+- 第二站已复测（`shopthebulkstore-demo`），只新增规则包，运行时公共代码不变。
+- 增加 `sitemap` 或分类分页策略，才能做 10～20 个商品的随机抽查和更完整的范围。
 - 把“两个任务并行 + 同域限速 + 暂停／取消”做成真实站点的验收记录，而不只用 fake fetcher。
 - 补跨进程 worker 或至少一个单 worker 的崩溃恢复演练。
 - 维护、漂移和长期稳定性仍后置（J08）；本轮不据此判断维护成本。

@@ -17,6 +17,9 @@ except ImportError:  # pragma: no cover - optional check dependency
 ROOT = Path(__file__).resolve().parents[3]
 SCHEMA_PATH = ROOT / "docs" / "schema" / "manifest.schema.json"
 RULE_PATH = ROOT / "experiments" / "r06" / "plans" / "familidoo-runtime.yaml"
+SECOND_RULE_PATH = (
+    ROOT / "experiments" / "r06" / "plans" / "shopthebulkstore-runtime.yaml"
+)
 PLAN_PATH = ROOT / "experiments" / "r06" / "plans" / "familidoo.yaml"
 
 
@@ -26,12 +29,18 @@ class SchemaTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
         cls.rule = yaml.safe_load(RULE_PATH.read_text(encoding="utf-8"))
+        cls.second_rule = yaml.safe_load(
+            SECOND_RULE_PATH.read_text(encoding="utf-8")
+        )
         cls.plan = yaml.safe_load(PLAN_PATH.read_text(encoding="utf-8"))
         jsonschema.Draft202012Validator.check_schema(cls.schema)
         cls.validator = jsonschema.Draft202012Validator(cls.schema)
 
     def test_runtime_rule_matches_schema(self) -> None:
         self._assert_valid(self.rule)
+
+    def test_second_site_rule_matches_schema(self) -> None:
+        self._assert_valid(self.second_rule)
 
     def test_single_run_plan_matches_schema(self) -> None:
         self._assert_valid(self.plan)
