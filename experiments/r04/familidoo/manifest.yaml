@@ -1,0 +1,97 @@
+schema_version: "1.0"
+plan_id: "familidoo-fr-r04"
+plan_version: "2026.11.20-1"
+kind: program
+status: candidate
+created_at: "2026-11-20T02:56:00Z"
+updated_at: "2026-11-20T03:02:52Z"
+
+site:
+  name: "Familidoo"
+  entry_urls: ["https://www.familidoo.fr/fr/"]
+  allowed_origins: ["https://www.familidoo.fr"]
+  allowed_path_prefixes: ["/fr/"]
+  market: "FR"
+  locale: "fr-FR"
+  currency: "EUR"
+
+scope:
+  include: ["/fr/*.html"]
+  exclude:
+    - "/fr/*controller=*"
+    - "/fr/panier*"
+    - "/fr/commande*"
+    - "/fr/mon-compte*"
+  notes: "Only the product links shown on the homepage; bounded R04 pilot, not full-site coverage."
+
+discovery:
+  strategies: ["homepage_product_links"]
+  entry_url: "https://www.familidoo.fr/fr/"
+  product_url_patterns: ["/fr/[^/]+/\\d+-[^/]+\\.html$"]
+  url_identity: "canonical"
+  notes: "Homepage a.product_img_link and product card headings; no sitemap or category pagination in this pilot."
+
+fetch:
+  default_engine: "static"
+  engine: "scrapling.FetcherSession (curl_cffi)"
+  concurrency: 1
+  delay_ms: 1000
+  retry: {max_attempts: 2, backoff_ms: 1000}
+  timeout_ms: 45000
+  browser: false
+  login: false
+  challenge_handling: "none; stop and record"
+
+extract:
+  fields:
+    name: {source: "css", selector: "h1[itemprop=name]", required: true}
+    price.amount: {source: "meta", selector: "product:pretax_price:amount | product:price:amount", required: true, notes: "choose the smaller public pretax/gross pair"}
+    price.currency: {source: "meta", selector: "product:price:currency | itemprop=priceCurrency", required: true}
+    primary_image_url: {source: "meta", selector: "og:image", required: true}
+    description_html: {source: "css", selector: "div.product_description_container", required: false}
+    category: {source: "breadcrumb", selector: "nav.breadcrumb_nav span[itemprop=name]", required: false, notes: "deepest non-home crumb"}
+    brand: {source: "css", selector: "div.product-manufacturer a", required: false, notes: "empty when not exposed; not inferred from the product name"}
+    options: {source: "css", selector: "div.product-variants .product-variants-item", required: false}
+    source_url: {source: "canonical"}
+
+normalize:
+  price: {tax_basis: "exclusive_or_inclusive", choose: "smaller_public_pair", positive_only: true}
+  description: {mode: "clean_html", statuses: ["complete", "partial", "not_provided", "failed"]}
+
+validate:
+  required_fields: ["name", "price.amount", "price.currency", "primary_image_url", "description_html", "source_url"]
+  assertions:
+    - {field: "price.amount", op: ">", value: 0}
+  partial_description: "allowed_with_flag"
+
+runtime:
+  entrypoint: "run.py"
+  protocol: "cli"
+  notes: "R04 pilot; the full docs/08 subprocess and NDJSON contract is not implemented."
+
+compatibility:
+  os: ["windows"]
+  runtime: "python>=3.13"
+  dependencies: ["scrapling==0.5.1", "protego", "lxml"]
+  browser: "none"
+  network: "public web; no proxy required in this run"
+
+evidence:
+  sample_urls:
+    - "https://www.familidoo.fr/fr/poussette-quadruple/74464-poussette-4-places-lidoo-lite-cosmic-black-0615402035002.html"
+    - "https://www.familidoo.fr/fr/poussette-quadruple/8-poussette-4-places-lidoo-star-dj04frl-4712928372676.html"
+    - "https://www.familidoo.fr/fr/poussette-quadruple/193-poussette-4-places-lidoo-city-h4e-full-grey-4712928374274.html"
+    - "https://www.familidoo.fr/fr/poussette-compacte/183-poussette-compacte-lidoo-one-noire-4712928373475.html"
+    - "https://www.familidoo.fr/fr/libeca/316-veilleuse-5-en-1-baby-dream-machine-0617092971653.html"
+    - "https://www.familidoo.fr/fr/iglu/74427-bascule-en-mousse-iglu-banane-4751005644831.html"
+  expected:
+    - {source_url: "https://www.familidoo.fr/fr/poussette-quadruple/74464-poussette-4-places-lidoo-lite-cosmic-black-0615402035002.html", name: "Poussette 4 places Lidoo Lite Cosmic Black", price.amount: 512.5, price.currency: "EUR"}
+  verified_at: "2026-11-20T03:02:52Z"
+  limitations:
+    - "R04 pilot; not D01 verified."
+    - "Only the six homepage product links; not full-site coverage."
+    - "Brand is not exposed by the page; it is left empty and not inferred from the product name."
+    - "Price uses the pretax member of the public pair; the displayed TTC price differs."
+    - "No browser, login, challenge handling or access-control bypass."
+
+notes: "R04 new-flow side; old-flow baseline and comparison are pending in docs/16."
