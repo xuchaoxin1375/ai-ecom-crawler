@@ -18,7 +18,7 @@ R06 验证两件事：
 
 暂不支持 sitemap／分类分页、浏览器渲染、登录、跨进程队列、Web UI 和完整 NDJSON 协议；这些不在 R16 v0 范围内。
 
-方案语义补充：`discovery.product_url_patterns` 和 `scope.exclude` 按正则匹配，`scope.include` 按 glob 匹配路径。`docs/08` 的最终语义仍待统一，R06 只实现这个可执行子集。运行设计见 [`docs/19`](../../docs/19-采集规则与任务运行时.md)。
+方案语义补充：`discovery.product_url_patterns` 和 `scope.exclude` 按正则匹配；`scope.include` 也按正则匹配 URL 的 path，不再使用 glob。`docs/08` 与 `docs/19` 已统一为这一语义。运行设计见 [`docs/19`](../../docs/19-采集规则与任务运行时.md)。
 
 ## 目录
 
@@ -28,16 +28,16 @@ R06 验证两件事：
 | `runtime/` | 任务运行时：SQLite 账本、工作项、discovery／product、并行 worker |
 | `plans/familidoo.yaml` | 单次运行的站点声明式方案 |
 | `plans/familidoo-runtime.yaml` | 运行时规则包；discovery 和 product 共用 |
-| `familidoo/` | 单次运行的 9 列 CSV、任务结果和 `r06-run-001`～`003` 诊断 |
+| `familidoo/` | 单次运行的 9 列 CSV、任务结果和 `r06-run-001`～`004` 诊断 |
 | `runtime-demo/` | 两个任务并行：discovery URL 清单和 product 9 列 CSV |
-| `tests/` | 38 个无网络契约、提取、任务账本和运行时测试 |
+| `tests/` | 无网络契约、提取、任务账本和运行时测试 |
 | `tools/validate_output.py` | 单次运行输出校验器 |
 | `tools/validate_runtime.py` | 运行时 demo 校验器 |
 
 ## 运行
 
 ```powershell
-python -m uv run --project experiments/framework-compare/scrapling --with "pyyaml==6.0.2" `
+python -m uv run --project experiments/framework-compare/scrapling --with "pyyaml==6.0.3" `
   python experiments/r06/run.py `
   --plan experiments/r06/plans/familidoo.yaml `
   --out-dir experiments/r06/familidoo `
@@ -49,8 +49,16 @@ python -m uv run --project experiments/framework-compare/scrapling --with "pyyam
 测试：
 
 ```powershell
-python -m uv run --project experiments/framework-compare/scrapling --with "pyyaml==6.0.2" `
+python -m uv run --project experiments/framework-compare/scrapling --with "pyyaml==6.0.3" `
   python -m unittest discover -s experiments/r06/tests -v
+```
+
+规则包结构校验（`jsonschema` 未安装时该测试跳过）：
+
+```powershell
+python -m uv run --project experiments/framework-compare/scrapling --with "pyyaml==6.0.3" `
+  --with "jsonschema>=4.23" `
+  python -m unittest discover -s experiments/r06/tests -p "test_schema.py" -v
 ```
 
 校验输出：
@@ -64,14 +72,14 @@ python experiments/r06/tools/validate_output.py --dir experiments/r06/familidoo
 | 项 | 值 |
 | --- | --- |
 | 站点与范围 | `familidoo.fr` 首页商品链接；FR／fr-FR／EUR |
-| 有效／排除／失败 | 6／0／0（三次运行相同） |
+| 有效／排除／失败 | 6／0／0（各次运行相同） |
 | 商品候选 | 6（入口页只展示 6 个商品链接；方案上限 20） |
-| 请求 | 8（robots 1、入口 1、商品 6），0 重试（三次运行相同） |
-| 运行墙钟 | 16.77s（`r06-run-001`）；19.8s（`r06-run-002`）；16.31s（`r06-run-003`，最终代码） |
+| 请求 | 8（robots 1、入口 1、商品 6），0 重试（各次运行相同） |
+| 运行墙钟 | 16.77s（`r06-run-001`）；19.8s（`r06-run-002`）；16.31s（`r06-run-003`，最终代码）；18.38s（`r06-run-004`，正则语义复核） |
 | 首次有效商品 | 2026-11-20T06:13:35Z（`r06-run-001`） |
 | 方案构建起点 | 2026-11-20T06:11:45Z（开始写站点方案） |
 | `first_valid_product_s` | 110.0s（约 1 分 50 秒；仅 `r06-run-001`） |
-| 复跑业务 CSV | `r06-run-001`～`003` 的 `valid.csv` SHA-256 相同：`D70458FD0177C39BBC4D4420B6A75D3C0EED47E5042C819359BA9F413EFD6D1E` |
+| 复跑业务 CSV | `r06-run-001`～`004` 的 `valid.csv` SHA-256 相同：`D70458FD0177C39BBC4D4420B6A75D3C0EED47E5042C819359BA9F413EFD6D1E` |
 | 运行期 LLM 调用 | 0 |
 | 浏览器 | 未启动 |
 | 描述状态 | 6／6 `complete` |
@@ -79,7 +87,7 @@ python experiments/r06/tools/validate_output.py --dir experiments/r06/familidoo
 | 品牌 | 6／6 页面未公开 manufacturer，留空并记 `NOT_PROVIDED` |
 | 任务结果 | `outcome=COMPLETED`、`stop_reason=NATURAL_END`、`coverage=PARTIAL` |
 
-根目录的 `valid.csv`、`task-result.json`、`run-summary.json` 是最近一次运行（当前为 `r06-run-003`）；`r06-run-001` 的构建观测值记录在上表，`valid.csv` 副本和诊断保留在 `diagnostics/r06-run-001/`，`r06-run-002/` 和 `r06-run-003/` 也保留各自的任务结果与运行摘要。三次运行相隔几分钟，只能说明同方案同环境可复现，不是独立复跑、漂移测试或跨环境验证。
+根目录的 `valid.csv`、`task-result.json`、`run-summary.json` 是最近一次运行（当前为 `r06-run-004`）；`r06-run-001` 的构建观测值记录在上表，`valid.csv` 副本和诊断保留在 `diagnostics/r06-run-001/`，`r06-run-002/`、`r06-run-003/` 和 `r06-run-004/` 也保留各自的任务结果与运行摘要。`r06-run-004` 是 URL 正则语义复核，业务 CSV 与前三次数字节一致。这些运行只能说明同方案同环境可复现，不是独立复跑、漂移测试或跨环境验证。
 
 字段命中路径（6／6 一致）：
 
@@ -113,25 +121,25 @@ R06 的方案构建时间不能直接和 R04 比：R06 的通用执行器是在�
 `plans/familidoo-runtime.yaml` 同时声明 discovery 和 product；任务类型决定停在哪一步。
 
 ```powershell
-python -m uv run --project experiments/framework-compare/scrapling --with "pyyaml==6.0.2" `
+python -m uv run --project experiments/framework-compare/scrapling --with "pyyaml==6.0.3" `
   python experiments/r06/runtime_cli.py rule validate `
   --rule experiments/r06/plans/familidoo-runtime.yaml
 
-python -m uv run --project experiments/framework-compare/scrapling --with "pyyaml==6.0.2" `
+python -m uv run --project experiments/framework-compare/scrapling --with "pyyaml==6.0.3" `
   python experiments/r06/runtime_cli.py task create `
   --db experiments/r06/runtime-demo/tasks.db `
   --rule experiments/r06/plans/familidoo-runtime.yaml `
   --task-type discovery --task-id demo-discovery `
   --out-root experiments/r06/runtime-demo/tasks --start
 
-python -m uv run --project experiments/framework-compare/scrapling --with "pyyaml==6.0.2" `
+python -m uv run --project experiments/framework-compare/scrapling --with "pyyaml==6.0.3" `
   python experiments/r06/runtime_cli.py task create `
   --db experiments/r06/runtime-demo/tasks.db `
   --rule experiments/r06/plans/familidoo-runtime.yaml `
   --task-type product --task-id demo-product `
   --out-root experiments/r06/runtime-demo/tasks --start
 
-python -m uv run --project experiments/framework-compare/scrapling --with "pyyaml==6.0.2" `
+python -m uv run --project experiments/framework-compare/scrapling --with "pyyaml==6.0.3" `
   python experiments/r06/runtime_cli.py worker run `
   --db experiments/r06/runtime-demo/tasks.db `
   --out-root experiments/r06/runtime-demo/tasks `
@@ -159,7 +167,7 @@ python experiments/r06/tools/validate_runtime.py --root experiments/r06/runtime-
 
 ### 运行时测试
 
-38 个无网络测试，覆盖：
+无网络测试覆盖：
 
 - 规则加载与非法发现策略拒绝；
 - SQLite 任务账本、工作项去重、claim／reset；

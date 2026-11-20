@@ -1,0 +1,620 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "采集方案 manifest v1.0",
+  "description": "校验运行时规则包（rule_*）与对外方案包（plan_*）两种投影。两种投影共享 site/scope/discovery/fetch/extract 语义；跨字段约束仍由执行器校验。",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/rulePackage"
+    },
+    {
+      "$ref": "#/$defs/planManifest"
+    }
+  ],
+  "$defs": {
+    "site": {
+      "type": "object",
+      "required": [
+        "name",
+        "entry_urls",
+        "allowed_origins",
+        "allowed_path_prefixes",
+        "market",
+        "locale",
+        "currency"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "entry_urls": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "allowed_origins": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "allowed_path_prefixes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^/"
+          }
+        },
+        "market": {
+          "type": "string",
+          "minLength": 1
+        },
+        "locale": {
+          "type": "string",
+          "minLength": 1
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$"
+        }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "properties": {
+        "include": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Python 正则，对 URL path 做 search；空数组表示不额外限制。"
+        },
+        "exclude": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Python 正则，对完整 URL 做 search，可匹配查询参数。"
+        },
+        "max_products": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_seconds": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "discovery": {
+      "type": "object",
+      "required": ["strategies", "link_selector", "product_url_patterns"],
+      "properties": {
+        "strategies": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "enum": ["entry_links"]
+          }
+        },
+        "entry_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "link_selector": {
+          "type": "string",
+          "minLength": 1
+        },
+        "product_url_patterns": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Python 正则，对 URL path 做 search。"
+        },
+        "url_identity": {
+          "enum": ["canonical", "final_url", "normalized_path"]
+        },
+        "limits": {
+          "type": "object"
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "fetch": {
+      "type": "object",
+      "required": ["default_engine", "retry"],
+      "properties": {
+        "default_engine": {
+          "enum": ["static", "browser", "http_json"]
+        },
+        "concurrency": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "delay_ms": {
+          "type": "number",
+          "minimum": 1000
+        },
+        "retry": {
+          "type": "object",
+          "required": ["max_attempts"],
+          "properties": {
+            "max_attempts": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "backoff_ms": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        },
+        "timeout_ms": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "rate_limit": {
+          "type": "object",
+          "properties": {
+            "per_domain_rps": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "burst": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "robots": {
+          "type": "string"
+        },
+        "challenge": {
+          "type": "string"
+        },
+        "challenge_handling": {
+          "type": "string"
+        },
+        "browser": {
+          "type": "boolean"
+        },
+        "login": {
+          "type": "boolean"
+        },
+        "max_seconds": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      }
+    },
+    "extract": {
+      "type": "object",
+      "required": ["fields"],
+      "properties": {
+        "fields": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "enum": [
+              "name",
+              "price.amount",
+              "price.currency",
+              "primary_image_url",
+              "description_html",
+              "category",
+              "brand",
+              "options",
+              "source_url"
+            ]
+          },
+          "required": [
+            "name",
+            "price.amount",
+            "price.currency",
+            "primary_image_url",
+            "source_url"
+          ],
+          "additionalProperties": {
+            "$ref": "#/$defs/fieldSpec"
+          }
+        }
+      }
+    },
+    "fieldSpec": {
+      "type": "object",
+      "required": ["fallbacks"],
+      "properties": {
+        "required": {
+          "type": "boolean"
+        },
+        "fallbacks": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["type"],
+            "properties": {
+              "type": {
+                "enum": [
+                  "json_ld",
+                  "css_text",
+                  "css_attr",
+                  "css_html",
+                  "title",
+                  "breadcrumb",
+                  "option_groups",
+                  "price_pair",
+                  "canonical",
+                  "constant"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "normalize": {
+      "type": "object"
+    },
+    "validate": {
+      "type": "object"
+    },
+    "compatibility": {
+      "type": "object"
+    },
+    "evidence": {
+      "type": "object",
+      "properties": {
+        "sample_urls": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "expected": {
+          "type": "array"
+        },
+        "verified_at": {
+          "type": ["string", "null"]
+        },
+        "limitations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "rulePackage": {
+      "type": "object",
+      "required": [
+        "schema_version",
+        "rule_id",
+        "rule_version",
+        "kind",
+        "site",
+        "scope",
+        "capabilities",
+        "discovery",
+        "fetch",
+        "output"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "1.0"
+        },
+        "rule_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{1,80}$",
+          "description": "稳定规则标识；对外契约对应 plan_id。"
+        },
+        "rule_version": {
+          "type": "string",
+          "minLength": 1,
+          "description": "站点方案版本；对外契约对应 plan_version。"
+        },
+        "kind": {
+          "const": "declarative"
+        },
+        "status": {
+          "enum": ["candidate", "verified", "deprecated"]
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "site": {
+          "$ref": "#/$defs/site"
+        },
+        "scope": {
+          "$ref": "#/$defs/scope"
+        },
+        "capabilities": {
+          "type": "object",
+          "required": ["discovery", "product"],
+          "properties": {
+            "discovery": {
+              "type": "boolean"
+            },
+            "product": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "anyOf": [
+            {
+              "required": ["discovery"],
+              "properties": {
+                "discovery": {
+                  "const": true
+                }
+              }
+            },
+            {
+              "required": ["product"],
+              "properties": {
+                "product": {
+                  "const": true
+                }
+              }
+            }
+          ]
+        },
+        "discovery": {
+          "$ref": "#/$defs/discovery"
+        },
+        "fetch": {
+          "$ref": "#/$defs/fetch"
+        },
+        "extract": {
+          "$ref": "#/$defs/extract"
+        },
+        "normalize": {
+          "$ref": "#/$defs/normalize"
+        },
+        "validate": {
+          "$ref": "#/$defs/validate"
+        },
+        "output": {
+          "type": "object",
+          "minProperties": 1,
+          "properties": {
+            "url_list": {
+              "oneOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "columns": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "format": {
+                      "type": "string"
+                    }
+                  }
+                }
+              ]
+            },
+            "product_csv": {
+              "oneOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "columns": {
+                      "oneOf": [
+                        {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      ]
+                    },
+                    "format": {
+                      "type": "string"
+                    }
+                  }
+                }
+              ]
+            },
+            "task_result": {
+              "oneOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "object"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "task_defaults": {
+          "type": "object",
+          "properties": {
+            "max_urls": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "max_products": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "max_seconds": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "concurrency": {
+              "type": "object",
+              "properties": {
+                "navigation": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "product": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "compatibility": {
+          "$ref": "#/$defs/compatibility"
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidence"
+        },
+        "notes": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "required": ["capabilities"],
+            "properties": {
+              "capabilities": {
+                "required": ["product"],
+                "properties": {
+                  "product": {
+                    "const": true
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "required": ["extract", "normalize", "validate"]
+          }
+        }
+      ]
+    },
+    "planManifest": {
+      "type": "object",
+      "required": [
+        "schema_version",
+        "plan_id",
+        "plan_version",
+        "kind",
+        "status",
+        "created_at",
+        "updated_at",
+        "site",
+        "scope",
+        "discovery",
+        "fetch",
+        "extract",
+        "normalize",
+        "validate",
+        "compatibility"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "1.0"
+        },
+        "plan_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{1,80}$"
+        },
+        "plan_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": ["declarative", "program", "hybrid"]
+        },
+        "status": {
+          "enum": ["candidate", "verified", "deprecated"]
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "site": {
+          "$ref": "#/$defs/site"
+        },
+        "scope": {
+          "$ref": "#/$defs/scope"
+        },
+        "discovery": {
+          "$ref": "#/$defs/discovery"
+        },
+        "fetch": {
+          "$ref": "#/$defs/fetch"
+        },
+        "extract": {
+          "$ref": "#/$defs/extract"
+        },
+        "normalize": {
+          "$ref": "#/$defs/normalize"
+        },
+        "validate": {
+          "$ref": "#/$defs/validate"
+        },
+        "runtime": {
+          "type": "object"
+        },
+        "entrypoint": {
+          "type": "string"
+        },
+        "rules": {
+          "type": "string"
+        },
+        "compatibility": {
+          "$ref": "#/$defs/compatibility"
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidence"
+        },
+        "notes": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

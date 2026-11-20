@@ -150,10 +150,22 @@ def _validate_scope(scope: dict[str, Any]) -> None:
     exclude = scope.get("exclude", [])
     if not isinstance(include, list) or not isinstance(exclude, list):
         raise PlanError("scope.include and scope.exclude must be lists")
+    _validate_regex_list(include, "scope.include")
+    _validate_regex_list(exclude, "scope.exclude")
     if "max_products" in scope:
         _require_positive_int(scope["max_products"], "scope.max_products")
     if "max_seconds" in scope:
         _require_positive_number(scope["max_seconds"], "scope.max_seconds")
+
+
+def _validate_regex_list(values: list[Any], name: str) -> None:
+    for pattern in values:
+        if not isinstance(pattern, str) or not pattern:
+            raise PlanError(f"{name} entries must be non-empty strings")
+        try:
+            re.compile(pattern)
+        except re.error as exc:
+            raise PlanError(f"invalid {name} regex: {exc}") from exc
 
 
 def _validate_discovery(discovery: dict[str, Any]) -> None:
