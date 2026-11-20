@@ -1,0 +1,147 @@
+{
+  "task_id": "d01-skatepro-d01-run-001-20261120T002926Z",
+  "plan_id": "skatepro-es-d01",
+  "plan_version": "2026.11.20-1",
+  "market": "ES",
+  "locale": "es-ES",
+  "state": "FINISHED",
+  "outcome": "PARTIAL",
+  "stop_reason": "BUDGET_EXHAUSTED",
+  "stop_detail": "task cap reached: processed 30 product pages; 3 navigation entries remain",
+  "started_at": "2026-11-20T00:29:26Z",
+  "finished_at": "2026-11-20T00:35:44Z",
+  "counts": {
+    "discovered_urls": 35,
+    "pending_navigation_entries": 3,
+    "product_candidates": 30,
+    "pending_products": 0,
+    "in_flight_products": 0,
+    "processed_products": 30,
+    "valid_products": 30,
+    "excluded_products": 0,
+    "failed_products": 0,
+    "partial_description_products": 0
+  },
+  "coverage": {
+    "status": "PARTIAL",
+    "denominator_source": "https://www.skatepro.es/sitemap.xml product URL count at run time",
+    "denominator": 6665,
+    "covered": 30,
+    "notes": "Discovery scope is the entry page's category grid, capped at 30 product pages; 30 valid products of 6665 sitemap product URLs. This is a bounded sample, not a full-site completion claim."
+  },
+  "business_acceptance": {
+    "status": "NOT_REVIEWED",
+    "accepted_by": null,
+    "accepted_at": null,
+    "reason": null,
+    "scope": "bounded 30-product skatepro.es category run"
+  },
+  "quality_exceptions": [
+    {
+      "source_url": "https://www.skatepro.es/81-35122.htm",
+      "description_status": "COMPLETE",
+      "partial_reason": null,
+      "missing_reasons": {
+        "specifications": "NOT_PROVIDED"
+      }
+    },
+    {
+      "source_url": "https://www.skatepro.es/254-42673.htm",
+      "description_status": "COMPLETE",
+      "partial_reason": null,
+      "missing_reasons": {
+        "specifications": "NOT_PROVIDED"
+      }
+    },
+    {
+      "source_url": "https://www.skatepro.es/254-52451.htm",
+      "description_status": "COMPLETE",
+      "partial_reason": null,
+      "missing_reasons": {
+        "options": "NOT_PROVIDED",
+        "specifications": "NOT_PROVIDED"
+      }
+    },
+    {
+      "source_url": "https://www.skatepro.es/47-12941.htm",
+      "description_status": "COMPLETE",
+      "partial_reason": null,
+      "missing_reasons": {
+        "options": "NOT_PROVIDED",
+        "specifications": "NOT_PROVIDED"
+      }
+    },
+    {
+      "source_url": "https://www.skatepro.es/47-15254.htm",
+      "description_status": "COMPLETE",
+      "partial_reason": null,
+      "missing_reasons": {
+        "options": "NOT_PROVIDED"
+      }
+    },
+    {
+      "source_url": "https://www.skatepro.es/37-55736.htm",
+      "description_status": "COMPLETE",
+      "partial_reason": null,
+      "missing_reasons": {
+        "specifications": "NOT_PROVIDED"
+      }
+    },
+    {
+      "source_url": "https://www.skatepro.es/45-12207.htm",
+      "description_status": "COMPLETE",
+      "partial_reason": null,
+      "missing_reasons": {
+        "specifications": "NOT_PROVIDED"
+      }
+    },
+    {
+      "source_url": "https://www.skatepro.es/67-32578.htm",
+      "description_status": "COMPLETE",
+      "partial_reason": null,
+      "missing_reasons": {
+        "options": "NOT_PROVIDED"
+      }
+    },
+    {
+      "source_url": "https://www.skatepro.es/67-43723.htm",
+      "description_status": "COMPLETE",
+      "partial_reason": null,
+      "missing_reasons": {
+        "specifications": "NOT_PROVIDED"
+      }
+    }
+  ],
+  "availability_summary": {
+    "in_stock": 30
+  },
+  "runtime": {
+    "llm_calls": 0,
+    "raw_pages_retained": false,
+    "browser_launched": false,
+    "http_engine": "scrapling.FetcherSession (curl_cffi, static HTML)",
+    "scrapling_version": "0.5.1",
+    "concurrency": 1,
+    "request_interval_seconds": 10.0,
+    "max_attempts": 3
+  },
+  "errors": [],
+  "limitations": [
+    "Static HTML only: Scrapling FetcherSession (curl_cffi) was sufficient; no browser was launched.",
+    "The task cap is 30 product pages; the category grid and the site sitemap contain far more.",
+    "robots.txt publishes Crawl-delay: 10 for meta-externalagent; this run applies 10 s end-to-start pacing to every request as the D01 S2 boundary requires.",
+    "Prices come from the page's embedded variant feed (price_number) and take the lowest finite positive variant price; compare-at prices, shipping and bundles are ignored.",
+    "No tax-inclusive/exclusive statement exists in the static HTML, so tax_basis stays unknown_not_stated.",
+    "Options are the public variant dimensions; all SKU combinations were not enumerated as separate products.",
+    "The 'Piezas compatibles' cross-sell block and customer reviews are excluded from description_html.",
+    "The site shows a 'Delivery to United States' suggestion because of the egress IP; quotes stay EUR and JSON-LD shipping/return policies target ES. No delivery-country cookie was set and no currency conversion was performed.",
+    "429 handling waits for Retry-After up to 60 s, retries at most 3 attempts, then stops the run.",
+    "sitemap.xml declares 6665 product URLs; it is a site-level denominator, not this bounded category scope.",
+    "discovery used 1 category page(s) and kept 30 unique products within the 30-page cap."
+  ],
+  "artifacts": {
+    "valid_csv": "valid.csv",
+    "run_summary": "run-summary.json",
+    "diagnostics_dir": "diagnostics/d01-run-001/"
+  }
+}

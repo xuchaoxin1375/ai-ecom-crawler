@@ -1,0 +1,1549 @@
+{
+  "task_id": "d01-skatepro-d01-run-001-20261120T002926Z",
+  "label": "d01-run-001",
+  "plan_id": "skatepro-es-d01",
+  "plan_version": "2026.11.20-1",
+  "run_started_at": "2026-11-20T00:29:26Z",
+  "run_finished_at": "2026-11-20T00:35:44Z",
+  "build_started_at": null,
+  "first_valid_at": "2026-11-20T00:30:13Z",
+  "first_valid_product_s": null,
+  "elapsed_s": 378.23,
+  "state": "FINISHED",
+  "outcome": "PARTIAL",
+  "stop_reason": "BUDGET_EXHAUSTED",
+  "stop_detail": "task cap reached: processed 30 product pages; 3 navigation entries remain",
+  "counts": {
+    "discovered_urls": 35,
+    "pending_navigation_entries": 3,
+    "product_candidates": 30,
+    "pending_products": 0,
+    "in_flight_products": 0,
+    "processed_products": 30,
+    "valid_products": 30,
+    "excluded_products": 0,
+    "failed_products": 0,
+    "partial_description_products": 0
+  },
+  "coverage": {
+    "status": "PARTIAL",
+    "denominator_source": "https://www.skatepro.es/sitemap.xml product URL count at run time",
+    "denominator": 6665,
+    "covered": 30,
+    "notes": "Discovery scope is the entry page's category grid, capped at 30 product pages; 30 valid products of 6665 sitemap product URLs. This is a bounded sample, not a full-site completion claim."
+  },
+  "requests": 34,
+  "retries": 0,
+  "per_purpose": {
+    "robots": 1,
+    "entry": 1,
+    "category": 1,
+    "sitemap": 1,
+    "product": 30
+  },
+  "per_status": {
+    "status_200": 34
+  },
+  "errors": [],
+  "discovery": {
+    "entry_url": "https://www.skatepro.es/",
+    "entry_final_url": "https://www.skatepro.es/",
+    "html_lang": "es",
+    "html_title": "SkatePro - Especialistas en Deportes de Acción",
+    "site_name": "SkatePro",
+    "category_urls_available": 450,
+    "visited_categories": [
+      "https://www.skatepro.es/c2.htm"
+    ],
+    "kept_products": 30,
+    "duplicate_urls": 0,
+    "filtered_urls": 0,
+    "pending_navigation": [
+      "https://www.skatepro.es/c2.htm?page=2",
+      "https://www.skatepro.es/c251.htm",
+      "https://www.skatepro.es/c252.htm"
+    ],
+    "sitemap_url": "https://www.skatepro.es/sitemap.xml",
+    "sitemap_product_count": 6665,
+    "robots_status": 200,
+    "notes": [
+      "sitemap.xml declares 6665 product URLs; it is a site-level denominator, not this bounded category scope.",
+      "discovery used 1 category page(s) and kept 30 unique products within the 30-page cap."
+    ]
+  },
+  "product_audits": [
+    {
+      "source_url": "https://www.skatepro.es/243-35728.htm",
+      "name": "Native Stem Tabla Scooter",
+      "price_amount": "49.95",
+      "price_currency": "EUR",
+      "description_status": "complete",
+      "description_chars": 2126,
+      "partial_reason": "",
+      "category": "Patinetes > Recambios Patinete > Tablas",
+      "brand": "Native",
+      "options": [
+        [
+          "Longitud",
+          [
+            "520mm",
+            "560mm"
+          ]
+        ],
+        [
+          "Color",
+          [
+            "Raw",
+            "Saundezy",
+            "Xl Raw",
+            "Xl"
+          ]
+        ]
+      ],
+      "availability": "in_stock",
+      "variant_count": 6,
+      "zero_price_variants": 0,
+      "missing_reasons": {},
+      "evidence": {
+        "source_kind": "static_html",
+        "currency": "json_ld_offer_priceCurrency=EUR",
+        "price_source": "php2js_variants_min_price_number",
+        "variant_prices_considered": 6,
+        "availability": {
+          "json_ld_in_stock": 6,
+          "json_ld_out_of_stock": 0,
+          "available_variants": 6,
+          "total_variants": 6
+        },
+        "description": {
+          "dom_body_chars": 1228,
+          "spec_rows": 14,
+          "json_ld_chars": 1228
+        },
+        "tax_basis": "no_tax_inclusive_or_exclusive statement found in static HTML",
+        "ld_product_count": 1
+      },
+      "outcome": "valid",
+      "detail": ""
+    },
+    {
+      "source_url": "https://www.skatepro.es/246-8437.htm",
+      "name": "Ethic DTC (Caucho) Puños Patinete",
+      "price_amount": "6.95",
+      "price_currency": "EUR",
+      "description_status": "complete",
+      "description_chars": 496,
+      "partial_reason": "",
+      "category": "Patinetes > Recambios Patinete > Puños",
+      "brand": "Ethic",
+      "options": [
+        [
+          "Color",
+          [
+            "Negro",
+            "Transparente",
+            "Rojo",
+            "Azul",
+            "Marrón",
+            "Verde"
+          ]
+        ]
+      ],
+      "availability": "in_stock",
+      "variant_count": 6,
+      "zero_price_variants": 0,
+      "missing_reasons": {},
+      "evidence": {
+        "source_kind": "static_html",
+        "currency": "json_ld_offer_priceCurrency=EUR",
+        "price_source": "php2js_variants_min_price_number",
+        "variant_prices_considered": 6,
+        "availability": {
+          "json_ld_in_stock": 6,
+          "json_ld_out_of_stock": 0,
+          "available_variants": 6,
+          "total_variants": 6
+        },
+        "description": {
+          "dom_body_chars": 143,
+          "spec_rows": 6,
+          "json_ld_chars": 143
+        },
+        "tax_basis": "no_tax_inclusive_or_exclusive statement found in static HTML",
+        "ld_product_count": 1
+      },
+      "outcome": "valid",
+      "detail": ""
+    },
+    {
+      "source_url": "https://www.skatepro.es/242-28856.htm",
+      "name": "Root Estándar Manillar Scooter en T",
+      "price_amount": "39.95",
+      "price_currency": "EUR",
+      "description_status": "complete",
+      "description_chars": 1348,
+      "partial_reason": "",
+      "category": "Patinetes > Recambios Patinete > Manillares",
+      "brand": "Root Industries",
+      "options": [
+        [
+          "Longitud",
+          [
+            "610mm",
+            "710mm"
+          ]
+        ],
+        [
+          "Color",
+          [
+            "Negro"
+          ]
+        ]
+      ],
+      "availability": "in_stock",
+      "variant_count": 2,
+      "zero_price_variants": 0,
+      "missing_reasons": {},
+      "evidence": {
+        "source_kind": "static_html",
+        "currency": "json_ld_offer_priceCurrency=EUR",
+        "price_source": "php2js_variants_min_price_number",
+        "variant_prices_considered": 2,
+        "availability": {
+          "json_ld_in_stock": 2,
+          "json_ld_out_of_stock": 0,
+          "available_variants": 2,
+          "total_variants": 2
+        },
+        "description": {
+          "dom_body_chars": 621,
+          "spec_rows": 12,
+          "json_ld_chars": 621
+        },
+        "tax_basis": "no_tax_inclusive_or_exclusive statement found in static HTML",
+        "ld_product_count": 1
+      },
+      "outcome": "valid",
+      "detail": ""
+    },
+    {
+      "source_url": "https://www.skatepro.es/218-36511.htm",
+      "name": "Longway Adam Scooter Freestyle",
+      "price_amount": "69.95",
+      "price_currency": "EUR",
+      "description_status": "complete",
+      "description_chars": 2683,
+      "partial_reason": "",
+      "category": "Patinetes > Freestyle",
+      "brand": "Longway",
+      "options": [
+        [
+          "Color",
+          [
+            "Negro"
+          ]
+        ],
+        [
+          "Altura total",
+          [
+            "81cm (31.9\")"
+          ]
+        ]
+      ],
+      "availability": "in_stock",
+      "variant_count": 1,
+      "zero_price_variants": 0,
+      "missing_reasons": {},
+      "evidence": {
+        "source_kind": "static_html",
+        "currency": "json_ld_offer_priceCurrency=EUR",
+        "price_source": "php2js_variants_min_price_number",
+        "variant_prices_considered": 1,
+        "availability": {
+          "json_ld_in_stock": 1,
+          "json_ld_out_of_stock": 0,
+          "available_variants": 1,
+          "total_variants": 1
+        },
+        "description": {
+          "dom_body_chars": 732,
+          "spec_rows": 34,
+          "json_ld_chars": 732
+        },
+        "tax_basis": "no_tax_inclusive_or_exclusive statement found in static HTML",
+        "ld_product_count": 1
+      },
+      "outcome": "valid",
+      "detail": ""
+    },
+    {
+      "source_url": "https://www.skatepro.es/218-49189.htm",
+      "name": "CORE CL1 Scooter Freestyle",
+      "price_amount": "199.95",
+      "price_currency": "EUR",
+      "description_status": "complete",
+      "description_chars": 2215,
+      "partial_reason": "",
+      "category": "Patinetes > Freestyle",
+      "brand": "Core",
+      "options": [
+        [
+          "Color",
+          [
+            "Chrome/Teal",
+            "Negro",
+            "Negro/Neochrome",
+            "Rosa",
+            "Turtlesent",
+            "Negro/Rojo"
+          ]
+        ],
+        [
+          "Altura total",
+          [
+            "85cm (33.5\")"
+          ]
+        ]
+      ],
+      "availability": "in_stock",
+      "variant_count": 6,
+      "zero_price_variants": 0,
+      "missing_reasons": {},
+      "evidence": {
+        "source_kind": "static_html",
+        "currency": "json_ld_offer_priceCurrency=EUR",
+        "price_source": "php2js_variants_min_price_number",
+        "variant_prices_considered": 6,
+        "availability": {
+          "json_ld_in_stock": 6,
+          "json_ld_out_of_stock": 0,
+          "available_variants": 6,
+          "total_variants": 6
+        },
+        "description": {
+          "dom_body_chars": 696,
+          "spec_rows": 26,
+          "json_ld_chars": 696
+        },
+        "tax_basis": "no_tax_inclusive_or_exclusive statement found in static HTML",
+        "ld_product_count": 1
+      },
+      "outcome": "valid",
+      "detail": ""
+    },
+    {
+      "source_url": "https://www.skatepro.es/218-49492.htm",
+      "name": "Ethic Erawan V2 Scooter Freestyle",
+      "price_amount": "199.95",
+      "price_currency": "EUR",
+      "description_status": "complete",
+      "description_chars": 2258,
+      "partial_reason": "",
+      "category": "Patinetes > Freestyle",
+      "brand": "Ethic",
+      "options": [
+        [
+          "Altura total",
+          [
+            "80cm (31.5\")",
+            "85cm (33.5\")"
+          ]
+        ],
+        [
+          "Color",
+          [
+            "Neochrome",
+            "Negro",
+            "Brushed",
+            "Blue Iridium",
+            "Azul",
+            "Rojo"
+          ]
+        ]
+      ],
+      "availability": "in_stock",
+      "variant_count": 8,
+      "zero_price_variants": 0,
+      "missing_reasons": {},
+      "evidence": {
+        "source_kind": "static_html",
+        "currency": "json_ld_offer_priceCurrency=EUR",
+        "price_source": "php2js_variants_min_price_number",
+        "variant_prices_considered": 8,
+        "availability": {
+          "json_ld_in_stock": 6,
+          "json_ld_out_of_stock": 0,
+          "available_variants": 8,
+          "total_variants": 8
+        },
+        "description": {
+          "dom_body_chars": 675,
+          "spec_rows": 27,
+          "json_ld_chars": 675
+        },
+        "tax_basis": "no_tax_inclusive_or_exclusive statement found in static HTML",
+        "ld_product_count": 1
+      },
+      "outcome": "valid",
+      "detail": ""
+    },
+    {
+      "source_url": "https://www.skatepro.es/108-52297.htm",
+      "name": "Indo Kickstart Scooter Cama Elastica",
+      "price_amount": "79.95",
+      "price_currency": "EUR",
+      "description_status": "complete",
+      "description_chars": 1525,
+      "partial_reason": "",
+      "category": "Patinetes > Camas elásticas",
+      "brand": "Indo",
+      "options": [
+        [
+          "Color",
+          [
+            "Negro"
+          ]
+        ]
+      ],
+      "availability": "in_stock",
+      "variant_count": 1,
+      "zero_price_variants": 0,
+      "missing_reasons": {},
+      "evidence": {
+        "source_kind": "static_html",
+        "currency": "json_ld_offer_priceCurrency=EUR",
+        "price_source": "php2js_variants_min_price_number",
+        "variant_prices_considered": 1,
+        "availability": {
+          "json_ld_in_stock": 1,
+          "json_ld_out_of_stock": 0,
+          "available_variants": 1,
+          "total_variants": 1
+        },
+        "description": {
+          "dom_body_chars": 1011,
+          "spec_rows": 6,
+          "json_ld_chars": 1011
+        },
+        "tax_basis": "no_tax_inclusive_or_exclusive statement found in static HTML",
+        "ld_product_count": 1
+      },
+      "outcome": "valid",
+      "detail": ""
+    },
+    {
+      "source_url": "https://www.skatepro.es/108-53429.htm",
+      "name": "Indo Fusion Scooter Cama Elastica",
+      "price_amount": "119.95",
+      "price_currency": "EUR",
+      "description_status": "complete",
+      "description_chars": 888,
+      "partial_reason": "",
+      "category": "Patinetes > Camas elásticas",
+      "brand": "Indo",
+      "options": [
+        [
+          "Color",
+          [
+            "Classic",
+            "Tornado"
+          ]
+        ]
+      ],
+      "availability": "in_stock",
+      "variant_count": 2,
+      "zero_price_variants": 0,
+      "missing_reasons": {},
+      "evidence": {
+        "source_kind": "static_html",
+        "currency": "json_ld_offer_priceCurrency=EUR",
+        "price_source": "php2js_variants_min_price_number",
+        "variant_prices_considered": 2,
+        "availability": {
+          "json_ld_in_stock": 2,
+          "json_ld_out_of_stock": 0,
+          "available_variants": 2,
+          "total_variants": 2
+        },
+        "description": {
+          "dom_body_chars": 456,
+          "spec_rows": 6,
+          "json_ld_chars": 456
+        },
+        "tax_basis": "no_tax_inclusive_or_exclusive statement found in static HTML",
+        "ld_product_count": 1
+      },
+      "outcome": "valid",
+      "detail": ""
+    },
+    {
+      "source_url": "https://www.skatepro.es/108-52296.htm",
+      "name": "Indo Pro V2 Scooter Cama Elastica",
+      "price_amount": "129.95",
+      "price_currency": "EUR",
+      "description_status": "complete",
+      "description_chars": 1461,
+      "partial_reason": "",
+      "category": "Patinetes > Camas elásticas",
+      "brand": "Indo",
+      "options": [
+        [
+          "Color",
+          [
+            "Azul"
+          ]
+        ]
+      ],
+      "availability": "in_stock",
+      "variant_count": 1,
+      "zero_price_variants": 0,
+      "missing_reasons": {},
+      "evidence": {
+        "source_kind": "static_html",
+        "currency": "json_ld_offer_priceCurrency=EUR",
+        "price_source": "php2js_variants_min_price_number",
+        "variant_prices_considered": 1,
+        "availability": {
+          "json_ld_in_stock": 1,
+          "json_ld_out_of_stock": 0,
+          "available_variants": 1,
+          "total_variants": 1
+        },
+        "description": {
+          "dom_body_chars": 999,
+          "spec_rows": 6,
+          "json_ld_chars": 999
+        },
+        "tax_basis": "no_tax_inclusive_or_exclusive statement found in static HTML",
+        "ld_product_count": 1
+      },
+      "outcome": "valid",
+      "detail": ""
+    },
+    {
+      "source_url": "https://www.skatepro.es/218-53652.htm",
+      "name": "Panda Cub Scooter Freestyle",
+      "price_amount": "79.95",
+      "price_currency": "EUR",
+      "description_status": "complete",
+      "description_chars": 2044,
+      "partial_reason": "",
+      "category": "Patinetes > Freestyle",
+      "brand": "Panda",
+      "options": [
+        [
+          "Color",
+          [
+            "Gold Painted",
+            "Verde",
+            "Lila",
+            "Gold Deck",
+            "Black/Rainbow",
+            "Rosa",
+            "Negro"
+          ]
+        ],
+        [
+          "Altura total",
+          [
+            "70cm (27.5\")"
+          ]
+        ]
+      ],
+      "availability": "in_stock",
+      "variant_count": 7,
+      "zero_price_variants": 0,
+      "missing_reasons": {},
+      "evidence": {
+        "source_kind": "static_html",
+        "currency": "json_ld_offer_priceCurrency=EUR",
+        "price_source": "php2js_variants_min_price_number",
+        "variant_prices_considered": 7,
+        "availability": {
+          "json_ld_in_stock": 7,
+          "json_ld_out_of_stock": 0,
+          "available_variants": 7,
+          "total_variants": 7
+        },
+        "description": {
+          "dom_body_chars": 531,
+          "spec_rows": 26,
+          "json_ld_chars": 531
+        },
+        "tax_basis": "no_tax_inclusive_or_exclusive statement found in static HTML",
+        "ld_product_count": 1
+      },
+      "outcome": "valid",
+      "detail": ""
+    },
+    {
+      "source_url": "https://www.skatepro.es/218-54773.htm",
+      "name": "Panda Nubi Scooter Freestyle Niños",
+      "price_amount": "69.95",
+      "price_currency": "EUR",
+      "description_status": "complete",
+      "description_chars": 1510,
+      "partial_reason": "",
+      "category": "Patinetes > Freestyle",
+      "brand": "Panda",
+      "options": [
+        [
+          "Color",
+          [
+            "Negro",
+            "Gris",
+            "Oro",
+            "Blanco",
+            "Verde turquesa"
+          ]
+        ],
+        [
+          "Altura total",
+          [
+            "75cm (29.5\")"
+          ]
+        ]
+      ],
+      "availability": "in_stock",
+      "variant_count": 5,
+      "zero_price_variants": 0,
+      "missing_reasons": {},
+      "evidence": {
+        "source_kind": "static_html",
+        "currency": "json_ld_offer_priceCurrency=EUR",
+        "price_source": "php2js_variants_min_price_number",
+        "variant_prices_considered": 5,
+        "availability": {
+          "json_ld_in_stock": 5,
+          "json_ld_out_of_stock": 0,
+          "available_variants": 5,
+          "total_variants": 5
+        },
+        "description": {
+          "dom_body_chars": 543,
+          "spec_rows": 17,
+          "json_ld_chars": 543
+        },
+        "tax_basis": "no_tax_inclusive_or_exclusive statement found in static HTML",
+        "ld_product_count": 1
+      },
+      "outcome": "valid",
+      "detail": ""
+    },
+    {
+      "source_url": "https://www.skatepro.es/218-44809.htm",
+      "name": "Striker Lux Youth Scooter Freestyle",
+      "price_amount": "229.95",
+      "price_currency": "EUR",
+      "description_status": "complete",
+      "description_chars": 2286,
+      "partial_reason": "",
+      "category": "Patinetes > Freestyle",
+      "brand": "Striker",
+      "options": [
+        [
+          "Color",
+          [
+            "Lila",
+            "Verde turquesa"
+          ]
+        ],
+        [
+          "Altura total",
+          [
+            "76cm (29.9\")"
+          ]
+        ]
+      ],
+      "availability": "in_stock",
+      "variant_count": 2,
+      "zero_price_variants": 0,
+      "missing_reasons": {},
+      "evidence": {
+        "source_kind": "static_html",
+        "currency": "json_ld_offer_priceCurrency=EUR",
+        "price_source": "php2js_variants_min_price_number",
+        "variant_prices_considered": 2,
+        "availability": {
+          "json_ld_in_stock": 2,
+          "json_ld_out_of_stock": 0,
+          "available_variants": 2,
+          "total_variants": 2
+        },
+        "description": {
+          "dom_body_chars": 752,
+          "spec_rows": 26,
+          "json_ld_chars": 752
+        },
+        "tax_basis": "no_tax_inclusive_or_exclusive statement found in static HTML",
+        "ld_product_count": 1
+      },
+      "outcome": "valid",
+      "detail": ""
+    },
+    {
+      "source_url": "https://www.skatepro.es/90-38715.htm",
+      "name": "Rocker Rolla Patinete Ruedas Grandes",
+      "price_amount": "169.95",
+      "price_currency": "EUR",
+      "description_status": "complete",
+      "description_chars": 2219,
+      "partial_reason": "",
+      "category": "Patinetes > Ruedas grandes > Patinetes",
+      "brand": "Rocker",
+      "options": [
+        [
+          "Color",
+          [
+            "Verde turquesa"
+          ]
+        ]
+      ],
+      "availability": "in_stock",
+      "variant_count": 1,
+      "zero_price_variants": 0,
+      "missing_reasons": {},
+      "evidence": {
+        "source_kind": "static_html",
+        "currency": "json_ld_offer_priceCurrency=EUR",
+        "price_source": "php2js_variants_min_price_number",
+        "variant_prices_considered": 1,
+        "availability": {
+          "json_ld_in_stock": 1,
+          "json_ld_out_of_stock": 0,
+          "available_variants": 1,
+          "total_variants": 1
+        },
+        "description": {
+          "dom_body_chars": 1161,
+          "spec_rows": 15,
+          "json_ld_chars": 1161
+        },
+        "tax_basis": "no_tax_inclusive_or_exclusive statement found in static HTML",
+        "ld_product_count": 1
+      },
+      "outcome": "valid",
+      "detail": ""
+    },
+    {
+      "source_url": "https://www.skatepro.es/90-27757.htm",
+      "name": "Street Surfing KB2 Patinete Ruedas Grandes",
+      "price_amount": "189.95",
+      "price_currency": "EUR",
+      "description_status": "complete",
+      "description_chars": 1240,
+      "partial_reason": "",
+      "category": "Patinetes > Ruedas grandes > Patinetes",
+      "brand": "Streetsurfing",
+      "options": [
+        [
+          "Color",
+          [
+            "Python",
+            "Desert Wolf"
+          ]
+        ]
+      ],
+      "availability": "in_stock",
+      "variant_count": 2,
+      "zero_price_variants": 0,
+      "missing_reasons": {},
+      "evidence": {
+        "source_kind": "static_html",
+        "currency": "json_ld_offer_priceCurrency=EUR",
+        "price_source": "php2js_variants_min_price_number",
+        "variant_prices_considered": 2,
+        "availability": {
+          "json_ld_in_stock": 2,
+          "json_ld_out_of_stock": 0,
+          "available_variants": 2,
+          "total_variants": 2
+        },
+        "description": {
+          "dom_body_chars": 489,
+          "spec_rows": 11,
+          "json_ld_chars": 489
+        },
+        "tax_basis": "no_tax_inclusive_or_exclusive statement found in static HTML",
+        "ld_product_count": 1
+      },
+      "outcome": "valid",
+      "detail": ""
+    },
+    {
+      "source_url": "https://www.skatepro.es/90-50761.htm",
+      "name": "HangUp Velocity Patinete Ruedas Grandes",
+      "price_amount": "124.95",
+      "price_currency": "EUR",
+      "description_status": "complete",
+      "description_chars": 2259,
+      "partial_reason": "",
+      "category": "Patinetes > Ruedas grandes > Patinetes",
+      "brand": "HangUp",
+      "options": [
+        [
+          "Color",
+          [
+            "Verde"
+          ]
+        ]
+      ],
+      "availability": "in_stock",
+      "variant_count": 1,
+      "zero_price_variants": 0,
+      "missing_reasons": {},
+      "evidence": {
+        "source_kind": "static_html",
+        "currency": "json_ld_offer_priceCurrency=EUR",
+        "price_source": "php2js_variants_min_price_number",
+        "variant_prices_considered": 1,
+        "availability": {
+          "json_ld_in_stock": 1,
+          "json_ld_out_of_stock": 0,
+          "available_variants": 1,
+          "total_variants": 1
+        },
+        "description": {
+          "dom_body_chars": 1382,
+          "spec_rows": 14,
+          "json_ld_chars": 1382
+        },
+        "tax_basis": "no_tax_inclusive_or_exclusive statement found in static HTML",
+        "ld_product_count": 1
+      },
+      "outcome": "valid",
+      "detail": ""
+    },
+    {
+      "source_url": "https://www.skatepro.es/81-35122.htm",
+      "name": "SkatePro Hoja de pegatinas",
+      "price_amount": "2.95",
+      "price_currency": "EUR",
+      "description_status": "complete",
+      "description_chars": 332,
+      "partial_reason": "",
+      "category": "Patinetes > Merchandise > Pegatinas",
+      "brand": "SkatePro",
+      "options": [
+        [
+          "Color",
+          [
+            "V7 Ramps"
+          ]
+        ]
+      ],
+      "availability": "in_stock",
+      "variant_count": 1,
+      "zero_price_variants": 0,
+      "missing_reasons": {
+        "specifications": "NOT_PROVIDED"
+      },
+      "evidence": {
+        "source_kind": "static_html",
+        "currency": "json_ld_offer_priceCurrency=EUR",
+        "price_source": "php2js_variants_min_price_number",
+        "variant_prices_considered": 1,
+        "availability": {
+          "json_ld_in_stock": 1,
+          "json_ld_out_of_stock": 0,
+          "available_variants": 1,
+          "total_variants": 1
+        },
+        "description": {
+          "dom_body_chars": 258,
+          "spec_rows": 0,
+          "json_ld_chars": 258
+        },
+        "tax_basis": "no_tax_inclusive_or_exclusive statement found in static HTML",
+        "ld_product_count": 1
+      },
+      "outcome": "valid",
+      "detail": ""
+    },
+    {
+      "source_url": "https://www.skatepro.es/254-42673.htm",
+      "name": "CORE Classic Pegatina Patinete",
+      "price_amount": "0.95",
+      "price_currency": "EUR",
+      "description_status": "complete",
+      "description_chars": 310,
+      "partial_reason": "",
+      "category": "Patinetes > Merchandise > Pegatinas",
+      "brand": "Core",
+      "options": [
+        [
+          "Color",
+          [
+            "Red Stamp",
+            "Neon Splat",
+            "Chrome Foil",
+            "Black",
+            "Split Black/Teal",
+            "Neon Galaxy",
+            "Split Pink/Blue",
+            "Tie Dye",
+            "Split Red/Black",
+            "Teal",
+            "Red"
+          ]
+        ]
+      ],
+      "availability": "in_stock",
+      "variant_count": 11,
+      "zero_price_variants": 0,
+      "missing_reasons": {
+        "specifications": "NOT_PROVIDED"
+      },
+      "evidence": {
+        "source_kind": "static_html",
+        "currency": "json_ld_offer_priceCurrency=EUR",
+        "price_source": "php2js_variants_min_price_number",
+        "variant_prices_considered": 11,
+        "availability": {
+          "json_ld_in_stock": 11,
+          "json_ld_out_of_stock": 0,
+          "available_variants": 11,
+          "total_variants": 11
+        },
+        "description": {
+          "dom_body_chars": 240,
+          "spec_rows": 0,
+          "json_ld_chars": 240
+        },
+        "tax_basis": "no_tax_inclusive_or_exclusive statement found in static HTML",
+        "ld_product_count": 1
+      },
+      "outcome": "valid",
+      "detail": ""
+    },
+    {
+      "source_url": "https://www.skatepro.es/254-52451.htm",
+      "name": "Tilt Compilation Pegatina Patinete",
+      "price_amount": "0.95",
+      "price_currency": "EUR",
+      "description_status": "complete",
+      "description_chars": 609,
+      "partial_reason": "",
+      "category": "Patinetes > Merchandise > Pegatinas",
+      "brand": "Tilt",
+      "options": [],
+      "availability": "in_stock",
+      "variant_count": 1,
+      "zero_price_variants": 0,
+      "missing_reasons": {
+        "options": "NOT_PROVIDED",
+        "specifications": "NOT_PROVIDED"
+      },
+      "evidence": {
+        "source_kind": "static_html",
+        "currency": "json_ld_offer_priceCurrency=EUR",
+        "price_source": "php2js_variants_min_price_number",
+        "variant_prices_considered": 1,
+        "availability": {
+          "json_ld_in_stock": 1,
+          "json_ld_out_of_stock": 0,
+          "available_variants": 1,
+          "total_variants": 1
+        },
+        "description": {
+          "dom_body_chars": 595,
+          "spec_rows": 0,
+          "json_ld_chars": 595
+        },
+        "tax_basis": "no_tax_inclusive_or_exclusive statement found in static HTML",
+        "ld_product_count": 1
+      },
+      "outcome": "valid",
+      "detail": ""
+    },
+    {
+      "source_url": "https://www.skatepro.es/72-39541.htm",
+      "name": "CORE Street Casco",
+      "price_amount": "49.95",
+      "price_currency": "EUR",
+      "description_status": "complete",
+      "description_chars": 850,
+      "partial_reason": "",
+      "category": "Patines > Protecciones > Cascos",
+      "brand": "Core",
+      "options": [
+        [
+          "Talla",
+          [
+            "XS-S",
+            "S-M",
+            "L-XL"
+          ]
+        ],
+        [
+          "Color",
+          [
+            "Negro",
+            "Gloss Neochrome Black",
+            "All Black",
+            "Negro/Rojo",
+            "Blanco",
+            "Gloss Neochrome White",
+            "Azul",
+            "Neochrome/Blanco",
+            "Neochrome/Negro",
+            "White/White",
+            "Gris"
+          ]
+        ]
+      ],
+      "availability": "in_stock",
+      "variant_count": 33,
+      "zero_price_variants": 0,
+      "missing_reasons": {},
+      "evidence": {
+        "source_kind": "static_html",
+        "currency": "json_ld_offer_priceCurrency=EUR",
+        "price_source": "php2js_variants_min_price_number",
+        "variant_prices_considered": 33,
+        "availability": {
+          "json_ld_in_stock": 24,
+          "json_ld_out_of_stock": 0,
+          "available_variants": 28,
+          "total_variants": 33
+        },
+        "description": {
+          "dom_body_chars": 732,
+          "spec_rows": 1,
+          "json_ld_chars": 732
+        },
+        "tax_basis": "no_tax_inclusive_or_exclusive statement found in static HTML",
+        "ld_product_count": 1
+      },
+      "outcome": "valid",
+      "detail": ""
+    },
+    {
+      "source_url": "https://www.skatepro.es/114-10576.htm",
+      "name": "Triple Eight Saver Protecciones Skate 3 Piezas",
+      "price_amount": "49.95",
+      "price_currency": "EUR",
+      "description_status": "complete",
+      "description_chars": 564,
+      "partial_reason": "",
+      "category": "Patines > Protecciones > Niños > Protecciones",
+      "brand": "Triple Eight",
+      "options": [
+        [
+          "Talla",
+          [
+            "Junior",
+            "XS",
+            "S",
+            "M",
+            "L"
+          ]
+        ],
+        [
+          "Color",
+          [
+            "Pacific Beach",
+            "Sunset",
+            "Negro",
+            "Floral"
+          ]
+        ]
+      ],
+      "availability": "in_stock",
+      "variant_count": 19,
+      "zero_price_variants": 0,
+      "missing_reasons": {},
+      "evidence": {
+        "source_kind": "static_html",
+        "currency": "json_ld_offer_priceCurrency=EUR",
+        "price_source": "php2js_variants_min_price_number",
+        "variant_prices_considered": 19,
+        "availability": {
+          "json_ld_in_stock": 16,
+          "json_ld_out_of_stock": 0,
+          "available_variants": 16,
+          "total_variants": 19
+        },
+        "description": {
+          "dom_body_chars": 450,
+          "spec_rows": 1,
+          "json_ld_chars": 450
+        },
+        "tax_basis": "no_tax_inclusive_or_exclusive statement found in static HTML",
+        "ld_product_count": 1
+      },
+      "outcome": "valid",
+      "detail": ""
+    },
+    {
+      "source_url": "https://www.skatepro.es/72-39540.htm",
+      "name": "CORE Action Sports Casco",
+      "price_amount": "24.95",
+      "price_currency": "EUR",
+      "description_status": "complete",
+      "description_chars": 1186,
+      "partial_reason": "",
+      "category": "Patines > Protecciones > Cascos",
+      "brand": "Core",
+      "options": [
+        [
+          "Talla",
+          [
+            "XS-S",
+            "S-M",
+            "L-XL"
+          ]
+        ],
+        [
+          "Color",
+          [
+            "Negro",
+            "Neochrome",
+            "Light Pink",
+            "Army Green",
+            "Neon Green",
+            "Verde turquesa",
+            "Azul",
+            "Rosa",
+            "Gris",
+            "Blanco",
+            "Navy Blue",
+            "Peach Salmon",
+            "Bright Pink",
+            "Lila"
+          ]
+        ]
+      ],
+      "availability": "in_stock",
+      "variant_count": 42,
+      "zero_price_variants": 0,
+      "missing_reasons": {},
+      "evidence": {
+        "source_kind": "static_html",
+        "currency": "json_ld_offer_priceCurrency=EUR",
+        "price_source": "php2js_variants_min_price_number",
+        "variant_prices_considered": 42,
+        "availability": {
+          "json_ld_in_stock": 40,
+          "json_ld_out_of_stock": 0,
+          "available_variants": 40,
+          "total_variants": 42
+        },
+        "description": {
+          "dom_body_chars": 659,
+          "spec_rows": 8,
+          "json_ld_chars": 659
+        },
+        "tax_basis": "no_tax_inclusive_or_exclusive statement found in static HTML",
+        "ld_product_count": 1
+      },
+      "outcome": "valid",
+      "detail": ""
+    },
+    {
+      "source_url": "https://www.skatepro.es/47-53236.htm",
+      "name": "Core CORE Mini Kicker Rampa (Plegable)",
+      "price_amount": "37.95",
+      "price_currency": "EUR",
+      "description_status": "complete",
+      "description_chars": 1220,
+      "partial_reason": "",
+      "category": "Patinetes > Rampas",
+      "brand": "Core",
+      "options": [
+        [
+          "Color",
+          [
+            "Black"
+          ]
+        ]
+      ],
+      "availability": "in_stock",
+      "variant_count": 1,
+      "zero_price_variants": 0,
+      "missing_reasons": {},
+      "evidence": {
+        "source_kind": "static_html",
+        "currency": "json_ld_offer_priceCurrency=EUR",
+        "price_source": "php2js_variants_min_price_number",
+        "variant_prices_considered": 1,
+        "availability": {
+          "json_ld_in_stock": 1,
+          "json_ld_out_of_stock": 0,
+          "available_variants": 1,
+          "total_variants": 1
+        },
+        "description": {
+          "dom_body_chars": 1046,
+          "spec_rows": 2,
+          "json_ld_chars": 1046
+        },
+        "tax_basis": "no_tax_inclusive_or_exclusive statement found in static HTML",
+        "ld_product_count": 1
+      },
+      "outcome": "valid",
+      "detail": ""
+    },
+    {
+      "source_url": "https://www.skatepro.es/47-12941.htm",
+      "name": "Mini Rampa Rampage Single",
+      "price_amount": "37.95",
+      "price_currency": "EUR",
+      "description_status": "complete",
+      "description_chars": 452,
+      "partial_reason": "",
+      "category": "Patinetes > Rampas",
+      "brand": "Rampage",
+      "options": [],
+      "availability": "in_stock",
+      "variant_count": 1,
+      "zero_price_variants": 0,
+      "missing_reasons": {
+        "options": "NOT_PROVIDED",
+        "specifications": "NOT_PROVIDED"
+      },
+      "evidence": {
+        "source_kind": "static_html",
+        "currency": "json_ld_offer_priceCurrency=EUR",
+        "price_source": "php2js_variants_min_price_number",
+        "variant_prices_considered": 1,
+        "availability": {
+          "json_ld_in_stock": 1,
+          "json_ld_out_of_stock": 0,
+          "available_variants": 1,
+          "total_variants": 1
+        },
+        "description": {
+          "dom_body_chars": 400,
+          "spec_rows": 0,
+          "json_ld_chars": 400
+        },
+        "tax_basis": "no_tax_inclusive_or_exclusive statement found in static HTML",
+        "ld_product_count": 1
+      },
+      "outcome": "valid",
+      "detail": ""
+    },
+    {
+      "source_url": "https://www.skatepro.es/47-15254.htm",
+      "name": "Rampage Carril de Grindeo",
+      "price_amount": "89.95",
+      "price_currency": "EUR",
+      "description_status": "complete",
+      "description_chars": 1207,
+      "partial_reason": "",
+      "category": "Patinetes > Rampas",
+      "brand": "Rampage",
+      "options": [],
+      "availability": "in_stock",
+      "variant_count": 1,
+      "zero_price_variants": 0,
+      "missing_reasons": {
+        "options": "NOT_PROVIDED"
+      },
+      "evidence": {
+        "source_kind": "static_html",
+        "currency": "json_ld_offer_priceCurrency=EUR",
+        "price_source": "php2js_variants_min_price_number",
+        "variant_prices_considered": 1,
+        "availability": {
+          "json_ld_in_stock": 1,
+          "json_ld_out_of_stock": 0,
+          "available_variants": 1,
+          "total_variants": 1
+        },
+        "description": {
+          "dom_body_chars": 958,
+          "spec_rows": 1,
+          "json_ld_chars": 958
+        },
+        "tax_basis": "no_tax_inclusive_or_exclusive statement found in static HTML",
+        "ld_product_count": 1
+      },
+      "outcome": "valid",
+      "detail": ""
+    },
+    {
+      "source_url": "https://www.skatepro.es/37-55736.htm",
+      "name": "ABUS Combiflex Candado De Cable",
+      "price_amount": "21.95",
+      "price_currency": "EUR",
+      "description_status": "complete",
+      "description_chars": 574,
+      "partial_reason": "",
+      "category": "Patinetes > Candados",
+      "brand": "ABUS",
+      "options": [
+        [
+          "Longitud",
+          [
+            "65cm",
+            "85cm",
+            "105cm"
+          ]
+        ]
+      ],
+      "availability": "in_stock",
+      "variant_count": 3,
+      "zero_price_variants": 0,
+      "missing_reasons": {
+        "specifications": "NOT_PROVIDED"
+      },
+      "evidence": {
+        "source_kind": "static_html",
+        "currency": "json_ld_offer_priceCurrency=EUR",
+        "price_source": "php2js_variants_min_price_number",
+        "variant_prices_considered": 3,
+        "availability": {
+          "json_ld_in_stock": 2,
+          "json_ld_out_of_stock": 0,
+          "available_variants": 2,
+          "total_variants": 3
+        },
+        "description": {
+          "dom_body_chars": 560,
+          "spec_rows": 0,
+          "json_ld_chars": 560
+        },
+        "tax_basis": "no_tax_inclusive_or_exclusive statement found in static HTML",
+        "ld_product_count": 1
+      },
+      "outcome": "valid",
+      "detail": ""
+    },
+    {
+      "source_url": "https://www.skatepro.es/45-12207.htm",
+      "name": "Dakine Cool Lock Esquí Candado",
+      "price_amount": "21.95",
+      "price_currency": "EUR",
+      "description_status": "complete",
+      "description_chars": 838,
+      "partial_reason": "",
+      "category": "Patinetes > Candados",
+      "brand": "Dakine",
+      "options": [
+        [
+          "Color",
+          [
+            "Gris"
+          ]
+        ]
+      ],
+      "availability": "in_stock",
+      "variant_count": 1,
+      "zero_price_variants": 0,
+      "missing_reasons": {
+        "specifications": "NOT_PROVIDED"
+      },
+      "evidence": {
+        "source_kind": "static_html",
+        "currency": "json_ld_offer_priceCurrency=EUR",
+        "price_source": "php2js_variants_min_price_number",
+        "variant_prices_considered": 1,
+        "availability": {
+          "json_ld_in_stock": 1,
+          "json_ld_out_of_stock": 0,
+          "available_variants": 1,
+          "total_variants": 1
+        },
+        "description": {
+          "dom_body_chars": 817,
+          "spec_rows": 0,
+          "json_ld_chars": 817
+        },
+        "tax_basis": "no_tax_inclusive_or_exclusive statement found in static HTML",
+        "ld_product_count": 1
+      },
+      "outcome": "valid",
+      "detail": ""
+    },
+    {
+      "source_url": "https://www.skatepro.es/45-25422.htm",
+      "name": "Burton Cable Snowboard Candado",
+      "price_amount": "21.95",
+      "price_currency": "EUR",
+      "description_status": "complete",
+      "description_chars": 532,
+      "partial_reason": "",
+      "category": "Invierno > Snowboard > Accesorios",
+      "brand": "Burton",
+      "options": [
+        [
+          "Color",
+          [
+            "Negro"
+          ]
+        ]
+      ],
+      "availability": "in_stock",
+      "variant_count": 1,
+      "zero_price_variants": 0,
+      "missing_reasons": {},
+      "evidence": {
+        "source_kind": "static_html",
+        "currency": "json_ld_offer_priceCurrency=EUR",
+        "price_source": "php2js_variants_min_price_number",
+        "variant_prices_considered": 1,
+        "availability": {
+          "json_ld_in_stock": 1,
+          "json_ld_out_of_stock": 0,
+          "available_variants": 1,
+          "total_variants": 1
+        },
+        "description": {
+          "dom_body_chars": 413,
+          "spec_rows": 1,
+          "json_ld_chars": 413
+        },
+        "tax_basis": "no_tax_inclusive_or_exclusive statement found in static HTML",
+        "ld_product_count": 1
+      },
+      "outcome": "valid",
+      "detail": ""
+    },
+    {
+      "source_url": "https://www.skatepro.es/67-32578.htm",
+      "name": "Eretic Snow Scooter Powder",
+      "price_amount": "399.95",
+      "price_currency": "EUR",
+      "description_status": "complete",
+      "description_chars": 1207,
+      "partial_reason": "",
+      "category": "Invierno > Snow Action Fun > Snowscoots",
+      "brand": "Eretic",
+      "options": [],
+      "availability": "in_stock",
+      "variant_count": 1,
+      "zero_price_variants": 0,
+      "missing_reasons": {
+        "options": "NOT_PROVIDED"
+      },
+      "evidence": {
+        "source_kind": "static_html",
+        "currency": "json_ld_offer_priceCurrency=EUR",
+        "price_source": "php2js_variants_min_price_number",
+        "variant_prices_considered": 1,
+        "availability": {
+          "json_ld_in_stock": 1,
+          "json_ld_out_of_stock": 0,
+          "available_variants": 1,
+          "total_variants": 1
+        },
+        "description": {
+          "dom_body_chars": 576,
+          "spec_rows": 9,
+          "json_ld_chars": 576
+        },
+        "tax_basis": "no_tax_inclusive_or_exclusive statement found in static HTML",
+        "ld_product_count": 1
+      },
+      "outcome": "valid",
+      "detail": ""
+    },
+    {
+      "source_url": "https://www.skatepro.es/67-55821.htm",
+      "name": "Stiga Snow Kick",
+      "price_amount": "59.95",
+      "price_currency": "EUR",
+      "description_status": "complete",
+      "description_chars": 776,
+      "partial_reason": "",
+      "category": "Invierno > Snow Action Fun > Snowscoots",
+      "brand": "Stiga",
+      "options": [
+        [
+          "Color",
+          [
+            "Verde",
+            "Negro"
+          ]
+        ]
+      ],
+      "availability": "in_stock",
+      "variant_count": 2,
+      "zero_price_variants": 0,
+      "missing_reasons": {},
+      "evidence": {
+        "source_kind": "static_html",
+        "currency": "json_ld_offer_priceCurrency=EUR",
+        "price_source": "php2js_variants_min_price_number",
+        "variant_prices_considered": 2,
+        "availability": {
+          "json_ld_in_stock": 2,
+          "json_ld_out_of_stock": 0,
+          "available_variants": 2,
+          "total_variants": 2
+        },
+        "description": {
+          "dom_body_chars": 478,
+          "spec_rows": 4,
+          "json_ld_chars": 478
+        },
+        "tax_basis": "no_tax_inclusive_or_exclusive statement found in static HTML",
+        "ld_product_count": 1
+      },
+      "outcome": "valid",
+      "detail": ""
+    },
+    {
+      "source_url": "https://www.skatepro.es/67-43723.htm",
+      "name": "Eretic Powder Snow Scooter Base",
+      "price_amount": "279.95",
+      "price_currency": "EUR",
+      "description_status": "complete",
+      "description_chars": 558,
+      "partial_reason": "",
+      "category": "Invierno > Snow Action Fun > Snowscoots",
+      "brand": "Eretic",
+      "options": [
+        [
+          "Color",
+          [
+            "Blanco"
+          ]
+        ]
+      ],
+      "availability": "in_stock",
+      "variant_count": 1,
+      "zero_price_variants": 0,
+      "missing_reasons": {
+        "specifications": "NOT_PROVIDED"
+      },
+      "evidence": {
+        "source_kind": "static_html",
+        "currency": "json_ld_offer_priceCurrency=EUR",
+        "price_source": "php2js_variants_min_price_number",
+        "variant_prices_considered": 1,
+        "availability": {
+          "json_ld_in_stock": 1,
+          "json_ld_out_of_stock": 0,
+          "available_variants": 1,
+          "total_variants": 1
+        },
+        "description": {
+          "dom_body_chars": 454,
+          "spec_rows": 0,
+          "json_ld_chars": 454
+        },
+        "tax_basis": "no_tax_inclusive_or_exclusive statement found in static HTML",
+        "ld_product_count": 1
+      },
+      "outcome": "valid",
+      "detail": ""
+    }
+  ],
+  "availability_summary": {
+    "in_stock": 30
+  },
+  "runtime": {
+    "llm_calls": 0,
+    "raw_pages_retained": false,
+    "browser_launched": false,
+    "http_engine": "scrapling.FetcherSession (curl_cffi, static HTML)",
+    "scrapling_version": "0.5.1",
+    "concurrency": 1,
+    "request_interval_seconds": 10.0,
+    "max_attempts": 3
+  },
+  "errors_count": 0
+}
