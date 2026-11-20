@@ -224,7 +224,7 @@ python experiments/r06/tools/validate_runtime.py --root experiments/r06/runtime-
 - 入口页只展示 6 个商品，未做 10～20 个随机抽样；6／6 是小样本全量，不是全站覆盖。
 - familidoo 只验证一个站点、一次运行；shopthebulkstore 是第二站 10 商品有界样本；没有独立复跑和跨环境导入。
 - 只支持静态 HTML；没有浏览器、登录、挑战处理或 JavaScript 渲染。
-- sitemap、`page_param`、`html_index` 和 `public_json` 已有真实站点有界验证；没有多种子、POST／GraphQL、load more／无限滚动或详情补全。
+- sitemap、`page_param`、`html_index` 和 `public_json` 已有真实站点有界验证；没有单 source seeds 列表、POST／GraphQL、load more／无限滚动或详情补全；多个 sources 有测试。
 - 运行时只有单 worker；有逻辑对账和失败分类测试，但没有跨进程锁、队列或真实进程崩溃演练；暂停／恢复只在无网络测试中验证过。
 - 单次运行执行器没有任务控制；任务控制只在 `runtime/` 中实现。
 - 没有 Web UI；`task list/status` 是 CLI。
