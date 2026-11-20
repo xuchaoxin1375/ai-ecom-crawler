@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/ecom-crawler/candidate-record.schema.json",
+  "title": "D02 candidate product input",
+  "description": "One JSON object per line in candidates.jsonl. The shape is intentionally permissive: incomplete records are classified into excluded/failed diagnostics instead of aborting the batch.",
+  "type": "object",
+  "properties": {
+    "source_url": {"type": "string"},
+    "name": {"type": "string"},
+    "price": {
+      "type": "object",
+      "properties": {
+        "amount": {"type": ["number", "string", "null"]},
+        "currency": {"type": ["string", "null"]},
+        "tax_basis": {"type": ["string", "null"]},
+        "price_basis": {"type": ["string", "null"]},
+        "displayed": {"type": ["number", "string", "null"]},
+        "pretax": {"type": ["number", "string", "null"]},
+        "variants": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "amount": {"type": ["number", "string", "null"]},
+              "available": {"type": "boolean"},
+              "tax_basis": {"type": ["string", "null"]},
+              "options": {"type": ["object", "array", "null"]}
+            },
+            "additionalProperties": true
+          }
+        },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "amount": {"type": ["number", "string", "null"]},
+              "label": {"type": ["string", "null"]},
+              "tax_basis": {"type": ["string", "null"]}
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "primary_image_url": {"type": ["string", "null"]},
+    "description": {
+      "type": "object",
+      "properties": {
+        "html": {"type": ["string", "null"]},
+        "text": {"type": ["string", "null"]},
+        "format": {"enum": ["html", "text", null]},
+        "status": {"type": ["string", "null"]},
+        "partial_reason": {"type": ["string", "null"]},
+        "missing_reasons": {"type": "object"},
+        "blocks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["kind"],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "marketing",
+                  "specs",
+                  "other",
+                  "compatibility",
+                  "package",
+                  "ingredients",
+                  "policy",
+                  "internal"
+                ]
+              },
+              "html": {"type": ["string", "null"]},
+              "text": {"type": ["string", "null"]}
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "description_html": {"type": ["string", "null"]},
+    "description_format": {"enum": ["html", "text", null]},
+    "description_status": {"type": ["string", "null"]},
+    "partial_reason": {"type": ["string", "null"]},
+    "missing_reasons": {"type": "object"},
+    "categories": {
+      "oneOf": [
+        {"type": "array", "items": {"type": "string"}},
+        {"type": "string"}
+      ]
+    },
+    "options": {"type": ["array", "object", "null"]},
+    "brand": {"type": ["string", "null"]},
+    "availability": {"type": ["string", "null"]},
+    "sales_unit": {"type": ["string", "null"]},
+    "market": {"type": ["string", "null"]},
+    "locale": {"type": ["string", "null"]},
+    "extracted_at": {"type": ["string", "null"]},
+    "field_sources": {"type": "object"}
+  },
+  "additionalProperties": true
+}
