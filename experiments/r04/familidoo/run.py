@@ -97,6 +97,7 @@ class ProductRecord:
     source_url: str
     sku: str = ""
     availability: str = ""
+    name_source: str = ""
     price_displayed: float | None = None
     price_pretax: float | None = None
     tax_basis: str = ""
@@ -229,6 +230,40 @@ def clean_text(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value)).strip()
 
 
+def strip_site_suffix(value: str, page: Selector) -> str:
+    """Remove a trailing/leading shop name from a title-like value."""
+    site = attr_of(page, 'meta[property="og:site_name"]', "content")
+    if not site:
+        return value
+    for separator in (" - ", " | ", " – ", " — "):
+        suffix = separator + site
+        prefix = site + separator
+        if value.endswith(suffix):
+            return value[: -len(suffix)].strip()
+        if value.startswith(prefix):
+            return value[len(prefix) :].strip()
+    return value
+
+
+def extract_name(page: Selector) -> tuple[str, str]:
+    """Return (name, source) using the common e-commerce fallback order."""
+    for selector, source in (
+        ('h1[itemprop="name"]', "h1_itemprop"),
+        ("h1", "h1"),
+        ('meta[property="og:title"]', "og_title"),
+        ("title", "title"),
+    ):
+        if selector.startswith("meta"):
+            value = attr_of(page, selector, "content")
+        else:
+            value = text_of(page, selector)
+        if value:
+            if source in {"og_title", "title"}:
+                value = strip_site_suffix(value, page)
+            return value, source
+    return "", ""
+
+
 def as_float(value: Any) -> float | None:
     if value is None:
         return None
@@ -309,7 +344,7 @@ def serialize_options(page: Selector) -> str:
 
 
 def extract_product(page: Selector, source_url: str) -> ProductRecord:
-    name = text_of(page, 'h1[itemprop="name"]') or text_of(page, "h1")
+    name, name_source = extract_name(page)
     price, currency, basis, displayed, pretax = pick_price(page)
     if price is None:
         raise PlanError("no positive price")
@@ -348,6 +383,7 @@ def extract_product(page: Selector, source_url: str) -> ProductRecord:
         source_url=canonical,
         sku=sku,
         availability=availability,
+        name_source=name_source,
         price_displayed=displayed,
         price_pretax=pretax,
         tax_basis=basis,
@@ -479,6 +515,7 @@ def main(argv: list[str] | None = None) -> int:
                         "source_url": record.source_url,
                         "status": "valid",
                         "name": record.name,
+                        "name_source": record.name_source,
                         "price_amount": record.price_amount,
                         "price_currency": record.price_currency,
                         "price_displayed": record.price_displayed,

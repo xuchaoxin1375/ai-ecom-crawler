@@ -4,7 +4,7 @@ plan_version: "2026.11.20-1"
 kind: program
 status: candidate
 created_at: "2026-11-20T02:56:00Z"
-updated_at: "2026-11-20T03:02:52Z"
+updated_at: "2026-11-20T03:45:39Z"
 
 site:
   name: "Familidoo"
@@ -86,7 +86,7 @@ evidence:
     - "https://www.familidoo.fr/fr/iglu/74427-bascule-en-mousse-iglu-banane-4751005644831.html"
   expected:
     - {source_url: "https://www.familidoo.fr/fr/poussette-quadruple/74464-poussette-4-places-lidoo-lite-cosmic-black-0615402035002.html", name: "Poussette 4 places Lidoo Lite Cosmic Black", price.amount: 512.5, price.currency: "EUR"}
-  verified_at: "2026-11-20T03:02:52Z"
+  verified_at: "2026-11-20T03:45:39Z"
   limitations:
     - "R04 pilot; not D01 verified."
     - "Only the six homepage product links; not full-site coverage."
