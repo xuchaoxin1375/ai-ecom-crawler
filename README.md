@@ -39,11 +39,15 @@ python scripts/export_docs.py
 
 默认生成 `dist/ai-ecom-crawler-docs.zip`，包根为 `docs/` 的内容，内含 `manifest.json`（每个文件的大小与 SHA-256；清单自身不计入）。
 
-复核一个已生成的包：
+## 校验
 
 ```powershell
+python scripts/check_docs_links.py
+python scripts/export_docs.py
 python scripts/export_docs.py --check dist/ai-ecom-crawler-docs.zip
 ```
+
+R06 原型测试见 [`experiments/r06/README.md`](experiments/r06/README.md)；Schema 测试需要 `jsonschema`，缺依赖时跳过不算全绿。
 
 ## 当前状态与边界
 

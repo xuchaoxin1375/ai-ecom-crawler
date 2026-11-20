@@ -14,3 +14,10 @@
 - 新增或复核站点后，把日期、实际出口、客户端、请求数、结论写回对应 probe 的 `probe.json` / `README.md`，或 `docs/12` 的初筛表；不要只留在会话里。
 - 文档改动后运行 `python scripts/export_docs.py`，再用 `python scripts/export_docs.py --check dist/ai-ecom-crawler-docs.zip` 复核；纯 Markdown 改动至少检查相对链接。
 - 不提交 `dist/`、密钥、Cookie、浏览器 profile 或整页原文。
+
+## 仓库校验
+
+- 文档：`python scripts/check_docs_links.py`；`python scripts/export_docs.py`；`python scripts/export_docs.py --check dist/ai-ecom-crawler-docs.zip`。
+- 运行时原型：`python -m uv run --project experiments/framework-compare/scrapling --with "pyyaml==6.0.3" --with "jsonschema>=4.23" python -m unittest discover -s experiments/r06/tests -v`。
+- Schema 测试不得默认跳过；缺 `jsonschema` 时先补依赖再跑，带 skip 的结果不算完整通过。
+- 真实站点验证仍按预算和证据要求手工执行，不纳入默认校验。
