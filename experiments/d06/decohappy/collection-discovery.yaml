@@ -1,0 +1,95 @@
+schema_version: "1.1"
+rule_id: "decohappy-fr-collection-d06"
+rule_version: "2026.11.21-1"
+kind: declarative
+status: candidate
+created_at: "2026-11-21T07:56:00+08:00"
+updated_at: "2026-11-21T07:56:16+08:00"
+
+site:
+  name: "Decohappy"
+  entry_urls: ["https://decohappy.com/fr/collections/all"]
+  allowed_origins: ["https://decohappy.com"]
+  allowed_path_prefixes: ["/fr", "/fr/"]
+  market: "FR"
+  locale: "fr-FR"
+  currency: "EUR"
+
+scope:
+  include: ['^/fr/products/[^/]+$']
+  exclude:
+    - "/cart"
+    - "/checkout"
+    - "/account"
+    - "/collections/"
+    - "/pages/"
+    - "/blogs/"
+    - "/search"
+  max_products: 30
+  max_seconds: 120
+  notes: "D06 page-1 category discovery; 68 pagination links exist, only page 1 fetched."
+
+capabilities:
+  discovery: true
+  product: false
+
+discovery:
+  strategies: ["entry_links"]
+  entry_url: "https://decohappy.com/fr/collections/all"
+  link_selector: 'a[href*="/products/"]'
+  product_url_patterns: ['^/fr/products/[^/]+$']
+  url_identity: "canonical"
+  notes: "Category page 1 only; pagination signal is recorded, not followed."
+
+fetch:
+  default_engine: "static"
+  concurrency: 1
+  delay_ms: 1000
+  retry: {max_attempts: 1, backoff_ms: 1000}
+  timeout_ms: 45000
+  browser: false
+  login: false
+  challenge_handling: "none; stop and record"
+
+normalize:
+  price:
+    tax_basis: "unspecified"
+    choose: "smaller_public_pair"
+    positive_only: true
+
+validate:
+  required_fields: []
+  assertions: []
+
+output:
+  url_list:
+    enabled: true
+    columns: ["url", "source", "status", "title"]
+    format: "csv"
+  task_result: true
+
+task_defaults:
+  max_urls: 30
+  max_products: 30
+  max_seconds: 120
+  concurrency:
+    navigation: 1
+    product: 1
+
+compatibility:
+  os: ["windows", "linux", "wsl2"]
+  runtime: "python>=3.11"
+  dependencies: ["scrapling==0.5.1", "curl_cffi==0.17.0", "patchright==1.64.4", "browserforge==1.2.4", "pyyaml==6.0.3", "lxml", "protego"]
+  browser: "none for static"
+
+evidence:
+  sample_urls:
+    - "https://decohappy.com/fr/collections/all"
+  expected:
+    - "24 product URLs on collection page 1"
+  verified_at: "2026-11-21T07:56:16+08:00"
+  limitations:
+    - "Only collection page 1; 68 pagination links exist."
+    - "Discovery only; product pages are not fetched."
+
+notes: "D06 cross-path: localized HTML collection page; public /fr/products.json returned a different Spanish catalog."

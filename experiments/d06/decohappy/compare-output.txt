@@ -1,0 +1,7 @@
+homepage A08: 6
+collection page 1: 24
+public JSON: 6
+homepage ∩ collection: 0
+homepage ∩ JSON: 0
+collection ∩ JSON: 0
+all three: 0

@@ -1,0 +1,28 @@
+{"ts": "2026-11-20T23:56:14Z", "event": "task_reconciled", "in_flight": 0, "reset": 0, "failed": 0, "orphan_files_removed": 0, "stale_result": false, "corrupt_product_lines": 0}
+{"ts": "2026-11-20T23:56:14Z", "event": "task_started", "task_type": "discovery", "plan_id": "decohappy-fr-collection-d06"}
+{"ts": "2026-11-20T23:56:16Z", "event": "url_discovered", "url": "https://decohappy.com/fr/products/sticker-triangle-chien-a-bord", "source": "https://decohappy.com/fr/collections/all"}
+{"ts": "2026-11-20T23:56:16Z", "event": "url_discovered", "url": "https://decohappy.com/fr/products/bebe-a-bord-ange", "source": "https://decohappy.com/fr/collections/all"}
+{"ts": "2026-11-20T23:56:16Z", "event": "url_discovered", "url": "https://decohappy.com/fr/products/bebe-a-bord-dune-voiture-orange-bebe", "source": "https://decohappy.com/fr/collections/all"}
+{"ts": "2026-11-20T23:56:16Z", "event": "url_discovered", "url": "https://decohappy.com/fr/products/bebe-a-bord-qui-dort-bebe-menthe", "source": "https://decohappy.com/fr/collections/all"}
+{"ts": "2026-11-20T23:56:16Z", "event": "url_discovered", "url": "https://decohappy.com/fr/products/bebe-a-bord-qui-dort-bebe-rose", "source": "https://decohappy.com/fr/collections/all"}
+{"ts": "2026-11-20T23:56:16Z", "event": "url_discovered", "url": "https://decohappy.com/fr/products/bebe-a-bord-qui-dort-bebe-rose-1", "source": "https://decohappy.com/fr/collections/all"}
+{"ts": "2026-11-20T23:56:16Z", "event": "url_discovered", "url": "https://decohappy.com/fr/products/bebe-a-bord-du-lapin-endormi-rose", "source": "https://decohappy.com/fr/collections/all"}
+{"ts": "2026-11-20T23:56:16Z", "event": "url_discovered", "url": "https://decohappy.com/fr/products/bebe-a-bord-dun-chat-endormi", "source": "https://decohappy.com/fr/collections/all"}
+{"ts": "2026-11-20T23:56:16Z", "event": "url_discovered", "url": "https://decohappy.com/fr/products/bebe-a-bord-dort-dans-une-voiture-triangle-rose-koala", "source": "https://decohappy.com/fr/collections/all"}
+{"ts": "2026-11-20T23:56:16Z", "event": "url_discovered", "url": "https://decohappy.com/fr/products/bebe-a-bord-endormi-koala-menthe", "source": "https://decohappy.com/fr/collections/all"}
+{"ts": "2026-11-20T23:56:16Z", "event": "url_discovered", "url": "https://decohappy.com/fr/products/bebe-a-bord-endormi-ours-menthe", "source": "https://decohappy.com/fr/collections/all"}
+{"ts": "2026-11-20T23:56:16Z", "event": "url_discovered", "url": "https://decohappy.com/fr/products/bordure-pour-enfants-abc-animaux-heureux", "source": "https://decohappy.com/fr/collections/all"}
+{"ts": "2026-11-20T23:56:16Z", "event": "url_discovered", "url": "https://decohappy.com/fr/products/frontiere-pour-enfants-angel-bueno", "source": "https://decohappy.com/fr/collections/all"}
+{"ts": "2026-11-20T23:56:16Z", "event": "url_discovered", "url": "https://decohappy.com/fr/products/bordure-enfant-animaux-de-la-jungle", "source": "https://decohappy.com/fr/collections/all"}
+{"ts": "2026-11-20T23:56:16Z", "event": "url_discovered", "url": "https://decohappy.com/fr/products/bordure-enfant-animaux-train-jaune", "source": "https://decohappy.com/fr/collections/all"}
+{"ts": "2026-11-20T23:56:16Z", "event": "url_discovered", "url": "https://decohappy.com/fr/products/bordure-pour-enfants-animaux-train-etoiles", "source": "https://decohappy.com/fr/collections/all"}
+{"ts": "2026-11-20T23:56:16Z", "event": "url_discovered", "url": "https://decohappy.com/fr/products/frise-enfant-animaux-train-rose", "source": "https://decohappy.com/fr/collections/all"}
+{"ts": "2026-11-20T23:56:16Z", "event": "url_discovered", "url": "https://decohappy.com/fr/products/bordure-de-carreaux-roses-pour-enfants", "source": "https://decohappy.com/fr/collections/all"}
+{"ts": "2026-11-20T23:56:16Z", "event": "url_discovered", "url": "https://decohappy.com/fr/products/bordure-pour-enfants-bebes-oiseaux", "source": "https://decohappy.com/fr/collections/all"}
+{"ts": "2026-11-20T23:56:16Z", "event": "url_discovered", "url": "https://decohappy.com/fr/products/bordure-des-enfants-du-ballon-du-monde-heureux", "source": "https://decohappy.com/fr/collections/all"}
+{"ts": "2026-11-20T23:56:16Z", "event": "url_discovered", "url": "https://decohappy.com/fr/products/bordure-pour-enfants-happy-earth-ball", "source": "https://decohappy.com/fr/collections/all"}
+{"ts": "2026-11-20T23:56:16Z", "event": "url_discovered", "url": "https://decohappy.com/fr/products/frontiere-des-enfants-de-caperufeliz", "source": "https://decohappy.com/fr/collections/all"}
+{"ts": "2026-11-20T23:56:16Z", "event": "url_discovered", "url": "https://decohappy.com/fr/products/bordure-pour-enfants-ciel-happy-girl", "source": "https://decohappy.com/fr/collections/all"}
+{"ts": "2026-11-20T23:56:16Z", "event": "url_discovered", "url": "https://decohappy.com/fr/products/bordure-pour-enfants-ciel-enfant-heureux", "source": "https://decohappy.com/fr/collections/all"}
+{"ts": "2026-11-20T23:56:16Z", "event": "item_finished", "item_type": "navigation", "url": "https://decohappy.com/fr/collections/all", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-20T23:56:16Z", "event": "task_finished", "state": "FINISHED", "outcome": "COMPLETED", "stop_reason": "NATURAL_END"}

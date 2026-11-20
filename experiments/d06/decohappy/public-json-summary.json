@@ -1,0 +1,123 @@
+{
+  "source_url": "https://decohappy.com/fr/products.json?limit=6",
+  "fetched_at": "2026-11-21T07:54:44+08:00",
+  "status": 200,
+  "bytes": 44283,
+  "note": "Returned a Spanish wallpaper/poster catalog; 0 overlap with /fr homepage or /fr/collections/all page 1. Currency is not present in this payload and was not used.",
+  "products": [
+    {
+      "handle": "papel-pintado-9100005-marron",
+      "title": "Papel Pintado 9100005 Marrón | Coordonné",
+      "product_type": "Papel Pintado",
+      "vendor": "Coordonné",
+      "variant_count": 1,
+      "min_price": 158.8,
+      "max_price": 158.8,
+      "body_chars": 2853,
+      "first_image": "https://cdn.shopify.com/s/files/1/0606/4409/8148/files/9100005-wallpaper-coordonne_d21c96b7-e169-413f-a785-d8bb18b5ac98.jpg?v=1773398938",
+      "tags": [
+        "Coordonné",
+        "Fabricado en España",
+        "Free match",
+        "Papel Pintado",
+        "Piece Unique"
+      ]
+    },
+    {
+      "handle": "papel-pintado-abr-wine",
+      "title": "Papel Pintado Abr Wine | Coordonné",
+      "product_type": "Papel Pintado",
+      "vendor": "Coordonné",
+      "variant_count": 2,
+      "min_price": 97.9,
+      "max_price": 137.06,
+      "body_chars": 3996,
+      "first_image": "https://cdn.shopify.com/s/files/1/0606/4409/8148/files/abr-wine-repeated-patterns-coordonne_2738b3bc-820f-4eab-9903-ff81da792ca9.jpg?v=1773398926",
+      "tags": [
+        "Coordonné",
+        "Diseño: Abr",
+        "Fabricado en España",
+        "Ikart",
+        "Non-woven",
+        "Papel Pintado",
+        "Straight match",
+        "Vinyl"
+      ]
+    },
+    {
+      "handle": "papel-pintado-abr-black",
+      "title": "Papel Pintado Abr Black | Coordonné",
+      "product_type": "Papel Pintado",
+      "vendor": "Coordonné",
+      "variant_count": 2,
+      "min_price": 97.9,
+      "max_price": 137.06,
+      "body_chars": 3790,
+      "first_image": "https://cdn.shopify.com/s/files/1/0606/4409/8148/files/abr-black-repeated-patterns-coordonne_fac8c7cf-1487-40e6-a026-69e144af854e.jpg?v=1773398913",
+      "tags": [
+        "Black",
+        "Coordonné",
+        "Diseño: Abr",
+        "Fabricado en España",
+        "Ikart",
+        "Non-woven",
+        "Papel Pintado",
+        "Straight match"
+      ]
+    },
+    {
+      "handle": "papel-pintado-abr-cream",
+      "title": "Papel Pintado Abr Cream | Coordonné",
+      "product_type": "Papel Pintado",
+      "vendor": "Coordonné",
+      "variant_count": 2,
+      "min_price": 97.9,
+      "max_price": 137.06,
+      "body_chars": 4146,
+      "first_image": "https://cdn.shopify.com/s/files/1/0606/4409/8148/files/abr-cream-repeated-patterns-coordonne_a20fe1ac-eb71-4280-85c2-99f257c2e38e.jpg?v=1773398898",
+      "tags": [
+        "Coordonné",
+        "Cream",
+        "Diseño: Abr",
+        "Fabricado en España",
+        "Ikart",
+        "Non-woven",
+        "Papel Pintado",
+        "Straight match"
+      ]
+    },
+    {
+      "handle": "papel-pintado-abr-green",
+      "title": "Papel Pintado Abr Green | Coordonné",
+      "product_type": "Papel Pintado",
+      "vendor": "Coordonné",
+      "variant_count": 2,
+      "min_price": 97.9,
+      "max_price": 137.06,
+      "body_chars": 5940,
+      "first_image": "https://cdn.shopify.com/s/files/1/0606/4409/8148/files/abr-green-repeated-patterns-coordonne.jpg?v=1773401555",
+      "tags": [
+        "Coordonné",
+        "Diseño: Abr",
+        "Fabricado en España",
+        "Green",
+        "Ikart",
+        "Non-woven",
+        "Papel Pintado",
+        "Straight match"
+      ]
+    },
+    {
+      "handle": "lamina-infantil-mapamundi-politico-colores",
+      "title": "Lámina infantil Mapamundi político colores",
+      "product_type": "Lámina",
+      "vendor": "Decohappy",
+      "variant_count": 3,
+      "min_price": 13.9,
+      "max_price": 40.0,
+      "body_chars": 3112,
+      "first_image": "https://cdn.shopify.com/s/files/1/0606/4409/8148/files/lamina-infantil-mapamundi-politico-colores-04.png?v=1768582130",
+      "tags": []
+    }
+  ]
+}
