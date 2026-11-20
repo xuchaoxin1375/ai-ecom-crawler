@@ -81,6 +81,8 @@ python -m uv run --project app ecom-crawler export `
   --out-dir experiments/d03/familidoo/export
 python -m uv run --project app ecom-crawler validate `
   --run-dir experiments/d03/familidoo/export
+python experiments/r06/tools/validate_runtime.py `
+  --root experiments/d03/familidoo
 ```
 
 ## D02 导出结果
