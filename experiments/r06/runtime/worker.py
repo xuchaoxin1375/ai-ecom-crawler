@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -12,6 +11,7 @@ from typing import Any
 
 from scrapling.fetchers import FetcherSession
 
+from .atomic import write_json
 from .fetcher import DomainLimiter, ScraplingFetcher
 from .models import Task
 from .rule import RulePackage, load_rule
@@ -94,6 +94,15 @@ class Worker:
         except Exception as exc:  # noqa: BLE001 - task boundary
             self._fail(task, "PLAN_ERROR", f"{type(exc).__name__}: {exc}")
             return
+        if rule.rule_id != task.plan_id or rule.rule_version != task.plan_version:
+            self._fail(
+                task,
+                "PLAN_ERROR",
+                "plan version mismatch: "
+                f"task={task.plan_id}@{task.plan_version} "
+                f"rule={rule.rule_id}@{rule.rule_version}",
+            )
+            return
         try:
             with self.fetcher_factory(rule, self.limiter) as fetcher:
                 runner = TaskRunner(
@@ -122,13 +131,13 @@ class Worker:
         payload = {
             "task_id": task.task_id,
             "task_type": task.task_type,
+            "plan_id": task.plan_id,
+            "plan_version": task.plan_version,
             "state": "FINISHED",
             "outcome": "FAILED",
             "stop_reason": reason,
             "stop_detail": detail,
+            "failure_classes": {"transient": 0, "permanent": 0, "blocked": 0},
             "counts": {},
         }
-        (task_dir / "task-result.json").write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
+        write_json(task_dir / "task-result.json", payload)

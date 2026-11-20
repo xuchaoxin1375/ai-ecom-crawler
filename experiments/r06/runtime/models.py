@@ -21,6 +21,7 @@ TASK_STATES = {
 TERMINAL_TASK_STATES = {"CANCELLED", "FINISHED"}
 ITEM_TYPES = {"navigation", "product"}
 ITEM_STATES = {"PENDING", "IN_FLIGHT", "DONE", "EXCLUDED", "FAILED"}
+FAILURE_CLASSES = {"transient", "permanent", "blocked"}
 
 
 def utc_now() -> str:
@@ -43,8 +44,8 @@ def json_loads(value: str | None, default: Any) -> Any:
 @dataclass
 class Task:
     task_id: str
-    rule_id: str
-    rule_version: str
+    plan_id: str
+    plan_version: str
     task_type: str
     state: str = "DRAFT"
     outcome: str | None = None
@@ -75,6 +76,7 @@ class WorkItem:
     stage: str = "discover"
     state: str = "PENDING"
     attempts: int = 0
+    failure_class: str | None = None
     parent_url: str | None = None
     discovered_from: str | None = None
     result: dict[str, Any] = field(default_factory=dict)
@@ -85,6 +87,8 @@ class WorkItem:
             raise ValueError(f"unsupported item_type: {self.item_type!r}")
         if self.state not in ITEM_STATES:
             raise ValueError(f"unsupported item state: {self.state!r}")
+        if self.failure_class is not None and self.failure_class not in FAILURE_CLASSES:
+            raise ValueError(f"unsupported failure_class: {self.failure_class!r}")
 
 
 @dataclass

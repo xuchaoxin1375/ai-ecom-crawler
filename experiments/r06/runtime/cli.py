@@ -38,6 +38,7 @@ def build_parser() -> argparse.ArgumentParser:
     create.add_argument("--max-urls", type=int, default=None)
     create.add_argument("--max-products", type=int, default=None)
     create.add_argument("--max-seconds", type=float, default=None)
+    create.add_argument("--max-attempts", type=int, default=None)
     create.add_argument("--start", action="store_true", help="queue immediately")
 
     list_cmd = task_sub.add_parser("list", help="list tasks")
@@ -114,14 +115,22 @@ def _task_create(store: TaskStore, args: argparse.Namespace) -> int:
     max_urls = args.max_urls or int(defaults.get("max_urls", 100))
     max_products = args.max_products or int(defaults.get("max_products", 20))
     max_seconds = args.max_seconds or float(defaults.get("max_seconds", 180))
+    if args.max_attempts is not None and args.max_attempts < 1:
+        print("--max-attempts must be a positive integer", file=sys.stderr)
+        return 3
+    max_attempts = (
+        args.max_attempts
+        if args.max_attempts is not None
+        else int(defaults.get("max_attempts", 2))
+    )
     task_id = args.task_id or _default_task_id(rule.rule_id, args.task_type)
     if not re.fullmatch(r"[A-Za-z0-9._-]+", task_id):
         print("task_id may contain letters, digits, dot, underscore and hyphen", file=sys.stderr)
         return 3
     task = Task(
         task_id=task_id,
-        rule_id=rule.rule_id,
-        rule_version=rule.rule_version,
+        plan_id=rule.rule_id,
+        plan_version=rule.rule_version,
         task_type=args.task_type,
         state="QUEUED" if args.start else "DRAFT",
         input={
@@ -132,6 +141,13 @@ def _task_create(store: TaskStore, args: argparse.Namespace) -> int:
             "max_urls": max_urls,
             "max_products": max_products,
             "max_seconds": max_seconds,
+            "max_attempts": max_attempts,
+            "retry_backoff_ms": int(
+                defaults.get(
+                    "retry_backoff_ms",
+                    rule.fetch.get("retry", {}).get("backoff_ms", 1000),
+                )
+            ),
             "concurrency": defaults.get("concurrency", {"navigation": 1, "product": 2}),
         },
         output={
@@ -146,7 +162,8 @@ def _task_create(store: TaskStore, args: argparse.Namespace) -> int:
         return 3
     print(
         f"created {task.task_id} type={task.task_type} state={task.state} "
-        f"max_urls={max_urls} max_products={max_products} max_seconds={max_seconds}"
+        f"max_urls={max_urls} max_products={max_products} "
+        f"max_seconds={max_seconds} max_attempts={max_attempts}"
     )
     return 0
 
@@ -173,8 +190,8 @@ def _task_status(store: TaskStore, task_id: str) -> int:
         return 3
     payload = {
         "task_id": task.task_id,
-        "rule_id": task.rule_id,
-        "rule_version": task.rule_version,
+        "plan_id": task.plan_id,
+        "plan_version": task.plan_version,
         "task_type": task.task_type,
         "state": task.state,
         "outcome": task.outcome,

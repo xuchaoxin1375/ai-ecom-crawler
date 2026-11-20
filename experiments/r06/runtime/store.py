@@ -13,8 +13,8 @@ from .models import Task, WorkItem, json_dumps, json_loads, utc_now
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS tasks (
     task_id TEXT PRIMARY KEY,
-    rule_id TEXT NOT NULL,
-    rule_version TEXT NOT NULL,
+    plan_id TEXT NOT NULL,
+    plan_version TEXT NOT NULL,
     task_type TEXT NOT NULL,
     state TEXT NOT NULL,
     outcome TEXT,
@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS task_items (
     stage TEXT NOT NULL,
     state TEXT NOT NULL,
     attempts INTEGER NOT NULL DEFAULT 0,
+    failure_class TEXT,
     parent_url TEXT,
     discovered_from TEXT,
     result_json TEXT NOT NULL DEFAULT '{}',
@@ -84,6 +85,22 @@ class TaskStore:
     def _init_schema(self) -> None:
         with self._connect() as connection:
             connection.executescript(SCHEMA)
+            task_columns = {
+                row["name"] for row in connection.execute("PRAGMA table_info(tasks)")
+            }
+            if "plan_id" not in task_columns and "rule_id" in task_columns:
+                connection.execute("ALTER TABLE tasks RENAME COLUMN rule_id TO plan_id")
+                connection.execute(
+                    "ALTER TABLE tasks RENAME COLUMN rule_version TO plan_version"
+                )
+            item_columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(task_items)")
+            }
+            if "failure_class" not in item_columns:
+                connection.execute(
+                    "ALTER TABLE task_items ADD COLUMN failure_class TEXT"
+                )
 
     def create_task(self, task: Task) -> None:
         with self._connect() as connection:
@@ -91,15 +108,15 @@ class TaskStore:
                 connection.execute(
                     """
                     INSERT INTO tasks (
-                        task_id, rule_id, rule_version, task_type, state, outcome,
+                        task_id, plan_id, plan_version, task_type, state, outcome,
                         stop_reason, input_json, limits_json, output_json,
                         counters_json, created_at, updated_at, started_at, finished_at
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         task.task_id,
-                        task.rule_id,
-                        task.rule_version,
+                        task.plan_id,
+                        task.plan_version,
                         task.task_type,
                         task.state,
                         task.outcome,
@@ -165,9 +182,9 @@ class TaskStore:
                 """
                 INSERT OR IGNORE INTO task_items (
                     task_id, item_id, item_type, url, normalized_url, stage,
-                    state, attempts, parent_url, discovered_from, result_json,
-                    updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    state, attempts, failure_class, parent_url, discovered_from,
+                    result_json, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     item.task_id,
@@ -178,6 +195,7 @@ class TaskStore:
                     item.stage,
                     item.state,
                     item.attempts,
+                    item.failure_class,
                     item.parent_url,
                     item.discovered_from,
                     json_dumps(item.result),
@@ -228,23 +246,83 @@ class TaskStore:
         item_id: str,
         state: str,
         result: dict[str, Any] | None = None,
+        *,
+        failure_class: str | None = None,
     ) -> None:
         with self._connect() as connection:
             connection.execute(
                 """
                 UPDATE task_items
-                SET state = ?, result_json = ?, updated_at = ?
+                SET state = ?, failure_class = ?, result_json = ?, updated_at = ?
                 WHERE task_id = ? AND item_id = ?
                 """,
-                (state, json_dumps(result or {}), utc_now(), task_id, item_id),
+                (
+                    state,
+                    failure_class,
+                    json_dumps(result or {}),
+                    utc_now(),
+                    task_id,
+                    item_id,
+                ),
             )
+
+    def reconcile_task(self, task_id: str, max_attempts: int) -> dict[str, int]:
+        """Reset in-flight items after a crash; fail those out of attempts."""
+        max_attempts = max(int(max_attempts), 1)
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                rows = connection.execute(
+                    """
+                    SELECT * FROM task_items
+                    WHERE task_id = ? AND state = 'IN_FLIGHT'
+                    """,
+                    (task_id,),
+                ).fetchall()
+                reset = 0
+                failed = 0
+                now = utc_now()
+                for row in rows:
+                    attempts = int(row["attempts"])
+                    if attempts >= max_attempts:
+                        result = {
+                            "reason": "attempts_exhausted",
+                            "failure_class": "transient",
+                            "attempts": attempts,
+                        }
+                        connection.execute(
+                            """
+                            UPDATE task_items
+                            SET state = 'FAILED', failure_class = 'transient',
+                                result_json = ?, updated_at = ?
+                            WHERE task_id = ? AND item_id = ?
+                            """,
+                            (json_dumps(result), now, task_id, row["item_id"]),
+                        )
+                        failed += 1
+                    else:
+                        connection.execute(
+                            """
+                            UPDATE task_items
+                            SET state = 'PENDING', failure_class = NULL,
+                                updated_at = ?
+                            WHERE task_id = ? AND item_id = ?
+                            """,
+                            (now, task_id, row["item_id"]),
+                        )
+                        reset += 1
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+        return {"in_flight": len(rows), "reset": reset, "failed": failed}
 
     def reset_in_flight(self, task_id: str) -> int:
         with self._connect() as connection:
             cursor = connection.execute(
                 """
                 UPDATE task_items
-                SET state = 'PENDING', updated_at = ?
+                SET state = 'PENDING', failure_class = NULL, updated_at = ?
                 WHERE task_id = ? AND state = 'IN_FLIGHT'
                 """,
                 (utc_now(), task_id),
@@ -282,8 +360,8 @@ class TaskStore:
 def _task_from_row(row: sqlite3.Row) -> Task:
     return Task(
         task_id=row["task_id"],
-        rule_id=row["rule_id"],
-        rule_version=row["rule_version"],
+        plan_id=row["plan_id"],
+        plan_version=row["plan_version"],
         task_type=row["task_type"],
         state=row["state"],
         outcome=row["outcome"],
@@ -309,6 +387,7 @@ def _item_from_row(row: sqlite3.Row, *, state: str | None = None) -> WorkItem:
         stage=row["stage"],
         state=state or row["state"],
         attempts=int(row["attempts"]),
+        failure_class=row["failure_class"],
         parent_url=row["parent_url"],
         discovered_from=row["discovered_from"],
         result=json_loads(row["result_json"], {}),

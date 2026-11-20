@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+import sqlite3
 import sys
 import tempfile
 import threading
@@ -80,11 +81,32 @@ class BlockingFetcher(FakeFetcher):
         return super().get(url)
 
 
+class FlakyFetcher(FakeFetcher):
+    def __init__(
+        self,
+        pages: dict[str, tuple[int, str]],
+        *,
+        flaky_url: str,
+        failures: int = 1,
+    ) -> None:
+        super().__init__(pages)
+        self.flaky_url = flaky_url
+        self.failures = failures
+
+    def get(self, url: str) -> FetchResult:
+        if url == self.flaky_url and self.failures > 0:
+            self.failures -= 1
+            self.calls.append(url)
+            self.requests += 1
+            return FetchResult(status=0, url=url, error="timeout")
+        return super().get(url)
+
+
 def make_task(task_type: str, task_id: str | None = None) -> Task:
     return Task(
         task_id=task_id or f"test-{task_type}",
-        rule_id="familidoo-fr-runtime",
-        rule_version="2026.11.20-1",
+        plan_id="familidoo-fr-runtime",
+        plan_version="2026.11.20-1",
         task_type=task_type,
         state="QUEUED",
         input={"rule_path": str(PLAN)},
@@ -92,6 +114,8 @@ def make_task(task_type: str, task_id: str | None = None) -> Task:
             "max_urls": 10,
             "max_products": 10,
             "max_seconds": 10,
+            "max_attempts": 2,
+            "retry_backoff_ms": 0,
             "concurrency": {"navigation": 1, "product": 2},
         },
         output={"url_list": True, "product_csv": task_type == "product"},
@@ -158,6 +182,101 @@ class StoreTests(unittest.TestCase):
             self.assertEqual(store.item_counts(task.task_id)["PENDING"], 1)
             store.mark_item(task.task_id, "i1", "DONE", {"status": "valid"})
             self.assertEqual(store.item_counts(task.task_id)["DONE"], 1)
+
+    def test_reconcile_resets_then_fails_after_max_attempts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = TaskStore(Path(tmp) / "tasks.db")
+            task = make_task("product", "reconcile-task")
+            store.create_task(task)
+            item = WorkItem(
+                task_id=task.task_id,
+                item_id="i1",
+                item_type="product",
+                url=PRODUCT,
+                normalized_url=PRODUCT,
+            )
+            store.add_item(item)
+            store.claim_items(task.task_id, 1)
+            first = store.reconcile_task(task.task_id, 2)
+            self.assertEqual(first, {"in_flight": 1, "reset": 1, "failed": 0})
+            self.assertEqual(store.item_counts(task.task_id)["PENDING"], 1)
+
+            store.claim_items(task.task_id, 1)
+            second = store.reconcile_task(task.task_id, 2)
+            self.assertEqual(second, {"in_flight": 1, "reset": 0, "failed": 1})
+            stored = store.items(task.task_id, "product")[0]
+            self.assertEqual(stored.state, "FAILED")
+            self.assertEqual(stored.failure_class, "transient")
+            self.assertEqual(stored.result["reason"], "attempts_exhausted")
+
+    def test_migrates_legacy_rule_columns(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "legacy.db"
+            connection = sqlite3.connect(db)
+            connection.executescript(
+                """
+                CREATE TABLE tasks (
+                    task_id TEXT PRIMARY KEY,
+                    rule_id TEXT NOT NULL,
+                    rule_version TEXT NOT NULL,
+                    task_type TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    outcome TEXT,
+                    stop_reason TEXT,
+                    input_json TEXT NOT NULL,
+                    limits_json TEXT NOT NULL,
+                    output_json TEXT NOT NULL,
+                    counters_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    started_at TEXT,
+                    finished_at TEXT
+                );
+                CREATE TABLE task_items (
+                    task_id TEXT NOT NULL,
+                    item_id TEXT NOT NULL,
+                    item_type TEXT NOT NULL,
+                    url TEXT NOT NULL,
+                    normalized_url TEXT NOT NULL,
+                    stage TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    parent_url TEXT,
+                    discovered_from TEXT,
+                    result_json TEXT NOT NULL DEFAULT '{}',
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (task_id, item_id),
+                    UNIQUE (task_id, item_type, normalized_url)
+                );
+                """
+            )
+            connection.execute(
+                """
+                INSERT INTO tasks VALUES (
+                    'legacy', 'familidoo-fr-runtime', '2026.11.20-1',
+                    'product', 'FINISHED', 'COMPLETED', 'NATURAL_END',
+                    '{}', '{}', '{}', '{}', '2026-11-20T00:00:00Z',
+                    '2026-11-20T00:00:00Z', NULL, NULL
+                )
+                """
+            )
+            connection.commit()
+            connection.close()
+
+            store = TaskStore(db)
+            task = store.get_task("legacy")
+            assert task is not None
+            self.assertEqual(task.plan_id, "familidoo-fr-runtime")
+            self.assertEqual(task.plan_version, "2026.11.20-1")
+            item = WorkItem(
+                task_id="legacy",
+                item_id="i1",
+                item_type="product",
+                url=PRODUCT,
+                normalized_url=PRODUCT,
+            )
+            self.assertTrue(store.add_item(item))
+            self.assertIsNone(store.items("legacy", "product")[0].failure_class)
 
 
 class DiscoveryTests(unittest.TestCase):
@@ -254,6 +373,217 @@ class ProductTests(unittest.TestCase):
             )
             self.assertEqual(task_result["counts"]["valid_products"], 1)
             self.assertEqual(task_result["outcome"], "COMPLETED")
+            self.assertEqual(task_result["plan_id"], "familidoo-fr-runtime")
+            self.assertEqual(task_result["plan_version"], "2026.11.20-1")
+            self.assertNotIn("rule_id", task_result)
+            self.assertEqual(
+                task_result["failure_classes"],
+                {"transient": 0, "permanent": 0, "blocked": 0, "unknown": 0},
+            )
+
+
+class RetryTests(unittest.TestCase):
+    def test_transient_failure_retries_until_success(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = TaskStore(root / "tasks.db")
+            rule = load_rule(PLAN)
+            task = make_task("product", "retry-success")
+            store.create_task(task)
+            fetcher = FlakyFetcher(
+                {
+                    ROBOTS: (200, ROBOTS_OK),
+                    ENTRY: (200, ENTRY_HTML),
+                    PRODUCT: (200, PRODUCT_HTML),
+                },
+                flaky_url=PRODUCT,
+                failures=1,
+            )
+            TaskRunner(
+                store, rule, task, fetcher=fetcher, out_root=root / "tasks"
+            ).run()
+            result = json.loads(
+                (root / "tasks" / task.task_id / "task-result.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(result["outcome"], "COMPLETED")
+            self.assertEqual(result["counts"]["valid_products"], 1)
+            self.assertEqual(result["failure_classes"]["transient"], 0)
+            item = store.items(task.task_id, "product")[0]
+            self.assertEqual(item.state, "DONE")
+            self.assertEqual(item.attempts, 2)
+
+    def test_transient_failure_exhausts_attempts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = TaskStore(root / "tasks.db")
+            rule = load_rule(PLAN)
+            task = make_task("product", "retry-fail")
+            task.limits["max_attempts"] = 2
+            store.create_task(task)
+            fetcher = FlakyFetcher(
+                {
+                    ROBOTS: (200, ROBOTS_OK),
+                    ENTRY: (200, ENTRY_HTML),
+                    PRODUCT: (200, PRODUCT_HTML),
+                },
+                flaky_url=PRODUCT,
+                failures=10,
+            )
+            TaskRunner(
+                store, rule, task, fetcher=fetcher, out_root=root / "tasks"
+            ).run()
+            result = json.loads(
+                (root / "tasks" / task.task_id / "task-result.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(result["outcome"], "FAILED")
+            self.assertEqual(result["failure_classes"]["transient"], 1)
+            item = store.items(task.task_id, "product")[0]
+            self.assertEqual(item.state, "FAILED")
+            self.assertEqual(item.failure_class, "transient")
+            self.assertEqual(item.attempts, 2)
+
+    def test_blocked_failure_is_classified(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = TaskStore(root / "tasks.db")
+            rule = load_rule(PLAN)
+            task = make_task("product", "blocked")
+            store.create_task(task)
+            fetcher = FakeFetcher(
+                {
+                    ROBOTS: (200, ROBOTS_OK),
+                    ENTRY: (200, ENTRY_HTML),
+                    PRODUCT: (403, ""),
+                }
+            )
+            TaskRunner(
+                store, rule, task, fetcher=fetcher, out_root=root / "tasks"
+            ).run()
+            result = json.loads(
+                (root / "tasks" / task.task_id / "task-result.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(result["outcome"], "FAILED")
+            self.assertEqual(result["stop_reason"], "ACCESS_DENIED")
+            self.assertEqual(result["failure_classes"]["blocked"], 1)
+            item = store.items(task.task_id, "product")[0]
+            self.assertEqual(item.state, "FAILED")
+            self.assertEqual(item.failure_class, "blocked")
+
+
+class RecoveryTests(unittest.TestCase):
+    def test_in_flight_item_is_reset_before_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = TaskStore(root / "tasks.db")
+            rule = load_rule(PLAN)
+            task = make_task("product", "recover")
+            store.create_task(task)
+            store.add_item(
+                WorkItem(
+                    task_id=task.task_id,
+                    item_id="i1",
+                    item_type="product",
+                    url=PRODUCT,
+                    normalized_url=PRODUCT,
+                )
+            )
+            store.claim_items(task.task_id, 1)
+            TaskRunner(
+                store,
+                rule,
+                task,
+                fetcher=FakeFetcher(
+                    {
+                        ROBOTS: (200, ROBOTS_OK),
+                        ENTRY: (200, ENTRY_HTML),
+                        PRODUCT: (200, PRODUCT_HTML),
+                    }
+                ),
+                out_root=root / "tasks",
+            ).run()
+            result = json.loads(
+                (root / "tasks" / task.task_id / "task-result.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(result["recovery"]["reset"], 1)
+            self.assertEqual(result["counts"]["valid_products"], 1)
+
+    def test_exhausted_item_fails_on_recovery(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = TaskStore(root / "tasks.db")
+            rule = load_rule(PLAN)
+            task = make_task("product", "recover-failed")
+            task.limits["max_attempts"] = 2
+            store.create_task(task)
+            store.add_item(
+                WorkItem(
+                    task_id=task.task_id,
+                    item_id="i1",
+                    item_type="product",
+                    url=PRODUCT,
+                    normalized_url=PRODUCT,
+                )
+            )
+            store.claim_items(task.task_id, 1)
+            store.mark_item(task.task_id, "i1", "PENDING")
+            store.claim_items(task.task_id, 1)
+            TaskRunner(
+                store,
+                rule,
+                task,
+                fetcher=FakeFetcher(
+                    {
+                        ROBOTS: (200, ROBOTS_OK),
+                        ENTRY: (200, ENTRY_HTML),
+                        PRODUCT: (200, PRODUCT_HTML),
+                    }
+                ),
+                out_root=root / "tasks",
+            ).run()
+            result = json.loads(
+                (root / "tasks" / task.task_id / "task-result.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(result["recovery"]["failed"], 1)
+            self.assertEqual(result["outcome"], "FAILED")
+
+    def test_plan_version_mismatch_fails_task(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = TaskStore(root / "tasks.db")
+            task = make_task("product", "plan-mismatch")
+            task.plan_version = "old-version"
+            store.create_task(task)
+
+            def factory(rule: object, limiter: object):
+                raise AssertionError("fetcher must not start on plan mismatch")
+
+            Worker(
+                store,
+                out_root=root / "tasks",
+                fetcher_factory=factory,
+            ).run_once()
+            stored = store.get_task(task.task_id)
+            assert stored is not None
+            self.assertEqual(stored.state, "FINISHED")
+            self.assertEqual(stored.outcome, "FAILED")
+            self.assertEqual(stored.stop_reason, "PLAN_ERROR")
+            result = json.loads(
+                (root / "tasks" / task.task_id / "task-result.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(result["plan_id"], "familidoo-fr-runtime")
+            self.assertEqual(result["plan_version"], "old-version")
 
 
 class ParallelTests(unittest.TestCase):
@@ -344,6 +674,48 @@ class ControlTests(unittest.TestCase):
             assert stored is not None
             self.assertEqual(stored.state, "FINISHED")
             self.assertEqual(stored.outcome, "COMPLETED")
+
+    def test_cancel_rejects_late_product(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = TaskStore(root / "tasks.db")
+            rule = load_rule(PLAN)
+            task = make_task("product", "cancel-task")
+            store.create_task(task)
+            fetcher = BlockingFetcher(
+                {
+                    ROBOTS: (200, ROBOTS_OK),
+                    ENTRY: (200, ENTRY_HTML),
+                    PRODUCT: (200, PRODUCT_HTML),
+                },
+                block_url=PRODUCT,
+            )
+            runner = TaskRunner(
+                store, rule, task, fetcher=fetcher, out_root=root / "tasks"
+            )
+            thread = threading.Thread(target=runner.run)
+            thread.start()
+            self.assertTrue(fetcher.started.wait(timeout=5))
+            store.update_task(task.task_id, state="CANCELLING")
+            fetcher.release.set()
+            thread.join(timeout=10)
+            stored = store.get_task(task.task_id)
+            assert stored is not None
+            self.assertEqual(stored.state, "CANCELLED")
+            self.assertEqual(stored.outcome, "CANCELLED")
+            item = store.items(task.task_id, "product")[0]
+            self.assertEqual(item.state, "FAILED")
+            self.assertEqual(item.failure_class, "blocked")
+            self.assertEqual(item.result["reason"], "task_cancelled")
+            rows = read_csv(root / "tasks" / task.task_id / "products.csv")
+            self.assertEqual(len(rows), 1)
+            result = json.loads(
+                (root / "tasks" / task.task_id / "task-result.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(result["outcome"], "CANCELLED")
+            self.assertEqual(result["failure_classes"]["blocked"], 1)
 
 
 if __name__ == "__main__":

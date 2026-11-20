@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import io
 import json
+import threading
 import time
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from pathlib import Path
@@ -16,11 +18,12 @@ from executor.normalize import csv_safe, format_price
 from executor.runner import CSV_COLUMNS, build_record, discover_urls, validate_product
 from protego import Protego
 
+from .atomic import append_jsonl, write_json, write_text
 from .models import Task, WorkItem, utc_now
 from .rule import RulePackage
 from .store import TaskStore
 
-RUNTIME_VERSION = "r06-runtime/0.1"
+RUNTIME_VERSION = "r06-runtime/0.2"
 
 
 class StopTask(Exception):
@@ -64,11 +67,18 @@ class TaskRunner:
         self._stop_reason = "NATURAL_END"
         self._stop_detail = "entry-page sample exhausted"
         self._final_outcome: str | None = None
+        self._write_lock = threading.Lock()
+        self._recovery: dict[str, Any] = {}
+        self._corrupt_products = 0
 
     def run(self) -> str:
         self.out_dir.mkdir(parents=True, exist_ok=True)
-        self._load_products()
-        self.store.reset_in_flight(self.task.task_id)
+        self._recovery = self.store.reconcile_task(
+            self.task.task_id, self._max_attempts()
+        )
+        self._recovery["orphan_files_removed"] = self._cleanup_orphans()
+        self._recovery["stale_result"] = self._quarantine_stale_result()
+        self._recovery["corrupt_product_lines"] = self._load_products()
         started_at = self.task.started_at or utc_now()
         self.task.started_at = started_at
         self.store.update_task(
@@ -76,7 +86,10 @@ class TaskRunner:
             state="RUNNING",
             started_at=started_at,
         )
-        self._event("task_started", task_type=self.task.task_type, rule_id=self.rule.rule_id)
+        self._event("task_reconciled", **self._recovery)
+        self._event(
+            "task_started", task_type=self.task.task_type, plan_id=self.task.plan_id
+        )
         control = "FINISHED"
         try:
             self._load_robots()
@@ -107,11 +120,14 @@ class TaskRunner:
                         try:
                             state, result = future.result()
                         except StopTask as exc:
-                            self.store.mark_item(
-                                item.task_id,
-                                item.item_id,
+                            self._finish_item(
+                                item,
                                 "FAILED",
-                                {"reason": exc.reason.lower()},
+                                {
+                                    "reason": exc.reason.lower(),
+                                    "failure_class": "blocked",
+                                    "detail": exc.detail,
+                                },
                             )
                             self._stop_reason = exc.reason
                             self._stop_detail = exc.detail
@@ -119,7 +135,10 @@ class TaskRunner:
                             return "FINISHED"
                         except Exception as exc:  # noqa: BLE001 - item boundary
                             state = "FAILED"
-                            result = {"reason": f"item_error:{type(exc).__name__}"}
+                            result = {
+                                "reason": f"item_error:{type(exc).__name__}",
+                                "failure_class": "permanent",
+                            }
                         self._finish_item(item, state, result)
                 else:
                     time.sleep(self.poll_interval)
@@ -132,7 +151,7 @@ class TaskRunner:
                     self._event("task_pausing", pending=len(futures))
                     return "PAUSED"
                 if current.state == "CANCELLING":
-                    self._drain(futures)
+                    self._drain(futures, reject=True)
                     self._event("task_cancelling", pending=len(futures))
                     return "CANCELLED"
                 if current.state == "CANCELLED":
@@ -156,7 +175,10 @@ class TaskRunner:
                         return "FINISHED"
 
     def _drain(
-        self, futures: dict[Future[tuple[str, dict[str, Any]]], WorkItem]
+        self,
+        futures: dict[Future[tuple[str, dict[str, Any]]], WorkItem],
+        *,
+        reject: bool = False,
     ) -> None:
         for future, item in list(futures.items()):
             try:
@@ -164,18 +186,28 @@ class TaskRunner:
             except StopTask as exc:
                 self._stop_reason = exc.reason
                 self._stop_detail = exc.detail
-                self.store.mark_item(
-                    item.task_id, item.item_id, "FAILED", {"reason": exc.reason.lower()}
+                self._finish_item(
+                    item,
+                    "FAILED",
+                    {
+                        "reason": exc.reason.lower(),
+                        "failure_class": "blocked",
+                        "detail": exc.detail,
+                    },
+                    accept=not reject,
                 )
             except Exception as exc:  # noqa: BLE001 - item boundary
-                self.store.mark_item(
-                    item.task_id,
-                    item.item_id,
+                self._finish_item(
+                    item,
                     "FAILED",
-                    {"reason": f"item_error:{type(exc).__name__}"},
+                    {
+                        "reason": f"item_error:{type(exc).__name__}",
+                        "failure_class": "permanent",
+                    },
+                    accept=not reject,
                 )
             else:
-                self._finish_item(item, state, result)
+                self._finish_item(item, state, result, accept=not reject)
             futures.pop(future, None)
 
     def _process_item(self, item: WorkItem) -> tuple[str, dict[str, Any]]:
@@ -183,11 +215,15 @@ class TaskRunner:
             return "EXCLUDED", {"reason": "robots_disallowed"}
         result = self.fetcher.get(item.url)
         if result.status == 0:
-            return "FAILED", {"reason": "transport_error", "error": result.error}
-        if result.status in {401, 403, 429}:
+            return self._failure(
+                item, "transient", "transport_error", error=result.error
+            )
+        if result.status in {401, 403}:
             raise StopTask("ACCESS_DENIED", f"HTTP {result.status} for {item.url}")
+        if result.status == 429 or 500 <= result.status < 600:
+            return self._failure(item, "transient", f"http_{result.status}")
         if not result.ok:
-            return "FAILED", {"reason": f"http_{result.status}"}
+            return self._failure(item, "permanent", f"http_{result.status}")
 
         page = HtmlPage(result.body, result.url)
         if item.item_type == "navigation":
@@ -215,13 +251,44 @@ class TaskRunner:
         product.values["source_url"] = canonical
         record = build_record(product)
         payload = _record_payload(record)
-        self._append_product(payload)
         return "DONE", {
             "status": "valid",
             "name": record.name,
             "price_amount": record.price_amount,
             "price_currency": record.price_currency,
+            "product": payload,
         }
+
+    def _failure(
+        self,
+        item: WorkItem,
+        failure_class: str,
+        reason: str,
+        **extra: Any,
+    ) -> tuple[str, dict[str, Any]]:
+        result = {
+            "reason": reason,
+            "failure_class": failure_class,
+            "attempts": item.attempts,
+            **extra,
+        }
+        if failure_class == "transient" and item.attempts < self._max_attempts():
+            delay = self._retry_delay(item.attempts)
+            if delay > 0:
+                time.sleep(delay)
+            result["retryable"] = True
+            return "PENDING", result
+        return "FAILED", result
+
+    def _max_attempts(self) -> int:
+        return max(1, int(self.task.limits.get("max_attempts", 2)))
+
+    def _retry_delay(self, attempt: int) -> float:
+        raw = self.task.limits.get("retry_backoff_ms")
+        if raw is None:
+            raw = self.rule.fetch.get("retry", {}).get("backoff_ms", 1000)
+        base = max(float(raw), 0.0) / 1000
+        return min(base * (2 ** max(attempt - 1, 0)), 5.0)
 
     def _seed_entry(self) -> None:
         normalized = _normalize_url(self.rule.entry_url)
@@ -283,8 +350,31 @@ class TaskRunner:
                 self._event("url_excluded", url=url, reason="robots_disallowed")
         return added
 
-    def _finish_item(self, item: WorkItem, state: str, result: dict[str, Any]) -> None:
-        self.store.mark_item(item.task_id, item.item_id, state, result)
+    def _finish_item(
+        self,
+        item: WorkItem,
+        state: str,
+        result: dict[str, Any],
+        *,
+        accept: bool = True,
+    ) -> None:
+        current = self.store.get_task(self.task.task_id)
+        if accept and current is not None and current.state in {"CANCELLING", "CANCELLED"}:
+            accept = False
+        if not accept and state == "DONE":
+            state = "FAILED"
+            result = {"reason": "task_cancelled", "failure_class": "blocked"}
+        product = result.pop("product", None) if state == "DONE" and accept else None
+        if product is not None:
+            self._append_product(product)
+        failure_class = result.get("failure_class")
+        self.store.mark_item(
+            item.task_id,
+            item.item_id,
+            state,
+            result,
+            failure_class=failure_class,
+        )
         self._append_jsonl(
             self.items_path,
             {
@@ -293,10 +383,43 @@ class TaskRunner:
                 "item_type": item.item_type,
                 "url": item.url,
                 "state": state,
+                "failure_class": failure_class,
                 "result": result,
             },
         )
-        self._event("item_finished", item_type=item.item_type, url=item.url, state=state)
+        self._event(
+            "item_finished",
+            item_type=item.item_type,
+            url=item.url,
+            state=state,
+            failure_class=failure_class,
+        )
+
+    def _cleanup_orphans(self) -> int:
+        removed = 0
+        if not self.out_dir.is_dir():
+            return removed
+        for path in self.out_dir.iterdir():
+            if path.is_file() and (
+                path.name.endswith(".tmp") or path.name.endswith(".partial")
+            ):
+                try:
+                    path.unlink()
+                except OSError:
+                    continue
+                removed += 1
+        return removed
+
+    def _quarantine_stale_result(self) -> bool:
+        if not self.task_result_path.is_file():
+            return False
+        backup = self.task_result_path.with_name("task-result.previous.json")
+        try:
+            backup.unlink(missing_ok=True)
+            self.task_result_path.replace(backup)
+        except OSError:
+            return False
+        return True
 
     def _load_robots(self) -> None:
         parsed = urlparse(self.rule.entry_url)
@@ -481,8 +604,8 @@ class TaskRunner:
         return {
             "task_id": self.task.task_id,
             "task_type": self.task.task_type,
-            "rule_id": self.rule.rule_id,
-            "rule_version": self.rule.rule_version,
+            "plan_id": self.task.plan_id,
+            "plan_version": self.task.plan_version,
             "market": self.rule.site.get("market"),
             "locale": self.rule.site.get("locale"),
             "state": state,
@@ -492,6 +615,8 @@ class TaskRunner:
             "started_at": self.task.started_at,
             "finished_at": finished_at,
             "counts": counts,
+            "failure_classes": self._failure_classes(),
+            "recovery": self._recovery,
             "coverage": coverage,
             "business_acceptance": {
                 "status": "NOT_REVIEWED",
@@ -528,11 +653,30 @@ class TaskRunner:
                 "max_products": self.task.limits.get("max_products"),
                 "max_urls": self.task.limits.get("max_urls"),
                 "max_seconds": self.task.limits.get("max_seconds"),
+                "max_attempts": self._max_attempts(),
                 "browser_launched": False,
                 "login_used": False,
             },
+            "resources": {
+                "browser_launched": False,
+                "processes": [],
+                "orphan_files_removed": self._recovery.get(
+                    "orphan_files_removed", 0
+                ),
+            },
             "limitations": limitations,
         }
+
+    def _failure_classes(self) -> dict[str, int]:
+        counts = {"transient": 0, "permanent": 0, "blocked": 0, "unknown": 0}
+        for item in self.store.items(self.task.task_id):
+            if item.state != "FAILED":
+                continue
+            failure_class = item.failure_class or item.result.get("failure_class")
+            if failure_class not in counts:
+                failure_class = "unknown"
+            counts[failure_class] += 1
+        return counts
 
     def _counts(self) -> dict[str, int]:
         items = self.store.items(self.task.task_id)
@@ -570,19 +714,32 @@ class TaskRunner:
             ),
         }
 
-    def _load_products(self) -> None:
+    def _load_products(self) -> int:
         if not self.products_path.is_file():
-            return
+            return 0
+        valid_lines: list[str] = []
+        corrupt = 0
         for line in self.products_path.read_text(encoding="utf-8").splitlines():
             if not line.strip():
                 continue
             try:
                 product = json.loads(line)
             except json.JSONDecodeError:
+                corrupt += 1
                 continue
+            valid_lines.append(line)
             self._products.append(product)
             if product.get("source_url"):
                 self._seen_canonical.add(product["source_url"])
+        if corrupt:
+            payload = "\n".join(valid_lines)
+            write_text(
+                self.products_path,
+                payload + "\n" if payload else "",
+                lock=self._write_lock,
+            )
+        self._corrupt_products = corrupt
+        return corrupt
 
     def _append_product(self, product: dict[str, Any]) -> None:
         self._products.append(product)
@@ -594,37 +751,39 @@ class TaskRunner:
             for item in self.store.items(self.task.task_id, "product")
             if item.state == "DONE"
         ]
-        with self.urls_path.open("w", encoding="utf-8", newline="") as handle:
-            writer = csv.writer(handle, lineterminator="\n")
-            writer.writerow(["url", "source", "status", "title"])
-            for item in items:
-                writer.writerow(
-                    [
-                        csv_safe(item.url),
-                        csv_safe(item.parent_url or ""),
-                        csv_safe(str(item.result.get("status", ""))),
-                        csv_safe(str(item.result.get("name", ""))),
-                    ]
-                )
+        buffer = io.StringIO()
+        writer = csv.writer(buffer, lineterminator="\n")
+        writer.writerow(["url", "source", "status", "title"])
+        for item in items:
+            writer.writerow(
+                [
+                    csv_safe(item.url),
+                    csv_safe(item.parent_url or ""),
+                    csv_safe(str(item.result.get("status", ""))),
+                    csv_safe(str(item.result.get("name", ""))),
+                ]
+            )
+        write_text(self.urls_path, buffer.getvalue(), lock=self._write_lock)
 
     def _write_products_csv(self) -> None:
-        with self.products_csv_path.open("w", encoding="utf-8", newline="") as handle:
-            writer = csv.writer(handle, lineterminator="\n")
-            writer.writerow(CSV_COLUMNS)
-            for product in self._products:
-                writer.writerow(
-                    [
-                        csv_safe(str(product.get("name", ""))),
-                        format_price(float(product.get("price_amount", 0))),
-                        csv_safe(str(product.get("price_currency", ""))),
-                        csv_safe(str(product.get("primary_image_url", ""))),
-                        csv_safe(str(product.get("description_html", ""))),
-                        csv_safe(str(product.get("category", ""))),
-                        csv_safe(str(product.get("brand", ""))),
-                        csv_safe(str(product.get("attributes", ""))),
-                        csv_safe(str(product.get("source_url", ""))),
-                    ]
-                )
+        buffer = io.StringIO()
+        writer = csv.writer(buffer, lineterminator="\n")
+        writer.writerow(CSV_COLUMNS)
+        for product in self._products:
+            writer.writerow(
+                [
+                    csv_safe(str(product.get("name", ""))),
+                    format_price(float(product.get("price_amount", 0))),
+                    csv_safe(str(product.get("price_currency", ""))),
+                    csv_safe(str(product.get("primary_image_url", ""))),
+                    csv_safe(str(product.get("description_html", ""))),
+                    csv_safe(str(product.get("category", ""))),
+                    csv_safe(str(product.get("brand", ""))),
+                    csv_safe(str(product.get("attributes", ""))),
+                    csv_safe(str(product.get("source_url", ""))),
+                ]
+            )
+        write_text(self.products_csv_path, buffer.getvalue(), lock=self._write_lock)
 
     def _event(self, event_type: str, **payload: Any) -> None:
         self._append_jsonl(
@@ -633,9 +792,7 @@ class TaskRunner:
         )
 
     def _append_jsonl(self, path: Path, payload: dict[str, Any]) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        append_jsonl(path, payload, lock=self._write_lock)
 
 
 def _record_payload(record: Any) -> dict[str, Any]:
@@ -692,8 +849,4 @@ def _coverage(denominator: int, covered: int, source: str) -> dict[str, Any]:
 
 
 def _write_json(path: Path, payload: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    write_json(path, payload)
