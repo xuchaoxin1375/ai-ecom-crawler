@@ -1,0 +1,306 @@
+{
+  "task_id": "r05-build-001",
+  "task_type": "product",
+  "plan_id": "javaestate-us-r05",
+  "plan_version": "2026.11.21-1",
+  "market": "US",
+  "locale": "en-US",
+  "state": "FINISHED",
+  "outcome": "COMPLETED",
+  "stop_reason": "NATURAL_END",
+  "stop_detail": "entry-page sample exhausted",
+  "started_at": "2026-11-20T16:36:44Z",
+  "finished_at": "2026-11-20T16:37:22Z",
+  "counts": {
+    "navigation_urls": 2,
+    "discovered_urls": 32,
+    "product_candidates": 30,
+    "pending_products": 0,
+    "in_flight_products": 0,
+    "processed_products": 30,
+    "valid_products": 30,
+    "excluded_products": 0,
+    "failed_products": 0,
+    "partial_description_products": 0
+  },
+  "failure_classes": {
+    "transient": 0,
+    "permanent": 0,
+    "blocked": 0,
+    "unknown": 0
+  },
+  "recovery": {
+    "in_flight": 0,
+    "reset": 0,
+    "failed": 0,
+    "orphan_files_removed": 0,
+    "stale_result": false,
+    "corrupt_product_lines": 0
+  },
+  "coverage": {
+    "status": "PARTIAL",
+    "denominator_source": "declared-source product candidates",
+    "denominator": 30,
+    "covered": 30,
+    "notes": "Bounded sample from one entry page; not full-site coverage."
+  },
+  "business_acceptance": {
+    "status": "NOT_REVIEWED",
+    "accepted_by": null,
+    "accepted_at": null,
+    "reason": "R06 runtime prototype; no business sign-off yet.",
+    "scope": "discovery sources declared by the rule"
+  },
+  "quality_exceptions": [],
+  "pricing": {
+    "policy": "Choose the smaller public pretax/gross pair per docs/02.",
+    "products": [
+      {
+        "source_url": "https://javaestate.com/products/ghirardelli-white-chocolate-sweet-ground-powder",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 25.49,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://javaestate.com/products/ghirardelli-sauce-pump",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 11.1,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://javaestate.com/products/ghirardelli-sweet-ground-chocolate-sauce",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 23.99,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://javaestate.com/products/ghirardelli-white-chocolate-sauce",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 24.49,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://javaestate.com/products/ghirardelli-double-chocolate-hot-cocoa-mix-90-count-0-85-oz-packets",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 132.99,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://javaestate.com/products/ghirardelli-chocolate-cocoa-sweet-ground-powder",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 22.99,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://javaestate.com/products/ghirardelli-classic-white-frappe-mix-10-lb-box",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 67.99,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://javaestate.com/products/ghirardelli-3-tier-pump-bottle-sauce-rack",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 39.3,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://javaestate.com/products/ghirardelli-black-label-chocolate-sauce",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 23.49,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://javaestate.com/products/ghirardelli-caramel-sauce",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 23.99,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://javaestate.com/products/big-train-20-below-frozen-hot-chocolate-beverage-mix",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 27.55,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://javaestate.com/products/big-train-20-below-frozen-white-chocolate-beverage-mix",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 27.55,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://javaestate.com/products/big-train-kidz-kreamz-bubble-gum-blended-beverage-mix",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 27.55,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://javaestate.com/products/big-train-cake-batter-blended-creme-beverage-mix",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 27.55,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://javaestate.com/products/big-train-caramel-latte-blended-ice-coffee-beverage-mix",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 27.55,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://javaestate.com/products/big-train-chocolate-peanut-butter-blended-ice-coffee-beverage-mix",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 27.55,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://javaestate.com/products/big-train-blended-ice-coffee-beverage-mix",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 27.55,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://javaestate.com/products/big-train-cookies-n-cream-blended-creme-beverage-mix",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 27.55,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://javaestate.com/products/big-train-kidz-kreamz-cotton-candy-blended-beverage-mix",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 27.55,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://javaestate.com/products/big-train-dragonfly-coconut-blended-creme-beverage-mix",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 27.55,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://javaestate.com/products/big-train-dragonfly-mango-blended-creme-beverage-mix",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 27.55,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://javaestate.com/products/big-train-espresso-blended-ice-coffee-beverage-mix",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 27.55,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://javaestate.com/products/big-train-java-chip-blended-ice-coffee-beverage-mix",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 27.55,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://javaestate.com/products/big-train-mocha-blended-ice-coffee-beverage-mix",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 27.55,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://javaestate.com/products/big-train-reduced-sugar-mocha-blended-ice-coffee-beverage-mix",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 27.55,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://javaestate.com/products/big-train-reduced-sugar-vanilla-latte-blended-ice-coffee-beverage-mix",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 27.55,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://javaestate.com/products/big-train-kidz-kreamz-orange-cream-blended-beverage-mix",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 27.55,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://javaestate.com/products/big-train-spiced-chai-tea-latte-beverage-mix",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 27.35,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://javaestate.com/products/big-train-strawberry-blended-creme-beverage-mix",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 27.55,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://javaestate.com/products/big-train-toffee-mocha-blended-ice-coffee-beverage-mix",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 27.55,
+        "basis": "unspecified"
+      }
+    ]
+  },
+  "runtime": {
+    "executor": "r06-runtime/0.2",
+    "llm_calls": 0,
+    "raw_pages_retained": false,
+    "http_engine": "scrapling.FetcherSession (curl_cffi, static HTML)"
+  },
+  "access": {
+    "entry_url": "https://javaestate.com/sitemap.xml",
+    "sources": [
+      "sitemap"
+    ],
+    "robots_url": "",
+    "robots_status": 0,
+    "robots_sitemaps": [],
+    "robots_policy": "sitemap_line_only",
+    "delay_ms": 1000,
+    "max_products": 30,
+    "max_urls": 30,
+    "max_seconds": 600.0,
+    "max_attempts": 2,
+    "browser_launched": false,
+    "login_used": false
+  },
+  "resources": {
+    "browser_launched": false,
+    "processes": [],
+    "orphan_files_removed": 0
+  },
+  "limitations": [
+    "Bounded to the declared discovery sources and limits; not full-site coverage.",
+    "Static HTML only; no browser rendering, login or access-control bypass.",
+    "Runtime LLM calls: 0; no raw page HTML is retained.",
+    "R05 fresh build; not a D01 production verification.",
+    "Bounded to 30 product URLs from the product sitemap; not full-site coverage.",
+    "Product options are empty in the sampled page; no variant matrix was built."
+  ]
+}

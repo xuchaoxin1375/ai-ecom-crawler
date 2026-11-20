@@ -1,0 +1,189 @@
+schema_version: "1.1"
+rule_id: "javaestate-us-r05"
+rule_version: "2026.11.21-1"
+kind: declarative
+status: candidate
+created_at: "2026-11-21T00:35:31+08:00"
+updated_at: "2026-11-21T00:35:31+08:00"
+
+site:
+  name: "Java Estate Roastery"
+  entry_urls: ["https://javaestate.com/"]
+  allowed_origins: ["https://javaestate.com"]
+  allowed_path_prefixes: ["/"]
+  market: "US"
+  locale: "en-US"
+  currency: "USD"
+
+scope:
+  include: ['^/products/[^/]+$']
+  exclude:
+    - "/cart"
+    - "/checkout"
+    - "/account"
+    - "/search"
+    - "/collections/"
+    - "/blogs/"
+    - "/pages/"
+  max_products: 30
+  max_seconds: 600
+  notes: "Bounded 30-product sample from the product sitemap; not full-site coverage."
+
+capabilities:
+  discovery: true
+  product: true
+
+discovery:
+  sources:
+    - type: "sitemap"
+      urls: ["https://javaestate.com/sitemap.xml"]
+      max_sitemaps: 2
+      sitemap_patterns: ["sitemap_products_1"]
+  product_url_patterns: ['^/products/[^/]+$']
+  url_identity: "canonical"
+  notes: "Sitemap index; only the sitemap_products_1 child is used."
+
+fetch:
+  default_engine: "static"
+  concurrency: 1
+  delay_ms: 1000
+  retry: {max_attempts: 2, backoff_ms: 1000}
+  timeout_ms: 45000
+  max_seconds: 600
+  browser: false
+  login: false
+  challenge_handling: "none; stop and record"
+
+extract:
+  fields:
+    name:
+      required: true
+      fallbacks:
+        - {type: json_ld, path: "name", label: "json_ld_name"}
+        - {type: css_text, selector: "h1", label: "h1"}
+        - type: css_attr
+          selector: 'meta[property="og:title"]'
+          attr: "content"
+          label: "og_title"
+          strip_site_suffix: true
+        - {type: title, label: "title"}
+    price.amount:
+      required: true
+      fallbacks:
+        - type: json_ld
+          path: "offers.price"
+          label: "json_ld_offer_price"
+          take: "min_positive"
+          tax_basis: "unspecified"
+        - type: json_ld
+          path: "offers.priceSpecification.price"
+          label: "json_ld_price_specification"
+          take: "min_positive"
+          tax_basis: "unspecified"
+        - type: css_attr
+          selector: 'meta[property="product:price:amount"]'
+          attr: "content"
+          label: "meta_price"
+    price.currency:
+      required: true
+      fallbacks:
+        - {type: json_ld, path: "offers.priceCurrency", label: "json_ld_currency"}
+        - type: css_attr
+          selector: 'meta[property="product:price:currency"]'
+          attr: "content"
+          label: "meta_currency"
+        - type: css_attr
+          selector: '[itemprop="priceCurrency"]'
+          attr: "content"
+          label: "itemprop_currency"
+    primary_image_url:
+      required: true
+      fallbacks:
+        - {type: json_ld, path: "image", label: "json_ld_image"}
+        - type: css_attr
+          selector: 'meta[property="og:image"]'
+          attr: "content"
+          label: "og_image"
+          absolute: true
+    description_html:
+      required: false
+      fallbacks:
+        - {type: json_ld, path: "description", label: "json_ld_description", description_status: "complete"}
+        - type: css_html
+          selector: "div.product__description"
+          label: "product_description"
+          description_status: "complete"
+    category:
+      required: false
+      fallbacks:
+        - {type: json_ld, path: "category", label: "json_ld_category"}
+    brand:
+      required: false
+      fallbacks:
+        - {type: json_ld, path: "brand.name", label: "json_ld_brand"}
+    source_url:
+      required: true
+      fallbacks:
+        - {type: canonical, label: "canonical"}
+
+normalize:
+  price:
+    tax_basis: "unspecified"
+    choose: "smaller_public_pair"
+    positive_only: true
+  description:
+    mode: "clean_html"
+    statuses: ["complete", "partial", "not_provided", "failed"]
+  options:
+    exclude_quantity: true
+    strip_price_delta: true
+
+validate:
+  required_fields:
+    - "name"
+    - "price.amount"
+    - "price.currency"
+    - "primary_image_url"
+    - "source_url"
+  assertions:
+    - {field: "price.amount", op: ">", value: 0}
+    - {field: "price.currency", op: "matches", value: "^[A-Z]{3}$"}
+  partial_description: "allowed_with_flag"
+
+output:
+  url_list:
+    enabled: true
+    columns: ["url", "source", "status", "title"]
+    format: "csv"
+  product_csv:
+    enabled: true
+    columns: 9
+    format: "csv"
+  task_result: true
+
+task_defaults:
+  max_urls: 30
+  max_products: 30
+  max_seconds: 600
+  concurrency:
+    navigation: 1
+    product: 1
+
+compatibility:
+  os: ["windows", "linux", "wsl2"]
+  runtime: "python>=3.11"
+  dependencies: ["scrapling==0.5.1", "pyyaml==6.0.3", "lxml", "protego"]
+  browser: "none for static"
+  network: "requires a US egress; direct requests returned HTTP 429 during build"
+
+evidence:
+  sample_urls:
+    - "https://javaestate.com/products/ghirardelli-white-chocolate-sweet-ground-powder"
+  expected: []
+  verified_at: null
+  limitations:
+    - "R05 fresh build; not a D01 production verification."
+    - "Bounded to 30 product URLs from the product sitemap; not full-site coverage."
+    - "Product options are empty in the sampled page; no variant matrix was built."
+
+notes: "Derived from docs/18; sitemap index filtered to sitemap_products_1; JSON-LD drives name, price, image, description, category, brand and canonical. Build egress: mihomo crawler-us:17211."
