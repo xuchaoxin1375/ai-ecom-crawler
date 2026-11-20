@@ -2,6 +2,12 @@
 
 本仓库是公开电商采集的业务与验收文档包，不是采集应用源码。业务口径以 `docs/` 为唯一入口，当前状态以 [`docs/15-交接.md`](docs/15-交接.md) 为准；本文件只补充代理执行约定，不复制业务规则。
 
+## 目录与许可边界
+
+- 生产应用放在 `app/`（本仓库 monorepo）；`app/` 不进入 `scripts/export_docs.py` 的文档包。
+- `docs/` 仍是业务口径与验收的唯一入口；`experiments/` 是实验与原型，不作为生产代码。
+- 项目最终闭源，未授予开源复用许可；第三方依赖保留各自许可证。
+
 ## 站点评估入口
 
 - 评估站点前先查 [`docs/12-验收基准站点.md`](docs/12-验收基准站点.md) 和 [`experiments/framework-compare/probes/README.md`](experiments/framework-compare/probes/README.md)；已有结论先复用，不重复探测。
