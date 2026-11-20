@@ -1,0 +1,269 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root JobName="takoy.fr" Encdoing="自动识别" CheckUrlRepeat="" JobId="811" UrlId="811" AutoDirect="" TimeOut="30" LoopJoinCode="&gt;" CycleMaxCount="0" WebOutType="0" WebPostTimeout="0" FileType="4" WordType="0" FileSavePath="C:\2025\Spider\EU\germigarden" FileTemplate="D:\LocoySpider_pj\FileTemplate\默认txt模版.txt" FilenNameType="[任务名]@[任务Id]@yyyy-MM-dd HH-mm-ss" FileEncoding="UTF-8" SpiderThreadNum="1" SpiderTimeInterval="1" SpiderTimeIntervalMax="800" OutThreadNum="50" OutTimeStart="10" OutTimeEnd="400" ResultProcessPlugin="df_spider.py" Plugin="" ProxyType="2" ProxyServer="127.0.0.1" ProxyPort="8800" BaseFileDir="C:\2025\Spider\EU\country\img" FileUploadDomain="C:\2025\Spider\EU\country\img" DownFileAsy="" FtpPort="21" FtpBaseDir="a" OSSAccessKeyId="" OSSAccessKeySecret="" OSSBucketName="" OSSEndpoint="" OSSModel="False" QiniuAk="" QiniuSk="" QiniuZoneId="0" QiniuBucket="" CosBucket="" CosPath="" CosRegion="" CosSecretId="" CosSecretKey="" ObsEndpoint="" ObsAccessKey="" ObsSecretKey="" ObsBucketName="" ObjectKey="" FtpPassiveMode="" MaxSpiderPerNum="0" MaxOutPerNum="0" MaxDownload="50" UrlRepeat="0" SignSucessIfAllPost="" DownloadSegments="1" PhpPlugin="" HTTPTamperPlugin="locoy_spider_http.py" FileDownloadPlugin="" LoopContentBySubstringOrRegex="1" LoopContentRegex="" LoopContentStart="" LoopContentEnd="" LoopContentMust="" LoopContentForbid="" IgnoreCodeList="403" SetReferNone="False" UseNodeHttp="False">
+    <StartAddress>https://takoy.fr/sitemaps/fra/sitemap.xml</StartAddress>
+    <StepAddress UrlAreaStart="" UrlAreaEnd="" UrlForbid="/blog" UrlMust="" PostData="" WbChange="0" PostStart="0" PostEnd="8" PostTimes="8" PostInterval="1" HttpMethod="0" PostTextFile="" NickName="1级列表页" AutoPages="" GetUrlType="1" ListAutoTerminal="1" ManualUrlStyle="&lt;loc&gt;[参数]&lt;/loc&gt;" ManualUrlCompile="[参数1]" XpathContent="" PagesAreaStart="删除这段文字替换为分页标记&#xA;&lt;loc&gt;&lt;![CDATA[[参数]]]&gt;&lt;/loc&gt;&#xA;&#xA;有些情况下,需要从robots.txt提取大量Sitemap地址&#xA;Sitemap:[参数].xml 提取为 [参数1].xml&#xA;&#xA;通常要设置网址获取选项中链接过滤的齿轮⚙️里切换[所有条件必须满足]" PagesAreaEnd="" PagesUrlStyle="" PagesUrlCompile="" PagesMax="0" AddLabel="" AddLabelFromUrl="0" AspxEnd="0" PostHeadAdd="">
+        <Filters />
+    </StepAddress>
+    <StepAddress UrlAreaStart="" UrlAreaEnd="" UrlForbid="" UrlMust="" PostData="" WbChange="0" PostStart="0" PostEnd="1" PostTimes="1" PostInterval="1" HttpMethod="0" PostTextFile="" NickName="" AutoPages="" GetUrlType="1" ListAutoTerminal="1" ManualUrlStyle="&lt;loc&gt;[参数]&lt;/loc&gt;" ManualUrlCompile="[参数1]" XpathContent="" PagesAreaStart="" PagesAreaEnd="" PagesUrlStyle="" PagesUrlCompile="" PagesMax="0" AddLabel="" AddLabelFromUrl="0" AspxEnd="0" PostHeadAdd="">
+        <Filters />
+    </StepAddress>
+    <Fields>
+        <Field LabelName="面包屑区域html" SourcePage="默认页面" PageArea="" FetchDataType="0" AreaStart="" AreaEnd="" SourcePageType="0" SourcePagePart="0" GetDataType="1" StartStr="" EndStr="" RegexContent="[参数]" RegexCombine="[参数1]" XpathContent="" XPathAttribue="0" CssContent="" CssAttribue="0" TextRecognitionType="0" JSONExpression="" TextRecognitionCodeReturnType="1" LengthFiltOpertar="0" LengthFiltValue="0" DateFilterOperate="0" DateFilterValue="" LabelContentMust="" LabelContentForbid="" FileUrlMust="" FileSaveDir="" FileSaveFormat="">
+            <Filters>
+                <IfEmptyDo RegexContent="class=&quot;woocommerce-breadcrumb[参数]&lt;/nav" RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="id=&quot;bc-w&quot;[参数]&lt;/ol&gt;" RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="class=&quot;breadcrumb seProductBreadcrumb&quot;[参数]&lt;/ol&gt;" RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="&lt;div class=&quot;breadcrumbs&quot;&gt;[参数]&lt;/ul&gt;" RegexCombine="[参数1]" />
+            </Filters>
+        </Field>
+        <Field LabelName="面包屑C#span" SourcePage="默认页面" PageArea="" FetchDataType="2" MergeContent="[标签:面包屑区域html]" LengthFiltOpertar="0" LengthFiltValue="0" DateFilterOperate="0" DateFilterValue="" LabelContentMust="" LabelContentForbid="" FileUrlMust="" FileSaveDir="" FileSaveFormat="">
+            <Filters>
+                <RunCSharp code="using System;&#xD;&#xA;using System.Collections.Generic;&#xD;&#xA;using System.Text;&#xD;&#xA;using System.Text.RegularExpressions;&#xD;&#xA;using SpiderInterface;&#xD;&#xA;class LocoyCode{&#xD;&#xA;    &#xD;&#xA;    public string Run(string content,ResponseEntry response){&#xD;&#xA;        //使用正则表达式获取标题&#xD;&#xA;        string pattern = @&quot;&lt;span[^&gt;]*&gt;(.*?)&lt;\/span&gt;&quot;;&#xD;&#xA;&#xD;&#xA;        MatchCollection matches = Regex.Matches(content, pattern);&#xD;&#xA;        &#xD;&#xA;      &#xD;&#xA;        if(matches.Count &gt;= 2){&#xD;&#xA;            // matches[1]表示正则匹配到的第一个子串(标签对),根据需要将1改成2,或更大的数字(由于这里的正则仅包含一个分组,Group[1]基本不用动;&#xD;&#xA;            return matches[1].Groups[1].Value;&#xD;&#xA;        }else{&#xD;&#xA;            &#xD;&#xA;            return &quot;&quot;;//返回空白,在固定标签组中的产品面包屑中统一返回热词&#xD;&#xA;        }&#xD;&#xA;    &#xD;&#xA;       &#xD;&#xA;    }&#xD;&#xA;}&#xD;&#xA;" />
+                <RemoveHtmlFilter Indexs="24" Custom="" />
+                <TextEncode codeType="1" encoding="utf-8" />
+            </Filters>
+        </Field>
+        <Field LabelName="面包屑C#a" SourcePage="默认页面" PageArea="" FetchDataType="2" MergeContent="[标签:面包屑区域html]" LengthFiltOpertar="0" LengthFiltValue="0" DateFilterOperate="0" DateFilterValue="" LabelContentMust="" LabelContentForbid="" FileUrlMust="" FileSaveDir="" FileSaveFormat="">
+            <Filters>
+                <RunCSharp code="using System;&#xD;&#xA;using System.Collections.Generic;&#xD;&#xA;using System.Text;&#xD;&#xA;using System.Text.RegularExpressions;&#xD;&#xA;using SpiderInterface;&#xD;&#xA;class LocoyCode{&#xD;&#xA;    &#xD;&#xA;    public string Run(string content,ResponseEntry response){&#xD;&#xA;        //使用正则表达式获取标题&#xD;&#xA;        //string pattern = @&quot;&lt;span[^&gt;]*&gt;(.*?)&lt;/span&gt;&quot;;&#xD;&#xA;        string pattern = @&quot;&lt;a[^&gt;]*&gt;(.*?)&lt;/a&gt;&quot;;&#xD;&#xA;&#xD;&#xA;        MatchCollection matches = Regex.Matches(content, pattern);&#xD;&#xA;        &#xD;&#xA;      &#xD;&#xA;        if(matches.Count &gt;= 2){&#xD;&#xA;             // matches[1]表示正则匹配到的第一个子串(标签对),根据需要将1改成2,或更大的数字(由于这里的正则仅包含一个分组,Group[1]基本不用动;&#xD;&#xA;            return matches[1].Groups[1].Value;&#xD;&#xA;        }else{&#xD;&#xA;&#xD;&#xA;            &#xD;&#xA;            return &quot;&quot;;//返回空白,在固定标签组中的产品面包屑中统一返回热词&#xD;&#xA;            &#xD;&#xA;        }&#xD;&#xA;    &#xD;&#xA;       &#xD;&#xA;    }&#xD;&#xA;}&#xD;&#xA;" />
+                <RemoveHtmlFilter Indexs="24" Custom="" />
+                <TextEncode codeType="1" encoding="utf-8" />
+            </Filters>
+        </Field>
+        <Field LabelName="Url(当前页面链接)" SourcePage="默认页面" PageArea="" FetchDataType="0" AreaStart="" AreaEnd="" SourcePageType="0" SourcePagePart="2" GetDataType="1" StartStr="" EndStr="" RegexContent="^(?&lt;content&gt;[\s\S]*?)$" RegexCombine="" XpathContent="" XPathAttribue="0" CssContent="" CssAttribue="0" TextRecognitionType="0" JSONExpression="" TextRecognitionCodeReturnType="1" LengthFiltOpertar="0" LengthFiltValue="0" DateFilterOperate="0" DateFilterValue="" LabelContentMust="" LabelContentForbid="" FileUrlMust="" FileSaveDir="" FileSaveFormat="">
+            <Filters />
+        </Field>
+        <Field LabelName="描述0" SourcePage="默认页面" PageArea="" FetchDataType="0" AreaStart="" AreaEnd="" SourcePageType="0" SourcePagePart="0" GetDataType="1" StartStr="" EndStr="" RegexContent="[参数]" RegexCombine="[参数1]" XpathContent="" XPathAttribue="0" CssContent="" CssAttribue="0" TextRecognitionType="0" JSONExpression="" TextRecognitionCodeReturnType="1" LengthFiltOpertar="0" LengthFiltValue="0" DateFilterOperate="0" DateFilterValue="" LabelContentMust="" LabelContentForbid="" FileUrlMust="" FileSaveDir="" FileSaveFormat="">
+            <Filters />
+        </Field>
+        <Field LabelName="描述1" SourcePage="默认页面" PageArea="" FetchDataType="0" AreaStart="" AreaEnd="" SourcePageType="0" SourcePagePart="0" GetDataType="2" StartStr="" EndStr="" RegexContent=" &lt;div class=&quot;woocommerce-product-details__short-description description prosed accordion-content&quot; data-tab-content&gt;[参数]&lt;div class=&quot;accordion-item" RegexCombine="[参数1]" XpathContent="//*[@id=&quot;maincontent&quot;]/div[3]/div/div[2]/div[5]" XPathAttribue="0" CssContent="" CssAttribue="0" TextRecognitionType="0" JSONExpression="" TextRecognitionCodeReturnType="1" LengthFiltOpertar="0" LengthFiltValue="0" DateFilterOperate="0" DateFilterValue="" LabelContentMust="" LabelContentForbid="" FileUrlMust="" FileSaveDir="" FileSaveFormat="">
+            <Filters>
+                <IfEmptyDo RegexContent="itemprop=&quot;description&quot; &gt;[参数]&lt;div class=&quot;productView-productTabs&quot;&gt;" RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="&lt;!-- Short Description --&gt;[参数]&lt;!-- Buyers Guide --&gt;" RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="&lt;!-- Short Description --&gt;[参数]&lt;!-- Reviews &amp; FAQs --&gt;" RegexCombine="" />
+                <FillBothEnd Start="" End="&lt;/br&gt;" EmptyNotFill="" />
+                <RemoveHtmlFilter Indexs="20" Custom="" />
+                <ReplaceFilter old="&lt;span class=&quot;title&quot;&gt;ÉCHANTILLON&lt;/span&gt;(*)" new="" IgnoreCase="0" />
+            </Filters>
+        </Field>
+        <Field LabelName="描述2" SourcePage="默认页面" PageArea="" FetchDataType="0" AreaStart="" AreaEnd="" SourcePageType="0" SourcePagePart="0" GetDataType="2" StartStr="" EndStr="" RegexContent="&lt;div class=&quot;box-collateral box-description&quot;&gt;[参数]&lt;div" RegexCombine="[参数1]" XpathContent="//*[@id=&quot;tab-description&quot;]" XPathAttribue="0" CssContent="" CssAttribue="0" TextRecognitionType="0" JSONExpression="" TextRecognitionCodeReturnType="1" LengthFiltOpertar="0" LengthFiltValue="0" DateFilterOperate="0" DateFilterValue="" LabelContentMust="" LabelContentForbid="" FileUrlMust="" FileSaveDir="" FileSaveFormat="">
+            <Filters>
+                <RemoveHtmlFilter Indexs="20" Custom="" />
+            </Filters>
+        </Field>
+        <Field LabelName="描述3" SourcePage="默认页面" PageArea="" FetchDataType="0" AreaStart="" AreaEnd="" SourcePageType="0" SourcePagePart="0" GetDataType="1" StartStr="" EndStr="&lt;/div&gt;&lt;/div&gt;&lt;/div&gt;&lt;/div&gt;&lt;/div&gt;&lt;/div&gt;&lt;/div&gt;&lt;/div&gt;" RegexContent="&lt;span class=&quot;tagged_as&quot;&gt;[参数]&lt;/div&gt;" RegexCombine="[参数1]" XpathContent="" XPathAttribue="0" CssContent="" CssAttribue="0" TextRecognitionType="0" JSONExpression="" TextRecognitionCodeReturnType="1" LengthFiltOpertar="0" LengthFiltValue="0" DateFilterOperate="0" DateFilterValue="" LabelContentMust="" LabelContentForbid="" FileUrlMust="" FileSaveDir="" FileSaveFormat="">
+            <Filters>
+                <RemoveHtmlFilter Indexs="19,20" Custom="" />
+            </Filters>
+        </Field>
+        <Field LabelName="----价格处理(按需处理)" SourcePage="默认页面" PageArea="" FetchDataType="0" AreaStart="" AreaEnd="" SourcePageType="0" SourcePagePart="0" GetDataType="0" StartStr="这一组关于价格或单位的标签如果用不上就全部删除掉即可&#xA;价格换汇率换算的C#代码片段(修改汇率值即可,例如澳元-美元(aud-usd))&#xA;using System;&#xA;using System.Collections.Generic;&#xA;using SpiderInterface;&#xA;class LocoyCode{&#xA;    /// &lt;summary&gt;&#xA;    /// 执行方法，不能修改类和方法名称。&#xA;    /// &lt;/summary&gt;&#xA;    /// &lt;param name=&quot;content&quot;&gt;标签内容&lt;/param&gt;&#xA;    /// &lt;param name=&quot;response&quot;&gt;页面响应，包含了Url、原始Html等属性&lt;/param&gt;&#xA;    /// &lt;returns&gt;返回处理后的标签内容&lt;/returns&gt;&#xA;    public string Run(string content,ResponseEntry response){&#xA;        //在这里编写处理代码(汇率值修改)&#xA;        double res=double.Parse(content)*0.65;&#xA;        return res.ToString();&#xA;    }&#xA;}" EndStr="" RegexContent="" RegexCombine="" XpathContent="" XPathAttribue="0" CssContent="" CssAttribue="0" TextRecognitionType="0" JSONExpression="" TextRecognitionCodeReturnType="1" LengthFiltOpertar="0" LengthFiltValue="0" DateFilterOperate="0" DateFilterValue="" LabelContentMust="" LabelContentForbid="" FileUrlMust="" FileSaveDir="" FileSaveFormat="">
+            <Filters />
+        </Field>
+        <Field LabelName="单价单位" SourcePage="默认页面" PageArea="" FetchDataType="0" AreaStart="" AreaEnd="" SourcePageType="0" SourcePagePart="0" GetDataType="1" StartStr="" EndStr="" RegexContent="&lt;span class=&quot;price-unit takoy-price-unit&quot;&gt;[参数]&lt;/span&gt;" RegexCombine="[参数1]" XpathContent="" XPathAttribue="0" CssContent="" CssAttribue="0" TextRecognitionType="0" JSONExpression="" TextRecognitionCodeReturnType="1" LengthFiltOpertar="0" LengthFiltValue="0" DateFilterOperate="0" DateFilterValue="" LabelContentMust="" LabelContentForbid="" FileUrlMust="" FileSaveDir="" FileSaveFormat="">
+            <Filters>
+                <FillBothEnd Start="&lt;/br&gt;Prix ​​unitaire:" End="&lt;/br&gt;" EmptyNotFill="" />
+            </Filters>
+        </Field>
+        <Field LabelName="产品价格初始" SourcePage="默认页面" PageArea="" FetchDataType="0" AreaStart="" AreaEnd="" SourcePageType="0" SourcePagePart="0" GetDataType="1" StartStr="" EndStr="" RegexContent="[参数]" RegexCombine="[参数1]" XpathContent="" XPathAttribue="0" CssContent="" CssAttribue="0" TextRecognitionType="0" JSONExpression="" TextRecognitionCodeReturnType="1" LengthFiltOpertar="0" LengthFiltValue="0" DateFilterOperate="0" DateFilterValue="" LabelContentMust="" LabelContentForbid="" FileUrlMust="" FileSaveDir="" FileSaveFormat="">
+            <Filters>
+                <IfEmptyDo RegexContent="data-pp-placement=&quot;product&quot; data-pp-amount=&quot;[参数]&quot;" RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="&quot;unit_sale_price&quot;:[参数]," RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="product:price:amount&quot;(*)content=&quot;[参数]&quot;" RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="price:amount&quot;(*)content=&quot;[参数]&quot;" RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="itemprop=price content=[参数]&gt;" RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="&lt;span itemprop='price' content=[参数]&gt;" RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="itemprop=&quot;price&quot; content=[参数]&gt;" RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="id=&quot;product_price&quot;&gt;[参数]&lt;/" RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="id=&quot;price&quot;&gt;[参数]&lt;/" RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="&lt;span class=&quot;prod-detail-cost-value&quot;&gt;[参数]&lt;/" RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="&quot;price&quot;:[参数],&quot;priceCurrency&quot;" RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="&quot;price&quot;:[参数]," RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="'price':[参数]," RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="&quot;productPrice&quot;(*)&gt;[参数]&lt;/" RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="itemprop=&quot;price&quot;&gt;[参数]&lt;/" RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="class=&quot;price&quot;&gt;[参数]&lt;/" RegexCombine="[参数1]" />
+            </Filters>
+        </Field>
+        <Field LabelName="EUR" SourcePage="默认页面" PageArea="" FetchDataType="2" MergeContent="[标签:产品价格初始]" LengthFiltOpertar="0" LengthFiltValue="0" DateFilterOperate="0" DateFilterValue="" LabelContentMust="" LabelContentForbid="" FillRelativeUrl="" DownloadImage="" FileUrlMust="" FileSaveDir="" FileSaveFormat="">
+            <Filters>
+                <ReplaceFilter old="." new="" IgnoreCase="0" />
+                <ReplaceFilter old="," new="." IgnoreCase="0" />
+            </Filters>
+        </Field>
+        <Field LabelName="USD" SourcePage="默认页面" PageArea="" FetchDataType="2" MergeContent="[标签:产品价格初始]" LengthFiltOpertar="0" LengthFiltValue="0" DateFilterOperate="0" DateFilterValue="" LabelContentMust="" LabelContentForbid="" FillRelativeUrl="" DownloadImage="" FileUrlMust="" FileSaveDir="" FileSaveFormat="">
+            <Filters>
+                <ReplaceFilter old="," new="" IgnoreCase="0" />
+            </Filters>
+        </Field>
+        <Field LabelName="--ReadMe固定标签" SourcePage="默认页面" PageArea="" FetchDataType="0" AreaStart="" AreaEnd="" SourcePageType="0" SourcePagePart="0" GetDataType="0" StartStr="说明:这里主要是引用或组合前面已经出现过的标签&#xA;比如产品描述:引用了多个前面的标签 [标签:基本描述short][标签:详细描述detail][标签:额外描述more]&#xA;又比如其中的[标签:基本描述short],如果你发现基本描述short是空的,而[标签:基本描述short2]是成功捕获描述的,那么就将 产品描述 这个标签的引用已有标签的组合更改为short2,其他被应用的标签类似(如果有多余的元素没关系,后面会统一清理数据)&#xA;又比如产品图片,可以连续引用前面的产品图片1,产品图片2标签(通常这两个至多一个成功,当然也可能都失败,此时就得你自己针对性写)&#xA;&#xA;产品图片使用了大量的[提取内容为空]判断,一般情况是可以正确提取产品价格,提高效率,但是有时候会适得其反,特别是用户发现采集过程中请求发送非常慢,或者会莫名奇妙下载图片,这两类情况请清空模板中[标签:产品图片]的数据处理标签,并自己编写图片采集规则!!!&#xA;手动采集图片的时候技巧是在浏览器中尝试右键复制图片链接再回到网页源码中找;如果是藏的比较深的或者是作为背景图,可以浏览器开发者工具审查元素,把遮挡在图片上方的元素给隐藏掉,逐层排查图片所在元素&#xA;&#xA;对于产品价格,固定标签中配置了欧元处理,对于前面的价格中带有逗号的价格,可以放到这里引用标签再处理一下,最后根据需要,可以把固定标签组里的[产品价格]引用标签为[欧元处理]&#xA;欧元处理这个标签只做简单的逗号引号处理,没有额外的数据清理,最后需要被[产品价格]引用,接受处理&#xA;&#xA;单价单位对于某些品类很有用(有时候可以忽略),比如布料出售,我们需要采集产品的单价,还要采集单价的单位,而不是采集3m,5m,...这类预设的伪装成属性值的情况,采集这种属性是不合理的,而应该采集单位(这是因为我们的价格值采最低价导致的限制)&#xA;注意,单位采集下来后,还需要为其添加一定的描述,进行对应国家语言的翻译,比如法国布料,最后在数据处理中设置前后缀,得到形如:&lt;/br&gt;Prix ​​unitaire:m&lt;/br&gt;的效果&#xA;&#xA;最后,如果产品面包屑引用的是[产品面包屑C#处理],那么记得修改C#中返回固定词(比如&quot;热卖&quot;,默认是西班牙语Venta caliente;法语为 Vente chaude;英语为 Hot Sale;德语为 Heißer Verkauf;" EndStr="" RegexContent="" RegexCombine="" XpathContent="" XPathAttribue="0" CssContent="" CssAttribue="0" TextRecognitionType="0" JSONExpression="" TextRecognitionCodeReturnType="1" LengthFiltOpertar="0" LengthFiltValue="0" DateFilterOperate="0" DateFilterValue="" LabelContentMust="" LabelContentForbid="" FileUrlMust="" FileSaveDir="" FileSaveFormat="">
+            <Filters />
+        </Field>
+        <Field LabelName="产品页网页标题(候选产品名)" SourcePage="默认页面" PageArea="" FetchDataType="0" AreaStart="" AreaEnd="" SourcePageType="0" SourcePagePart="0" GetDataType="0" StartStr="" EndStr="" RegexContent="" RegexCombine="" XpathContent="" XPathAttribue="0" CssContent="" CssAttribue="0" TextRecognitionType="0" JSONExpression="" TextRecognitionCodeReturnType="1" LengthFiltOpertar="0" LengthFiltValue="0" DateFilterOperate="0" DateFilterValue="" LabelContentMust="" LabelContentForbid="" FileUrlMust="" FileSaveDir="" FileSaveFormat="">
+            <Filters>
+                <IfEmptyDo RegexContent="&lt;title(*)&gt;[参数]&lt;/title&gt;" RegexCombine="[参数1]" />
+            </Filters>
+        </Field>
+        <Field LabelName="产品名称" SourcePage="默认页面" PageArea="" FetchDataType="0" AreaStart="" AreaEnd="" SourcePageType="0" SourcePagePart="0" GetDataType="1" StartStr="&lt;meta property=&quot;og:title&quot; content=&quot;" EndStr="&quot;" RegexContent="&lt;h1 class=&quot;page-title&quot;  &gt;&lt;span class=&quot;base&quot; data-ui-id=&quot;page-title-wrapper&quot; itemprop=&quot;name&quot;&gt;[参数]&lt;/span&gt;&lt;/h1&gt;" RegexCombine="[参数1]" XpathContent="" XPathAttribue="0" CssContent="" CssAttribue="0" TextRecognitionType="0" JSONExpression="" TextRecognitionCodeReturnType="1" LabelNotNull="" LengthFiltOpertar="0" LengthFiltValue="0" DateFilterOperate="0" DateFilterValue="" LabelContentMust="" LabelContentForbid=".COM|Pokemon |Disney |Pokémon|DISNEY|POKEMON|LEGO" FileUrlMust="" FileSaveDir="" FileSaveFormat="">
+            <Filters>
+                <IfEmptyDo RegexContent="&lt;h1 itemprop=&quot;name&quot;&gt;[参数]&lt;/h1&gt;" RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="&lt;h1(*)&gt;[参数]&lt;/h1&gt;" RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="&lt;meta property=&quot;(*)title&quot; content=&quot;[参数]&quot;" RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="class=&quot;product-name&quot;(*)&gt;[参数]&lt;/" RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="&lt;h1(*)&gt;[参数]&lt;/" RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="&lt;title&gt;[参数]&lt;/title&gt;" RegexCombine="[参数1]" />
+                <TextEncode codeType="3" encoding="utf-8" />
+                <TextEncode codeType="7" encoding="utf-8" />
+                <RemoveHtmlFilter Indexs="20,24" Custom="" />
+                <BatchReplaceFilter old="|*#@*\*#@*#*#@*:*#@*'*#@*£*#@*$*#@*€" new=" *#@* *#@* *#@* *#@*‘*#@* *#@* *#@* " IgnoreCase="0" />
+                <PureRegexFilter old="\s{2,}" new=" " />
+            </Filters>
+        </Field>
+        <Field LabelName="产品价格" SourcePage="默认页面" PageArea="" FetchDataType="2" MergeContent="[标签:USD]" LabelNotNull="" LengthFiltOpertar="0" LengthFiltValue="0" DateFilterOperate="0" DateFilterValue="" LabelContentMust="" LabelContentForbid="" FillRelativeUrl="" DownloadImage="" FileUrlMust="" FileSaveDir="" FileSaveFormat="">
+            <Filters>
+                <TextEncode codeType="3" encoding="utf-8" />
+                <TextEncode codeType="7" encoding="utf-8" />
+                <RunCSharp code="/* &#xD;&#xA;//将Unicode编码(\uxxxx)的形式解码为Unicode字符,(可以转换价格为unicode字符)&#xD;&#xA;    (&quot;\u0024&quot;, &quot;$&quot;),  # 美元/加拿大元/澳大利亚元&#xD;&#xA;    (&quot;\u20AC&quot;, &quot;€&quot;),  # 欧元&#xD;&#xA;    (&quot;\u00A3&quot;, &quot;£&quot;),  # 英镑&#xD;&#xA;    (&quot;\u00A5&quot;, &quot;¥&quot;),  # 日元/人民币&#xD;&#xA; */&#xD;&#xA;using System;&#xD;&#xA;using System.Collections.Generic;&#xD;&#xA;using System.Text.RegularExpressions;//使用正则类库&#xD;&#xA;using SpiderInterface;&#xD;&#xA;class LocoyCode{&#xD;&#xA;    /// &lt;summary&gt;&#xD;&#xA;    /// 执行方法，不能修改类和方法名称。&#xD;&#xA;    /// &lt;/summary&gt;&#xD;&#xA;    /// &lt;param name=&quot;content&quot;&gt;标签内容&lt;/param&gt;&#xD;&#xA;    /// &lt;param name=&quot;response&quot;&gt;页面响应，包含了Url、原始Html等属性&lt;/param&gt;&#xD;&#xA;    /// &lt;returns&gt;返回处理后的标签内容&lt;/returns&gt;&#xD;&#xA;    public string Run(string content,ResponseEntry response){&#xD;&#xA;        //在这里编写处理代码&#xD;&#xA;        // 使用正则表达式查找 Unicode 转义序列 \uXXXX&#xD;&#xA;        string pattern = @&quot;\\u([0-9A-Fa-f]{4})&quot;;&#xD;&#xA;        // 替换 \uXXXX 为对应的 Unicode 字符&#xD;&#xA;        string result = Regex.Replace(content, pattern, delegate(Match match)&#xD;&#xA;        {&#xD;&#xA;            // 将匹配到的 Unicode 转义序列转换为字符&#xD;&#xA;            int unicodeValue = int.Parse(match.Groups[1].Value, System.Globalization.NumberStyles.HexNumber);&#xD;&#xA;            return char.ConvertFromUtf32(unicodeValue);&#xD;&#xA;        });&#xD;&#xA;        &#xD;&#xA;        return result;&#xD;&#xA;    }&#xD;&#xA;}&#xD;&#xA;" />
+                <ReplaceFilter old="&quot;" new="" IgnoreCase="0" />
+                <RemoveHtmlFilter Indexs="19,20,24" Custom="" />
+                <BatchReplaceFilter old="£*#@*$*#@*€*#@*¥" new=" *#@* *#@* *#@* " IgnoreCase="0" />
+                <PureRegexFilter old="\s*" new="" />
+                <PureRegexFilter old=".*?(\d+(\.\d+)?).*" new="$1" />
+                <PureRegexFilter old=".*[^\d.,].*" new="" />
+            </Filters>
+        </Field>
+        <Field LabelName="产品图片" SourcePage="默认页面" PageArea="" FetchDataType="0" AreaStart="" AreaEnd="" SourcePageType="0" SourcePagePart="0" GetDataType="1" StartStr="" EndStr="" RegexContent="&lt;div class=&quot;takoy-product-gallery-item   &quot;&gt;&lt;img src=&quot;[参数]&quot;" RegexCombine="[参数1]" XpathContent="" XPathAttribue="0" CssContent="" CssAttribue="0" TextRecognitionType="0" JSONExpression="" TextRecognitionCodeReturnType="1" LabelNotNull="" LengthFiltOpertar="0" LengthFiltValue="0" DateFilterOperate="0" DateFilterValue="" LabelContentMust="http" LabelContentForbid="logo|ToolCentral|no-image|thumb|.svg|LOG|Log|placeholder|Coming(*)Soon|coming(*)soon" FileUrlMust="" FileSaveDir="" FileSaveFormat="">
+            <Filters>
+                <IfEmptyDo RegexContent="&quot;full&quot;:&quot;[参数]&quot;," RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="&lt;div class=&quot;woocommerce-product-gallery__wrapper&quot;&gt;(*)href=&quot;[参数]&quot;" RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="&lt;img class=&quot;product_image&quot; src=&quot;[参数]&quot;" RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="&lt;meta property=&quot;og:image&quot;(*)content=&quot;[参数]&quot;" RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="&lt;div id=&quot;product-images&quot;(*)src=&quot;[参数]&quot;" RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="&lt;meta itemprop=image content=[参数]/&gt;" RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="class=&quot;productView-images&quot;(*)src=&quot;[参数]&quot;" RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="&lt;img data-src=&quot;[参数]&quot;" RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="property=&quot;og:image&quot;(*)content=&quot;[参数]&quot;" RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="&lt;img id=&quot;image&quot; src=&quot;[参数]&quot;" RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="&quot;image&quot;:(*)&quot;[参数]&quot;" RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="&lt;img src=&quot;[参数]&quot;" RegexCombine="[参数1]" />
+                <TextEncode codeType="3" encoding="utf-8" />
+                <TextEncode codeType="7" encoding="utf-8" />
+                <BatchReplaceFilter old="\*#@*(*)http[参数]*#@*&quot;(*)" new="*#@*http[参数1]*#@*" IgnoreCase="0" />
+                <ReplaceFilter old="##?(*)" new="" IgnoreCase="0" />
+            </Filters>
+        </Field>
+        <Field LabelName="产品描述" SourcePage="默认页面" PageArea="" FetchDataType="2" MergeContent="[标签:单价单位][标签:描述0][标签:描述1][标签:描述2][标签:描述3]" LabelNotNull="" LengthFiltOpertar="0" LengthFiltValue="0" DateFilterOperate="0" DateFilterValue="" LabelContentMust="" LabelContentForbid="" FileUrlMust="" FileSaveDir="" FileSaveFormat="">
+            <Filters>
+                <IfEmptyDo RegexContent="name=&quot;description&quot; content=&quot;[参数]&quot;" RegexCombine="[参数1]" />
+                <TextEncode codeType="7" encoding="utf-8" />
+                <BatchReplaceFilter old="View All&lt;/span&gt;&lt;span class=&quot;off&quot;&gt;Close*#@*mehr sehen*#@*Leggi di più*#@*Description*#@*Descriptions*#@*Read more*#@*read more*#@*Read More*#@*...*#@*Descripción" new="*#@**#@**#@**#@**#@**#@**#@**#@**#@*" IgnoreCase="0" />
+                <PureRegexFilter old="&lt;(\w+)[^&gt;]*&gt;" new="&lt;$1&gt;" />
+                <BatchReplaceFilter old="#词库说明:末尾的html标签是在有的网站要保留而有的网站要移除(词库版本20250822)*#@*# &lt;body(*)body&gt;*#@*# &lt;label(*)label&gt;*#@*#&lt;br(*)&gt;*#@*#&lt;details(*)details&gt;*#@*#&lt;summary(*)summary&gt;*#@*&lt;!--(*)--&gt;*#@*#&lt;html(*)html&gt;*#@*&lt;head(*)head&gt;*#@*&lt;meta(*)meta&gt;*#@*&lt;style(*)style&gt;*#@*&lt;script(*)script&gt;*#@*&lt;link(*)link&gt;*#@*&lt;header(*)header&gt;*#@*&lt;footer(*)footer&gt;*#@*&lt;textarea(*)textarea&gt;*#@*&lt;select(*)select&gt;*#@*&lt;form(*)form&gt;*#@*&lt;input(*)&gt;*#@*&lt;img(*)&gt;*#@*&lt;hr(*)&gt;*#@*&lt;base(*)&gt;*#@*&lt;area(*)&gt;*#@*&lt;source(*)&gt;*#@*&lt;select(*)select&gt;*#@*&lt;option(*)option&gt;*#@*&lt;button(*)button&gt;*#@*&lt;form(*)form&gt;*#@*&lt;textarea(*)textarea&gt;*#@*&lt;select(*)select&gt;*#@*&lt;option(*)option&gt;*#@*&lt;embed(*)embed&gt;*#@*&lt;fieldset(*)fieldset&gt;*#@*&lt;legend(*)legend&gt;*#@*&lt;object(*)object&gt;*#@*&lt;iframe(*)iframe&gt;*#@*&lt;frame(*)frame&gt;*#@*&lt;video(*)video&gt;*#@*&lt;audio(*)audio&gt;*#@*&lt;canvas(*)canvas&gt;*#@*&lt;picture(*)picture&gt;*#@*&lt;svg(*)svg&gt;*#@*&lt;dialog(*)dialog&gt;*#@*&lt;style(*)style&gt;" new="根据情况可以取消注释(删除对应行开头的#号);*#@* *#@* *#@* *#@* *#@* *#@* *#@* *#@* *#@* *#@* *#@* *#@* *#@* *#@* *#@* *#@* *#@* *#@* *#@* *#@* *#@* *#@* *#@* *#@* *#@* *#@* *#@* *#@* *#@* *#@* *#@* *#@* *#@* *#@* *#@* *#@* *#@* *#@* *#@* *#@* *#@* *#@* *#@* " IgnoreCase="0" />
+                <PureRegexFilter old="[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+" new="" />
+                <PureRegexFilter old="(https?://)(([\w-]+\.)+([\w-]+))/?" new="." />
+                <PureRegexFilter old="(\s+)|(^\s*&gt;)" new=" " />
+                <BatchReplaceFilter old="&lt;p&gt;&lt;/p&gt;*#@*&lt;div&gt;&lt;/div&gt;*#@*&lt;span&gt;&lt;/span&gt;*#@*&lt;li&gt;&lt;/li&gt;*#@*&lt;ol&gt;&lt;/ol&gt;*#@*&lt;ul&gt;&lt;/ul&gt;" new=" *#@* *#@* *#@* *#@* *#@* " IgnoreCase="0" />
+                <PureRegexFilter old="[&gt;\s]+&gt;" new="&gt;" />
+                <PureRegexFilter old="&lt;a.*?&gt;(.*?)&lt;/a&gt;" new="$1" />
+                <BatchReplaceFilter old="&lt;div&gt;*#@*&lt;/div&gt;*#@*Loading...*#@*&lt;small&gt;*#@*&lt;/small&gt;*#@*&lt;h1&gt;*#@*&lt;/h1&gt;*#@*&lt;h2&gt;*#@*&lt;/h2&gt;*#@*&lt;details&gt;*#@*&lt;/details&gt;*#@*&lt;summary&gt;*#@*&lt;/summary&gt;*#@*&lt;li&gt;*#@*&lt;/li&gt;*#@*&lt;label&gt;*#@*&lt;/label&gt;" new="&lt;p&gt;*#@*&lt;/p&gt;*#@**#@**#@**#@*&lt;strong&gt;*#@*&lt;/strong&gt;*#@*&lt;strong&gt;*#@*&lt;/strong&gt;*#@**#@**#@**#@**#@*&lt;p&gt;*#@*&lt;/p&gt;*#@*&lt;strong&gt;*#@*&lt;/strong&gt;" IgnoreCase="0" />
+                <PureRegexFilter old="\s*(&lt;/?\s*br\s*/?\s*&gt;\s*)+" new="&lt;br&gt;" />
+                <PureRegexFilter old="(\\+r|\\+n)" new="" />
+                <PureRegexFilter old="([+]?\s*)(((\d+[,.])?\d+)\s*[€$£￥]|([€$£￥]\s*(\d+[,.])?\d+))" new="" />
+                <BatchReplaceFilter old="£*#@*$*#@*€*#@*¥*#@*\" new=" *#@* *#@* *#@* *#@*" IgnoreCase="0" />
+                <PureRegexFilter old="[^\u0000-\u007F\u0080-\u024F\u1E00-\u1EFF]" new="" />
+                <ReplaceFilter old="##(*)Mehr" new="" IgnoreCase="0" />
+            </Filters>
+        </Field>
+        <Field LabelName="产品面包屑" SourcePage="默认页面" PageArea="" FetchDataType="0" AreaStart="" AreaEnd="" SourcePageType="0" SourcePagePart="0" GetDataType="2" StartStr="" EndStr="" RegexContent="[参数]" RegexCombine="[参数1]" XpathContent="" XPathAttribue="0" CssContent="" CssAttribue="0" TextRecognitionType="0" JSONExpression="" TextRecognitionCodeReturnType="1" LabelNotNull="" LengthFiltOpertar="0" LengthFiltValue="0" DateFilterOperate="0" DateFilterValue="" LabelContentMust="" LabelContentForbid="https|:" FileUrlMust="" FileSaveDir="" FileSaveFormat="">
+            <Filters>
+                <IfEmptyDo RegexContent="},&quot;category&quot;:&quot;[参数]&quot;,&quot;description&quot;" RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="&quot;category&quot;:[&quot;[参数]&quot;" RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="&quot;item_category2&quot;:[参数]," RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="&quot;category&quot;:[参数]," RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="&quot;item_category1&quot;:[参数]," RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="            &quot;@type&quot;: &quot;ListItem&quot;,&#xA;            &quot;position&quot;: 2,&#xA;            &quot;item&quot;: {&#xA;                &quot;@id&quot;:(*)&#xA;                &quot;name&quot;: &quot;[参数]&quot;&#xA;            }" RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="&quot;item_category&quot;:[参数]," RegexCombine="[参数1]" />
+                <RemoveHtmlFilter Indexs="20,24" Custom="" />
+                <TextEncode codeType="3" encoding="utf-8" />
+                <TextEncode codeType="7" encoding="utf-8" />
+                <ReplaceFilter old=",(*)" new="" IgnoreCase="0" />
+                <BatchReplaceFilter old="'[参数]'*#@*&quot;[参数]&quot;*#@*\*#@*}*#@*]*#@*/*#@*&gt;*#@*)*#@*;*#@*:" new="[参数1]*#@*[参数1]*#@* *#@**#@**#@* *#@* *#@**#@**#@*" IgnoreCase="0" />
+                <PureRegexFilter old="(.*?)[&gt;|/].*" new="$1" />
+                <PureRegexFilter old="\s+" new=" " />
+                <BatchReplaceFilter old="'[参数]'*#@*&quot;*#@*(*#@*)*#@*[*#@*]*#@*{*#@*}*#@*&lt;*#@*&gt;*#@*\*#@*;*#@*:*#@*/*#@*,*#@*(*)_(*)" new=" *#@* *#@* *#@* *#@* *#@* *#@* *#@* *#@* *#@* *#@* *#@* *#@* *#@*-*#@* *#@*" IgnoreCase="0" />
+                <RunCSharp code="//当引用的面包屑为空值时,返回固定词(比如热卖,注意将&quot;热卖&quot;这个词翻译成你采集站的对应语言&#xD;&#xA;/*&#xD;&#xA;西班牙语Venta caliente;&#xD;&#xA;法语为 Vente chaude;&#xD;&#xA;英语为 Hot Sale;&#xD;&#xA;德语为 Heißer Verkauf;&#xD;&#xA;&#xD;&#xA;*/&#xD;&#xA;using System;&#xD;&#xA;using System.Collections.Generic;&#xD;&#xA;using SpiderInterface;&#xD;&#xA;class LocoyCode&#xD;&#xA;{&#xD;&#xA;    /// &lt;summary&gt;&#xD;&#xA;    /// 执行方法，不能修改类和方法名称。&#xD;&#xA;    /// &lt;/summary&gt;&#xD;&#xA;    /// &lt;param name=&quot;content&quot;&gt;标签内容&lt;/param&gt;&#xD;&#xA;    /// &lt;param name=&quot;response&quot;&gt;页面响应，包含了Url、原始Html等属性&lt;/param&gt;&#xD;&#xA;    /// &lt;returns&gt;返回处理后的标签内容&lt;/returns&gt;&#xD;&#xA;    public string Run(string content, ResponseEntry response)&#xD;&#xA;    {&#xD;&#xA;        string candidate=&quot;!&quot;;&#xD;&#xA;        &#xD;&#xA;        int lengthLimit=50;//面包屑长度限制(有利于控制分类数量,以及wp站的商店页面侧边栏显示分类的小工具不挤压)&#xD;&#xA;        &#xD;&#xA;        //在这里编写处理代码&#xD;&#xA;        if (string.IsNullOrEmpty(content))&#xD;&#xA;        {&#xD;&#xA;            content = candidate;//法语热卖&#xD;&#xA;        }&#xD;&#xA;        if(content.Length&gt;lengthLimit){&#xD;&#xA;            content=candidate;&#xD;&#xA;            &#xD;&#xA;        }&#xD;&#xA;&#xD;&#xA;        return content;&#xD;&#xA;    }&#xD;&#xA;}&#xD;&#xA;" />
+            </Filters>
+        </Field>
+        <Field LabelName="品牌" SourcePage="默认页面" PageArea="" FetchDataType="0" AreaStart="" AreaEnd="" SourcePageType="0" SourcePagePart="0" GetDataType="1" StartStr="" EndStr="" RegexContent="[参数]" RegexCombine="[参数1]" XpathContent="" XPathAttribue="0" CssContent="" CssAttribue="0" TextRecognitionType="0" JSONExpression="" TextRecognitionCodeReturnType="1" LengthFiltOpertar="0" LengthFiltValue="0" DateFilterOperate="0" DateFilterValue="" LabelContentMust="" LabelContentForbid="shoes|https://" FileUrlMust="" FileSaveDir="" FileSaveFormat="">
+            <Filters>
+                <IfEmptyDo RegexContent="&quot;brand&quot;:(*)&quot;name&quot;(*)&quot;[参数]&quot;" RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="itemprop=&quot;brand&quot;(*)itemprop=&quot;name&quot;&gt;[参数]&lt;/span&gt;" RegexCombine="[参数1]" />
+                <IfEmptyDo RegexContent="&quot;manufacturer&quot;:&quot;[参数]&quot;" RegexCombine="[参数1]" />
+                <RemoveHtmlFilter Indexs="24" Custom="" />
+                <TextEncode codeType="7" encoding="utf-8" />
+                <TextEncode codeType="1" encoding="utf-8" />
+                <BatchReplaceFilter old="&quot;*#@*\" new="*#@*" IgnoreCase="0" />
+            </Filters>
+        </Field>
+        <Field LabelName="产品型号" SourcePage="默认页面" PageArea="" FetchDataType="0" AreaStart="" AreaEnd="" SourcePageType="0" SourcePagePart="0" GetDataType="1" StartStr="" EndStr="" RegexContent=",&quot;sku&quot;(*)&quot;[参数]&quot;" RegexCombine="[参数1]" XpathContent="" XPathAttribue="0" CssContent="" CssAttribue="0" TextRecognitionType="0" JSONExpression="" TextRecognitionCodeReturnType="1" LengthFiltOpertar="0" LengthFiltValue="0" DateFilterOperate="0" DateFilterValue="" LabelContentMust="" LabelContentForbid="" FileUrlMust="" FileSaveDir="" FileSaveFormat="">
+            <Filters>
+                <RemoveHtmlFilter Indexs="20" Custom="" />
+                <TextEncode codeType="1" encoding="utf-8" />
+                <TextEncode codeType="3" encoding="utf-8" />
+                <ReplaceFilter old="\" new="" IgnoreCase="0" />
+            </Filters>
+        </Field>
+        <Field LabelName="属性值1" SourcePage="默认页面" PageArea="" FetchDataType="0" AreaStart="" AreaEnd="" SourcePageType="0" SourcePagePart="0" GetDataType="1" StartStr="" EndStr="" RegexContent="[参数]" RegexCombine="[参数1]" XpathContent="" XPathAttribue="0" CssContent="" CssAttribue="0" TextRecognitionType="0" JSONExpression="" TextRecognitionCodeReturnType="1" LengthFiltOpertar="0" LengthFiltValue="0" DateFilterOperate="0" DateFilterValue="" LabelContentMust="" LabelContentForbid="" FileUrlMust="" FileSaveDir="" FileSaveFormat="">
+            <Filters>
+                <ReplaceFilter old="&#xA;可选替换:&#xA;&#xA;如果需要,可以在这个环节过滤掉(替换为空)一些多余的选项或者不重要但是可能引起采集到多余html原码的东西,例如&#xA;&lt;option value=&quot;&quot; selected=&quot;selected&quot;&gt;select an option&lt;/option&gt;" new="" IgnoreCase="0" />
+                <TextEncode codeType="3" encoding="utf-8" />
+                <TextEncode codeType="7" encoding="utf-8" />
+                <RemoveHtmlFilter Indexs="0" Custom="" />
+                <ReplaceFilter old="属性名&lt;span&gt;[参数]&lt;/span&gt; &lt;div class=&quot;options" new="&amp;&amp;&amp;[参数1]#&amp;&amp;&amp;" IgnoreCase="0" />
+                <ReplaceFilter old="选项值:注意边界情况可能引号 &quot; 和 &gt; 符号之间可能有其他内容,通常建议结尾的 &gt; 号不要掉&#xA;例如&#xA;&lt;option value(*)title=&quot;[参数]&quot;    #末尾尽量不用有多余的东西&#xA;而不建议写成:&#xA;&lt;option value(*)title=&quot;[参数]&quot;&gt;   #不推荐这样的结尾" new="&amp;&amp;&amp;[参数1]|&amp;&amp;&amp;" IgnoreCase="0" />
+                <ReplaceFilter old="...[参数]..." new="&amp;&amp;&amp;[参数1]#&amp;&amp;&amp;" IgnoreCase="0" />
+                <ReplaceFilter old="...[参数]..." new="&amp;&amp;&amp;[参数1]|&amp;&amp;&amp;" IgnoreCase="0" />
+                <PureRegexFilter old="[\s\S]*?&amp;&amp;&amp;([\s\S]*)&amp;&amp;&amp;[\s\S]*" new="$1" />
+                <PureRegexFilter old="&amp;&amp;&amp;([\s\S]*?)&amp;&amp;&amp;" new="" />
+                <ReplaceFilter old=":(*)#" new="#" IgnoreCase="0" />
+                <PureRegexFilter old="[|]([^|]*?)#" new="~    $1#" />
+                <PureRegexFilter old="([\s\S]*)[|]" new="$1" />
+                <PureRegexFilter old="\s+" new=" " />
+                <PureRegexFilter old="([+]?\s*)(((\d+[,.])?\d+)\s*[€$£￥]|([€$£￥]\s*(\d+[,.])?\d+))" new="" />
+                <BatchReplaceFilter old="#(*)&lt;(*)&gt;(*)*#@*#(*)=(*)" new="*#@*" IgnoreCase="0" />
+                <PureRegexFilter old="#\s*\|" new="#" />
+            </Filters>
+        </Field>
+    </Fields>
+    <ListFields />
+    <DefaultPage>
+        <MultiPage PageName="默认页面" SourcePage="默认页面" PageReplaceUrl="" PageReplaceNew="" PageUrlStyle="" PageUrlCombine="" PageEncoding="" PagesUrlListAll="" GetPagesUrlAuto="" MaxPages="0">
+            <TestPageUrls>https://takoy.fr/fermeture-eclair-tky-spirale-au-metre-3mm-sans-curseur-blanc-ns-14489</TestPageUrls>
+            <TestPageUrls>https://takoy.fr/broderie-anglaise-jersey-rose-clair-ns-13023</TestPageUrls>
+            <TestPageUrls>https://takoy.fr/tissu-avec-impression-polyester-impermeable-td-ns-cicmany-blanc-ns-6004</TestPageUrls>
+            <TestPageUrls>http://localhost</TestPageUrls>
+            <TestPageUrls>https://www.scheufele-modellbau.de/4423-Niederbordwagen-unbeladen</TestPageUrls>
+            <TestPageUrls>https://www.contactlenses.co.uk/contact-lenses/biomedics-55-evolution</TestPageUrls>
+            <TestPageUrls>https://www.byflou.com/de/h2o-roemoe-logo-lw-rain-long-jacket/warm-grey</TestPageUrls>
+            <TestPageUrls>https://www.byflou.com/de/we-are-bitte-baby-sengetoej/oat-hval</TestPageUrls>
+            <TestPageUrls>https://www.byflou.com/de/fredericia-furniture/moebel/sofas/modulsofas</TestPageUrls>
+            <TestPageUrls>https://www.byflou.com/de/kalager-design-ottoman-large?ident=7d061f66aa1f745bad5810b63118921d4f0051a9</TestPageUrls>
+            <TestPageUrls>https://www.byflou.com/de/kalager-design-ottoman-large/green-beige</TestPageUrls>
+            <TestPageUrls>https://shopjarbo.com/products/down-crop-coccon-jdo2991</TestPageUrls>
+            <TestPageUrls>https://peachfrog.com/products/avari-conversion-ii-rower-recumbent-bike-black/</TestPageUrls>
+            <TestPageUrls>https://shopjarbo.com/products/down-crop-coccon-jdo29</TestPageUrls>
+            <TestPageUrls>https://www.schraubenluchs.de/Zylinderschrauben-mit-Innensechskant-DIN-912-ISO-4762-88-galv-verzinkt</TestPageUrls>
+        </MultiPage>
+    </DefaultPage>
+    <MultiPages>
+        <MultiPage PageName="shopify_json" SourcePage="默认页面" PageReplaceUrl="^(.*?)/?$" PageReplaceNew="$1.json" PageUrlStyle="" PageUrlCombine="" PageEncoding="" PagesUrlListAll="" GetPagesUrlAuto="" MaxPages="0" IgnoreCase="">
+            <TestPageUrls>https://lakelifter.com/products/3-amp-quick-blow-fuses-springs-2-pack</TestPageUrls>
+        </MultiPage>
+    </MultiPages>
+    <PageAreas />
+    <ManualHeaders>
+        <_1_2_3_4_5_6_7__User-Agent>Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36</_1_2_3_4_5_6_7__User-Agent>
+        <_1_2_3_4_5_6_7__Referer>https://www.google.com</_1_2_3_4_5_6_7__Referer>
+    </ManualHeaders>
+    <Alarm Enabled="0" Column="0" Method="0" value="0" Email="" Send="" User="" Pwd="" SMTPUrl="" SMTPPort="0" />
+    <AutoGetUrlConfig AutoGetUrlInfo="0" AutoGetStopCount="0" UpdateCookieTimeout="120" AutoGetUrl="" AutoGetLength="0" AutoGetErrors="" />
+</root>

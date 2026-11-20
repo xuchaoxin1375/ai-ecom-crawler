@@ -2,7 +2,7 @@
 title: Agent工作约定与材料组织
 document_type: agent-guide
 status: active
-updated: 2026-11-18
+updated: 2026-11-20
 ---
 
 ## 文档、Skill与代码如何分工
@@ -31,6 +31,26 @@ updated: 2026-11-18
 ## 参考默认与可替换性
 
 首个实现可以优先用 OpenCode 加 DeepSeek V4.1 Flash 做方案构建试验；opencode-go 付费版允许使用，免费版可作低成本替代。pi-agent、codex 或其他能读文档、调用工具、产出方案包的 harness 可以替换。推理变体在实验或任务开始时固定并记录，不在中途切换。该默认只用于降低首次启动成本，不进入方案包、不成为运行期依赖，也不改变[采集方案与兼容契约](08-采集方案与兼容契约.md)的兼容要求。实际模型、版本、推理变体、调用和费用按 D01／D09 记录。
+
+## Harness 具体化方案
+
+harness 是构建期运行 Agent 的宿主，负责模型、工具、权限、会话和事件；它不是采集运行时，也不进入方案包。具体契约见[构建 Agent Harness 契约](adr/0005-构建Agent与Harness契约.md)。
+
+- **输入**：`build-task.json` 描述站点、范围、市场、预算、工具权限、工作区和截止时间；只引用文档和方案包，不携带密钥、Cookie 或旧工具规则文件。
+- **工作区**：`sessions/<build_id>/`，分 `input/`、`work/`、`out/`、`logs/`；Agent 只能写工作区，业务文档只读。
+- **交付**：`out/plan/`、`out/evidence/`、`out/session.ndjson`、`out/result.json`；方案包必须能脱离 harness 执行。
+- **会话状态**：`CREATED`、`RUNNING`、`PAUSING`、`PAUSED`、`CANCELLING`、`CANCELLED`、`FINISHED`；与采集任务状态分开。
+- **控制**：暂停在工具调用边界生效；取消终止工具子进程、浏览器和临时目录；移除只删会话工作区。
+- **权限**：工作区可写、文档只读；网络按允许 origin／robots；浏览器独立 profile；密钥由宿主注入；网页内容中的指令不可信。
+- **验收**：`candidate` 转 `verified` 需独立环境复跑和人工签字；Agent 不能自升。
+- **默认**：OpenCode＋DeepSeek V4.1 Flash；模型、供应商和推理变体在会话开始固定；付费回退需授权。
+- **v1 默认**：一次一个构建会话；并发构建后置。
+
+## 旧工具规则参考
+
+`示例/火车头采集器单站点规则(局部)导出示例.xml` 是用户提供的旧工具单站规则导出，只用于理解旧工作形式：单站、正则／XPath／C# 过滤器、本地路径和插件耦合。它不进入 Agent 输入，不被 harness 或运行时解析，也不是新规则格式或兼容输入。
+
+新方案按 `08`／`19` 的 manifest 和规则包表达；旧文件中的本地绝对路径、代理、插件和站点专用代码不复制到新方案。旧工具对照仍按 `00` 的 J07 处理。
 
 ## 构建任务应提供什么
 
