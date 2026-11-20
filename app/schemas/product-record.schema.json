@@ -24,6 +24,7 @@
     "availability_observed",
     "sales_unit",
     "relations",
+    "variants",
     "extracted_at"
   ],
   "properties": {
@@ -98,6 +99,24 @@
             "enum": ["compatibility", "package", "ingredients"]
           },
           "html": {"type": "string"}
+        },
+        "additionalProperties": true
+      }
+    },
+    "variants": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["amount", "available", "sku", "options", "price_reason"],
+        "properties": {
+          "amount": {"type": ["number", "null"], "exclusiveMinimum": 0},
+          "available": {"type": ["boolean", "null"]},
+          "sku": {"type": ["string", "null"]},
+          "options": {
+            "type": "object",
+            "additionalProperties": {"type": "string"}
+          },
+          "price_reason": {"type": ["string", "null"]}
         },
         "additionalProperties": true
       }

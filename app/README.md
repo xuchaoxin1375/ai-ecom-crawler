@@ -91,7 +91,7 @@ python -m uv run --project app ecom-crawler validate --task-result /path/to/task
 | `source_url` | 必填；`http`／`https`，不含凭据；去 fragment 后用于去重 |
 | `name` | 必填；只清理来源主机等价后缀，不猜删品牌词 |
 | `price.amount` | 与 `price.currency` 一起构成主报价；支持数字或带符号／千位符的字符串 |
-| `price.variants` | 可选；取最低正价变体（含缺货有价），并合并变体选项 |
+| `price.variants` | 可选；取最低正价变体（含缺货有价），合并变体选项，并在内部记录保留变体级价格／库存／SKU |
 | `price.candidates` | 可选；按 `label` 标记 `displayed`／`pretax`，取较小正价 |
 | `price.tax_basis` | `INCLUSIVE`、`EXCLUSIVE`、`NOT_SPECIFIED` 或 `UNSPECIFIED` |
 | `primary_image_url` | 必填；相对路径按 `source_url` 解析；占位图不算主图 |
@@ -118,7 +118,7 @@ python -m uv run --project app ecom-crawler validate --task-result /path/to/task
 | --- | --- |
 | `products.csv` | `docs/02` 的固定 9 列，UTF-8，无 BOM |
 | `task-result.json` | `docs/09` 的任务结果、计数、覆盖、业务验收和 `quality_exceptions` |
-| `records.jsonl` | 内部规范化记录；CSV 是它的 9 列投影 |
+| `records.jsonl` | 内部规范化记录；含变体级价格／库存／SKU 和字段来源，CSV 是它的 9 列投影 |
 | `diagnostics/excluded.jsonl` | 业务排除记录，保留 `source_url`、`reason` 和观察价 |
 | `diagnostics/failed.jsonl` | 技术失败记录，保留 `source_url`、`reason` 和明细 |
 

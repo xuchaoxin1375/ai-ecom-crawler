@@ -55,6 +55,7 @@ class ResolvedPrice:
     displayed: Decimal | None
     pretax: Decimal | None
     options: tuple[OptionGroup, ...] = ()
+    variants: tuple[dict[str, Any], ...] = ()
 
 
 def load_task(path: Path) -> dict[str, Any]:
@@ -285,11 +286,12 @@ def resolve_price(price: Any, *, locale: str) -> ResolvedPrice:
     variants = price.get("variants")
     candidates = price.get("candidates")
     options: tuple[OptionGroup, ...] = ()
+    variant_records: tuple[dict[str, Any], ...] = ()
 
     if variants:
         if not isinstance(variants, list):
             raise RecordIssue("INVALID_PRICE_VARIANTS")
-        amount, chosen, options = _choose_variant(variants, locale=locale)
+        amount, chosen, options, variant_records = _choose_variant(variants, locale=locale)
         tax_basis = normalize_tax_basis(chosen.get("tax_basis", price.get("tax_basis")))
     elif candidates:
         if not isinstance(candidates, list):
@@ -328,15 +330,17 @@ def resolve_price(price: Any, *, locale: str) -> ResolvedPrice:
         displayed=displayed,
         pretax=pretax,
         options=options,
+        variants=variant_records,
     )
 
 
 def _choose_variant(
     variants: list[Any], *, locale: str
-) -> tuple[Decimal, Mapping[str, Any], tuple[OptionGroup, ...]]:
+) -> tuple[Decimal, Mapping[str, Any], tuple[OptionGroup, ...], tuple[dict[str, Any], ...]]:
     valid: list[tuple[Decimal, Mapping[str, Any]]] = []
     reasons: list[str] = []
     option_groups: list[OptionGroup] = []
+    records: list[dict[str, Any]] = []
     for variant in variants:
         if not isinstance(variant, Mapping):
             reasons.append("INVALID_PRICE")
@@ -350,10 +354,26 @@ def _choose_variant(
         variant_options = variant.get("options")
         if variant_options is not None:
             option_groups.extend(normalize_options(variant_options))
+        options_payload = (
+            {str(key): str(value) for key, value in variant_options.items()}
+            if isinstance(variant_options, Mapping)
+            else {}
+        )
+        records.append(
+            {
+                "amount": None if amount is None else float(amount),
+                "available": variant.get("available")
+                if isinstance(variant.get("available"), bool)
+                else None,
+                "sku": clean_text(variant.get("sku")) or None,
+                "options": options_payload,
+                "price_reason": reason,
+            }
+        )
     if not valid:
         raise RecordIssue(_pick_price_reason(reasons))
     amount, chosen = min(valid, key=lambda pair: pair[0])
-    return amount, chosen, merge_options((), option_groups)
+    return amount, chosen, merge_options((), option_groups), tuple(records)
 
 
 def _choose_candidate(
@@ -469,6 +489,7 @@ def _normalize_candidate(
         price_displayed=resolved.displayed,
         price_pretax=resolved.pretax,
         relations=description.relations,
+        variants=resolved.variants,
         field_sources=dict(field_sources),
     )
 

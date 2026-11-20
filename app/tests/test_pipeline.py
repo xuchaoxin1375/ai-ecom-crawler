@@ -73,10 +73,16 @@ class CandidateClassificationTests(unittest.TestCase):
             price={
                 "currency": "GBP",
                 "variants": [
-                    {"amount": "29.00", "available": False, "options": {"Size": "S"}},
+                    {
+                        "amount": "29.00",
+                        "available": False,
+                        "sku": "SHIRT-S",
+                        "options": {"Size": "S"},
+                    },
                     {
                         "amount": "35.00",
                         "available": True,
+                        "sku": "SHIRT-M",
                         "options": {"Size": "M", "Color": "Red"},
                     },
                 ],
@@ -90,6 +96,10 @@ class CandidateClassificationTests(unittest.TestCase):
             [(group.name, group.values) for group in product.options],
             [("Size", ("S", "M")), ("Color", ("Red",))],
         )
+        variants = product.to_record()["variants"]
+        self.assertEqual([variant["amount"] for variant in variants], [29.0, 35.0])
+        self.assertEqual([variant["available"] for variant in variants], [False, True])
+        self.assertEqual([variant["sku"] for variant in variants], ["SHIRT-S", "SHIRT-M"])
 
     def test_tax_candidates_choose_smaller_public_price(self) -> None:
         item = candidate(

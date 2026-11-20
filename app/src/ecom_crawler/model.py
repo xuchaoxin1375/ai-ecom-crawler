@@ -131,6 +131,7 @@ class NormalizedProduct:
     price_displayed: Decimal | None = None
     price_pretax: Decimal | None = None
     relations: tuple[dict[str, str], ...] = ()
+    variants: tuple[dict[str, Any], ...] = ()
     field_sources: dict[str, str] = field(default_factory=dict)
 
     def to_record(self) -> dict[str, Any]:
@@ -167,6 +168,7 @@ class NormalizedProduct:
             "availability_observed": self.availability_observed,
             "sales_unit": self.sales_unit,
             "relations": [dict(item) for item in self.relations],
+            "variants": [dict(item) for item in self.variants],
             "extracted_at": self.extracted_at,
             "field_sources": dict(self.field_sources),
         }
