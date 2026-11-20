@@ -1,0 +1,8 @@
+{
+  "task_id": "d01-sixmoondesigns-d01-rerun-001-20261120T153902Z",
+  "label": "d01-rerun-001",
+  "command": "experiments/d01/sixmoondesigns/run.py --out-dir experiments/d01/sixmoondesigns --label d01-rerun-001",
+  "python": "3.13.13",
+  "platform": "win32",
+  "proxy_env_present": false
+}

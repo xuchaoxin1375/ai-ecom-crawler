@@ -1,5 +1,5 @@
 {
-  "task_id": "d01-sixmoondesigns-d01-run-003-20261120T011333Z",
+  "task_id": "d01-sixmoondesigns-d01-rerun-001-20261120T153902Z",
   "plan_id": "sixmoondesigns-us-d01",
   "plan_version": "2026.11.20-1",
   "market": "US",
@@ -8,8 +8,8 @@
   "outcome": "PARTIAL",
   "stop_reason": "BUDGET_EXHAUSTED",
   "stop_detail": "task cap reached: processed 30 products; products.json declares 112",
-  "started_at": "2026-11-20T01:13:19Z",
-  "finished_at": "2026-11-20T01:13:33Z",
+  "started_at": "2026-11-20T15:38:50Z",
+  "finished_at": "2026-11-20T15:39:02Z",
   "counts": {
     "discovered_urls": 33,
     "pending_navigation_entries": 0,
@@ -204,7 +204,7 @@
   "artifacts": {
     "valid_csv": "valid.csv",
     "run_summary": "run-summary.json",
-    "diagnostics_dir": "diagnostics/d01-run-003/"
+    "diagnostics_dir": "diagnostics/d01-rerun-001/"
   },
   "discovery": {
     "entry_url": "https://www.sixmoondesigns.com/?country=US",

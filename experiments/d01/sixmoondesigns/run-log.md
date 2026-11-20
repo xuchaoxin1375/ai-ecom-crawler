@@ -15,9 +15,10 @@
 | --- | --- | ---: | ---: | --- | --- |
 | `d01-run-001` | 失败：入口 `Shopify.currency` 解析为空 | 2 | 52.31s | 0／0／0 | `PLAN_ERROR` |
 | `d01-run-002` | 成功，计数字段待修正 | 4 | 10.46s | 29／1／0 | `BUDGET_EXHAUSTED` |
-| `d01-run-003` | 最终发布结果 | 4 | 14.49s | 29／1／0 | `BUDGET_EXHAUSTED` |
+| `d01-run-003` | 试点发布结果 | 4 | 14.49s | 29／1／0 | `BUDGET_EXHAUSTED` |
+| `d01-rerun-001` | 独立复跑，结果一致 | 4 | 11.46s | 29／1／0 | `BUDGET_EXHAUSTED` |
 
-最终运行：robots 1、US 入口 1、US `products.json` 1、首商品页抽检 1；全部 200。
+最终运行：`d01-rerun-001`；robots 1、US 入口 1、US `products.json` 1、首商品页抽检 1；全部 200。
 
 ## 失败与修复
 
@@ -45,10 +46,11 @@ python experiments/d01/sixmoondesigns/tools/validate_output.py `
 
 ## 证据位置
 
-- `valid.csv`、`task-result.json`、`run-summary.json`：`d01-run-003` 发布结果。
+- `valid.csv`、`task-result.json`、`run-summary.json`：`d01-rerun-001` 发布结果。
 - `diagnostics/d01-run-001/`：入口 `.text` 空值的失败证据。
 - `diagnostics/d01-run-002/`：修复后的中间结果。
-- `diagnostics/d01-run-003/`：最终结果、逐商品审计、robots 快照。
+- `diagnostics/d01-run-003/`：试点结果、逐商品审计、robots 快照。
+- `diagnostics/d01-rerun-001/`：独立复跑结果，与试点 29／1／0 一致。
 - `tests/`、`tools/validate_output.py`：离线测试与结果校验。
 
 ## 限制
