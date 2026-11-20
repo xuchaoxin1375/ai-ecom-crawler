@@ -1,0 +1,15 @@
+{
+  "task_id": "d01-campsaver-d01-rerun-001-20261120T161101Z",
+  "label": "d01-rerun-001",
+  "command": "C:\\repos\\ai-ecom-crawler\\experiments\\d01\\campsaver\\run.py --batch-dir <batch-dir> --batch-dir <batch-dir> --batch-dir <batch-dir> --batch-dir <batch-dir> --batch-dir <batch-dir> --batch-dir <batch-dir> --order-file C:\\repos\\ai-ecom-crawler\\experiments\\d01\\campsaver\\category-product-urls.txt --out-dir C:\\repos\\ai-ecom-crawler\\experiments\\d01\\campsaver --label d01-rerun-001",
+  "python": "3.13.13",
+  "platform": "win32",
+  "batch_dirs": [
+    "batch-001",
+    "batch-002",
+    "batch-003",
+    "batch-004",
+    "batch-005",
+    "batch-006"
+  ]
+}

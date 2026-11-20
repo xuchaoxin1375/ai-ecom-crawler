@@ -1,5 +1,5 @@
 {
-  "task_id": "d01-campsaver-d01-run-005-20261120T015718Z",
+  "task_id": "d01-campsaver-d01-rerun-001-20261120T161101Z",
   "plan_id": "campsaver-us-d01",
   "plan_version": "2026.11.20-1",
   "market": "US",
@@ -8,8 +8,8 @@
   "outcome": "PARTIAL",
   "stop_reason": "BUDGET_EXHAUSTED",
   "stop_detail": "task cap reached: processed 30 of 144 Sleeping Pads products",
-  "started_at": "2026-11-20T01:57:18Z",
-  "finished_at": "2026-11-20T01:57:18Z",
+  "started_at": "2026-11-20T16:11:01Z",
+  "finished_at": "2026-11-20T16:11:01Z",
   "counts": {
     "discovered_urls": 31,
     "pending_navigation_entries": 0,
@@ -67,7 +67,7 @@
   "artifacts": {
     "valid_csv": "valid.csv",
     "run_summary": "run-summary.json",
-    "diagnostics_dir": "diagnostics/d01-run-005/"
+    "diagnostics_dir": "diagnostics/d01-rerun-001/"
   },
   "discovery": {
     "entry_url": "https://www.campsaver.com/sleeping-pads.html",

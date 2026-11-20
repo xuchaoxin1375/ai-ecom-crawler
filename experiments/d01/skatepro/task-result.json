@@ -1,5 +1,5 @@
 {
-  "task_id": "d01-skatepro-d01-run-001-20261120T002926Z",
+  "task_id": "d01-skatepro-d01-rerun-001-20261120T155330Z",
   "plan_id": "skatepro-es-d01",
   "plan_version": "2026.11.20-1",
   "market": "ES",
@@ -8,8 +8,8 @@
   "outcome": "PARTIAL",
   "stop_reason": "BUDGET_EXHAUSTED",
   "stop_detail": "task cap reached: processed 30 product pages; 3 navigation entries remain",
-  "started_at": "2026-11-20T00:29:26Z",
-  "finished_at": "2026-11-20T00:35:44Z",
+  "started_at": "2026-11-20T15:53:30Z",
+  "finished_at": "2026-11-20T16:02:37Z",
   "counts": {
     "discovered_urls": 35,
     "pending_navigation_entries": 3,
@@ -25,9 +25,9 @@
   "coverage": {
     "status": "PARTIAL",
     "denominator_source": "https://www.skatepro.es/sitemap.xml product URL count at run time",
-    "denominator": 6665,
+    "denominator": 6668,
     "covered": 30,
-    "notes": "Discovery scope is the entry page's category grid, capped at 30 product pages; 30 valid products of 6665 sitemap product URLs. This is a bounded sample, not a full-site completion claim."
+    "notes": "Discovery scope is the entry page's category grid, capped at 30 product pages; 30 valid products of 6668 sitemap product URLs. This is a bounded sample, not a full-site completion claim."
   },
   "business_acceptance": {
     "status": "NOT_REVIEWED",
@@ -54,11 +54,10 @@
       }
     },
     {
-      "source_url": "https://www.skatepro.es/254-52451.htm",
+      "source_url": "https://www.skatepro.es/49-45319.htm",
       "description_status": "COMPLETE",
       "partial_reason": null,
       "missing_reasons": {
-        "options": "NOT_PROVIDED",
         "specifications": "NOT_PROVIDED"
       }
     },
@@ -136,12 +135,12 @@
     "The 'Piezas compatibles' cross-sell block and customer reviews are excluded from description_html.",
     "The site shows a 'Delivery to United States' suggestion because of the egress IP; quotes stay EUR and JSON-LD shipping/return policies target ES. No delivery-country cookie was set and no currency conversion was performed.",
     "429 handling waits for Retry-After up to 60 s, retries at most 3 attempts, then stops the run.",
-    "sitemap.xml declares 6665 product URLs; it is a site-level denominator, not this bounded category scope.",
+    "sitemap.xml declares 6668 product URLs; it is a site-level denominator, not this bounded category scope.",
     "discovery used 1 category page(s) and kept 30 unique products within the 30-page cap."
   ],
   "artifacts": {
     "valid_csv": "valid.csv",
     "run_summary": "run-summary.json",
-    "diagnostics_dir": "diagnostics/d01-run-001/"
+    "diagnostics_dir": "diagnostics/d01-rerun-001/"
   }
 }
