@@ -661,6 +661,61 @@ class PublicJsonTests(unittest.TestCase):
             self.assertEqual(result["counts"]["valid_urls"], 3)
             self.assertNotIn(PRODUCT, fetcher.calls)
 
+    def test_public_json_cursor(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = TaskStore(root / "tasks.db")
+            start = "https://www.familidoo.fr/products.json?cursor=start"
+            second = "https://www.familidoo.fr/products.json?cursor=abc"
+            rule = sources_rule(
+                root,
+                [
+                    {
+                        "type": "public_json",
+                        "url": start,
+                        "items_path": "products",
+                        "url_field": "url",
+                        "pagination": {
+                            "type": "cursor",
+                            "cursor_param": "cursor",
+                            "next_cursor_path": "next_cursor",
+                            "max_pages": 2,
+                        },
+                    }
+                ],
+            )
+            task = make_task("discovery", "public-json-cursor")
+            store.create_task(task)
+            fetcher = FakeFetcher(
+                {
+                    start: (
+                        200,
+                        json.dumps(
+                            {
+                                "products": [{"url": PRODUCT}],
+                                "next_cursor": "abc",
+                            }
+                        ),
+                    ),
+                    second: (
+                        200,
+                        json.dumps(
+                            {"products": [{"url": PRODUCT2}], "next_cursor": None}
+                        ),
+                    ),
+                }
+            )
+            TaskRunner(
+                store, rule, task, fetcher=fetcher, out_root=root / "tasks"
+            ).run()
+            result = json.loads(
+                (root / "tasks" / task.task_id / "task-result.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(result["counts"]["navigation_urls"], 2)
+            self.assertEqual(result["counts"]["valid_urls"], 2)
+
     def test_public_json_offset(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -791,6 +846,49 @@ class HtmlIndexTests(unittest.TestCase):
             )
             self.assertEqual(result["counts"]["navigation_urls"], 1)
             self.assertEqual(result["counts"]["valid_urls"], 1)
+
+
+class MultipleSourceTests(unittest.TestCase):
+    def test_two_listing_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = TaskStore(root / "tasks.db")
+            listing2 = "https://www.familidoo.fr/fr/list2?page=1"
+            rule = sources_rule(
+                root,
+                [
+                    {
+                        "type": "listing",
+                        "url": LISTING,
+                        "product_link_selector": "a.product_img_link",
+                        "advance": {"type": "none"},
+                    },
+                    {
+                        "type": "listing",
+                        "url": listing2,
+                        "product_link_selector": "a.product_img_link",
+                        "advance": {"type": "none"},
+                    },
+                ],
+            )
+            task = make_task("discovery", "multi-source")
+            store.create_task(task)
+            fetcher = FakeFetcher(
+                {
+                    LISTING: (200, listing_html(PRODUCT)),
+                    listing2: (200, listing_html(PRODUCT2)),
+                }
+            )
+            TaskRunner(
+                store, rule, task, fetcher=fetcher, out_root=root / "tasks"
+            ).run()
+            result = json.loads(
+                (root / "tasks" / task.task_id / "task-result.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(result["counts"]["navigation_urls"], 2)
+            self.assertEqual(result["counts"]["valid_urls"], 2)
 
 
 class ListingTests(unittest.TestCase):
