@@ -33,7 +33,7 @@ python experiments/d01/sixmoondesigns/tools/validate_output.py `
   --dir experiments/d01/sixmoondesigns --expected-products 29
 ```
 
-本次 S4 试点：4 请求、29 有效、1 排除（Restocking Fee，缺主图）、0 失败；14.49s；USD 10.00–425.00；覆盖 29／112。入口币种与首商品页抽检均为 USD，抽检价 18.00 与 API 一致。
+本次 S4 试点：4 请求、29 有效、1 排除（Restocking Fee，缺主图）、0 失败；14.49s；USD 10.00–425.00；覆盖 29／112。入口币种与首商品页抽检均为 USD，抽检价 18.00 与 API 一致。2026-11-20 独立复跑 `d01-rerun-001`：4 请求、11.46s、29／1／0，结果一致。
 
 ## 方案要点
 
