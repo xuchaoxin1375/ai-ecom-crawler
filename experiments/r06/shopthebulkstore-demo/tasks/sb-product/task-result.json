@@ -1,0 +1,161 @@
+{
+  "task_id": "sb-product",
+  "task_type": "product",
+  "plan_id": "shopthebulkstore-us-r06",
+  "plan_version": "2026.11.20-1",
+  "market": "US",
+  "locale": "en-US",
+  "state": "FINISHED",
+  "outcome": "COMPLETED",
+  "stop_reason": "NATURAL_END",
+  "stop_detail": "entry-page sample exhausted",
+  "started_at": "2026-11-20T12:32:41Z",
+  "finished_at": "2026-11-20T12:33:14Z",
+  "counts": {
+    "navigation_urls": 1,
+    "discovered_urls": 11,
+    "product_candidates": 10,
+    "pending_products": 0,
+    "in_flight_products": 0,
+    "processed_products": 10,
+    "valid_products": 10,
+    "excluded_products": 0,
+    "failed_products": 0,
+    "partial_description_products": 0
+  },
+  "failure_classes": {
+    "transient": 0,
+    "permanent": 0,
+    "blocked": 0,
+    "unknown": 0
+  },
+  "recovery": {
+    "in_flight": 0,
+    "reset": 0,
+    "failed": 0,
+    "orphan_files_removed": 0,
+    "stale_result": false,
+    "corrupt_product_lines": 0
+  },
+  "coverage": {
+    "status": "PARTIAL",
+    "denominator_source": "entry-page product candidates",
+    "denominator": 10,
+    "covered": 10,
+    "notes": "Bounded sample from one entry page; not full-site coverage."
+  },
+  "business_acceptance": {
+    "status": "NOT_REVIEWED",
+    "accepted_by": null,
+    "accepted_at": null,
+    "reason": "R06 runtime prototype; no business sign-off yet.",
+    "scope": "entry-page sample declared by the rule"
+  },
+  "quality_exceptions": [],
+  "pricing": {
+    "policy": "Choose the smaller public pretax/gross pair per docs/02.",
+    "products": [
+      {
+        "source_url": "https://shopthebulkstore.com/boston-baked-beans",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 5.99,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://shopthebulkstore.com/candy-corn",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 4.49,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://shopthebulkstore.com/halloween-caramel-apple-candy-corn",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 4.49,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://shopthebulkstore.com/candy-pebbles",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 7.99,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://shopthebulkstore.com/candy-sours-cherry",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 7.99,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://shopthebulkstore.com/caramel-coconut-tips",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 7.99,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://shopthebulkstore.com/cinnamon-imperials",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 6.99,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://shopthebulkstore.com/sanded-anise-squares",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 4.49,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://shopthebulkstore.com/sanded-cinnamon-drops",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 4.49,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://shopthebulkstore.com/sanded-ginger-drops",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 4.49,
+        "basis": "unspecified"
+      }
+    ]
+  },
+  "runtime": {
+    "executor": "r06-runtime/0.2",
+    "llm_calls": 0,
+    "raw_pages_retained": false,
+    "http_engine": "scrapling.FetcherSession (curl_cffi, static HTML)"
+  },
+  "access": {
+    "entry_url": "https://shopthebulkstore.com/candy/bulk-candy-unwrapped",
+    "robots_url": "https://shopthebulkstore.com/robots.txt",
+    "robots_status": 200,
+    "delay_ms": 1000,
+    "max_products": 10,
+    "max_urls": 100,
+    "max_seconds": 180.0,
+    "max_attempts": 2,
+    "browser_launched": false,
+    "login_used": false
+  },
+  "resources": {
+    "browser_launched": false,
+    "processes": [],
+    "orphan_files_removed": 0
+  },
+  "limitations": [
+    "Bounded to links accepted from the entry page; not full-site coverage.",
+    "Static HTML only; no browser rendering, login or access-control bypass.",
+    "Runtime LLM calls: 0; no raw page HTML is retained.",
+    "Second-site declarative smoke; not D01 verified.",
+    "Category page 1 only; 10 products; not full-site coverage.",
+    "Price is per lb; keep the public unit price, do not multiply by package weight."
+  ]
+}

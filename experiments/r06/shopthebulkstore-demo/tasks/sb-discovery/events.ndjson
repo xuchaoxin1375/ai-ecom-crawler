@@ -1,0 +1,15 @@
+{"ts": "2026-11-20T12:32:41Z", "event": "task_reconciled", "in_flight": 0, "reset": 0, "failed": 0, "orphan_files_removed": 0, "stale_result": false, "corrupt_product_lines": 0}
+{"ts": "2026-11-20T12:32:41Z", "event": "task_started", "task_type": "discovery", "plan_id": "shopthebulkstore-us-r06"}
+{"ts": "2026-11-20T12:32:43Z", "event": "robots_loaded", "url": "https://shopthebulkstore.com/robots.txt", "status": 200}
+{"ts": "2026-11-20T12:32:46Z", "event": "url_discovered", "url": "https://shopthebulkstore.com/boston-baked-beans", "source": "https://shopthebulkstore.com/candy/bulk-candy-unwrapped"}
+{"ts": "2026-11-20T12:32:46Z", "event": "url_discovered", "url": "https://shopthebulkstore.com/candy-corn", "source": "https://shopthebulkstore.com/candy/bulk-candy-unwrapped"}
+{"ts": "2026-11-20T12:32:46Z", "event": "url_discovered", "url": "https://shopthebulkstore.com/halloween-caramel-apple-candy-corn", "source": "https://shopthebulkstore.com/candy/bulk-candy-unwrapped"}
+{"ts": "2026-11-20T12:32:46Z", "event": "url_discovered", "url": "https://shopthebulkstore.com/candy-pebbles", "source": "https://shopthebulkstore.com/candy/bulk-candy-unwrapped"}
+{"ts": "2026-11-20T12:32:46Z", "event": "url_discovered", "url": "https://shopthebulkstore.com/candy-sours-cherry", "source": "https://shopthebulkstore.com/candy/bulk-candy-unwrapped"}
+{"ts": "2026-11-20T12:32:46Z", "event": "url_discovered", "url": "https://shopthebulkstore.com/caramel-coconut-tips", "source": "https://shopthebulkstore.com/candy/bulk-candy-unwrapped"}
+{"ts": "2026-11-20T12:32:46Z", "event": "url_discovered", "url": "https://shopthebulkstore.com/cinnamon-imperials", "source": "https://shopthebulkstore.com/candy/bulk-candy-unwrapped"}
+{"ts": "2026-11-20T12:32:46Z", "event": "url_discovered", "url": "https://shopthebulkstore.com/sanded-anise-squares", "source": "https://shopthebulkstore.com/candy/bulk-candy-unwrapped"}
+{"ts": "2026-11-20T12:32:46Z", "event": "url_discovered", "url": "https://shopthebulkstore.com/sanded-cinnamon-drops", "source": "https://shopthebulkstore.com/candy/bulk-candy-unwrapped"}
+{"ts": "2026-11-20T12:32:46Z", "event": "url_discovered", "url": "https://shopthebulkstore.com/sanded-ginger-drops", "source": "https://shopthebulkstore.com/candy/bulk-candy-unwrapped"}
+{"ts": "2026-11-20T12:32:46Z", "event": "item_finished", "item_type": "navigation", "url": "https://shopthebulkstore.com/candy/bulk-candy-unwrapped", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-20T12:32:46Z", "event": "task_finished", "state": "FINISHED", "outcome": "COMPLETED", "stop_reason": "NATURAL_END"}
