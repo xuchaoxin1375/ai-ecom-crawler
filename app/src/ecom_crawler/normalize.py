@@ -636,7 +636,7 @@ def normalize_description(candidate: Mapping[str, Any]) -> NormalizedDescription
 
     status = _normalize_description_status(status_raw)
     if status is None:
-        status = "COMPLETE" if cleaned else "NOT_PROVIDED"
+        raise RecordIssue("MISSING_DESCRIPTION_STATUS")
     reason = clean_text(partial_reason) or None
     missing = _normalize_missing_reasons(missing_reasons)
 

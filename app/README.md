@@ -97,7 +97,7 @@ python -m uv run --project app ecom-crawler validate --task-result /path/to/task
 | `primary_image_url` | 必填；相对路径按 `source_url` 解析；占位图不算主图 |
 | `description_html`／`description_format` | 二选一或同时给出；`html` 走白名单清洗，`text` 转段落 HTML |
 | `description` | 可选嵌套形式：`html`、`text`、`format`、`status`、`partial_reason`、`missing_reasons`、`blocks` |
-| `description_status` | `COMPLETE`、`PARTIAL`、`SUMMARY_FALLBACK`、`NOT_PROVIDED`、`FAILED` |
+| `description_status` | 必填；`COMPLETE`、`PARTIAL`、`SUMMARY_FALLBACK`、`NOT_PROVIDED`、`FAILED`；不从正文内容自动推断 |
 | `categories` | 字符串或字符串数组；过滤 Home／Shop／Women／Clothing 等泛层级 |
 | `brand` | 可空；不把店名或域名当品牌 |
 | `options` | 维度和值数组；数量组、价格差值和空值会被移除 |
@@ -161,6 +161,7 @@ CSV 对以 `=`、`+`、`-`、`@` 开头的文本单元格加单引号，防止�
 
 - 当前只有 T1 契约与单元测试，没有 T2 fixture 集成、T3 实站验证或 T4 生产验收。
 - `description.blocks` 的 `kind` 由提取端标注；本层不按关键词猜测政策或适配区块。
+- `description_status` 必须由提取端显式给出；本层不从正文长度或选择器命中情况推断完整／未提供。
 - 单一分隔符后三位数字的价格必须带 `locale` 才能判定；缺省时按 `AMBIGUOUS_PRICE` 排除，不猜。
 - `discovered_urls`、待处理数和导航数由调用方提供；导出层不做发现，也不构造全站分母。
 - `outcome` 是推导值，不接受调用方直接覆盖。

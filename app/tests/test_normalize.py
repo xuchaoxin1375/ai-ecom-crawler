@@ -141,6 +141,11 @@ class DescriptionTests(unittest.TestCase):
         self.assertNotIn("Shipping", description.html)
         self.assertEqual(description.missing_reasons, {})
 
+    def test_missing_description_status_is_rejected(self) -> None:
+        with self.assertRaises(RecordIssue) as context:
+            normalize_description({"description_html": "<p>Copy</p>"})
+        self.assertEqual(context.exception.code, "MISSING_DESCRIPTION_STATUS")
+
     def test_partial_requires_reason(self) -> None:
         with self.assertRaises(RecordIssue) as context:
             normalize_description(
