@@ -63,6 +63,39 @@ a {
   font-size: 12px;
 }
 
+.quality-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.quality-list li {
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+
+.quality-list li:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.quality-source {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.quality-meta,
+.quality-missing {
+  margin-top: 3px;
+}
+
+.quality-missing {
+  color: var(--muted);
+}
+
 main {
   width: min(1280px, calc(100% - 48px));
   margin: 24px auto 64px;
