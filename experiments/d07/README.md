@@ -9,9 +9,9 @@
 | 领域 | 已有证据 | 状态 | 缺口 |
 | --- | --- | --- | --- |
 | A12 访问与重试 | R06 `RetryTests`（transient 重试、耗尽、blocked 分类）、`RobotsTests`；D01 S6 挑战页；A08 429／Chrome 指纹；D06 JSON／HTML 路径 | 部分 | 无浏览器会话复用自动化；无统一 429 `Retry-After` 处理；无代理／出口资源登记 |
-| A13 暂停／取消／恢复 | R06 `ControlTests`（暂停恢复、取消拒收迟到结果）、`RecoveryTests`（在途重置、尝试耗尽、孤儿状态、plan 版本不匹配）；Tognar 真实暂停／取消／强杀恢复；`app/tests/test_control.py`（状态转移、恢复对账）、`test_control_flow.py`（暂停结清、恢复、取消拒收迟到结果、`run_forever`） | 原型 + `app` 单 worker 控制面通过 | 同进程单 worker；跨进程租约、心跳过期扫描、浏览器资源回收未实现 |
+| A13 暂停／取消／恢复 | R06 `ControlTests`（暂停恢复、取消拒收迟到结果）、`RecoveryTests`（在途重置、尝试耗尽、孤儿状态、plan 版本不匹配）；Tognar 真实暂停／取消／强杀恢复；`app/tests/test_control.py`（状态转移、恢复对账、worker 单实例锁）、`test_control_flow.py`（暂停结清、恢复、取消拒收迟到结果、`run_forever`） | 原型 + `app` 单 worker 控制面通过 | 同进程单 worker；跨进程租约、心跳过期扫描、浏览器资源回收未实现 |
 | A15 漂移与修复 | A08 两轮方案修订（入口前缀、正文／分类／选项）；D03／D04 同方案复跑；R06 提取缺失值测试 | 部分 | 没有自动化漂移检测／修复；没有旧结果失效标记；分类问题本轮修正 |
-| A20 多任务并行 | R06 `ParallelTests` 两任务同时启动；runtime demo 两任务互不污染 | 部分 | 没有“暂停／取消其中一个、另一个继续”的自动化；无资源配额和站点级隔离 |
+| A20 多任务并行 | R06 `ParallelTests`；`app/tests/test_control_flow.py` 的 `test_a20_pause_*`／`test_a20_cancel_*`：同域两任务并行，暂停／取消一个，另一个继续并输出独立；`test_same_domain_limiter_serializes` 验证同域限速 | 通过（同进程） | 无跨进程资源配额和跨进程隔离；浏览器实例配额未实现 |
 | 原子写与幂等 | R06 `AtomicTests`、`StoreTests`；D02 app 原子写和幂等键 | 通过（单进程） | 跨进程幂等、租约和迟到结果拒收未验证 |
 | 资源回收 | R06 `resources` 字段、无浏览器路径；D02 无外部资源；`app` 取消后无 `IN_FLIGHT`、无临时文件残留，`run_forever` 停止时 join 运行线程 | 部分 | 浏览器／进程登记、孤儿回收、取消后跨进程资源结清未实现 |
 
@@ -42,7 +42,7 @@ R06 原先把所有 `validate_product` 原因都映射为 `EXCLUDED`。这会掩
 - 启动时 `recover_orphaned_tasks()` 对账：`RUNNING` → `QUEUED`，`PAUSING` → `PAUSED`，`CANCELLING` → `CANCELLED`。
 - 跨进程 `submit` → `status` → `cancel` 冒烟通过（独立 Python 进程共享同一 SQLite）；跨进程 `worker` 的暂停／恢复仍未做自动化。
 
-测试：`app/tests/test_control.py`（9 个转移／恢复用例）和 `app/tests/test_control_flow.py`（4 个流程用例）；`app` 总计 74 个测试通过，`ruff check app` 通过。
+测试：`app/tests/test_control.py`（10 个转移／恢复／锁用例）和 `app/tests/test_control_flow.py`（8 个流程／A20／CLI 用例）；`app` 总计 79 个测试通过，`ruff check app` 通过。
 
 ## 测试结果
 
@@ -56,9 +56,9 @@ python -m uv run --project experiments/framework-compare/scrapling `
 
 ## D07 结论
 
-- **不是 D07 完成**：生产 `app` 执行器、任务账本和单 worker 控制面已落地；跨进程租约、浏览器资源回收、A20 多任务隔离和自动化漂移修复仍未实现。
+- **不是 D07 完成**：生产 `app` 执行器、任务账本、单 worker 控制面、单实例锁和同进程 A20 隔离已落地；跨进程租约、浏览器资源回收、跨进程 A20 隔离和自动化漂移修复仍未实现。
 - **可复用的改进**：字段错误与业务排除的分类已修正，并进入 R06 回归测试；`app` 控制面复用同一状态语义。
-- **下一步优先级**：先补 A20 多任务隔离和跨进程租约，再扩展浏览器资源回收；D08 控制界面不得早于这些结论。
+- **下一步优先级**：先补跨进程租约和浏览器资源回收，再扩展跨进程 A20；D08 控制界面不得早于这些结论。
 
 ## 限制
 

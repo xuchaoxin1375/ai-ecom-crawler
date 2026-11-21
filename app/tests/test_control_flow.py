@@ -12,6 +12,8 @@ from typing import Any, Self
 
 from ecom_crawler.cli import main
 from ecom_crawler.execution import submit_task
+from ecom_crawler.runtime.fetcher import DomainLimiter
+from ecom_crawler.runtime.lock import worker_lock
 from ecom_crawler.runtime.models import FetchResult
 from ecom_crawler.runtime.store import TaskStore
 from ecom_crawler.runtime.worker import Worker
@@ -186,6 +188,70 @@ class StaticFetcher:
         return FetchResult(status=200, url=url, body=PRODUCT_HTML.encode("utf-8"))
 
 
+class Gate:
+    def __init__(self) -> None:
+        self.started = threading.Event()
+        self.release = threading.Event()
+
+
+def prefixed_rule(prefix: str) -> str:
+    text = RULE.replace(
+        "https://fixture.test/", f"https://fixture.test/{prefix}/"
+    )
+    return text.replace("^/p1\\.html$", f"^/{prefix}/p1\\.html$")
+
+
+def prefixed_entry(prefix: str) -> str:
+    return (
+        "<html><body>"
+        f'<a class="product" href="/{prefix}/p1.html">One</a>'
+        "</body></html>"
+    )
+
+
+def prefixed_product(prefix: str) -> str:
+    text = PRODUCT_HTML.replace("Product 1", f"Product {prefix.upper()}")
+    return text.replace(
+        "https://fixture.test/p1.html", f"https://fixture.test/{prefix}/p1.html"
+    )
+
+
+class GateFetcher:
+    def __init__(
+        self,
+        rule: Any,
+        limiter: DomainLimiter,
+        gates: dict[str, Gate],
+    ) -> None:
+        self.prefix = "a" if "/a/" in rule.entry_url else "b"
+        self.limiter = limiter
+        self.gates = gates
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *args: object) -> bool:
+        return False
+
+    def get(self, url: str) -> FetchResult:
+        if url.rstrip("/") == f"https://fixture.test/{self.prefix}":
+            return FetchResult(
+                status=200,
+                url=url,
+                body=prefixed_entry(self.prefix).encode("utf-8"),
+            )
+        self.limiter.wait(url)
+        gate = self.gates[self.prefix]
+        gate.started.set()
+        if not gate.release.wait(5):
+            raise AssertionError("test did not release the in-flight request")
+        return FetchResult(
+            status=200,
+            url=url,
+            body=prefixed_product(self.prefix).encode("utf-8"),
+        )
+
+
 class ControlFlowTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
@@ -225,6 +291,131 @@ class ControlFlowTests(unittest.TestCase):
         thread = threading.Thread(target=worker.run_once, daemon=True)
         thread.start()
         return worker, thread
+
+    def _prefixed_rule(self, prefix: str) -> Path:
+        path = self.root / f"rule-{prefix}.yaml"
+        path.write_text(prefixed_rule(prefix), encoding="utf-8")
+        return path
+
+    def _wait_for(self, predicate: Any, message: str, timeout: float = 5) -> None:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if predicate():
+                return
+            time.sleep(0.01)
+        self.fail(message)
+
+    def _submit_prefixed(self, prefix: str, task_id: str) -> Any:
+        return submit_task(
+            rule_path=self._prefixed_rule(prefix),
+            db_path=self.db_path,
+            task_id=task_id,
+            max_products=5,
+            max_seconds=30,
+            max_attempts=1,
+        )
+
+    def test_a20_pause_one_task_keeps_other_running(self) -> None:
+        task_a = self._submit_prefixed("a", "a20-pause-a")
+        task_b = self._submit_prefixed("b", "a20-pause-b")
+        gates = {"a": Gate(), "b": Gate()}
+        store = TaskStore(self.db_path)
+        worker = Worker(
+            store,
+            out_root=self.out_root,
+            max_tasks=2,
+            per_domain_rps=50,
+            fetcher_factory=lambda rule, limiter: GateFetcher(rule, limiter, gates),
+        )
+        thread = threading.Thread(target=worker.run_once, daemon=True)
+        thread.start()
+        self.assertTrue(gates["a"].started.wait(5))
+        self.assertTrue(gates["b"].started.wait(5))
+
+        store.request_pause(task_a.task_id)
+        gates["a"].release.set()
+        self._wait_for(
+            lambda: store.get_task(task_a.task_id).state == "PAUSED",
+            "task A did not settle to PAUSED",
+        )
+        running_b = store.get_task(task_b.task_id)
+        assert running_b is not None
+        self.assertEqual(running_b.state, "RUNNING")
+
+        gates["b"].release.set()
+        thread.join(10)
+        self.assertFalse(thread.is_alive(), "worker did not stop")
+        self.assertEqual(store.get_task(task_a.task_id).state, "PAUSED")
+        self.assertEqual(store.get_task(task_b.task_id).state, "FINISHED")
+        self.assertEqual(store.item_counts(task_a.task_id, "product").get("DONE"), 1)
+        self.assertEqual(store.item_counts(task_b.task_id, "product").get("DONE"), 1)
+
+        lines_a = (self.out_root / task_a.task_id / "products.jsonl").read_text(
+            encoding="utf-8"
+        ).splitlines()
+        lines_b = (self.out_root / task_b.task_id / "products.jsonl").read_text(
+            encoding="utf-8"
+        ).splitlines()
+        self.assertEqual(len(lines_a), 1)
+        self.assertEqual(len(lines_b), 1)
+        self.assertIn("Product A", lines_a[0])
+        self.assertIn("Product B", lines_b[0])
+
+    def test_a20_cancel_one_task_keeps_other_running(self) -> None:
+        task_a = self._submit_prefixed("a", "a20-cancel-a")
+        task_b = self._submit_prefixed("b", "a20-cancel-b")
+        gates = {"a": Gate(), "b": Gate()}
+        store = TaskStore(self.db_path)
+        worker = Worker(
+            store,
+            out_root=self.out_root,
+            max_tasks=2,
+            per_domain_rps=50,
+            fetcher_factory=lambda rule, limiter: GateFetcher(rule, limiter, gates),
+        )
+        thread = threading.Thread(target=worker.run_once, daemon=True)
+        thread.start()
+        self.assertTrue(gates["a"].started.wait(5))
+        self.assertTrue(gates["b"].started.wait(5))
+
+        store.request_cancel(task_a.task_id)
+        gates["a"].release.set()
+        self._wait_for(
+            lambda: store.get_task(task_a.task_id).state == "CANCELLED",
+            "task A did not settle to CANCELLED",
+        )
+        running_b = store.get_task(task_b.task_id)
+        assert running_b is not None
+        self.assertEqual(running_b.state, "RUNNING")
+
+        gates["b"].release.set()
+        thread.join(10)
+        self.assertFalse(thread.is_alive(), "worker did not stop")
+        self.assertEqual(store.get_task(task_a.task_id).state, "CANCELLED")
+        self.assertEqual(store.get_task(task_b.task_id).state, "FINISHED")
+        self.assertEqual(store.item_counts(task_a.task_id, "product").get("FAILED"), 1)
+        self.assertEqual(store.item_counts(task_b.task_id, "product").get("DONE"), 1)
+        products_a = self.out_root / task_a.task_id / "products.jsonl"
+        self.assertFalse(products_a.exists() and products_a.read_text(encoding="utf-8").strip())
+
+    def test_same_domain_limiter_serializes(self) -> None:
+        limiter = DomainLimiter(per_domain_rps=5)
+        barrier = threading.Barrier(2)
+        times: list[float] = []
+
+        def call() -> None:
+            barrier.wait()
+            limiter.wait("https://fixture.test/a/")
+            times.append(time.monotonic())
+
+        threads = [threading.Thread(target=call) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(5)
+        self.assertEqual(len(times), 2)
+        self.assertGreaterEqual(abs(times[1] - times[0]), 0.15)
+        self.assertGreaterEqual(limiter.waits, 1)
 
     def test_cancel_rejects_late_result(self) -> None:
         task = self._submit("cancel-flow")
@@ -346,6 +537,20 @@ class ControlFlowTests(unittest.TestCase):
         )
         self.assertEqual(code, 0, stderr)
         self.assertEqual([item["task_id"] for item in json.loads(stdout)], ["cli-control"])
+
+    def test_cli_worker_refuses_second_instance(self) -> None:
+        with worker_lock(self.db_path):
+            code, _, stderr = self._run_cli(
+                [
+                    "worker",
+                    "--db",
+                    str(self.db_path),
+                    "--out-root",
+                    str(self.out_root),
+                ]
+            )
+        self.assertEqual(code, 2)
+        self.assertIn("another worker", stderr)
 
     def test_worker_run_forever_processes_and_stops(self) -> None:
         task = self._submit("forever-flow")

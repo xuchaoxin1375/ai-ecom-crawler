@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from ecom_crawler.runtime.lock import WorkerLockError, worker_lock
 from ecom_crawler.runtime.models import Task, WorkItem
 from ecom_crawler.runtime.store import (
     TaskNotFoundError,
@@ -84,6 +85,18 @@ class ControlTransitionTests(unittest.TestCase):
     def test_unknown_task_is_reported(self) -> None:
         with self.assertRaises(TaskNotFoundError):
             self.store.request_cancel("missing")
+
+    def test_worker_lock_is_exclusive_and_stale_file_is_reusable(self) -> None:
+        lock_path = self.store.path.with_name(self.store.path.name + ".worker.lock")
+        lock_path.write_text("stale\n", encoding="utf-8")
+        with (
+            worker_lock(self.store.path),
+            self.assertRaises(WorkerLockError),
+            worker_lock(self.store.path),
+        ):
+            pass
+        with worker_lock(self.store.path):
+            self.assertTrue(lock_path.is_file())
 
     def test_recovery_settles_running_pausing_and_cancelling(self) -> None:
         self.store.create_task(make_task("recover-running"))

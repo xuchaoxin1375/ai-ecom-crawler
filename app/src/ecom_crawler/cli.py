@@ -16,6 +16,7 @@ from . import __version__
 from .execution import run_and_export, submit_task
 from .model import ContractError
 from .pipeline import export_run
+from .runtime.lock import WorkerLockError, worker_lock
 from .runtime.models import Task
 from .runtime.rule import RuleError
 from .runtime.store import TaskNotFoundError, TaskStore, TaskTransitionError
@@ -150,32 +151,33 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _run_worker(args: argparse.Namespace) -> int:
-    store = TaskStore(args.db)
-    worker = Worker(
-        store,
-        out_root=args.out_root,
-        max_tasks=args.max_tasks,
-        per_domain_rps=args.per_domain_rps,
-    )
-    stop = threading.Event()
-
-    def request_stop(signum: int, frame: Any) -> None:
-        stop.set()
-
-    previous: dict[int, Any] = {}
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        try:
-            previous[sig] = signal.signal(sig, request_stop)
-        except (ValueError, OSError):
-            continue
-    try:
-        started = worker.run_forever(
-            stop_event=stop,
-            poll_interval=args.poll_interval,
+    with worker_lock(args.db):
+        store = TaskStore(args.db)
+        worker = Worker(
+            store,
+            out_root=args.out_root,
+            max_tasks=args.max_tasks,
+            per_domain_rps=args.per_domain_rps,
         )
-    finally:
-        for sig, handler in previous.items():
-            signal.signal(sig, handler)
+        stop = threading.Event()
+
+        def request_stop(signum: int, frame: Any) -> None:
+            stop.set()
+
+        previous: dict[int, Any] = {}
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            try:
+                previous[sig] = signal.signal(sig, request_stop)
+            except (ValueError, OSError):
+                continue
+        try:
+            started = worker.run_forever(
+                stop_event=stop,
+                poll_interval=args.poll_interval,
+            )
+        finally:
+            for sig, handler in previous.items():
+                signal.signal(sig, handler)
     print(f"worker stopped; started {started} task(s)")
     return 0
 
@@ -334,7 +336,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 return 1
             print(f"OK: {target}")
             return 0
-    except (ContractError, RuleError, TaskNotFoundError, TaskTransitionError) as exc:
+    except (
+        ContractError,
+        RuleError,
+        TaskNotFoundError,
+        TaskTransitionError,
+        WorkerLockError,
+    ) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
     parser.error("unknown command")
