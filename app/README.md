@@ -1,6 +1,6 @@
 # 生产应用（app/）
 
-本目录是 monorepo 中生产应用的承载位置。当前已落地 **D02 数据合同与导出 CLI**、**D04 v0 静态执行器**和 **浏览器 adapter v0**：规则包 → 发现／获取／提取 → SQLite 任务账本 → D02 导出。静态 worker 带跨进程任务租约和资源登记／回收；浏览器 worker 按任务启动 Patchright CDP，登记并回收浏览器进程和 profile；完整跨进程 A20、load-more／滚动和构建会话仍未实现。
+本目录是 monorepo 中生产应用的承载位置。当前已落地 **D02 数据合同与导出 CLI**、**D04 v0 静态执行器**、**浏览器 adapter v0**和 **hybrid adapter discovery**：规则包 → 发现／获取／提取 → SQLite 任务账本 → D02 导出。静态 worker 带跨进程任务租约和资源登记／回收；浏览器 worker 按任务启动 Patchright CDP，登记并回收浏览器进程和 profile；hybrid 规则把 C2 discovery 交给包内 adapter 子进程，商品页仍由声明式 `fetch`／`extract` 处理。完整跨进程 A20、adapter 浏览器资源配额和构建会话仍未实现。
 
 ## 边界
 
@@ -149,14 +149,41 @@ discovery:
 - 首次响应可能是 403／429／503 挑战壳，站点自己的 JS 跳转后才出现正文；fetcher 在等待完成后读取 navigation timing 的最终 `responseStatus`，并可用 `wait_selector` 作为就绪条件。它不点击、不过验证码、不绕过登录或付费。挑战识别是标题启发式，可能漏判或误判，最终以就绪信号、正文和任务结果为准。
 - 浏览器 fetcher 是 thread-affine，浏览器任务不走线程池；暂停／取消在条目边界生效，单次导航仍受 `timeout_ms` 约束。
 
+## Hybrid adapter（hybrid）
+
+需要虚拟列表、网络重放、多步状态等 C2 交互时，规则包声明 `kind: hybrid`，把 discovery 交给包内 adapter，商品页仍由 `fetch`／`extract` 处理。运行时不 import adapter，而是按 `runtime.entrypoint` 启动子进程，传入上下文 JSON，按 NDJSON 读取 `discovered`／`done`／`error`。
+
+```yaml
+kind: "hybrid"
+discovery:
+  sources:
+    - type: adapter
+      url: "https://example.test/catalogue"
+      advance: {item_selector: "a.product", container: "#feed", settle_ms: 100, no_new_stop: 1}
+      max_batches: 10
+      max_seconds: 30
+  product_url_patterns: ['^/product/[^/]+$']
+runtime:
+  adapter_id: "virtual-list-patchright"
+  adapter_version: "2026.11.22-1"
+  entrypoint: "adapter.py"
+  protocol: "ndjson-stdio-v1"
+  capabilities: ["discovery"]
+```
+
+- adapter 子进程超时受 `source.max_seconds` 和任务 `max_seconds` 约束；stdout 写入 `<out-root>/<task-id>/adapter.ndjson`，输入上下文写入 `adapter-context.json`。
+- 成功标准是 `done` + `discovered` 事件；`error` 或非零退出记为 `ADAPTER_FAILED`，不产生半成品商品。
+- `task-result.json` 的 `runtime.adapter` 记录 `discovered`／`added`／`skipped`／`stop`／`batches`／`requests`／`elapsed_ms`。
+- 当前只接入 adapter discovery，商品页仍由声明式 fetcher 处理；adapter 自己启动的 Chromium 尚未登记到 `task_resources`，超时强杀可能留下子进程，跨进程配额也未接入。本地端到端证据：`experiments/d07/virtual-list-hybrid/app-evidence/virtual-list-app-001/`。
+
 ## 执行入口（run）
 
-`run` 读取一个声明式规则包，创建任务并在当前进程执行：
+`run` 读取一个声明式或 hybrid 规则包，创建任务并在当前进程执行：
 
-- 规则包：YAML manifest；`rule_id`／`rule_version` 必须与任务一致；支持 `entry_links`、`sitemap`、`listing`、`html_index`、`public_json` 来源。
+- 规则包：YAML manifest；`rule_id`／`rule_version` 必须与任务一致；声明式支持 `entry_links`、`sitemap`、`listing`、`html_index`、`public_json` 来源；hybrid 还支持 `discovery.sources[].type=adapter`。
 - 账本：`--db` 指向的 SQLite 文件，记录任务、工作项、状态、尝试次数和失败分类。
 - 输出：`<out-root>/<task-id>/` 下有 `task-result.json`、`products.jsonl`、`urls.csv`、`events.ndjson` 等运行时产物；product 任务另有 `app-run/` 和 `export/`。
-- 当前是单进程运行时；静态 HTML、浏览器渲染、SQLite 租约和资源回收已接入，跨机租约、跨进程资源配额和交互推进未接入。
+- 当前是单进程运行时；静态 HTML、浏览器渲染、SQLite 租约、资源回收、`load_more`／`infinite_scroll` 和 hybrid adapter discovery 已接入；跨机租约、跨进程资源配额和 adapter 浏览器实例回收未接入。
 
 ## 控制面（submit / worker / pause / resume / cancel）
 
@@ -310,6 +337,7 @@ CSV 对以 `=`、`+`、`-`、`@` 开头的文本单元格加单引号，防止�
 - `test_execution.py::test_cli_run_command`：同一 fixture 走 `ecom-crawler run`。
 - `tests/test_browser.py`：本地 JS 商品页，静态 HTML 不含名称／价格，浏览器渲染后 1／1 有效；断言 task result 的浏览器字段、导出 CSV、资源表清空、profile 删除和 PID 退出。
 - `tests/test_browser_actions.py`：本地追加型列表，`load_more` 与 `infinite_scroll` 各 6／6；非法 schema 版本和静态 navigation 被拒绝。
+- `tests/test_hybrid.py`：fake adapter + 本地商品页，覆盖 hybrid discovery → 3／3 商品导出、discovery URL 列表、adapter 失败和 entrypoint 校验。
 - `experiments/d04/production/README.md`：`familidoo` 6 商品、7 请求、7 秒，CSV 与 D05 字节一致。
 - `experiments/d07/browser-mercerine/`：mercerine 首页 503 挑战壳，浏览器渲染后 3／3 商品（EUR）；同一浏览器会话；强杀 worker 后新 worker 接管，遗留 Chromium PID 终止、profile 删除、资源表清空，任务重跑完成。
 - `experiments/d07/browser-listing/`：`scrapingcourse.com` 公开练习页，`load_more` 1 次点击后 24 条、`infinite_scroll` 2 次滚动后 36 条，均取前 15 个商品、15／15 有效。
@@ -318,7 +346,7 @@ CSV 对以 `=`、`+`、`-`、`@` 开头的文本单元格加单引号，防止�
 
 - 当前有 T1 契约／单元测试和本地 HTTP fixture 集成；D03／A08／D04 有真实站点证据，但不是 T4 生产验收。浏览器路径另有本地 JS fixture、mercerine 真实站点和强杀接管证据。
 - `runtime/`、`executor/` 从 R06 抽取；静态和浏览器两类 fetcher 共用同一 runner，浏览器任务逐条串行执行。租约和资源登记已支持多 worker 进程，但浏览器实例配额和跨机租约未接入。控制面支持暂停／恢复／取消。
-- 浏览器 `load_more`／`infinite_scroll` 只支持追加型列表；内部滚动容器（`container`）已有本地 fixture（6／6），虚拟列表、任意点击序列和表单提交未实现。
+- 浏览器 `load_more`／`infinite_scroll` 只支持追加型列表；内部滚动容器（`container`）已有本地 fixture（6／6）。虚拟列表不扩声明式 primitive，走 hybrid adapter：adapter discovery 已接入并有本地端到端 12／12；更复杂的内部滚动、任意点击序列和表单提交未实现。
 - `run` 已接入 SQLite 任务账本；`export` 仍可独立使用 `task.json` + `candidates.jsonl`，不依赖账本。
 - `description.blocks` 的 `kind` 由提取端标注；本层不按关键词猜测政策或适配区块。
 - `description_status` 必须由提取端显式给出；本层不从正文长度或选择器命中情况推断完整／未提供。

@@ -1,6 +1,6 @@
 schema_version: "1.1"
-plan_id: "virtual-list-fixture"
-plan_version: "2026.11.22-1"
+rule_id: "virtual-list-fixture"
+rule_version: "2026.11.22-1"
 kind: "hybrid"
 status: "candidate"
 
@@ -8,7 +8,7 @@ site:
   name: "Virtual list fixture"
   entry_urls: ["http://127.0.0.1:8000/virtual.html"]
   allowed_origins: ["http://127.0.0.1:8000"]
-  allowed_path_prefixes: ["/", "/product/"]
+  allowed_path_prefixes: ["/"]
   market: "FR"
   locale: "fr-FR"
   currency: "EUR"
@@ -21,6 +21,22 @@ capabilities:
   discovery: true
   product: true
 
+discovery:
+  sources:
+    - type: adapter
+      url: "http://127.0.0.1:8000/virtual.html"
+      advance:
+        item_selector: "a.product"
+        container: "#feed"
+        id_attribute: "data-id"
+        mode: "scroll"
+        settle_ms: 100
+        no_new_stop: 1
+      max_batches: 10
+      max_seconds: 30
+  product_url_patterns: ['^/product/[^/]+\.html$']
+  url_identity: "canonical"
+
 runtime:
   adapter_id: "virtual-list-patchright"
   adapter_version: "2026.11.22-1"
@@ -28,18 +44,91 @@ runtime:
   protocol: "ndjson-stdio-v1"
   capabilities: ["discovery"]
 
+fetch:
+  default_engine: "static"
+  concurrency: 1
+  delay_ms: 1000
+  retry: {max_attempts: 1, backoff_ms: 0}
+  timeout_ms: 10000
+  browser: false
+
+extract:
+  fields:
+    name:
+      required: true
+      fallbacks:
+        - {type: css_text, selector: "h1", label: "h1"}
+    price.amount:
+      required: true
+      fallbacks:
+        - {type: css_attr, selector: 'meta[property="product:price:amount"]', attr: "content", label: "price"}
+    price.currency:
+      required: true
+      fallbacks:
+        - {type: css_attr, selector: 'meta[property="product:price:currency"]', attr: "content", label: "currency"}
+    primary_image_url:
+      required: true
+      fallbacks:
+        - {type: css_attr, selector: 'meta[property="og:image"]', attr: "content", label: "image", absolute: true}
+    source_url:
+      required: true
+      fallbacks:
+        - {type: canonical, label: "canonical"}
+
+normalize:
+  price:
+    tax_basis: "unspecified"
+    choose: "smaller_public_pair"
+    positive_only: true
+  description:
+    mode: "clean_html"
+    statuses: ["complete", "partial", "fallback", "not_provided", "failed"]
+  options:
+    exclude_quantity: true
+    strip_price_delta: true
+
+validate:
+  required_fields:
+    - "name"
+    - "price.amount"
+    - "price.currency"
+    - "primary_image_url"
+    - "source_url"
+  assertions:
+    - {field: "price.amount", op: ">", value: 0}
+  partial_description: "allowed_with_flag"
+
+output:
+  url_list:
+    enabled: true
+    columns: ["url", "source", "status", "title"]
+    format: "csv"
+  product_csv:
+    enabled: true
+    columns: 9
+    format: "csv"
+  task_result: true
+
+task_defaults:
+  max_urls: 20
+  max_products: 20
+  max_seconds: 30
+  concurrency:
+    navigation: 1
+    product: 1
+
 compatibility:
   os: ["windows", "linux", "wsl2"]
   runtime: "python>=3.11"
   dependencies: ["patchright==1.64.4"]
-  browser: "patchright CDP"
+  browser: "patchright CDP for discovery; static product pages"
 
 evidence:
   sample_urls: ["http://127.0.0.1:8000/virtual.html"]
   expected: []
   verified_at: null
   limitations:
-    - "Local virtual-list fixture only; app run does not consume hybrid manifests yet."
-    - "The adapter owns only batch capture and stable-ID accumulation; task state, budgets, extraction and acceptance stay with the caller."
+    - "Local virtual-list fixture only; not a production store."
+    - "The adapter owns only batch capture and stable-ID accumulation; task state, budgets, extraction and acceptance stay with app run."
 
-notes: "Contract example for a C2 virtual-list adapter; not accepted by app run yet."
+notes: "Hybrid manifest example: adapter discovery plus declarative product extraction."

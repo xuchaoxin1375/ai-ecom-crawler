@@ -4,13 +4,13 @@
 
 虚拟列表在滚动时**替换** DOM 行，最终页面只保留最后一批；等滚到底再读最终 DOM 会漏掉前面的商品。按 [ADR 0007](../../../docs/adr/0007-规则层与爬虫框架边界.md)，这是 C2 复杂交互，应走 `hybrid` adapter，而不是继续扩声明式 `load_more`／`infinite_scroll`。
 
-本目录只做第一层验证：
+本目录验证两层：
 
 - 定义一个可执行的 adapter 子进程契约：输入任务上下文 JSON，输出 NDJSON；
 - 用 Patchright 在本地虚拟列表 fixture 上逐批采集，按稳定 ID 累积，证明“替换 DOM”不会丢批次；
-- 不修改 `app run`，不新增 schema 推进类型，不把 adapter 代码 import 进主服务。
+- `app run` 已接受 `kind: hybrid` 的 `discovery.sources[].type=adapter`：adapter 只负责 C2 discovery，商品页仍由 `fetch`／`extract` 的声明式部分抓取和提取；adapter 不拥有任务状态、计数或最终验收。
 
-`app run` 目前仍只接受 `kind: declarative`；本目录的 `manifest.example.yaml` 是契约示例，不是可被 `app run` 直接消费的方案包。
+`manifest.example.yaml` 是完整可加载的 hybrid 方案示例；`run_app_demo.py` 用真实 adapter 跑端到端本地任务。
 
 ## 本地 fixture
 
@@ -48,9 +48,23 @@
 
 这不是基准站证据，也不是全量保证；它只证明虚拟列表逐批累积和停止条件在本地 fixture 上成立。
 
+## app run 端到端结果
+
+`run_app_demo.py` 启动同一 fixture，把 `adapter.py` 和 `manifest.example.yaml` 复制到临时方案包，再调用 `ecom_crawler.execution.run_and_export`：
+
+- adapter 作为 `app run` 的子进程执行，4 次滚动后返回 12 个 URL；
+- app 用静态 fetcher 抓取 12 个商品页并导出 9 列 CSV；
+- `valid_products=12`、`excluded=0`、`failed=0`；
+- `task-result.json` 的 `runtime.adapter` 记录 `discovered=12`、`added=12`、`skipped=0`、`stop=NO_NEW_ITEMS`、`batches=4`、`requests=1`、`elapsed_ms` 约 0.9 秒；
+- 任务目录保留 `adapter-context.json`、`adapter.ndjson` 和 `rule-used.yaml` 作为证据。
+
+证据：`app-evidence/virtual-list-app-001/`。端口是临时端口，复跑会生成新的端口和任务目录。
+
 ## Adapter 契约（v1 草案）
 
 ### 调用
+
+`app run` 通过 `runtime.entrypoint` 启动子进程；当前实现等价于：
 
 ```text
 python adapter.py --context /path/to/context.json
@@ -61,6 +75,7 @@ python adapter.py --context /path/to/context.json
 - 退出码：`0` 成功并已输出 `done`；`2` 上下文无效；`3` 浏览器或运行期失败。
 - 失败时输出 `error` 事件，不输出 `done`；调用方丢弃该任务的半成品结果。
 - adapter 不拥有任务状态、计数、暂停／取消和最终验收；不绕过登录、付费、401／403、验证码或挑战页。
+- `app run` 设置子进程超时并保存 `adapter-context.json`／`adapter.ndjson`；adapter 当前自己关闭 browser，尚未把 Chromium 纳入 `task_resources`。
 
 ### 输入上下文
 
@@ -106,24 +121,28 @@ python adapter.py --context /path/to/context.json
 
 ```powershell
 python -m uv run --project app --extra dev python experiments/d07/virtual-list-hybrid/run_demo.py
+python -m uv run --project app --extra dev python experiments/d07/virtual-list-hybrid/run_app_demo.py
 python -m uv run --project app --extra dev python -m unittest discover -s experiments/d07/virtual-list-hybrid -v
+python -m uv run --project app --extra dev python -m unittest app.tests.test_hybrid -v
 ```
 
-`run_demo.py` 会重写 `evidence.ndjson`；测试使用临时上下文和临时 fixture，不写仓库证据。
+`run_demo.py` 只跑 adapter；`run_app_demo.py` 会重写 `app-evidence/virtual-list-app-001/`；测试使用临时上下文和临时 fixture，不写仓库证据。
 
 ## 缺口
 
-- `app run` 尚未接受 `kind: hybrid`，也没有把 adapter 的 `discovered` 事件接回任务账本；本目录只定义契约和验证执行器。
+- `app run` 已支持 adapter discovery，但 adapter 的浏览器实例和临时目录尚未登记到 `task_resources`，超时强杀后可能留下 Chromium 子进程；需要补进程组／资源回收。
 - 未在真实基准站验证；虚拟列表的稳定 ID 属性、滚动容器和终止文案因站而异，需要逐站配置。
-- 未实现浏览器实例配额、跨进程资源配额和跨机租约；adapter 目前自己关闭 browser，尚未登记到 `task_resources`。
-- 未处理登录、挑战页、私有 XHR、网络重放或多步状态。
+- 未实现浏览器实例配额、跨进程资源配额和跨机租约。
+- 未处理登录、挑战页、私有 XHR、网络重放或多步状态；`app run` 目前只支持 adapter 返回 URL 后由声明式 `fetch`／`extract` 处理商品页。
 
 ## 文件
 
 - `adapter.py`：最小虚拟列表 adapter（Patchright，NDJSON）。
 - `fixture.py`：12 项、每批 3 项的替换式虚拟列表 fixture。
 - `test_adapter.py`：本地 fixture 12／12、无重复、`NO_NEW_ITEMS` 停止；无效上下文返回 2。
-- `run_demo.py`：生成 `evidence.ndjson`。
-- `evidence.ndjson`：本机 headless 运行证据。
+- `run_demo.py`：只运行 adapter，生成 `evidence.ndjson`。
+- `run_app_demo.py`：启动 fixture、跑 `app run` 端到端，生成 `app-evidence/`。
+- `evidence.ndjson`：adapter 本机 headless 运行证据。
 - `context.example.json`：任务上下文示例。
-- `manifest.example.yaml`：`kind: hybrid` 契约示例，尚不能被 `app run` 消费。
+- `manifest.example.yaml`：可加载的 `kind: hybrid` 方案示例。
+- `app-evidence/virtual-list-app-001/`：adapter + app 提取的 12／12 证据。

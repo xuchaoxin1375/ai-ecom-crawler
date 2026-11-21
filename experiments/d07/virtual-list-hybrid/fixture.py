@@ -74,7 +74,12 @@ render();
 
 def product_html(index: int) -> str:
     return f"""<!doctype html>
-<html><head><meta charset="utf-8"><title>Product {index}</title></head>
+<html><head><meta charset="utf-8"><title>Product {index}</title>
+<meta property="og:image" content="/img/p{index}.jpg">
+<meta property="product:price:amount" content="{10 + index}.00">
+<meta property="product:price:currency" content="EUR">
+<link rel="canonical" href="/product/p{index}.html">
+</head>
 <body><h1>Product {index}</h1></body></html>
 """
 

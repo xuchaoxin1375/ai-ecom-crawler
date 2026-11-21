@@ -15,9 +15,16 @@ from .models import TASK_TYPES, utc_now
 
 SCHEMA_VERSIONS = {"1.0", "1.1", "1.2"}
 RULE_STATUSES = {"candidate", "verified", "deprecated"}
-SUPPORTED_KINDS = {"declarative"}
+SUPPORTED_KINDS = {"declarative", "hybrid"}
 SUPPORTED_DISCOVERY = {"entry_links"}
-SUPPORTED_SOURCES = {"entry_links", "sitemap", "listing", "html_index", "public_json"}
+SUPPORTED_SOURCES = {
+    "entry_links",
+    "sitemap",
+    "listing",
+    "html_index",
+    "public_json",
+    "adapter",
+}
 SUPPORTED_ADVANCE = {
     "none",
     "page_param",
@@ -85,6 +92,7 @@ OPTIONAL_TOP_LEVEL = {
     "compatibility",
     "evidence",
     "notes",
+    "runtime",
 }
 
 
@@ -104,6 +112,15 @@ class RulePackage:
     @property
     def rule_version(self) -> str:
         return str(self.raw["rule_version"])
+
+    @property
+    def kind(self) -> str:
+        return str(self.raw["kind"])
+
+    @property
+    def runtime(self) -> dict[str, Any]:
+        value = self.raw.get("runtime", {})
+        return value if isinstance(value, dict) else {}
 
     @property
     def site(self) -> dict[str, Any]:
@@ -226,6 +243,25 @@ class RulePackage:
             return bool(section.get("enabled", True))
         return bool(section)
 
+    def validate_entrypoint(self) -> None:
+        """Ensure a hybrid adapter stays inside its package and exists."""
+        if self.kind != "hybrid":
+            return
+        entrypoint = str(self.runtime.get("entrypoint") or "").strip()
+        if not entrypoint:
+            raise RuleError("hybrid rule needs runtime.entrypoint")
+        relative = Path(entrypoint)
+        if relative.is_absolute() or any(part == ".." for part in relative.parts):
+            raise RuleError("runtime.entrypoint must stay inside the rule package")
+        package_root = self.path.parent.resolve()
+        resolved = (package_root / relative).resolve()
+        try:
+            resolved.relative_to(package_root)
+        except ValueError as exc:
+            raise RuleError("runtime.entrypoint escapes the rule package") from exc
+        if not resolved.is_file():
+            raise RuleError(f"runtime.entrypoint not found: {resolved}")
+
 
 def load_rule(path: str | Path) -> RulePackage:
     rule_path = Path(path)
@@ -239,6 +275,7 @@ def load_rule(path: str | Path) -> RulePackage:
         raise RuleError("rule manifest must be a YAML mapping")
     _validate_common(data)
     rule = RulePackage(path=rule_path, raw=data)
+    rule.validate_entrypoint()
     if rule.capabilities.get("product"):
         try:
             validate_plan(rule.product_plan())
@@ -263,7 +300,13 @@ def _validate_common(data: dict[str, Any]) -> None:
     _require_string(data["rule_version"], "rule_version")
     kind = _require_string(data["kind"], "kind")
     if kind not in SUPPORTED_KINDS:
-        raise RuleError(f"v1 runtime supports kind=declarative only, got {kind!r}")
+        raise RuleError(
+            f"unsupported kind {kind!r}; supported: {sorted(SUPPORTED_KINDS)}"
+        )
+    if kind == "hybrid":
+        _validate_runtime(data.get("runtime"))
+    elif "runtime" in data:
+        raise RuleError("runtime is only allowed for kind=hybrid")
     status = data.get("status", "candidate")
     if status not in RULE_STATUSES:
         raise RuleError(f"unsupported status: {status!r}")
@@ -317,6 +360,16 @@ def _validate_common(data: dict[str, Any]) -> None:
             )
         if "entry_links" in strategies:
             _require_string(discovery.get("link_selector"), "discovery.link_selector")
+    adapter_sources = [
+        source
+        for source in (sources if isinstance(sources, list) else [])
+        if isinstance(source, dict) and source.get("type") == "adapter"
+    ]
+    if kind == "hybrid" and not adapter_sources:
+        raise RuleError("hybrid rule needs a discovery.sources entry with type=adapter")
+    if kind != "hybrid" and adapter_sources:
+        raise RuleError("adapter source requires kind=hybrid")
+
     patterns = _require_list(
         discovery.get("product_url_patterns"), "discovery.product_url_patterns"
     )
@@ -498,6 +551,24 @@ def _validate_page_engine_fields(settings: dict[str, Any], path: str) -> None:
         _require_string(settings["wait_selector"], f"{path}.wait_selector")
 
 
+def _validate_runtime(value: Any) -> None:
+    runtime = _require_mapping(value, "runtime")
+    for key in ("adapter_id", "adapter_version", "entrypoint", "protocol"):
+        _require_string(runtime.get(key), f"runtime.{key}")
+    if runtime["protocol"] != "ndjson-stdio-v1":
+        raise RuleError(
+            f"unsupported runtime.protocol {runtime['protocol']!r}; "
+            "supported: ['ndjson-stdio-v1']"
+        )
+    capabilities = _require_list(
+        runtime.get("capabilities"), "runtime.capabilities"
+    )
+    for capability in capabilities:
+        _require_string(capability, "runtime.capabilities[]")
+    if "discovery" not in capabilities:
+        raise RuleError("runtime.capabilities must include 'discovery'")
+
+
 def _validate_sources(value: Any, discovery: dict[str, Any]) -> None:
     sources = _require_list(value, "discovery.sources")
     if not sources:
@@ -547,6 +618,48 @@ def _validate_sources(value: Any, discovery: dict[str, Any]) -> None:
                 raise RuleError(f"{path}.max_depth must be a non-negative integer")
         if source_type == "public_json":
             _validate_public_json_source(source, path)
+        if source_type == "adapter":
+            _require_string(source.get("url"), f"{path}.url")
+            advance = _require_mapping(source.get("advance"), f"{path}.advance")
+            _require_string(
+                advance.get("item_selector"), f"{path}.advance.item_selector"
+            )
+            if "container" in advance:
+                _require_string(advance.get("container"), f"{path}.advance.container")
+            if "id_attribute" in advance:
+                _require_string(
+                    advance.get("id_attribute"), f"{path}.advance.id_attribute"
+                )
+            if "mode" in advance:
+                mode = _require_string(advance.get("mode"), f"{path}.advance.mode")
+                if mode not in SUPPORTED_SCROLL_MODES:
+                    raise RuleError(
+                        f"unsupported {path}.advance.mode {mode!r}; "
+                        f"supported: {sorted(SUPPORTED_SCROLL_MODES)}"
+                    )
+            if "settle_ms" in advance and (
+                isinstance(advance["settle_ms"], bool)
+                or not isinstance(advance["settle_ms"], int)
+                or advance["settle_ms"] < 0
+            ):
+                raise RuleError(
+                    f"{path}.advance.settle_ms must be a non-negative integer"
+                )
+            if "no_new_stop" in advance and (
+                isinstance(advance["no_new_stop"], bool)
+                or not isinstance(advance["no_new_stop"], int)
+                or advance["no_new_stop"] < 1
+            ):
+                raise RuleError(
+                    f"{path}.advance.no_new_stop must be a positive integer"
+                )
+            for key in ("max_batches", "max_seconds"):
+                if key in source and (
+                    isinstance(source[key], bool)
+                    or not isinstance(source[key], int)
+                    or source[key] < 1
+                ):
+                    raise RuleError(f"{path}.{key} must be a positive integer")
         if source_type == "sitemap":
             urls = source.get("urls", [])
             if not isinstance(urls, list):

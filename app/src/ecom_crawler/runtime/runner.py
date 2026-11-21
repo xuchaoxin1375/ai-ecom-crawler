@@ -8,6 +8,8 @@ import hashlib
 import io
 import json
 import re
+import subprocess
+import sys
 import threading
 import time
 import xml.etree.ElementTree as ET
@@ -36,6 +38,14 @@ class StopTask(Exception):
         self.detail = detail
 
 
+class AdapterError(RuntimeError):
+    def __init__(self, reason: str, detail: str, failure_class: str = "permanent") -> None:
+        super().__init__(detail)
+        self.reason = reason
+        self.detail = detail
+        self.failure_class = failure_class
+
+
 class TaskRunner:
     def __init__(
         self,
@@ -58,6 +68,9 @@ class TaskRunner:
         self.products_path = self.out_dir / "products.jsonl"
         self.events_path = self.out_dir / "events.ndjson"
         self.items_path = self.out_dir / "items.jsonl"
+        self.adapter_context_path = self.out_dir / "adapter-context.json"
+        self.adapter_ndjson_path = self.out_dir / "adapter.ndjson"
+        self._adapter_stats: dict[str, Any] = {}
         self.urls_path = self.out_dir / "urls.csv"
         self.products_csv_path = self.out_dir / "products.csv"
         self.task_result_path = self.out_dir / "task-result.json"
@@ -133,6 +146,15 @@ class TaskRunner:
             self._stop_reason = exc.reason
             self._stop_detail = exc.detail
             self._event("task_stopping", reason=exc.reason, detail=exc.detail)
+        except AdapterError as exc:
+            self._stop_reason = "ADAPTER_FAILED"
+            self._stop_detail = f"{exc.reason}: {exc.detail}"
+            self._event(
+                "adapter_failed",
+                reason=exc.reason,
+                detail=exc.detail,
+                failure_class=exc.failure_class,
+            )
         except LeaseLostError:
             raise
         except Exception as exc:  # noqa: BLE001 - task boundary
@@ -770,6 +792,8 @@ class TaskRunner:
                     str(source.get("url") or self.rule.entry_url),
                     source="entry_links",
                 )
+            elif source_type == "adapter":
+                self._seed_adapter(source)
             elif source_type == "sitemap":
                 urls = list(source.get("urls") or [])
                 if source.get("robots") is True:
@@ -830,6 +854,165 @@ class TaskRunner:
                         "cursor": None,
                     },
                 )
+
+    def _seed_adapter(self, source: dict[str, Any]) -> None:
+        runtime = self.rule.runtime
+        adapter_id = str(runtime.get("adapter_id") or "")
+        adapter_version = str(runtime.get("adapter_version") or "")
+        entrypoint_value = str(runtime.get("entrypoint") or "")
+        entrypoint = (self.rule.path.parent / entrypoint_value).resolve()
+        entry_url = str(source.get("url") or self.rule.entry_url)
+        advance = source.get("advance") or {}
+        if not isinstance(advance, dict):
+            raise AdapterError("adapter_context", "source.advance must be an object")
+        max_items = self._remaining_product_limit()
+        if max_items <= 0:
+            return
+        task_seconds = max(1, int(self.task.limits.get("max_seconds", 180)))
+        source_seconds = source.get("max_seconds")
+        max_seconds = (
+            min(task_seconds, int(source_seconds)) if source_seconds else task_seconds
+        )
+        max_batches = int(source.get("max_batches", advance.get("max_batches", 10)))
+        browser_config = self.rule.fetch.get("browser")
+        browser = dict(browser_config) if isinstance(browser_config, dict) else {}
+        browser.setdefault("headless", True)
+        context = {
+            "plan_id": self.rule.rule_id,
+            "plan_version": self.rule.rule_version,
+            "adapter_id": adapter_id,
+            "adapter_version": adapter_version,
+            "task_id": self.task.task_id,
+            "task_type": self.task.task_type,
+            "entry_url": entry_url,
+            "scope": self.rule.scope,
+            "limits": {
+                "max_items": max_items,
+                "max_batches": max_batches,
+                "max_seconds": max_seconds,
+            },
+            "browser": browser,
+            "advance": dict(advance),
+        }
+        write_json(self.adapter_context_path, context)
+        command = (
+            [sys.executable, str(entrypoint)]
+            if entrypoint.suffix.lower() == ".py"
+            else [str(entrypoint)]
+        )
+        command.extend(["--context", str(self.adapter_context_path)])
+        self._event(
+            "adapter_started",
+            adapter_id=adapter_id,
+            adapter_version=adapter_version,
+            entry_url=entry_url,
+            max_items=max_items,
+            max_batches=max_batches,
+            max_seconds=max_seconds,
+        )
+        try:
+            completed = subprocess.run(
+                command,
+                check=False,
+                cwd=str(self.rule.path.parent),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=max_seconds + 5,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise AdapterError(
+                "adapter_timeout",
+                f"adapter exceeded {max_seconds} seconds",
+                "transient",
+            ) from exc
+        write_text(self.adapter_ndjson_path, completed.stdout or "")
+        events = self._parse_adapter_events(completed.stdout)
+        errors = [event for event in events if event.get("event") == "error"]
+        if errors:
+            error = errors[0]
+            raise AdapterError(
+                str(error.get("reason") or "adapter_error"),
+                str(error.get("detail") or error),
+                str(error.get("failure_class") or "permanent"),
+            )
+        if completed.returncode != 0:
+            detail = completed.stderr.strip() or f"adapter exited with {completed.returncode}"
+            raise AdapterError("adapter_exit", detail, "transient")
+        discovered = next(
+            (event for event in events if event.get("event") == "discovered"), None
+        )
+        done = next(
+            (event for event in reversed(events) if event.get("event") == "done"),
+            None,
+        )
+        if discovered is None or done is None:
+            raise AdapterError(
+                "adapter_incomplete",
+                "adapter must emit discovered and done events",
+            )
+        urls = discovered.get("urls")
+        if not isinstance(urls, list):
+            raise AdapterError("adapter_invalid", "discovered.urls must be a list")
+        added = 0
+        skipped = 0
+        for raw_url in urls:
+            if not isinstance(raw_url, str):
+                skipped += 1
+                continue
+            url = raw_url.strip()
+            if not url or not self._is_product_candidate(url):
+                skipped += 1
+                continue
+            if self._add_product_item(url, parent=entry_url, source="adapter"):
+                added += 1
+            else:
+                skipped += 1
+        stats = {
+            "adapter_id": adapter_id,
+            "adapter_version": adapter_version,
+            "entrypoint": entrypoint_value,
+            "protocol": runtime.get("protocol"),
+            "entry_url": entry_url,
+            "returncode": completed.returncode,
+            "stop": done.get("stop"),
+            "batches": done.get("batches"),
+            "items": done.get("items"),
+            "requests": done.get("requests"),
+            "elapsed_ms": done.get("elapsed_ms"),
+            "url_changes": done.get("url_changes"),
+            "discovered": len(urls),
+            "added": added,
+            "skipped": skipped,
+            "context_path": str(self.adapter_context_path),
+            "ndjson_path": str(self.adapter_ndjson_path),
+        }
+        self._adapter_stats = stats
+        self._event("adapter_finished", **stats)
+        if added == 0 and self.store.count_items(self.task.task_id, "product") == 0:
+            raise AdapterError(
+                "adapter_empty", "adapter returned no usable product URLs"
+            )
+
+    @staticmethod
+    def _parse_adapter_events(raw: str) -> list[dict[str, Any]]:
+        events: list[dict[str, Any]] = []
+        for line in raw.splitlines():
+            if not line.strip():
+                continue
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise AdapterError(
+                    "adapter_invalid_ndjson", f"invalid NDJSON line: {exc}"
+                ) from exc
+            if not isinstance(payload, dict) or not payload.get("event"):
+                raise AdapterError(
+                    "adapter_invalid_ndjson", "each line needs an event field"
+                )
+            events.append(payload)
+        return events
 
     def _add_navigation(
         self,
@@ -1085,6 +1268,7 @@ class TaskRunner:
         failed = counts.get("FAILED", 0)
         if self._stop_reason in {
             "ACCESS_DENIED",
+            "ADAPTER_FAILED",
             "BUDGET_EXHAUSTED",
             "ENVIRONMENT_ERROR",
             "PLAN_ERROR",
@@ -1236,6 +1420,7 @@ class TaskRunner:
                     "pid": engine_info.get("browser_pid"),
                     "profile": engine_info.get("browser_profile"),
                 },
+                **({"adapter": self._adapter_stats} if self._adapter_stats else {}),
             },
             "access": {
                 "entry_url": self.rule.entry_url,

@@ -89,7 +89,7 @@ R06 原先把所有 `validate_product` 原因都映射为 `EXCLUDED`。这会掩
   - `app/tests/test_browser_actions.py`：本地追加型列表，两种推进各 6／6；schema 版本和静态 navigation 校验。
   - `experiments/d07/browser-listing/`：`scrapingcourse.com` 公开练习页，`load_more` 1 次点击后 24 条、`infinite_scroll` 2 次滚动后 36 条，均取前 15 个商品、15／15 有效（多次复跑，约 75–88 秒）。
   - `experiments/d07/url-pagination-batch/`：5 个法国基准站的 URL 可寻址检查。`mapetitemercerie.com` 两页各 10／10（`?page=2`），`gaspardetleonie.com` 26／26（Shopify `rel=next`，第 2 页 2 条），`touchatou.fr` 22／22（`/page/2/`，第 2 页 2 条）；`atelier-leonie.fr` 单页 40、无下一页，`tissus.net` 静态无商品卡片、留待浏览器／API。全部静态、0 失败。
-  - `experiments/d07/virtual-list-hybrid/`：按 ADR 0007 的 C2 hybrid adapter 原型。本地替换式虚拟列表 12／12，5 批累积、1 次列表请求、`NO_NEW_ITEMS` 停止，约 0.9 秒；接口是上下文 JSON + NDJSON，不改声明式 DSL。`app run` 尚未接入 hybrid manifest。
+  - `experiments/d07/virtual-list-hybrid/`：按 ADR 0007 的 C2 hybrid adapter。本地替换式虚拟列表 12／12，4 次滚动、1 次列表请求、`NO_NEW_ITEMS` 停止，约 0.9 秒；接口是上下文 JSON + NDJSON，不改声明式 DSL。`app run` 已支持 adapter discovery，端到端抓取并导出 12／12 商品（`app-evidence/virtual-list-app-001/`）。
 
 ## 测试结果
 
@@ -99,19 +99,19 @@ python -m uv run --project experiments/framework-compare/scrapling `
   python -m unittest discover -s experiments/r06/tests -v
 ```
 
-结果：**83 个测试通过**，无 skip。覆盖原子写、契约、提取、运行时、重试、恢复、控制、并行、Schema 和新的字段分类。`app` 当前 **140 个测试通过**（含 8 个浏览器配置／路由／fixture 用例、5 个 load_more／infinite_scroll 用例（含内部容器）、4 个桥接状态用例和 1 个原子写用例），`ruff check app` 通过；真实浏览器用例在缺少 Chromium 的环境中会跳过，本机运行结果为通过。
+结果：**83 个测试通过**，无 skip。覆盖原子写、契约、提取、运行时、重试、恢复、控制、并行、Schema 和新的字段分类。`app` 当前 **145 个测试通过**（含 8 个浏览器配置／路由／fixture 用例、5 个 load_more／infinite_scroll 用例（含内部容器）、5 个 hybrid adapter 用例、4 个桥接状态用例和 1 个原子写用例），`ruff check app` 通过；真实浏览器用例在缺少 Chromium 的环境中会跳过，本机运行结果为通过。
 
 ## D07 结论
 
-- **不是 D07 完成**：生产 `app` 执行器、任务账本、控制面、单实例锁、同进程 A20、单机跨进程租约、进程／目录资源回收、真实浏览器进程／profile 回收、两种有界浏览器推进（含内部容器追加型）和虚拟列表 hybrid adapter 原型已落地；跨进程资源配额、浏览器实例配额、虚拟列表的 `app run` 接入／真实站点、更复杂的内部滚动、跨机租约和自动化漂移修复仍未实现。
+- **不是 D07 完成**：生产 `app` 执行器、任务账本、控制面、单实例锁、同进程 A20、单机跨进程租约、进程／目录资源回收、真实浏览器进程／profile 回收、两种有界浏览器推进（含内部容器追加型）和虚拟列表 hybrid adapter（含 `app run` 端到端）已落地；跨进程资源配额、浏览器实例配额、真实站点虚拟列表、adapter 浏览器资源回收、更复杂的内部滚动、跨机租约和自动化漂移修复仍未实现。
 - **可复用的改进**：字段错误与业务排除的分类已修正，并进入 R06 回归测试；`app` 控制面复用同一状态语义；租约和资源登记不改变对外任务状态；浏览器挑战壳要按渲染后的最终状态判断，不能只看首个 HTTP 响应。
-- **下一步优先级**：URL 可寻址检查已覆盖 `ecolaines` 与 5 个法国基准站；虚拟列表 hybrid adapter 原型已跑通本地 fixture，接下来接入 `app run`、补真实站点虚拟列表、更复杂的内部滚动、浏览器实例配额和跨进程资源配额，并对 `tissus.net` 这类 JS／API 列表做浏览器或公开 API 验证。D08 控制界面不得早于这些结论。
+- **下一步优先级**：URL 可寻址检查已覆盖 `ecolaines` 与 5 个法国基准站；虚拟列表 hybrid adapter 已接入 `app run` 并本地端到端 12／12，接下来补真实站点虚拟列表、adapter 浏览器资源回收、更复杂的内部滚动、浏览器实例配额和跨进程资源配额，并对 `tissus.net` 这类 JS／API 列表做浏览器或公开 API 验证。D08 控制界面不得早于这些结论。
 
 ## 限制
 
 - 现有真实站点控制证据来自 Tognar（静态）和 mercerine（浏览器），仍是单 worker、单机；不能代表多进程或浏览器池。
 - 浏览器证据是首页 3 个商品的有界样本，不是全站；headless 通过不代表挑战站长期稳定。
-- 浏览器 adapter 已支持渲染、任务级回收和追加型 `load_more`／`infinite_scroll`（含 `container` 内部滚动，本地 fixture 6／6）；虚拟列表有独立 hybrid 原型（本地 fixture 12／12，未接入 `app run`），更复杂的内部滚动、浏览器实例配额和跨机回收未验证。
+- 浏览器 adapter 已支持渲染、任务级回收和追加型 `load_more`／`infinite_scroll`（含 `container` 内部滚动，本地 fixture 6／6）；虚拟列表有 hybrid adapter 并接入 `app run`（本地端到端 12／12，但 adapter Chromium 未纳入 `task_resources`），更复杂的内部滚动、浏览器实例配额和跨机回收未验证。
 - 浏览器交互证据来自公开练习页和本地 fixture，不是基准站或生产店铺；只有首页列表的有界样本。
 - R06 的 `RetryTests` 是 fixture 级，不覆盖真实 429 `Retry-After`、代理切换和会话复用。
 - A20 只验证了并行启动，没有验证一个任务暂停／取消时另一个任务的计数和输出不受影响。
