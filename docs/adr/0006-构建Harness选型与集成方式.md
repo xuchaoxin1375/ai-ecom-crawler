@@ -11,6 +11,13 @@ updated: 2026-11-20
 
 本文决定参考 harness、集成协议、适配器边界和构建会话的暂停／取消／恢复映射。构建会话契约以 [构建 Agent Harness 契约](0005-构建Agent与Harness契约.md) 为准；采集任务状态以 [任务状态与计数契约](../09-任务状态与计数契约.md) 和 [采集规则与任务运行时](../19-采集规则与任务运行时.md) 为准；方案包以 [采集方案与兼容契约](../08-采集方案与兼容契约.md) 为准。本文不改变执行期，也不把 harness 引入运行期。
 
+## 2026-11-21 实现进展
+
+- `app/src/ecom_crawler/harness/` 已实现 `HarnessAdapter`、`OpenCodeHttpAdapter`、`OpenCodeServer`、构建工作区、HTTP/SSE 客户端和事件归一化；端点按运行中 server 的 OpenAPI（OpenCode 2.3.2）核对，不依赖猜测。
+- 真实 `opencode serve` 冒烟已完成：随机端口和 `OPENCODE_PASSWORD`、session 创建、`/api/event` 首事件、权限请求创建／列表／回复、session 删除和 server 回收；该次冒烟未发送 prompt，不调用模型。
+- `app/tests/test_harness.py` 6 个用例覆盖 fake server 的 session／prompt／permission／interrupt、SSE、事件归一化、推理脱敏、工作区、暂停门、取消／关闭和进程回收。
+- 仍未完成：真实 prompt、执行中的 `interrupt`、pause-gate 插件、`request_dependency` 和 BuildService／构建会话 UI。ADR 0006 保持 Proposed，退出条件中的“发 prompt 和执行中 interrupt”仍需一次经授权的真实模型冒烟。
+
 ## 背景与约束
 
 - ADR 0005 只定义“任何 harness 必须满足什么”，没有决定用哪个 harness、怎么接。
