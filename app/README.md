@@ -95,8 +95,10 @@ python -m uv run --project app ecom-crawler validate --task-result /path/to/task
 - `cancel` 把 `RUNNING`／`PAUSING` 改为 `CANCELLING`；runner 等在途结束，拒绝迟到结果，写 `CANCELLED`。`DRAFT`／`QUEUED`／`PAUSED` 直接进入 `CANCELLED`。
 - `resume` 把 `PAUSED` 改回 `QUEUED`，由 `worker` 重新领取；不恢复浏览器内存或旧会话。
 - 状态转移校验在 `TaskStore.request_*`，不在 CLI 或页面里重复实现；非法转移和未知任务返回 2。
-- 当前只支持一个 `worker` 消费一个账本；跨进程租约、浏览器资源回收和 A20 多任务隔离仍未实现。
-- 证据：`tests/test_control.py` 覆盖状态转移和启动对账；`tests/test_control_flow.py` 覆盖暂停结清、恢复、取消拒收迟到结果和 `run_forever`。
+- `worker` 启动时获取 `<db>.worker.lock` 单实例锁；锁由操作系统在进程退出时释放，残留锁文件不会阻止下次启动。
+- 同进程 A20 已覆盖：同域两任务并行，暂停／取消一个，另一个继续并保持独立输出；同域请求共用限速器。
+- 跨进程租约、浏览器资源回收和跨进程 A20 仍未实现。
+- 证据：`tests/test_control.py` 覆盖状态转移、启动对账和单实例锁；`tests/test_control_flow.py` 覆盖暂停结清、恢复、取消拒收迟到结果、`run_forever` 和同进程 A20。
 
 ## 输入契约
 
