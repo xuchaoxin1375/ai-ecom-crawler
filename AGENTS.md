@@ -11,6 +11,7 @@
 ## 站点评估入口
 
 - 评估站点前先查 [`docs/12-验收基准站点.md`](docs/12-验收基准站点.md) 和 [`experiments/framework-compare/probes/README.md`](experiments/framework-compare/probes/README.md)；已有结论先复用，不重复探测。
+- 用户在 [`docs/12-验收基准站点.md`](docs/12-验收基准站点.md) 补充新站点后，直接归位到对应国家／品类并处理：去重、统一链接格式、更新日期；对新增入口各做一次首页可达性复核（直连优先，失败再经本机代理），把失效、跳转、挑战和路径修正写回名单或复核段，不删除历史失败记录；随后跑文档检查并提交，不反复确认站点来源或是否值得加入。
 - 单站分诊按 `product-crawl-workflow` 的顺序：robots → sitemap → 首页/分类 → 1 个样页。挑战站先按项目预算；没有项目预算时默认不超过 5 次目标请求或 3 分钟，超出停止并记录出口、客户端、请求数和停止原因。
 - 挑战页处理按 `resilient-browser-fetch`：无头失败先 `--headful`；同一出口用户浏览器能开、自动化仍被拒时，优先 `chrome-late` 或 `cdp-attach`，不要先轮换代理或叠加引擎。
 - `campsaver.com` 已知 PerimeterX：默认无头栈会被挑战；2026-11-19 复核中，有头 Chromium 直连首次 200 打开首页，随后同一出口转为 `PRESS & HOLD` 挑战。复核时优先有头/会话复用，不重复跑 headless 矩阵。
