@@ -7,7 +7,15 @@ name = "ecom-crawler"
 version = "0.1.0"
 description = "D02 data contract and export CLI for the AI e-commerce crawler"
 requires-python = ">=3.11"
-dependencies = ["lxml>=5.3,<7"]
+dependencies = [
+    "browserforge==1.2.4",
+    "curl_cffi==0.17.0",
+    "lxml>=5.3,<7",
+    "patchright==1.64.4",
+    "protego>=0.3,<1",
+    "pyyaml==6.0.3",
+    "scrapling==0.5.1",
+]
 
 [project.optional-dependencies]
 dev = ["jsonschema>=4.23"]
