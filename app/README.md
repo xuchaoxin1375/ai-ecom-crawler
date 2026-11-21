@@ -20,16 +20,17 @@
 - 分类过滤、选项合并与 `attributes` 兼容序列化。
 - 9 列业务 CSV、`task-result.json`、内部记录和排除／失败诊断。
 - 计数不变量、`outcome` 推导、`quality_exceptions` 异常索引。
-- `export`、`validate` 和 `run` 三个 CLI 子命令。
+- `export`、`validate`、`run`、`submit`、`worker`、`pause`、`resume`、`cancel`、`status` 和 `list` CLI 子命令。
 - 声明式规则包读取与校验；`entry_links`、`sitemap`、`listing`、`html_index`、`public_json` 发现来源。
 - 静态发现、获取、提取、基础重试和 SQLite 任务账本。
 - `run` 执行 product 任务并自动接入 D02 导出。
+- 单 worker 控制面：`submit` 入队，`worker` 常驻执行，`pause`／`resume`／`cancel` 从另一个进程改账本，runner 在检查点响应并拒收迟到结果。
 
 尚未实现：
 
 - 浏览器／动态渲染、挑战页会话复用和资源回收。
-- 暂停／取消 / 任务状态的 CLI 控制；账本已有状态字段，但没有命令入口。
-- 跨进程租约、app 原生状态模型、Web UI 和构建会话。
+- 跨进程租约；当前只允许一个 `worker` 消费同一账本。
+- app 原生状态模型、Web UI 和构建会话。
 - 生产级浏览器／进程孤儿回收；R06 的静态单进程能力已抽取，但不是最终形态。
 
 ## 布局
@@ -56,6 +57,13 @@ python -m uv run ruff check app
 ```powershell
 python -m uv run --project app ecom-crawler --version
 python -m uv run --project app ecom-crawler run --rule /path/to/rule.yaml --db /path/to/tasks.db --out-root /path/to/tasks --task-id sample-001 --task-type product --max-products 6
+python -m uv run --project app ecom-crawler submit --rule /path/to/rule.yaml --db /path/to/tasks.db --task-id sample-002
+python -m uv run --project app ecom-crawler worker --db /path/to/tasks.db --out-root /path/to/tasks
+python -m uv run --project app ecom-crawler pause --db /path/to/tasks.db --task-id sample-002
+python -m uv run --project app ecom-crawler resume --db /path/to/tasks.db --task-id sample-002
+python -m uv run --project app ecom-crawler cancel --db /path/to/tasks.db --task-id sample-002
+python -m uv run --project app ecom-crawler status --db /path/to/tasks.db --task-id sample-002 --json
+python -m uv run --project app ecom-crawler list --db /path/to/tasks.db --state RUNNING
 python -m uv run --project app ecom-crawler export --run-dir /path/to/run --out-dir /path/to/out
 python -m uv run --project app ecom-crawler validate --run-dir /path/to/out
 python -m uv run --project app ecom-crawler validate --task-result /path/to/task-result.json
@@ -63,7 +71,10 @@ python -m uv run --project app ecom-crawler validate --task-result /path/to/task
 
 - `run` 每次执行一个任务；product 任务完成后自动导出到 `<out-root>/<task-id>/export`，discovery 任务只写运行时 URL 清单和任务结果。
 - `run` 的退出码表示任务是否实际执行；业务结论看 `task-result.json` 的 `outcome`。计划或用法错误返回 2。
-- `run` 暂不提供暂停／取消命令；账本已有状态字段，但 CLI 控制入口后置。
+- `run` 是一次性入口，不提供可恢复的控制；需要暂停／恢复／取消时用 `submit` 入队，再在另一个 shell 运行 `worker`，用 `pause`／`resume`／`cancel` 控制。外部暂停 `run` 任务后，`run` 以 2 退出并提示用 `worker` 恢复。
+- `worker` 默认 `--max-tasks 1`，按 `QUEUED` 取任务；Ctrl+C 停止领取新任务并等待已启动任务结束，已取消任务用 `cancel` 处理。
+- `pause` 只接受 `RUNNING`，`resume` 只接受 `PAUSED`；重复请求按当前状态幂等返回，非法转移返回 2。
+- `status` 和 `list` 是只读入口；`--json` 输出可直接给脚本消费。任务计数仍以 `task-result.json` 和 `docs/09` 为准。
 - `export` 默认拒绝覆盖已存在的 `products.csv`／`task-result.json`；需要覆盖时加 `--force`。
 - `export` 的退出码表示导出流程是否成功，不表示业务结论；业务结论看 `task-result.json` 的 `outcome`。
 - `export` 的输入或任务元数据错误返回 2；`validate` 的校验失败返回 1。
@@ -76,6 +87,16 @@ python -m uv run --project app ecom-crawler validate --task-result /path/to/task
 - 账本：`--db` 指向的 SQLite 文件，记录任务、工作项、状态、尝试次数和失败分类。
 - 输出：`<out-root>/<task-id>/` 下有 `task-result.json`、`products.jsonl`、`urls.csv`、`events.ndjson` 等运行时产物；product 任务另有 `app-run/` 和 `export/`。
 - 当前是单进程、静态 HTML；浏览器、跨进程租约和资源回收未接入。
+
+## 控制面（submit / worker / pause / resume / cancel）
+
+- `submit` 只创建 `QUEUED` 任务，不启动执行；`worker` 常驻读取账本中的 `QUEUED` 任务。
+- `pause` 把 `RUNNING` 改为 `PAUSING`；runner 停止派发新工作，等在途结清后写 `PAUSED`。
+- `cancel` 把 `RUNNING`／`PAUSING` 改为 `CANCELLING`；runner 等在途结束，拒绝迟到结果，写 `CANCELLED`。`DRAFT`／`QUEUED`／`PAUSED` 直接进入 `CANCELLED`。
+- `resume` 把 `PAUSED` 改回 `QUEUED`，由 `worker` 重新领取；不恢复浏览器内存或旧会话。
+- 状态转移校验在 `TaskStore.request_*`，不在 CLI 或页面里重复实现；非法转移和未知任务返回 2。
+- 当前只支持一个 `worker` 消费一个账本；跨进程租约、浏览器资源回收和 A20 多任务隔离仍未实现。
+- 证据：`tests/test_control.py` 覆盖状态转移和启动对账；`tests/test_control_flow.py` 覆盖暂停结清、恢复、取消拒收迟到结果和 `run_forever`。
 
 ## 输入契约
 
@@ -184,7 +205,7 @@ CSV 对以 `=`、`+`、`-`、`@` 开头的文本单元格加单引号，防止�
 ## 已知限制
 
 - 当前有 T1 契约／单元测试和本地 HTTP fixture 集成；D03／A08／D04 有真实站点证据，但不是 T4 生产验收。
-- `runtime/`、`executor/` 从 R06 抽取，当前是单进程、静态 HTML；浏览器、跨进程租约、暂停／取消 CLI 和资源回收未接入。
+- `runtime/`、`executor/` 从 R06 抽取，当前是单进程、静态 HTML；浏览器、跨进程租约和浏览器资源回收未接入。控制面已支持单 worker 的暂停／恢复／取消。
 - `run` 已接入 SQLite 任务账本；`export` 仍可独立使用 `task.json` + `candidates.jsonl`，不依赖账本。
 - `description.blocks` 的 `kind` 由提取端标注；本层不按关键词猜测政策或适配区块。
 - `description_status` 必须由提取端显式给出；本层不从正文长度或选择器命中情况推断完整／未提供。

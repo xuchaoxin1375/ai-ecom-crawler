@@ -58,14 +58,52 @@ class Worker:
         self.max_tasks = max(1, max_tasks)
         self.limiter = DomainLimiter(per_domain_rps)
         self.fetcher_factory = fetcher_factory
+        self._recovered = False
 
     def run_once(self, poll_interval: float = 0.2) -> int:
-        self.out_root.mkdir(parents=True, exist_ok=True)
+        """Process queued tasks and return when the queue is empty."""
+        self._recover_once()
+        return self._run_loop(poll_interval, exit_when_idle=True)
+
+    def run_forever(
+        self,
+        *,
+        stop_event: threading.Event | None = None,
+        poll_interval: float = 0.5,
+    ) -> int:
+        """Keep processing queued tasks until ``stop_event`` is set.
+
+        A stopped worker stops claiming new tasks and joins the tasks already
+        running.  Use the cancel command for a task that should end early.
+        """
+        self._recover_once()
+        return self._run_loop(
+            poll_interval,
+            exit_when_idle=False,
+            stop_event=stop_event,
+        )
+
+    def _recover_once(self) -> None:
+        if self._recovered:
+            return
         recovery = self.store.recover_orphaned_tasks()
         if recovery["recovered"]:
             logger.warning("recovered orphaned tasks: %s", recovery)
+        self._recovered = True
+
+    def _run_loop(
+        self,
+        poll_interval: float,
+        *,
+        exit_when_idle: bool,
+        stop_event: threading.Event | None = None,
+    ) -> int:
+        self.out_root.mkdir(parents=True, exist_ok=True)
         running: dict[str, threading.Thread] = {}
+        started = 0
         while True:
+            if stop_event is not None and stop_event.is_set():
+                break
             for task in self.store.list_tasks({"QUEUED"}):
                 if len(running) >= self.max_tasks:
                     break
@@ -79,15 +117,22 @@ class Worker:
                 )
                 running[task.task_id] = thread
                 thread.start()
+                started += 1
 
             for task_id, thread in list(running.items()):
                 if not thread.is_alive():
                     thread.join()
                     running.pop(task_id, None)
 
-            if not running and not self.store.list_tasks({"QUEUED"}):
-                return 0
+            if exit_when_idle and not running and not self.store.list_tasks({"QUEUED"}):
+                return started
+            if stop_event is not None and stop_event.is_set():
+                break
             time.sleep(poll_interval)
+
+        for thread in running.values():
+            thread.join()
+        return started
 
     def _run_task(self, task: Task) -> None:
         rule_path = task.input.get("rule_path")

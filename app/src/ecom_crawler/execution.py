@@ -30,20 +30,16 @@ class ExecutionResult:
     export_dir: Path | None = None
 
 
-def run_task(
+def _build_task(
     *,
     rule_path: Path,
-    db_path: Path,
-    out_root: Path,
     task_id: str,
-    task_type: str = "product",
-    max_urls: int = 100,
-    max_products: int = 20,
-    max_seconds: int = 180,
-    max_attempts: int = 2,
-    per_domain_rps: float = 1.0,
-) -> tuple[dict[str, Any], Path]:
-    """Create and run one task, returning its result and task directory."""
+    task_type: str,
+    max_urls: int,
+    max_products: int,
+    max_seconds: int,
+    max_attempts: int,
+) -> Task:
     rule_path = Path(rule_path).resolve()
     if not rule_path.is_file():
         raise ContractError(f"rule package not found: {rule_path}")
@@ -51,19 +47,12 @@ def run_task(
     rule.validate_task_type(task_type)
     if task_type not in {"product", "discovery"}:
         raise ContractError(f"unsupported task_type: {task_type}")
-
-    db_path = Path(db_path)
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    out_root = Path(out_root)
-    out_root.mkdir(parents=True, exist_ok=True)
-
-    store = TaskStore(db_path)
-    task = Task(
+    return Task(
         task_id=task_id,
         plan_id=rule.rule_id,
         plan_version=rule.rule_version,
         task_type=task_type,
-        state="QUEUED",
+        state="DRAFT",
         input={"rule_path": str(rule_path)},
         limits={
             "max_urls": max_urls,
@@ -78,9 +67,71 @@ def run_task(
             "product_csv": task_type == "product",
         },
     )
+
+
+def submit_task(
+    *,
+    rule_path: Path,
+    db_path: Path,
+    task_id: str,
+    task_type: str = "product",
+    max_urls: int = 100,
+    max_products: int = 20,
+    max_seconds: int = 180,
+    max_attempts: int = 2,
+) -> Task:
+    """Create a QUEUED task without executing it."""
+    task = _build_task(
+        rule_path=rule_path,
+        task_id=task_id,
+        task_type=task_type,
+        max_urls=max_urls,
+        max_products=max_products,
+        max_seconds=max_seconds,
+        max_attempts=max_attempts,
+    )
+    db_path = Path(db_path)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    store = TaskStore(db_path)
     if store.get_task(task_id) is not None:
         raise ContractError(f"task already exists: {task_id}")
     store.create_task(task)
+    return store.request_start(task_id)
+
+
+def run_task(
+    *,
+    rule_path: Path,
+    db_path: Path,
+    out_root: Path,
+    task_id: str,
+    task_type: str = "product",
+    max_urls: int = 100,
+    max_products: int = 20,
+    max_seconds: int = 180,
+    max_attempts: int = 2,
+    per_domain_rps: float = 1.0,
+) -> tuple[dict[str, Any], Path]:
+    """Create and run one task, returning its result and task directory."""
+    task = _build_task(
+        rule_path=rule_path,
+        task_id=task_id,
+        task_type=task_type,
+        max_urls=max_urls,
+        max_products=max_products,
+        max_seconds=max_seconds,
+        max_attempts=max_attempts,
+    )
+    db_path = Path(db_path)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    out_root = Path(out_root)
+    out_root.mkdir(parents=True, exist_ok=True)
+
+    store = TaskStore(db_path)
+    if store.get_task(task_id) is not None:
+        raise ContractError(f"task already exists: {task_id}")
+    store.create_task(task)
+    store.request_start(task_id)
 
     worker = Worker(
         store,
@@ -94,6 +145,10 @@ def run_task(
     if not result_path.is_file():
         stored = store.get_task(task_id)
         state = stored.state if stored is not None else "UNKNOWN"
+        if state == "PAUSED":
+            raise ContractError(
+                f"task {task_id} is PAUSED; run 'worker' after 'resume' to continue"
+            )
         raise ContractError(f"task {task_id} finished without task-result.json (state={state})")
     return json.loads(result_path.read_text(encoding="utf-8")), task_dir
 

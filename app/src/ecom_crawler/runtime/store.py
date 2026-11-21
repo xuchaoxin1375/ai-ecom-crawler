@@ -65,6 +65,14 @@ TASK_COLUMNS = {
 }
 
 
+class TaskNotFoundError(ValueError):
+    """Raised when a control command targets an unknown task."""
+
+
+class TaskTransitionError(ValueError):
+    """Raised when a control command is invalid for the task's current state."""
+
+
 class TaskStore:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
@@ -175,6 +183,109 @@ class TaskStore:
                 f"UPDATE tasks SET {', '.join(assignments)} WHERE task_id = ?",
                 values,
             )
+
+    def request_start(self, task_id: str) -> Task:
+        """Move a DRAFT task to QUEUED; repeated starts are idempotent."""
+        return self._transition(
+            task_id,
+            action="start",
+            allowed={"DRAFT"},
+            idempotent={"QUEUED", "RUNNING", "CANCELLED", "FINISHED"},
+            target="QUEUED",
+        )
+
+    def request_pause(self, task_id: str) -> Task:
+        """Request a pause; the runner settles to PAUSED after in-flight items."""
+        return self._transition(
+            task_id,
+            action="pause",
+            allowed={"RUNNING"},
+            idempotent={"PAUSING", "PAUSED"},
+            target="PAUSING",
+        )
+
+    def request_resume(self, task_id: str) -> Task:
+        """Requeue a PAUSED task; a running or queued task is returned as-is."""
+        return self._transition(
+            task_id,
+            action="resume",
+            allowed={"PAUSED"},
+            idempotent={"QUEUED", "RUNNING"},
+            target="QUEUED",
+        )
+
+    def request_cancel(self, task_id: str) -> Task:
+        """Cancel a task; running work first moves to CANCELLING."""
+        return self._transition(
+            task_id,
+            action="cancel",
+            allowed={"DRAFT", "QUEUED", "RUNNING", "PAUSING", "PAUSED"},
+            idempotent={"CANCELLING", "CANCELLED"},
+            target={"RUNNING": "CANCELLING", "PAUSING": "CANCELLING"},
+            default_target="CANCELLED",
+            finalize_cancel=True,
+        )
+
+    def _transition(
+        self,
+        task_id: str,
+        *,
+        action: str,
+        allowed: set[str],
+        idempotent: set[str],
+        target: str | dict[str, str],
+        default_target: str | None = None,
+        finalize_cancel: bool = False,
+    ) -> Task:
+        now = utc_now()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                row = connection.execute(
+                    "SELECT state FROM tasks WHERE task_id = ?", (task_id,)
+                ).fetchone()
+                if row is None:
+                    raise TaskNotFoundError(f"unknown task: {task_id}")
+                state = str(row["state"])
+                if state in idempotent:
+                    connection.commit()
+                elif state not in allowed:
+                    raise TaskTransitionError(
+                        f"cannot {action} task {task_id} in state {state}"
+                    )
+                else:
+                    next_state = (
+                        target.get(state, default_target)
+                        if isinstance(target, dict)
+                        else target
+                    )
+                    if not next_state:
+                        raise TaskTransitionError(
+                            f"cannot {action} task {task_id} in state {state}"
+                        )
+                    fields: dict[str, Any] = {
+                        "state": next_state,
+                        "updated_at": now,
+                    }
+                    if finalize_cancel and next_state == "CANCELLED":
+                        fields.update(
+                            outcome="CANCELLED",
+                            stop_reason="USER_CANCELLED",
+                            finished_at=now,
+                        )
+                    assignments = ", ".join(f"{key} = ?" for key in fields)
+                    connection.execute(
+                        f"UPDATE tasks SET {assignments} WHERE task_id = ?",
+                        [*fields.values(), task_id],
+                    )
+                    connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+        task = self.get_task(task_id)
+        if task is None:
+            raise TaskNotFoundError(f"unknown task: {task_id}")
+        return task
 
     def add_item(self, item: WorkItem) -> bool:
         with self._connect() as connection:
