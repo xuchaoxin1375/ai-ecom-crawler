@@ -36,7 +36,7 @@
 
 尚未实现：
 
-- 虚拟列表、复杂内部滚动、任意点击序列和 POST／GraphQL；当前 `load_more`／`infinite_scroll` 只支持追加型列表。
+- 虚拟列表、任意点击序列和 POST／GraphQL；当前 `load_more`／`infinite_scroll` 只支持追加型列表，内部滚动容器（`container`）的追加型列表已有本地 fixture。
 - 跨进程 A20 的真实资源配额、浏览器实例配额和跨机租约；当前租约在单机 SQLite 上验证。
 - 永久移除、异步残留回收、构建会话 UI、`request_dependency` 工具桥、真实依赖安装和完整前端原型评审。
 - 生产级浏览器孤儿回收的跨机路径；本机强杀 worker 后的租约接管已演练，浏览器进程和 profile 会被回收。
@@ -318,7 +318,7 @@ CSV 对以 `=`、`+`、`-`、`@` 开头的文本单元格加单引号，防止�
 
 - 当前有 T1 契约／单元测试和本地 HTTP fixture 集成；D03／A08／D04 有真实站点证据，但不是 T4 生产验收。浏览器路径另有本地 JS fixture、mercerine 真实站点和强杀接管证据。
 - `runtime/`、`executor/` 从 R06 抽取；静态和浏览器两类 fetcher 共用同一 runner，浏览器任务逐条串行执行。租约和资源登记已支持多 worker 进程，但浏览器实例配额和跨机租约未接入。控制面支持暂停／恢复／取消。
-- 浏览器 `load_more`／`infinite_scroll` 只支持追加型列表；虚拟列表、复杂内部滚动、任意点击序列和表单提交未实现。
+- 浏览器 `load_more`／`infinite_scroll` 只支持追加型列表；内部滚动容器（`container`）已有本地 fixture（6／6），虚拟列表、任意点击序列和表单提交未实现。
 - `run` 已接入 SQLite 任务账本；`export` 仍可独立使用 `task.json` + `candidates.jsonl`，不依赖账本。
 - `description.blocks` 的 `kind` 由提取端标注；本层不按关键词猜测政策或适配区块。
 - `description_status` 必须由提取端显式给出；本层不从正文长度或选择器命中情况推断完整／未提供。
