@@ -164,6 +164,7 @@ document.getElementById('more').addEventListener('click', function () {
   } else {
     this.remove();
   }
+  history.pushState({}, '', '/listing-more.html?page=' + page);
 });
 </script>
 </body></html>
@@ -190,6 +191,7 @@ window.addEventListener('scroll', function () {
     document.getElementById('items').appendChild(link);
   }
   document.getElementById('spacer').style.height = (3000 + loaded * 1000) + 'px';
+  history.pushState({}, '', '/listing-scroll.html?page=' + loaded);
 });
 </script>
 </body></html>
@@ -323,6 +325,9 @@ class BrowserListingActionTests(unittest.TestCase):
             self.assertEqual(advance["type"], "load_more")
             self.assertGreaterEqual(advance["items"], 6)
             self.assertIn(advance["stop"], {"NO_NEW_ITEMS", "BUTTON_GONE"})
+            self.assertGreaterEqual(advance["url_changes"], 1)
+            self.assertIn("?page=", advance["final_url"])
+            self.assertTrue(advance["urls"])
 
     def test_infinite_scroll_appends_products(self) -> None:
         with tempfile.TemporaryDirectory() as temporary, fixture_server() as base:
@@ -345,6 +350,9 @@ class BrowserListingActionTests(unittest.TestCase):
             self.assertEqual(advance["type"], "infinite_scroll")
             self.assertGreaterEqual(advance["items"], 6)
             self.assertIn(advance["stop"], {"NO_NEW_ITEMS", "MAX_STEPS"})
+            self.assertGreaterEqual(advance["url_changes"], 1)
+            self.assertIn("?page=", advance["final_url"])
+            self.assertTrue(advance["urls"])
 
 
 class BrowserAdvanceValidationTests(unittest.TestCase):

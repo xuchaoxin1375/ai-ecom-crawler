@@ -1,0 +1,148 @@
+schema_version: "1.1"
+rule_id: "scrapingcourse-url-pages"
+rule_version: "2026.11.21-1"
+kind: declarative
+status: candidate
+
+site:
+  name: "ScrapingCourse URL Pagination"
+  entry_urls: ["https://www.scrapingcourse.com/infinite-url"]
+  allowed_origins:
+    - "https://www.scrapingcourse.com"
+    - "https://scrapingcourse.com"
+  allowed_path_prefixes: ["/infinite-url", "/ecommerce/product/"]
+  market: "US"
+  locale: "en-US"
+  currency: "USD"
+
+scope:
+  include: ['^/ecommerce/product/']
+  exclude: ["/cart", "/checkout", "/my-account"]
+
+capabilities:
+  discovery: true
+  product: true
+
+discovery:
+  sources:
+    - type: listing
+      url: "https://www.scrapingcourse.com/infinite-url"
+      product_link_selector: '#product-grid a[href*="/ecommerce/product/"]'
+      advance:
+        type: page_param
+        param: "page"
+        start: 1
+        max_pages: 2
+  product_url_patterns: ['^/ecommerce/product/[^/]+/?$']
+  url_identity: "canonical"
+
+fetch:
+  default_engine: "static"
+  concurrency: 1
+  delay_ms: 1000
+  retry: {max_attempts: 2, backoff_ms: 1000}
+  timeout_ms: 45000
+  browser: false
+  login: false
+  challenge_handling: "none; stop and record"
+
+extract:
+  fields:
+    name:
+      required: true
+      fallbacks:
+        - {type: json_ld, path: "name", label: "json_ld"}
+        - {type: css_text, selector: "h1.product_title", label: "h1"}
+    price.amount:
+      required: true
+      fallbacks:
+        - {type: json_ld, path: "offers.price", label: "json_ld", take: "min_positive"}
+    price.currency:
+      required: true
+      fallbacks:
+        - {type: json_ld, path: "offers.priceCurrency", label: "json_ld"}
+    primary_image_url:
+      required: true
+      fallbacks:
+        - {type: json_ld, path: "image", label: "json_ld"}
+        - {type: css_attr, selector: 'meta[property="og:image"]', attr: "content", label: "og_image", absolute: true}
+    description_html:
+      required: false
+      fallbacks:
+        - {type: json_ld, path: "description", label: "json_ld", description_status: "fallback"}
+        - {type: css_html, selector: ".woocommerce-product-details__short-description", label: "short_description", description_status: "partial"}
+    category:
+      required: false
+      fallbacks:
+        - type: breadcrumb
+          selector: "nav.woocommerce-breadcrumb a"
+          label: "breadcrumb"
+          drop_last: true
+          exclude: ["Home"]
+    brand:
+      required: false
+      fallbacks:
+        - {type: json_ld, path: "brand.name", label: "json_ld"}
+    source_url:
+      required: true
+      fallbacks:
+        - {type: canonical, label: "canonical"}
+
+normalize:
+  price:
+    tax_basis: "EXCLUSIVE"
+    choose: "smaller_public_pair"
+    positive_only: true
+  description:
+    mode: "clean_html"
+    statuses: ["complete", "partial", "fallback", "not_provided", "failed"]
+  options:
+    exclude_quantity: true
+    strip_price_delta: true
+
+validate:
+  required_fields:
+    - "name"
+    - "price.amount"
+    - "price.currency"
+    - "primary_image_url"
+    - "source_url"
+  assertions:
+    - {field: "price.amount", op: ">", value: 0}
+    - {field: "price.currency", op: "matches", value: "^[A-Z]{3}$"}
+  partial_description: "allowed_with_flag"
+
+output:
+  url_list:
+    enabled: true
+    columns: ["url", "source", "status", "title"]
+    format: "csv"
+  product_csv:
+    enabled: true
+    columns: 9
+    format: "csv"
+  task_result: true
+
+task_defaults:
+  max_urls: 50
+  max_products: 15
+  max_seconds: 120
+  concurrency:
+    navigation: 1
+    product: 1
+
+compatibility:
+  os: ["windows", "linux", "wsl2"]
+  runtime: "python>=3.11"
+  dependencies: ["scrapling==0.5.1"]
+  browser: "none; direct URL pagination"
+
+evidence:
+  sample_urls: ["https://www.scrapingcourse.com/infinite-url", "https://www.scrapingcourse.com/infinite-url?page=2"]
+  expected: []
+  verified_at: null
+  limitations:
+    - "Public scraping practice site; direct URL pages, not a production store."
+    - "This rule uses page_param with the static engine; it proves the simpler path when URL state is addressable."
+
+notes: "URL-addressable contrast: the same site's infinite scroll updates ?page=N; direct pages return page N without click/scroll, so page_param is preferred."
