@@ -66,7 +66,14 @@ PAGE_OVERRIDE_KEYS = {
     "disable_resources",
     "timeout_ms",
 }
-ADAPTER_BROWSER_KEYS = {"headless", "timeout_ms", "locale", "timezone", "wait_state"}
+ADAPTER_BROWSER_KEYS = {
+    "headless",
+    "timeout_ms",
+    "locale",
+    "timezone",
+    "wait_state",
+    "profile_mode",
+}
 CORE_FIELDS = {"name", "price.amount", "price.currency", "primary_image_url", "source_url"}
 RULE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,80}$")
 
@@ -586,9 +593,21 @@ def _validate_adapter_browser(value: Any, path: str) -> None:
         or browser["timeout_ms"] <= 0
     ):
         raise RuleError(f"{path}.timeout_ms must be positive")
-    for key in ("locale", "timezone", "wait_state"):
+    for key in ("locale", "timezone", "wait_state", "profile_mode"):
         if key in browser:
             _require_string(browser[key], f"{path}.{key}")
+    if "wait_state" in browser and browser["wait_state"] not in {
+        "attached",
+        "visible",
+        "hidden",
+        "detached",
+    }:
+        raise RuleError(f"{path}.wait_state is not supported")
+    if "profile_mode" in browser and browser["profile_mode"] not in {
+        "ephemeral",
+        "task",
+    }:
+        raise RuleError(f"{path}.profile_mode must be ephemeral or task")
 
 
 def _validate_sources(value: Any, discovery: dict[str, Any]) -> None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import threading
 import unittest
@@ -246,6 +247,15 @@ def write_package(root: Path, base: str, adapter: str) -> Path:
     return rule
 
 
+def enable_task_profile(rule: Path) -> None:
+    text = rule.read_text(encoding="utf-8")
+    text = text.replace(
+        '        wait_state: "attached"',
+        '        wait_state: "attached"\n        profile_mode: "task"',
+    )
+    rule.write_text(text, encoding="utf-8")
+
+
 class HybridRuntimeTests(unittest.TestCase):
     def test_hybrid_adapter_discovers_and_products_are_extracted(self) -> None:
         with tempfile.TemporaryDirectory() as temporary, fixture_server() as base:
@@ -270,14 +280,42 @@ class HybridRuntimeTests(unittest.TestCase):
             self.assertEqual(adapter["discovered"], 3)
             self.assertEqual(adapter["added"], 3)
             self.assertEqual(adapter["stop"], "MAX_ITEMS")
+            self.assertEqual(adapter["profile_mode"], "ephemeral")
+            self.assertIsNone(adapter["profile_dir"])
+            self.assertIsNone(adapter["profile_removed"])
             self.assertTrue((result.out_dir / "adapter-context.json").is_file())
             self.assertTrue((result.out_dir / "adapter.ndjson").is_file())
             self.assertFalse((result.out_dir / "adapter-browser-profile").exists())
+            context = json.loads(
+                (result.out_dir / "adapter-context.json").read_text(encoding="utf-8")
+            )
+            self.assertNotIn("profile_dir", context["browser"])
             self.assertIsNotNone(result.app_export)
             rows = (result.out_dir / "export" / "products.csv").read_text(
                 encoding="utf-8"
             ).splitlines()
             self.assertEqual(len(rows), 4)
+
+    def test_persistent_profile_is_registered_and_cleaned(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary, fixture_server() as base:
+            root = Path(temporary)
+            rule = write_package(root, base, ADAPTER_OK)
+            enable_task_profile(rule)
+            result = run_and_export(
+                rule_path=rule,
+                db_path=root / "tasks.db",
+                out_root=root / "tasks",
+                task_id="hybrid-profile-001",
+                task_type="product",
+                max_products=10,
+                max_seconds=30,
+                max_attempts=1,
+                per_domain_rps=50,
+            )
+            adapter = result.task_result["runtime"]["adapter"]
+            self.assertEqual(adapter["profile_mode"], "task")
+            self.assertTrue(adapter["profile_removed"])
+            self.assertFalse((result.out_dir / "adapter-browser-profile").exists())
 
     def test_hybrid_discovery_writes_url_list_without_product_fetches(self) -> None:
         with tempfile.TemporaryDirectory() as temporary, fixture_server() as base:
@@ -326,6 +364,7 @@ class HybridRuntimeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary, fixture_server() as base:
             root = Path(temporary)
             rule = write_package(root, base, ADAPTER_HANG)
+            enable_task_profile(rule)
             rule.write_text(
                 rule.read_text(encoding="utf-8").replace(
                     "max_seconds: 20", "max_seconds: 1"

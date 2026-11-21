@@ -56,7 +56,7 @@
 - app 用静态 fetcher 抓取 12 个商品页并导出 9 列 CSV；
 - `valid_products=12`、`excluded=0`、`failed=0`；
 - `task-result.json` 的 `runtime.adapter` 记录 `discovered=12`、`added=12`、`skipped=0`、`stop=NO_NEW_ITEMS`、`batches=4`、`requests=1`、`elapsed_ms` 约 0.9 秒；
-- 任务目录保留 `adapter-context.json`、`adapter.ndjson` 和 `rule-used.yaml` 作为证据；`adapter-browser-profile` 在正常退出后删除，`runtime.adapter.profile_removed=true`。
+- `runtime.adapter.profile_mode=ephemeral`、`profile_dir=null`、`profile_removed=null`；任务目录不产生 `adapter-browser-profile`。需要持久会话的规则显式设 `profile_mode: task`，由 `test_hybrid.py` 覆盖注册和清理。
 
 证据：`app-evidence/virtual-list-app-001/`。端口是临时端口，复跑会生成新的端口和任务目录。
 
@@ -94,7 +94,7 @@ python adapter.py --context /path/to/context.json
 | `limits.max_batches` | 滚动批次上限（不含初始批次） |
 | `limits.max_seconds` | adapter 墙钟上限 |
 
-可选：`plan_id`、`plan_version`、`adapter_id`、`adapter_version`、`task_id`、`task_type`、`scope.include`／`exclude`、`browser.headless`／`timeout_ms`／`locale`／`timezone`／`wait_state`（默认 `attached`，避免被隐藏的重复卡片阻塞）；`app run` 还会传入任务级 `browser.profile_dir`，adapter 用 persistent context 启动，正常退出后由 app 登记并删除该目录。
+可选：`plan_id`、`plan_version`、`adapter_id`、`adapter_version`、`task_id`、`task_type`、`scope.include`／`exclude`、`browser.headless`／`timeout_ms`／`locale`／`timezone`／`wait_state`（默认 `attached`，避免被隐藏的重复卡片阻塞）。`browser.profile_mode` 默认 `ephemeral`（临时 context，不落盘、不清理）；显式设 `task` 时 app 才传入任务级 `browser.profile_dir`，adapter 用 persistent context 启动，正常退出后由 app 登记并删除该目录。
 
 ### 输出事件
 

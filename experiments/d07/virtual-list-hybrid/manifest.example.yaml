@@ -32,6 +32,11 @@ discovery:
         mode: "scroll"
         settle_ms: 100
         no_new_stop: 1
+      browser:
+        headless: true
+        timeout_ms: 30000
+        wait_state: "attached"
+        profile_mode: "ephemeral"
       max_batches: 10
       max_seconds: 30
   product_url_patterns: ['^/product/[^/]+\.html$']

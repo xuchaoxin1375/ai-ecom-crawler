@@ -75,6 +75,7 @@ class TaskRunner:
         self.adapter_context_path = (self.out_dir / "adapter-context.json").resolve()
         self.adapter_ndjson_path = (self.out_dir / "adapter.ndjson").resolve()
         self.adapter_profile_dir = (self.out_dir / "adapter-browser-profile").resolve()
+        self._adapter_use_profile = False
         self._adapter_stats: dict[str, Any] = {}
         self.urls_path = self.out_dir / "urls.csv"
         self.products_csv_path = self.out_dir / "products.csv"
@@ -887,16 +888,26 @@ class TaskRunner:
         )
         browser = dict(browser_config) if isinstance(browser_config, dict) else {}
         browser.setdefault("headless", True)
-        if self.adapter_profile_dir.exists():
-            self._cleanup_adapter_profile()
-        browser["profile_dir"] = str(self.adapter_profile_dir)
-        register_path(
-            self.store,
-            self.task.task_id,
-            self.adapter_profile_dir,
-            resource_id="adapter-profile",
-            lease_token=self.lease.token,
-        )
+        profile_mode = str(browser.pop("profile_mode", "ephemeral")).strip().lower()
+        if profile_mode not in {"ephemeral", "task"}:
+            raise AdapterError(
+                "adapter_context",
+                f"unsupported browser.profile_mode {profile_mode!r}",
+            )
+        self._adapter_use_profile = profile_mode == "task"
+        if self._adapter_use_profile:
+            if self.adapter_profile_dir.exists():
+                self._cleanup_adapter_profile()
+            browser["profile_dir"] = str(self.adapter_profile_dir)
+            register_path(
+                self.store,
+                self.task.task_id,
+                self.adapter_profile_dir,
+                resource_id="adapter-profile",
+                lease_token=self.lease.token,
+            )
+        else:
+            browser.pop("profile_dir", None)
         context = {
             "plan_id": self.rule.rule_id,
             "plan_version": self.rule.rule_version,
@@ -1038,8 +1049,15 @@ class TaskRunner:
             "skipped": skipped,
             "context_path": str(self.adapter_context_path),
             "ndjson_path": str(self.adapter_ndjson_path),
-            "profile_dir": str(self.adapter_profile_dir),
-            "profile_removed": not self.adapter_profile_dir.exists(),
+            "profile_mode": profile_mode,
+            "profile_dir": (
+                str(self.adapter_profile_dir) if self._adapter_use_profile else None
+            ),
+            "profile_removed": (
+                not self.adapter_profile_dir.exists()
+                if self._adapter_use_profile
+                else None
+            ),
         }
         self._adapter_stats = stats
         self._event("adapter_finished", **stats)
@@ -1049,6 +1067,8 @@ class TaskRunner:
             )
 
     def _cleanup_adapter_profile(self) -> bool:
+        if not self._adapter_use_profile:
+            return True
         path = self.adapter_profile_dir
         if not path.exists():
             self.store.remove_resource(self.task.task_id, "adapter-profile")

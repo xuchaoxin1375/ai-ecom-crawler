@@ -90,7 +90,7 @@ R06 原先把所有 `validate_product` 原因都映射为 `EXCLUDED`。这会掩
   - `experiments/d07/browser-listing/`：`scrapingcourse.com` 公开练习页，`load_more` 1 次点击后 24 条、`infinite_scroll` 2 次滚动后 36 条，均取前 15 个商品、15／15 有效（多次复跑，约 75–88 秒）。
   - `experiments/d07/url-pagination-batch/`：5 个法国基准站的 URL 可寻址检查。`mapetitemercerie.com` 两页各 10／10（`?page=2`），`gaspardetleonie.com` 26／26（Shopify `rel=next`，第 2 页 2 条），`touchatou.fr` 22／22（`/page/2/`，第 2 页 2 条）；`atelier-leonie.fr` 单页 40、无下一页，`tissus.net` 静态无商品卡片、留待浏览器／API。全部静态、0 失败。
   - `experiments/d07/virtual-list-hybrid/`：按 ADR 0007 的 C2 hybrid adapter。本地替换式虚拟列表 12／12，4 次滚动、1 次列表请求、`NO_NEW_ITEMS` 停止，约 0.9 秒；接口是上下文 JSON + NDJSON，不改声明式 DSL。`app run` 已支持 adapter discovery，端到端抓取并导出 12／12 商品（`app-evidence/virtual-list-app-001/`）。
-  - `experiments/d07/tissus-adapter/`：真实站点 `tissus.net/cretonne` 的 hybrid discovery。静态 HTML 无商品卡片，adapter 读取浏览器渲染后的 60 张卡片，按上限取前 10 个；app 静态抓取 10 个商品页并导出 10／10、0 失败，约 38 秒；profile 已回收。不是虚拟列表证明（初始已渲染 60 张、`batches=0`）。
+  - `experiments/d07/tissus-adapter/`：真实站点 `tissus.net/cretonne` 的 hybrid discovery。静态 HTML 无商品卡片，adapter 读取浏览器渲染后的 60 张卡片，按上限取前 10 个；app 静态抓取 10 个商品页并导出 10／10、0 失败，约 37 秒；默认临时 context，不产生 profile。不是虚拟列表证明（初始已渲染 60 张、`batches=0`）。
 
 ## 测试结果
 
@@ -100,7 +100,7 @@ python -m uv run --project experiments/framework-compare/scrapling `
   python -m unittest discover -s experiments/r06/tests -v
 ```
 
-结果：**83 个测试通过**，无 skip。覆盖原子写、契约、提取、运行时、重试、恢复、控制、并行、Schema 和新的字段分类。`app` 当前 **150 个测试通过**（含 8 个浏览器配置／路由／fixture 用例、5 个 load_more／infinite_scroll 用例（含内部容器）、6 个 hybrid adapter 用例、4 个 worker 浏览器配额用例、4 个桥接状态用例和 1 个原子写用例），`ruff check app` 通过；真实浏览器用例在缺少 Chromium 的环境中会跳过，本机运行结果为通过。
+结果：**83 个测试通过**，无 skip。覆盖原子写、契约、提取、运行时、重试、恢复、控制、并行、Schema 和新的字段分类。`app` 当前 **151 个测试通过**（含 8 个浏览器配置／路由／fixture 用例、5 个 load_more／infinite_scroll 用例（含内部容器）、7 个 hybrid adapter 用例、4 个 worker 浏览器配额用例、4 个桥接状态用例和 1 个原子写用例），`ruff check app` 通过；真实浏览器用例在缺少 Chromium 的环境中会跳过，本机运行结果为通过。
 
 ## D07 结论
 

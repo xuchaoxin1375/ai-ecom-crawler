@@ -35,6 +35,7 @@ discovery:
         headless: true
         timeout_ms: 45000
         wait_state: "attached"
+        profile_mode: "ephemeral"
       max_batches: 1
       max_seconds: 60
   product_url_patterns: ['^/[^/]+/a-\d+/?$']

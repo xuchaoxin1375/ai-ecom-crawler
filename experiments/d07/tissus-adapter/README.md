@@ -21,22 +21,22 @@ python -m uv run --project app ecom-crawler run `
   --rule experiments/d07/tissus-adapter/rule.yaml `
   --db experiments/d07/tissus-adapter/tasks.db `
   --out-root experiments/d07/tissus-adapter/tasks `
-  --task-id tissus-cretonne-006 `
+  --task-id tissus-cretonne-007 `
   --task-type product --max-products 10 --max-seconds 180 --max-attempts 2 --per-domain-rps 1
 ```
 
-任务 `tissus-cretonne-006`：
+任务 `tissus-cretonne-007`：
 
 | 项 | 结果 |
 | --- | --- |
 | 状态 | `FINISHED` / `COMPLETED` |
 | 有效商品 | 10 / 10 |
 | 排除 / 失败 | 0 / 0 |
-| adapter | 1 次列表页请求，60 张卡片中按 `max_items=10` 取前 10 个，`stop=MAX_ITEMS`，约 26.5 秒 |
+| adapter | 1 次列表页请求，60 张卡片中按 `max_items=10` 取前 10 个，`stop=MAX_ITEMS`，约 25 秒 |
 | 商品抓取 | 10 个静态商品页，约 1 rps |
-| 墙钟 | 38 秒（22:33:14–22:33:52 UTC） |
+| 墙钟 | 37 秒（22:55:17–22:55:54 UTC） |
 | 导出 | 9 列 `products.csv`，10 行 |
-| profile 回收 | `runtime.adapter.profile_removed=true`，任务目录无 `adapter-browser-profile` |
+| profile | `profile_mode=ephemeral`、`profile_dir=null`；不产生 `adapter-browser-profile` |
 | 字段 | 名称／价格／币种／图片／描述／品牌来自 Product JSON-LD；`source_url` 来自 canonical |
 
 示例商品：`Cretonne de coton - Impression numérique « Ferme Curry »`，10.87 EUR。
@@ -46,11 +46,11 @@ python -m uv run --project app ecom-crawler run `
 - 只取前 10 个商品，不是 `cretonne` 全分类，也不是 `tissus.net` 全站。
 - 这是一次**真实 JS 渲染列表**的 adapter discovery，不是虚拟列表证明：页面初始已经渲染 60 张卡片，adapter 没有滚动追加；`batches=0`。
 - 价格是站点 JSON-LD 当前 offer，未做税价、运费、变体或单位换算审计。
-- adapter 的 profile 路径登记到 `task_resources`；正常退出后 app 删除 profile，`profile_removed=true`。如果删除失败，会按 profile 路径做一次 best-effort 进程扫描和终止，但这还不是完整的浏览器实例配额或跨进程配额。
+- adapter 默认使用临时 context（`profile_mode=ephemeral`），不产生 profile 目录；`profile_mode=task` 才登记并删除 profile。浏览器槽位已由 `--max-browser-tasks` 和 SQLite `browser_slot` 协调。
 - 只读公开页面，未登录、未下单。
 
 ## 文件
 
 - `adapter.py`：从 `../virtual-list-hybrid/adapter.py` 同步的通用滚动／批次 adapter。
 - `rule.yaml`：真实站点 hybrid 规则。
-- `tasks/tissus-cretonne-006/`：10／10 证据，含 `adapter-context.json`、`adapter.ndjson`、`task-result.json` 和 `export/products.csv`。
+- `tasks/tissus-cretonne-007/`：10／10 证据，含 `adapter-context.json`、`adapter.ndjson`、`task-result.json` 和 `export/products.csv`。

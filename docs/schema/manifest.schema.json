@@ -386,6 +386,9 @@
                       },
                       "wait_state": {
                         "enum": ["attached", "visible", "hidden", "detached"]
+                      },
+                      "profile_mode": {
+                        "enum": ["ephemeral", "task"]
                       }
                     },
                     "additionalProperties": false
