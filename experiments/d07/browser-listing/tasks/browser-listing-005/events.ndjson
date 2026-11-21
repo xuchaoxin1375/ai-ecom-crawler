@@ -1,0 +1,20 @@
+{"ts": "2026-11-21T15:16:41Z", "event": "task_reconciled", "in_flight": 0, "reset": 0, "failed": 0, "orphan_files_removed": 0, "stale_result": false, "corrupt_product_lines": 0, "uncommitted_product_lines": 0}
+{"ts": "2026-11-21T15:16:41Z", "event": "task_started", "task_type": "product", "plan_id": "scrapingcourse-url-pages"}
+{"ts": "2026-11-21T15:16:44Z", "event": "item_finished", "item_type": "navigation", "url": "https://www.scrapingcourse.com/infinite-url", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:16:48Z", "event": "item_finished", "item_type": "product", "url": "https://scrapingcourse.com/ecommerce/product/chaz-kangeroo-hoodie", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:16:50Z", "event": "item_finished", "item_type": "product", "url": "https://scrapingcourse.com/ecommerce/product/teton-pullover-hoodie", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:16:52Z", "event": "item_finished", "item_type": "product", "url": "https://scrapingcourse.com/ecommerce/product/bruno-compete-hoodie", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:16:53Z", "event": "item_finished", "item_type": "product", "url": "https://scrapingcourse.com/ecommerce/product/frankie--sweatshirt", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:16:55Z", "event": "item_finished", "item_type": "product", "url": "https://scrapingcourse.com/ecommerce/product/hollister-backyard-sweatshirt", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:16:56Z", "event": "item_finished", "item_type": "product", "url": "https://scrapingcourse.com/ecommerce/product/stark-fundamental-hoodie", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:16:59Z", "event": "item_finished", "item_type": "product", "url": "https://scrapingcourse.com/ecommerce/product/hero-hoodie", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:17:01Z", "event": "item_finished", "item_type": "product", "url": "https://scrapingcourse.com/ecommerce/product/oslo-trek-hoodie", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:17:02Z", "event": "item_finished", "item_type": "product", "url": "https://scrapingcourse.com/ecommerce/product/abominable-hoodie", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:17:04Z", "event": "item_finished", "item_type": "product", "url": "https://scrapingcourse.com/ecommerce/product/mach-street-sweatshirt", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:17:06Z", "event": "item_finished", "item_type": "product", "url": "https://scrapingcourse.com/ecommerce/product/grayson-crewneck-sweatshirt", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:17:07Z", "event": "item_finished", "item_type": "product", "url": "https://scrapingcourse.com/ecommerce/product/ajax-full-zip-sweatshirt", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:17:08Z", "event": "item_finished", "item_type": "navigation", "url": "https://www.scrapingcourse.com/infinite-url?page=2", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:17:09Z", "event": "item_finished", "item_type": "product", "url": "https://scrapingcourse.com/ecommerce/product/marco-lightweight-active-hoodie", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:17:11Z", "event": "item_finished", "item_type": "product", "url": "https://scrapingcourse.com/ecommerce/product/beaumont-summit-kit", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:17:12Z", "event": "item_finished", "item_type": "product", "url": "https://scrapingcourse.com/ecommerce/product/hyperion-elements-jacket", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:17:12Z", "event": "task_finished", "state": "FINISHED", "outcome": "COMPLETED", "stop_reason": "NATURAL_END"}

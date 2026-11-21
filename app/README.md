@@ -142,7 +142,9 @@ discovery:
         no_new_stop: 2
 ```
 
-  `load_more` 点击按钮并等条目数增加；`infinite_scroll` 滚动 window 或指定容器。`max_clicks`／`max_scrolls`、`settle_ms` 和 `no_new_stop` 是有界停止条件；listing 工作项的结果会带 `advance` 统计。虚拟列表只保留最后一批，不能用该实现直接采全量。
+  `load_more` 点击按钮并等条目数增加；`infinite_scroll` 滚动 window 或指定容器。`max_clicks`／`max_scrolls`、`settle_ms` 和 `no_new_stop` 是有界停止条件；listing 工作项的结果会带 `advance` 统计，包括 `start_url`、`final_url`、`url_changes` 和 `urls`。虚拟列表只保留最后一批，不能用该实现直接采全量。
+
+  先检查交互后的地址栏／`history.pushState`：如果变成稳定的 `?page=N` 或 `/page/N`，且直接请求该 URL 返回对应页，改用 `page_param`／`next_link`，不要继续点击或滚动。`load_more`／`infinite_scroll` 只用于 URL 不可寻址、直接打开回到首屏／空壳或虚拟列表的站点。基准站 `ecolaines.com/3-laine` 与公开练习页 `scrapingcourse.com/infinite-url` 都有这种 URL 可寻址模式。
 - 浏览器子进程和 `<out-root>/<task-id>/browser-profile` 登记在 `task_resources`；正常结束、取消、租约过期接管都会回收。本机强杀 worker 后由新 worker 接管并回收的演练见 `experiments/d07/browser-mercerine/`。
 - 首次响应可能是 403／429／503 挑战壳，站点自己的 JS 跳转后才出现正文；fetcher 在等待完成后读取 navigation timing 的最终 `responseStatus`，并可用 `wait_selector` 作为就绪条件。它不点击、不过验证码、不绕过登录或付费。挑战识别是标题启发式，可能漏判或误判，最终以就绪信号、正文和任务结果为准。
 - 浏览器 fetcher 是 thread-affine，浏览器任务不走线程池；暂停／取消在条目边界生效，单次导航仍受 `timeout_ms` 约束。

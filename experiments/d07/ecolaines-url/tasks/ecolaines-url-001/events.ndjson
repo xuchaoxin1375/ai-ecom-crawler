@@ -1,0 +1,25 @@
+{"ts": "2026-11-21T15:22:34Z", "event": "task_reconciled", "in_flight": 0, "reset": 0, "failed": 0, "orphan_files_removed": 0, "stale_result": false, "corrupt_product_lines": 0, "uncommitted_product_lines": 0}
+{"ts": "2026-11-21T15:22:34Z", "event": "task_started", "task_type": "product", "plan_id": "ecolaines-url-pages"}
+{"ts": "2026-11-21T15:22:38Z", "event": "item_finished", "item_type": "navigation", "url": "https://www.ecolaines.com/3-laine", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:22:40Z", "event": "item_finished", "item_type": "product", "url": "https://www.ecolaines.com/les-accessoires/45892-etui-muud-billie-etui-pour-aiguilles-interchangeables.html", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:22:41Z", "event": "item_finished", "item_type": "product", "url": "https://www.ecolaines.com/les-accessoires/45891-sac-a-projet-muud-evita-whisky.html", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:22:43Z", "event": "item_finished", "item_type": "product", "url": "https://www.ecolaines.com/les-accessoires/45873-boite-en-cuir-muud-emeli-whisky.html", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:22:44Z", "event": "item_finished", "item_type": "product", "url": "https://www.ecolaines.com/les-accessoires/45872-sac-a-projets-muud-jeanne-whisky.html", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:22:46Z", "event": "item_finished", "item_type": "product", "url": "https://www.ecolaines.com/les-accessoires/45850-compte-rangs-electronique-pour-le-tricot-milward.html", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:22:47Z", "event": "item_finished", "item_type": "product", "url": "https://www.ecolaines.com/les-fils/45733-67855-cashmere-hug-de-katia.html", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:22:48Z", "event": "item_finished", "item_type": "product", "url": "https://www.ecolaines.com/les-fils/45662-67834-perla-de-katia.html", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:22:50Z", "event": "item_finished", "item_type": "product", "url": "https://www.ecolaines.com/les-accessoires/45136-sac-a-projet-muud-canvas-effi.html", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:22:52Z", "event": "item_finished", "item_type": "product", "url": "https://www.ecolaines.com/les-accessoires/45000-base-ronde-en-similicuir-pour-sac-katia.html", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:22:54Z", "event": "item_finished", "item_type": "product", "url": "https://www.ecolaines.com/les-fils/44822-66729-polar-extreme-de-katia.html", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:22:56Z", "event": "item_finished", "item_type": "product", "url": "https://www.ecolaines.com/les-fils/44623-66552-calineige-de-plassard.html", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:22:58Z", "event": "item_finished", "item_type": "product", "url": "https://www.ecolaines.com/les-fils/44622-66544-alpaco-de-plassard.html", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:23:00Z", "event": "item_finished", "item_type": "product", "url": "https://www.ecolaines.com/les-fils/44620-66528-revelation-de-dmc.html", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:23:01Z", "event": "item_finished", "item_type": "product", "url": "https://www.ecolaines.com/les-fils/44396-66358-creative-fur-de-rico-design.html", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:23:03Z", "event": "item_finished", "item_type": "product", "url": "https://www.ecolaines.com/les-fils/44395-66332-froiselle-de-plassard.html", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:23:05Z", "event": "item_finished", "item_type": "product", "url": "https://www.ecolaines.com/les-fils/44334-66311-azteca-felting-wool-de-katia.html", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:23:07Z", "event": "item_finished", "item_type": "product", "url": "https://www.ecolaines.com/les-fils/44332-66283-the-basic-bubbles-de-katia.html", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:23:08Z", "event": "item_finished", "item_type": "product", "url": "https://www.ecolaines.com/les-fils/44331-66267-love-wool-de-katia.html", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:23:10Z", "event": "item_finished", "item_type": "product", "url": "https://www.ecolaines.com/les-fils/44100-66157-shirley-de-lang-yarns.html", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:23:12Z", "event": "item_finished", "item_type": "product", "url": "https://www.ecolaines.com/les-fils/44096-66153-prisma-de-lang-yarns.html", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:23:15Z", "event": "item_finished", "item_type": "navigation", "url": "https://www.ecolaines.com/3-laine?page=2", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:23:15Z", "event": "task_finished", "state": "FINISHED", "outcome": "COMPLETED", "stop_reason": "NATURAL_END"}

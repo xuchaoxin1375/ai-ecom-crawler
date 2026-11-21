@@ -372,6 +372,10 @@ class BrowserFetcher:
             "items": 0,
             "stop": "MAX_STEPS",
             "max_steps": max_steps,
+            "start_url": str(page.url),
+            "final_url": str(page.url),
+            "url_changes": 0,
+            "urls": [],
         }
         if not selector:
             stats["stop"] = "MISSING_ITEM_SELECTOR"
@@ -389,17 +393,21 @@ class BrowserFetcher:
                 if advance_type == "load_more":
                     if not self._click_load_more(page, advance):
                         stats["stop"] = "BUTTON_GONE"
+                        self._record_advance_url(page, stats)
                         break
                 elif not self._scroll_once(page, advance):
                     stats["stop"] = "SCROLL_FAILED"
+                    self._record_advance_url(page, stats)
                     break
             except Exception as exc:  # noqa: BLE001 - action boundary
                 stats["stop"] = "ACTION_FAILED"
                 stats["detail"] = f"{type(exc).__name__}: {exc}"
+                self._record_advance_url(page, stats)
                 break
             stats["steps"] = step + 1
             if settle_ms:
                 page.wait_for_timeout(settle_ms)
+            self._record_advance_url(page, stats)
             try:
                 current = int(page.locator(selector).count())
             except Exception as exc:  # noqa: BLE001 - page may be navigating
@@ -415,7 +423,28 @@ class BrowserFetcher:
                 if stalls >= no_new_stop:
                     stats["stop"] = "NO_NEW_ITEMS"
                     break
+        self._record_advance_url(page, stats)
         return stats
+
+    def _record_advance_url(self, page: Any, stats: dict[str, Any]) -> None:
+        """Keep a small trace of URL state changes made by the action.
+
+        AJAX pagination often updates ``?page=N`` while appending products.
+        Recording the URL lets a rule author see that the next state is
+        directly addressable and switch to ``page_param`` instead of repeating
+        clicks or scrolls.
+        """
+        try:
+            current = str(page.url)
+        except Exception:  # noqa: BLE001 - page may be navigating
+            return
+        stats["final_url"] = current
+        if current == stats["start_url"]:
+            return
+        urls = stats["urls"]
+        if current not in urls and len(urls) < 10:
+            urls.append(current)
+            stats["url_changes"] = len(urls)
 
     def _click_load_more(self, page: Any, advance: dict[str, Any]) -> bool:
         selector = str(advance.get("button_selector") or "").strip()

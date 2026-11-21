@@ -1,0 +1,146 @@
+schema_version: "1.1"
+rule_id: "ecolaines-url-pages"
+rule_version: "2026.11.21-1"
+kind: declarative
+status: candidate
+
+site:
+  name: "Ecolaines"
+  entry_urls: ["https://www.ecolaines.com/3-laine"]
+  allowed_origins: ["https://www.ecolaines.com"]
+  allowed_path_prefixes: ["/"]
+  market: "FR"
+  locale: "fr-FR"
+  currency: "EUR"
+
+scope:
+  include: ['/\d+-[^/]+\.html$']
+  exclude: ["/panier", "/commande", "/connexion", "/mon-compte"]
+
+capabilities:
+  discovery: true
+  product: true
+
+discovery:
+  sources:
+    - type: listing
+      url: "https://www.ecolaines.com/3-laine"
+      product_link_selector: '#js-product-list article.product-miniature a.product-thumbnail'
+      advance:
+        type: page_param
+        param: "page"
+        start: 1
+        max_pages: 2
+  product_url_patterns: ['/\d+-[^/]+\.html$']
+  url_identity: "canonical"
+
+fetch:
+  default_engine: "static"
+  concurrency: 1
+  delay_ms: 1000
+  retry: {max_attempts: 2, backoff_ms: 1000}
+  timeout_ms: 45000
+  browser: false
+  login: false
+  challenge_handling: "none; stop and record"
+
+extract:
+  fields:
+    name:
+      required: true
+      fallbacks:
+        - {type: css_text, selector: 'h1[itemprop="name"]', label: "h1_itemprop"}
+        - {type: css_text, selector: "h1.h1", label: "h1"}
+    price.amount:
+      required: true
+      fallbacks:
+        - {type: css_attr, selector: 'meta[property="product:price:amount"]', attr: "content", label: "meta_price"}
+        - {type: css_text, selector: "span[itemprop=price]", label: "price_span"}
+    price.currency:
+      required: true
+      fallbacks:
+        - {type: css_attr, selector: 'meta[property="product:price:currency"]', attr: "content", label: "meta_currency"}
+    primary_image_url:
+      required: true
+      fallbacks:
+        - {type: css_attr, selector: 'meta[property="og:image"]', attr: "content", label: "og_image", absolute: true}
+    description_html:
+      required: false
+      fallbacks:
+        - {type: css_html, selector: "#description", label: "description_tab", description_status: "complete"}
+        - {type: css_html, selector: 'div[id^="product-description-short-"]', label: "short_description", description_status: "partial"}
+    category:
+      required: false
+      fallbacks:
+        - type: breadcrumb
+          selector: "nav.breadcrumb a, .breadcrumb a"
+          label: "breadcrumb"
+          drop_last: true
+          exclude: ["Accueil"]
+    brand:
+      required: false
+      fallbacks:
+        - {type: css_text, selector: ".product-manufacturer a", label: "manufacturer"}
+    source_url:
+      required: true
+      fallbacks:
+        - {type: canonical, label: "canonical"}
+
+normalize:
+  price:
+    tax_basis: "EXCLUSIVE"
+    choose: "smaller_public_pair"
+    positive_only: true
+  description:
+    mode: "clean_html"
+    statuses: ["complete", "partial", "fallback", "not_provided", "failed"]
+  options:
+    exclude_quantity: true
+    strip_price_delta: true
+
+validate:
+  required_fields:
+    - "name"
+    - "price.amount"
+    - "price.currency"
+    - "primary_image_url"
+    - "source_url"
+  assertions:
+    - {field: "price.amount", op: ">", value: 0}
+    - {field: "price.currency", op: "matches", value: "^[A-Z]{3}$"}
+  partial_description: "allowed_with_flag"
+
+output:
+  url_list:
+    enabled: true
+    columns: ["url", "source", "status", "title"]
+    format: "csv"
+  product_csv:
+    enabled: true
+    columns: 9
+    format: "csv"
+  task_result: true
+
+task_defaults:
+  max_urls: 50
+  max_products: 20
+  max_seconds: 180
+  concurrency:
+    navigation: 1
+    product: 1
+
+compatibility:
+  os: ["windows", "linux", "wsl2"]
+  runtime: "python>=3.11"
+  dependencies: ["scrapling==0.5.1"]
+  browser: "none; URL page_param"
+
+evidence:
+  sample_urls: ["https://www.ecolaines.com/3-laine", "https://www.ecolaines.com/3-laine?page=2"]
+  expected: []
+  verified_at: null
+  limitations:
+    - "Benchmark French fabric site; bounded sample of the first two category pages."
+    - "The site uses the kiwik infinite-scroll module but exposes ?page=N; this rule uses the direct URL instead of click/scroll."
+
+notes: "URL-addressable pagination on a benchmark site: the category uses infinite scroll in the browser, but ?page=N returns the page directly; use page_param."

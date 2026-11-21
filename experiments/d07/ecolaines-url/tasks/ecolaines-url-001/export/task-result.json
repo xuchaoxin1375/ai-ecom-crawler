@@ -1,0 +1,212 @@
+{
+  "task_id": "ecolaines-url-001",
+  "task_type": "product",
+  "plan_id": "ecolaines-url-pages",
+  "plan_version": "2026.11.21-1",
+  "market": "FR",
+  "locale": "fr-FR",
+  "state": "FINISHED",
+  "outcome": "COMPLETED",
+  "stop_reason": "NATURAL_END",
+  "started_at": "2026-11-21T15:22:34Z",
+  "finished_at": "2026-11-21T15:23:15Z",
+  "counts": {
+    "discovered_urls": 22,
+    "pending_navigation_entries": 0,
+    "product_candidates": 20,
+    "pending_products": 0,
+    "in_flight_products": 0,
+    "processed_products": 20,
+    "valid_products": 20,
+    "excluded_products": 0,
+    "failed_products": 0,
+    "partial_description_products": 0
+  },
+  "coverage": {
+    "status": "PARTIAL",
+    "denominator_source": "declared-source product candidates",
+    "denominator": 20,
+    "covered": 20,
+    "notes": "Bounded sample from one entry page; not full-site coverage."
+  },
+  "business_acceptance": {
+    "status": "NOT_REVIEWED",
+    "accepted_by": null,
+    "accepted_at": null,
+    "reason": "R06 runtime prototype; no business sign-off yet.",
+    "scope": "discovery sources declared by the rule"
+  },
+  "quality_exceptions": [
+    {
+      "source_url": "https://www.ecolaines.com/les-accessoires/45000-base-ronde-en-similicuir-pour-sac-katia.html",
+      "description_status": "COMPLETE",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED"
+      }
+    },
+    {
+      "source_url": "https://www.ecolaines.com/les-accessoires/45136-sac-a-projet-muud-canvas-effi.html",
+      "description_status": "COMPLETE",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED"
+      }
+    },
+    {
+      "source_url": "https://www.ecolaines.com/les-accessoires/45850-compte-rangs-electronique-pour-le-tricot-milward.html",
+      "description_status": "COMPLETE",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED"
+      }
+    },
+    {
+      "source_url": "https://www.ecolaines.com/les-accessoires/45872-sac-a-projets-muud-jeanne-whisky.html",
+      "description_status": "COMPLETE",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED"
+      }
+    },
+    {
+      "source_url": "https://www.ecolaines.com/les-accessoires/45873-boite-en-cuir-muud-emeli-whisky.html",
+      "description_status": "COMPLETE",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED"
+      }
+    },
+    {
+      "source_url": "https://www.ecolaines.com/les-accessoires/45891-sac-a-projet-muud-evita-whisky.html",
+      "description_status": "COMPLETE",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED"
+      }
+    },
+    {
+      "source_url": "https://www.ecolaines.com/les-accessoires/45892-etui-muud-billie-etui-pour-aiguilles-interchangeables.html",
+      "description_status": "COMPLETE",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED"
+      }
+    },
+    {
+      "source_url": "https://www.ecolaines.com/les-fils/44096-prisma-de-lang-yarns.html",
+      "description_status": "COMPLETE",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED"
+      }
+    },
+    {
+      "source_url": "https://www.ecolaines.com/les-fils/44100-shirley-de-lang-yarns.html",
+      "description_status": "COMPLETE",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED"
+      }
+    },
+    {
+      "source_url": "https://www.ecolaines.com/les-fils/44331-love-wool-de-katia.html",
+      "description_status": "COMPLETE",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED"
+      }
+    },
+    {
+      "source_url": "https://www.ecolaines.com/les-fils/44332-the-basic-bubbles-de-katia.html",
+      "description_status": "COMPLETE",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED"
+      }
+    },
+    {
+      "source_url": "https://www.ecolaines.com/les-fils/44334-azteca-felting-wool-de-katia.html",
+      "description_status": "COMPLETE",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED"
+      }
+    },
+    {
+      "source_url": "https://www.ecolaines.com/les-fils/44395-froiselle-de-plassard.html",
+      "description_status": "COMPLETE",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED"
+      }
+    },
+    {
+      "source_url": "https://www.ecolaines.com/les-fils/44396-creative-fur-de-rico-design.html",
+      "description_status": "COMPLETE",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED"
+      }
+    },
+    {
+      "source_url": "https://www.ecolaines.com/les-fils/44620-revelation-de-dmc.html",
+      "description_status": "COMPLETE",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED"
+      }
+    },
+    {
+      "source_url": "https://www.ecolaines.com/les-fils/44622-alpaco-de-plassard.html",
+      "description_status": "COMPLETE",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED"
+      }
+    },
+    {
+      "source_url": "https://www.ecolaines.com/les-fils/44623-calineige-de-plassard.html",
+      "description_status": "COMPLETE",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED"
+      }
+    },
+    {
+      "source_url": "https://www.ecolaines.com/les-fils/44822-polar-extreme-de-katia.html",
+      "description_status": "COMPLETE",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED"
+      }
+    },
+    {
+      "source_url": "https://www.ecolaines.com/les-fils/45662-perla-de-katia.html",
+      "description_status": "COMPLETE",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED"
+      }
+    },
+    {
+      "source_url": "https://www.ecolaines.com/les-fils/45733-cashmere-hug-de-katia.html",
+      "description_status": "COMPLETE",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED"
+      }
+    }
+  ],
+  "runtime": {
+    "llm_calls": 0,
+    "raw_pages_retained": false
+  },
+  "limitations": [
+    "Bounded to the declared discovery sources and limits; not full-site coverage.",
+    "Static HTML only; no browser rendering, login or access-control bypass.",
+    "Runtime LLM calls: 0; no raw page HTML is retained.",
+    "Benchmark French fabric site; bounded sample of the first two category pages.",
+    "The site uses the kiwik infinite-scroll module but exposes ?page=N; this rule uses the direct URL instead of click/scroll."
+  ]
+}
