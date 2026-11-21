@@ -7,16 +7,16 @@ updated: 2026-11-20
 
 ## 状态与适用范围
 
-**Proposed**。项目方于 2026-11-20 确认 v1 采用 OpenCode + HTTP/SSE，并确认高自动化、常见依赖预置；安全沙箱不作为 v1 前置。实现、契约测试和端到端验证尚未开始，验证后转 Accepted。G0（2026-11-20）保留 Proposed；退出条件：创建 session、发 prompt、订阅事件、权限回复、interrupt 和关闭回收通过端到端冒烟。
+**Proposed**。项目方于 2026-11-20 确认 v1 采用 OpenCode + HTTP/SSE，并确认高自动化、常见依赖预置；安全沙箱不作为 v1 前置。2026-11-21 适配器核心、契约测试和真实端到端冒烟已通过（session、prompt、事件、权限回复、执行中 interrupt、关闭回收）；pause-gate、`request_dependency` 和 BuildService 未完成，保持 Proposed。
 
 本文决定参考 harness、集成协议、适配器边界和构建会话的暂停／取消／恢复映射。构建会话契约以 [构建 Agent Harness 契约](0005-构建Agent与Harness契约.md) 为准；采集任务状态以 [任务状态与计数契约](../09-任务状态与计数契约.md) 和 [采集规则与任务运行时](../19-采集规则与任务运行时.md) 为准；方案包以 [采集方案与兼容契约](../08-采集方案与兼容契约.md) 为准。本文不改变执行期，也不把 harness 引入运行期。
 
 ## 2026-11-21 实现进展
 
 - `app/src/ecom_crawler/harness/` 已实现 `HarnessAdapter`、`OpenCodeHttpAdapter`、`OpenCodeServer`、构建工作区、HTTP/SSE 客户端和事件归一化；端点按运行中 server 的 OpenAPI（OpenCode 2.3.2）核对，不依赖猜测。
-- 真实 `opencode serve` 冒烟已完成：随机端口和 `OPENCODE_PASSWORD`、session 创建、`/api/event` 首事件、权限请求创建／列表／回复、session 删除和 server 回收；该次冒烟未发送 prompt，不调用模型。
+- 真实 `opencode serve` 冒烟已完成：随机端口和 `OPENCODE_PASSWORD`、session 创建、`/api/event` 首事件、权限请求创建／列表／回复、session 删除和 server 回收；另有一次真实 prompt，使用 `opencode-go/deepseek-v4.1-flash`（`variant=high`），在 `session.execution.started` 后执行 `interrupt`／取消，结果为 `CANCELLED`。
 - `app/tests/test_harness.py` 6 个用例覆盖 fake server 的 session／prompt／permission／interrupt、SSE、事件归一化、推理脱敏、工作区、暂停门、取消／关闭和进程回收。
-- 仍未完成：真实 prompt、执行中的 `interrupt`、pause-gate 插件、`request_dependency` 和 BuildService／构建会话 UI。ADR 0006 保持 Proposed，退出条件中的“发 prompt 和执行中 interrupt”仍需一次经授权的真实模型冒烟。
+- 仍未完成：pause-gate 插件、`request_dependency`、BuildService／构建会话 UI 和模型自然完成。ADR 0006 保持 Proposed；核心协议和退出条件中的 prompt＋interrupt 已通过，剩余实现前检查项完成后再转 Accepted。
 
 ## 背景与约束
 
@@ -197,6 +197,8 @@ v1 采用 **任务服务托管的 `opencode serve` 子进程 + HTTP/SSE 适配**
 - `request_dependency` 工具的审批、隔离安装和失败回退需要验证。
 - 安全沙箱、VM／容器、独立 OS 用户和网络隔离不在 v1 范围；出现不可信站点或多人共用时再评估。
 - ACP 适配器维持备选，HTTP 契约稳定后再评估。
+
+2026-11-21 状态：`HarnessAdapter`、`OpenCodeHttpAdapter`、server 进程管理、事件归一化和真实 session／prompt／permission／interrupt 冒烟已通过；pause-gate 插件、`request_dependency`、BuildService 和构建会话 UI 仍未完成。
 
 ## 参考
 

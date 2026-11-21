@@ -14,13 +14,45 @@ from __future__ import annotations
 
 import argparse
 import json
+import queue
 import shutil
 import tempfile
+import threading
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
 from ecom_crawler.harness import BuildTask, OpenCodeHttpAdapter
 from ecom_crawler.harness.adapter import HarnessStateError
+
+
+def _start_event_pump(adapter: OpenCodeHttpAdapter, build_id: str) -> queue.Queue:
+    events: queue.Queue = queue.Queue()
+
+    def pump() -> None:
+        try:
+            for event in adapter.stream_events(build_id):
+                events.put(("event", event))
+        except Exception as exc:  # noqa: BLE001 - background pump boundary
+            events.put(("error", exc))
+        finally:
+            events.put(("end", None))
+
+    threading.Thread(
+        target=pump,
+        name="harness-event-pump",
+        daemon=True,
+    ).start()
+    return events
+
+
+def _next_event(events: queue.Queue, deadline: float):
+    while time.monotonic() < deadline:
+        try:
+            return events.get(timeout=0.5)
+        except queue.Empty:
+            continue
+    return ("timeout", None)
 
 
 def main() -> int:
@@ -101,8 +133,25 @@ def main() -> int:
             f"adapter={session.harness.get('adapter_version')}"
         )
 
+        assert adapter.client is not None and session.session_id
+        try:
+            live = adapter.client.get_session(session.session_id)
+            print(f"model: {live.get('model')}")
+        except Exception as exc:  # noqa: BLE001 - informational only
+            print(f"model info unavailable: {type(exc).__name__}: {exc}")
+
+        # Subscribe before sending the prompt so early events such as
+        # session.execution.started are not lost.
+        events = _start_event_pump(adapter, session.build_id)
+        first = _next_event(events, time.monotonic() + args.timeout)
+        if first[0] == "error":
+            raise first[1]
+        if first[0] == "event":
+            print(f"event: {first[1].type} ({first[1].source_type})")
+        elif first[0] == "timeout":
+            print("event: no initial event within timeout")
+
         if args.permission_probe:
-            assert adapter.client is not None and session.session_id
             created = adapter.client.create_permission_request(
                 session.session_id,
                 action="shell",
@@ -129,9 +178,19 @@ def main() -> int:
         if args.prompt:
             response = adapter.send_prompt(session.build_id, args.prompt)
             print(f"prompt admitted: {response.get('id')}")
-            deadline_events = 0
-            for event in adapter.stream_events(session.build_id):
-                deadline_events += 1
+            deadline = time.monotonic() + args.timeout
+            seen = 0
+            while time.monotonic() < deadline:
+                kind, item = _next_event(events, deadline)
+                if kind == "timeout":
+                    print("event: timeout")
+                    break
+                if kind == "end":
+                    break
+                if kind == "error":
+                    raise item
+                event = item
+                seen += 1
                 print(f"event: {event.type} ({event.source_type})")
                 if args.cancel_after_start and event.type == "phase_changed":
                     canceled = adapter.cancel(session.build_id)
@@ -150,18 +209,10 @@ def main() -> int:
                         )
                 if event.type in {"finished", "error"}:
                     break
-                if deadline_events > 500:
+                if seen > 500:
                     print("event limit reached")
                     break
         else:
-            # A live-only subscription receives server.connected immediately.
-            stream = adapter.stream_events(session.build_id)
-            try:
-                for _ in range(1):
-                    event = next(stream)
-                    print(f"event: {event.type} ({event.source_type})")
-            finally:
-                stream.close()
             print("prompt: skipped (no model call)")
 
         artifacts = adapter.collect_artifacts(session.build_id)

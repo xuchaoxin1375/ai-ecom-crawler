@@ -97,6 +97,7 @@ class FakeHandler(BaseHTTPRequestHandler):
                 "time": {"created": 1, "updated": 1},
                 "title": body.get("title"),
                 "location": body.get("location"),
+                "model": body.get("model"),
             }
             self._json(200, {"data": self.state.session})
             return
@@ -316,9 +317,16 @@ class HarnessTests(unittest.TestCase):
             client=self.client,
         )
         task = self._task()
+        task.model = {
+            "providerID": "opencode-go",
+            "id": "deepseek-v4.1-flash",
+            "variant": "high",
+        }
         session = adapter.start_build(task)
         self.assertEqual(session.state, "CREATED")
         self.assertEqual(session.session_id, SESSION_ID)
+        self.assertEqual(session.model, task.model)
+        self.assertEqual(FakeHandler.state.session["model"], task.model)
         self.assertTrue((session.workspace.work_dir).is_dir())
         self.assertTrue(session.workspace.task_path.is_file())
 
