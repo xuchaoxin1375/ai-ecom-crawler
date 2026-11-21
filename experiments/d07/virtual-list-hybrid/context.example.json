@@ -1,0 +1,30 @@
+{
+  "plan_id": "virtual-list-fixture",
+  "plan_version": "2026.11.22-1",
+  "adapter_id": "virtual-list-patchright",
+  "adapter_version": "2026.11.22-1",
+  "task_id": "virtual-list-fixture-001",
+  "task_type": "discovery",
+  "entry_url": "http://127.0.0.1:8000/virtual.html",
+  "scope": {
+    "include": ["^/product/"],
+    "exclude": []
+  },
+  "limits": {
+    "max_items": 20,
+    "max_batches": 10,
+    "max_seconds": 30
+  },
+  "browser": {
+    "headless": true,
+    "timeout_ms": 15000
+  },
+  "advance": {
+    "container": "#feed",
+    "item_selector": "a.product",
+    "id_attribute": "data-id",
+    "mode": "scroll",
+    "settle_ms": 100,
+    "no_new_stop": 1
+  }
+}

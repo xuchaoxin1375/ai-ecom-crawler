@@ -1,0 +1,45 @@
+schema_version: "1.1"
+plan_id: "virtual-list-fixture"
+plan_version: "2026.11.22-1"
+kind: "hybrid"
+status: "candidate"
+
+site:
+  name: "Virtual list fixture"
+  entry_urls: ["http://127.0.0.1:8000/virtual.html"]
+  allowed_origins: ["http://127.0.0.1:8000"]
+  allowed_path_prefixes: ["/", "/product/"]
+  market: "FR"
+  locale: "fr-FR"
+  currency: "EUR"
+
+scope:
+  include: ['^/product/']
+  exclude: []
+
+capabilities:
+  discovery: true
+  product: true
+
+runtime:
+  adapter_id: "virtual-list-patchright"
+  adapter_version: "2026.11.22-1"
+  entrypoint: "adapter.py"
+  protocol: "ndjson-stdio-v1"
+  capabilities: ["discovery"]
+
+compatibility:
+  os: ["windows", "linux", "wsl2"]
+  runtime: "python>=3.11"
+  dependencies: ["patchright==1.64.4"]
+  browser: "patchright CDP"
+
+evidence:
+  sample_urls: ["http://127.0.0.1:8000/virtual.html"]
+  expected: []
+  verified_at: null
+  limitations:
+    - "Local virtual-list fixture only; app run does not consume hybrid manifests yet."
+    - "The adapter owns only batch capture and stable-ID accumulation; task state, budgets, extraction and acceptance stay with the caller."
+
+notes: "Contract example for a C2 virtual-list adapter; not accepted by app run yet."
