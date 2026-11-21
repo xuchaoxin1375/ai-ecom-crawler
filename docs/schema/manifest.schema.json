@@ -389,6 +389,10 @@
                       },
                       "profile_mode": {
                         "enum": ["ephemeral", "task"]
+                      },
+                      "proxy": {
+                        "type": "string",
+                        "format": "uri"
                       }
                     },
                     "additionalProperties": false

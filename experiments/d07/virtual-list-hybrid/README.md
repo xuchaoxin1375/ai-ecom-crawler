@@ -39,11 +39,11 @@
 关键行：
 
 ```json
-{"event": "batch", "batch": 0, "ids": ["p1", "p2", "p3"], "new": 3, "total": 3}
-{"event": "batch", "batch": 1, "ids": ["p4", "p5", "p6"], "new": 3, "total": 6}
-{"event": "batch", "batch": 4, "ids": ["p10", "p11", "p12"], "new": 0, "total": 12}
+{"event": "batch", "batch": 0, "ids": ["p1", "p2", "p3"], "rendered": 3, "recycled": 0, "new": 3, "total": 3}
+{"event": "batch", "batch": 1, "ids": ["p4", "p5", "p6"], "rendered": 3, "recycled": 3, "new": 3, "total": 6}
+{"event": "batch", "batch": 4, "ids": ["p10", "p11", "p12"], "rendered": 3, "recycled": 0, "new": 0, "total": 12}
 {"event": "discovered", "count": 12, "urls": ["http://127.0.0.1:.../product/p1.html", "..."]}
-{"event": "done", "stop": "NO_NEW_ITEMS", "batches": 4, "items": 12, "requests": 1, "url_changes": 0}
+{"event": "done", "stop": "NO_NEW_ITEMS", "batches": 4, "items": 12, "rendered": 3, "recycled": 9, "requests": 1, "url_changes": 0}
 ```
 
 这不是基准站证据，也不是全量保证；它只证明虚拟列表逐批累积和停止条件在本地 fixture 上成立。
@@ -55,7 +55,7 @@
 - adapter 作为 `app run` 的子进程执行，4 次滚动后返回 12 个 URL；
 - app 用静态 fetcher 抓取 12 个商品页并导出 9 列 CSV；
 - `valid_products=12`、`excluded=0`、`failed=0`；
-- `task-result.json` 的 `runtime.adapter` 记录 `discovered=12`、`added=12`、`skipped=0`、`stop=NO_NEW_ITEMS`、`batches=4`、`requests=1`、`elapsed_ms` 约 0.9 秒；
+- `task-result.json` 的 `runtime.adapter` 记录 `discovered=12`、`added=12`、`skipped=0`、`stop=NO_NEW_ITEMS`、`batches=4`、`rendered=3`、`recycled=9`、`requests=1`、`elapsed_ms` 约 0.9 秒；
 - `runtime.adapter.profile_mode=ephemeral`、`profile_dir=null`、`profile_removed=null`；任务目录不产生 `adapter-browser-profile`。需要持久会话的规则显式设 `profile_mode: task`，由 `test_hybrid.py` 覆盖注册和清理。
 
 证据：`app-evidence/virtual-list-app-001/`。端口是临时端口，复跑会生成新的端口和任务目录。
@@ -94,19 +94,21 @@ python adapter.py --context /path/to/context.json
 | `limits.max_batches` | 滚动批次上限（不含初始批次） |
 | `limits.max_seconds` | adapter 墙钟上限 |
 
-可选：`plan_id`、`plan_version`、`adapter_id`、`adapter_version`、`task_id`、`task_type`、`scope.include`／`exclude`、`browser.headless`／`timeout_ms`／`locale`／`timezone`／`wait_state`（默认 `attached`，避免被隐藏的重复卡片阻塞）。`browser.profile_mode` 默认 `ephemeral`（临时 context，不落盘、不清理）；显式设 `task` 时 app 才传入任务级 `browser.profile_dir`，adapter 用 persistent context 启动，正常退出后由 app 登记并删除该目录。
+可选：`plan_id`、`plan_version`、`adapter_id`、`adapter_version`、`task_id`、`task_type`、`scope.include`／`exclude`、`browser.headless`／`timeout_ms`／`locale`／`timezone`／`wait_state`（默认 `attached`，避免被隐藏的重复卡片阻塞）／`proxy`（`http`、`https` 或 `socks5` URL，不接受内嵌凭据）。`browser.profile_mode` 默认 `ephemeral`（临时 context，不落盘、不清理）；显式设 `task` 时 app 才传入任务级 `browser.profile_dir`，adapter 用 persistent context 启动，正常退出后由 app 登记并删除该目录。
 
 ### 输出事件
 
 | 事件 | 关键字段 | 说明 |
 | --- | --- | --- |
 | `start` | `adapter_id`、`adapter_version`、`entry_url`、`limits` | 开始执行 |
-| `batch` | `batch`、`ids`、`new`、`total`、`url` | 每个当前批次；`ids` 是当前 DOM，`new` 是新增唯一 ID 数 |
+| `batch` | `batch`、`ids`、`rendered`、`recycled`、`new`、`total`、`url` | 每个当前批次；`ids` 是当前 DOM，`rendered` 是当前 DOM 条目数，`recycled` 是上一批出现、当前批已不在 DOM 的 ID 数，`new` 是新增唯一 ID 数 |
 | `discovered` | `count`、`urls` | 成功完成后一次性给出唯一 URL，按首次出现顺序 |
-| `done` | `stop`、`batches`、`items`、`requests`、`elapsed_ms`、`start_url`、`final_url`、`url_changes`、`urls` | 终止原因和资源统计 |
+| `done` | `stop`、`batches`、`items`、`rendered`、`recycled`、`requests`、`elapsed_ms`、`start_url`、`final_url`、`url_changes`、`urls` | 终止原因和资源统计；`recycled` 是全程累计的 DOM 回收 ID 数 |
 | `error` | `reason`、`failure_class`、`detail` | 结构化失败；无 `done` |
 
 `stop` 取值：`NO_NEW_ITEMS`、`MAX_ITEMS`、`MAX_BATCHES`、`MAX_SECONDS`、`NO_ITEMS`。
+
+`recycled > 0` 是替换式 DOM 的候选信号；追加型列表即使不断新增，`recycled` 也保持 0。`rendered` 用于核对当前 DOM 是否被限制在视口窗口内，不能单凭它判断虚拟列表；两者都要结合首尾条目和批次变化判读。
 
 ### 与声明式 `infinite_scroll` 的区别
 

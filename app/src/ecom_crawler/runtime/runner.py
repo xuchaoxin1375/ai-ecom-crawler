@@ -1041,6 +1041,8 @@ class TaskRunner:
             "stop": done.get("stop"),
             "batches": done.get("batches"),
             "items": done.get("items"),
+            "rendered": done.get("rendered"),
+            "recycled": done.get("recycled"),
             "requests": done.get("requests"),
             "elapsed_ms": done.get("elapsed_ms"),
             "url_changes": done.get("url_changes"),

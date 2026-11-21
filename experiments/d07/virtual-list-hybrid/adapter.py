@@ -192,6 +192,13 @@ def run(context: dict[str, Any]) -> int:
     profile_dir = str(browser_options.get("profile_dir") or "").strip()
     if profile_dir:
         Path(profile_dir).mkdir(parents=True, exist_ok=True)
+    proxy = str(browser_options.get("proxy") or "").strip()
+    if proxy:
+        parsed_proxy = urlparse(proxy)
+        if parsed_proxy.scheme not in {"http", "https", "socks5"} or not parsed_proxy.netloc:
+            raise ContextError("browser.proxy must be an http(s) or socks5 URL")
+        if parsed_proxy.username or parsed_proxy.password:
+            raise ContextError("browser.proxy must not contain credentials")
     includes = compile_patterns(scope.get("include"), "include")
     excludes = compile_patterns(scope.get("exclude"), "exclude")
     script = collect_script(selector, id_attribute)
@@ -220,17 +227,29 @@ def run(context: dict[str, Any]) -> int:
     seen: dict[str, dict[str, str]] = {}
     order: list[str] = []
     batches = 0
+    rendered = 0
+    recycled_total = 0
+    last_ids: set[str] = set()
     stop = "MAX_BATCHES"
     start_url = entry_url
     final_url = entry_url
     urls: list[str] = []
 
     def capture_batch() -> int:
-        nonlocal final_url
+        nonlocal final_url, rendered, recycled_total, last_ids
         final_url = str(page.url)
         if final_url != start_url and final_url not in urls and len(urls) < 10:
             urls.append(final_url)
         current = capture(page, script)
+        current_ids = {
+            item["id"] or item["url"]
+            for item in current
+            if item["id"] or item["url"]
+        }
+        rendered = len(current)
+        recycled = len(last_ids - current_ids)
+        recycled_total += recycled
+        last_ids = current_ids
         added = 0
         for item in current:
             if len(seen) >= max_items:
@@ -248,6 +267,8 @@ def run(context: dict[str, Any]) -> int:
             "batch",
             batch=batches,
             ids=[item["id"] for item in current],
+            rendered=rendered,
+            recycled=recycled,
             new=added,
             total=len(seen),
             url=final_url,
@@ -257,15 +278,18 @@ def run(context: dict[str, Any]) -> int:
     try:
         locale = str(browser_options.get("locale") or "fr-FR")
         timezone = str(browser_options.get("timezone") or "Europe/Paris")
+        launch_options: dict[str, Any] = {"headless": headless}
+        if proxy:
+            launch_options["proxy"] = {"server": proxy}
         if profile_dir:
             browser_context = playwright.chromium.launch_persistent_context(
                 user_data_dir=profile_dir,
-                headless=headless,
                 locale=locale,
                 timezone_id=timezone,
+                **launch_options,
             )
         else:
-            browser = playwright.chromium.launch(headless=headless)
+            browser = playwright.chromium.launch(**launch_options)
             browser_context = browser.new_context(
                 locale=locale,
                 timezone_id=timezone,
@@ -305,6 +329,8 @@ def run(context: dict[str, Any]) -> int:
             stop=stop,
             batches=batches,
             items=len(discovered),
+            rendered=rendered,
+            recycled=recycled_total,
             requests=1,
             elapsed_ms=int((time.monotonic() - started) * 1000),
             start_url=start_url,

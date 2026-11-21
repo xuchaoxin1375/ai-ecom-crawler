@@ -1,0 +1,32 @@
+{
+  "plan_id": "nike-append-control",
+  "plan_version": "2026.11.22-1",
+  "adapter_id": "virtual-list-patchright",
+  "adapter_version": "2026.11.22-1",
+  "task_id": "nike-append-001",
+  "task_type": "discovery",
+  "entry_url": "https://www.nike.com/fr/w/?q=air+max",
+  "scope": {
+    "include": ["^/fr/t/"],
+    "exclude": []
+  },
+  "limits": {
+    "max_items": 100,
+    "max_batches": 3,
+    "max_seconds": 60
+  },
+  "browser": {
+    "headless": true,
+    "timeout_ms": 30000,
+    "locale": "fr-FR",
+    "timezone": "Europe/Paris",
+    "proxy": "http://127.0.0.1:7897"
+  },
+  "advance": {
+    "item_selector": "a[href*=\"/t/\"]",
+    "id_attribute": "href",
+    "mode": "scroll",
+    "settle_ms": 1500,
+    "no_new_stop": 2
+  }
+}

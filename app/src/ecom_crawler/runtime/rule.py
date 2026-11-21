@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import yaml
 
@@ -73,6 +74,7 @@ ADAPTER_BROWSER_KEYS = {
     "timezone",
     "wait_state",
     "profile_mode",
+    "proxy",
 }
 CORE_FIELDS = {"name", "price.amount", "price.currency", "primary_image_url", "source_url"}
 RULE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,80}$")
@@ -608,6 +610,13 @@ def _validate_adapter_browser(value: Any, path: str) -> None:
         "task",
     }:
         raise RuleError(f"{path}.profile_mode must be ephemeral or task")
+    if "proxy" in browser:
+        _require_string(browser["proxy"], f"{path}.proxy")
+        parsed = urlparse(browser["proxy"])
+        if parsed.scheme not in {"http", "https", "socks5"} or not parsed.netloc:
+            raise RuleError(f"{path}.proxy must be an http(s) or socks5 URL")
+        if parsed.username or parsed.password:
+            raise RuleError(f"{path}.proxy must not contain credentials")
 
 
 def _validate_sources(value: Any, discovery: dict[str, Any]) -> None:

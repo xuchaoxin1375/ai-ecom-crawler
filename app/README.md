@@ -174,7 +174,7 @@ runtime:
 - adapter 子进程超时受 `source.max_seconds` 和任务 `max_seconds` 约束；超时按进程组终止（Windows `taskkill /T`，POSIX `killpg`）。stdout 写入 `<out-root>/<task-id>/adapter.ndjson`，输入上下文写入 `adapter-context.json`。
 - 成功标准是 `done` + `discovered` 事件；`error` 或非零退出记为 `ADAPTER_FAILED`，不产生半成品商品。
 - `task-result.json` 的 `runtime.adapter` 记录 `discovered`／`added`／`skipped`／`stop`／`batches`／`requests`／`elapsed_ms`。
-- 当前只接入 adapter discovery，商品页仍由声明式 fetcher 处理。adapter 默认 `browser.profile_mode: ephemeral`，用临时 context，不分配 profile，也不产生 profile 清理；需要登录／挑战页／跨步骤会话时显式设 `profile_mode: task`，app 才分配任务级 `adapter-browser-profile`、登记到 `task_resources`，退出后删除，删除失败时按 profile 路径做 best-effort 进程扫描。超时已按进程组终止。浏览器实例配额（单进程／跨进程）已接入。本地端到端证据：`experiments/d07/virtual-list-hybrid/app-evidence/virtual-list-app-001/`；真实 JS 渲染列表证据：`experiments/d07/tissus-adapter/`（10／10）。
+- 当前只接入 adapter discovery，商品页仍由声明式 fetcher 处理。adapter 默认 `browser.profile_mode: ephemeral`，用临时 context，不分配 profile，也不产生 profile 清理；需要登录／挑战页／跨步骤会话时显式设 `profile_mode: task`，app 才分配任务级 `adapter-browser-profile`、登记到 `task_resources`，退出后删除，删除失败时按 profile 路径做 best-effort 进程扫描。`browser.proxy` 可传 `http`／`https`／`socks5` URL，不接受内嵌凭据。超时已按进程组终止。浏览器实例配额（单进程／跨进程）已接入。本地端到端证据：`experiments/d07/virtual-list-hybrid/app-evidence/virtual-list-app-001/`；真实 JS 渲染列表证据：`experiments/d07/tissus-adapter/`（10／10）。
 
 ## 执行入口（run）
 

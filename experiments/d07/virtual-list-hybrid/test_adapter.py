@@ -89,7 +89,13 @@ class VirtualListAdapterTests(unittest.TestCase):
             self.assertEqual(len(set(discovered["urls"])), 12)
             self.assertEqual(sum(event["new"] for event in batches), 12)
             self.assertGreaterEqual(len(batches), 4)
+            self.assertTrue(
+                any(event.get("recycled", 0) > 0 for event in batches),
+                "replaced DOM should report recycled IDs",
+            )
             self.assertEqual(done["items"], 12)
+            self.assertGreater(done["rendered"], 0)
+            self.assertGreater(done["recycled"], 0)
             self.assertEqual(done["stop"], "NO_NEW_ITEMS")
             self.assertEqual(done["requests"], 1)
             self.assertEqual(done["url_changes"], 0)

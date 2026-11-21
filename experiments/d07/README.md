@@ -100,11 +100,12 @@ python -m uv run --project experiments/framework-compare/scrapling `
   python -m unittest discover -s experiments/r06/tests -v
 ```
 
-结果：**83 个测试通过**，无 skip。覆盖原子写、契约、提取、运行时、重试、恢复、控制、并行、Schema 和新的字段分类。`app` 当前 **151 个测试通过**（含 8 个浏览器配置／路由／fixture 用例、5 个 load_more／infinite_scroll 用例（含内部容器）、7 个 hybrid adapter 用例、4 个 worker 浏览器配额用例、4 个桥接状态用例和 1 个原子写用例），`ruff check app` 通过；真实浏览器用例在缺少 Chromium 的环境中会跳过，本机运行结果为通过。
+结果：**83 个测试通过**，无 skip。覆盖原子写、契约、提取、运行时、重试、恢复、控制、并行、Schema 和新的字段分类。`app` 当前 **152 个测试通过**（含 8 个浏览器配置／路由／fixture 用例、5 个 load_more／infinite_scroll 用例（含内部容器）、8 个 hybrid adapter 用例、4 个 worker 浏览器配额用例、4 个桥接状态用例和 1 个原子写用例），`ruff check app` 通过；真实浏览器用例在缺少 Chromium 的环境中会跳过，本机运行结果为通过。
 
 ## D07 结论
 
 - **不是 D07 完成**：生产 `app` 执行器、任务账本、控制面、单实例锁、同进程 A20、单机跨进程租约、进程／目录资源回收、真实浏览器进程／profile 回收、两种有界浏览器推进（含内部容器追加型）和虚拟列表 hybrid adapter（含 `app run` 端到端）已落地；其他资源配额、真实虚拟列表、更复杂的内部滚动和自动化漂移修复仍未实现；跨机租约为 v1 外；单进程／跨进程 browser／hybrid 槽位已补，adapter profile 已登记并在正常退出后删除，孤儿扫描为 best-effort。
+- **真实虚拟列表候选扫描**：14 个主表站点和 4 个补充尝试的有界观测没有找到替换式 DOM，主流表现是固定批次、追加式无限滚动或分页；Nike 追加式列表由 adapter 跑出 `rendered=281`、`recycled=0`，与本地替换式 fixture 的 `rendered=3`、`recycled=9` 形成对照。扫描记录见 `experiments/d07/virtual-list-scan/`，真实虚拟列表仍未闭合。
 - **可复用的改进**：字段错误与业务排除的分类已修正，并进入 R06 回归测试；`app` 控制面复用同一状态语义；租约和资源登记不改变对外任务状态；浏览器挑战壳要按渲染后的最终状态判断，不能只看首个 HTTP 响应。
 - **下一步优先级**：URL 可寻址检查已覆盖 `ecolaines` 与 5 个法国基准站；虚拟列表 hybrid adapter 已接入 `app run` 并本地端到端 12／12，接下来补真实虚拟列表、更复杂的内部滚动和其他资源配额；单进程／跨进程 browser／hybrid 槽位已补；`tissus.net` 的 JS 渲染列表已由 adapter 验证 10／10。D08 控制界面不得早于这些结论。
 

@@ -149,8 +149,9 @@ if profile:
 base = context["entry_url"].rsplit("/", 1)[0]
 urls = [f"{base}/product/p{index}.html" for index in (1, 2, 3)]
 print(json.dumps({"event": "start", "adapter_id": "fake-adapter"}), flush=True)
+print(json.dumps({"event": "batch", "batch": 0, "ids": ["p1", "p2", "p3"], "rendered": 3, "recycled": 0, "new": 3, "total": 3}), flush=True)
 print(json.dumps({"event": "discovered", "count": len(urls), "urls": urls}), flush=True)
-print(json.dumps({"event": "done", "stop": "MAX_ITEMS", "items": len(urls), "requests": 1}), flush=True)
+print(json.dumps({"event": "done", "stop": "MAX_ITEMS", "items": len(urls), "rendered": 3, "recycled": 0, "requests": 1}), flush=True)
 """
 
 
@@ -279,6 +280,8 @@ class HybridRuntimeTests(unittest.TestCase):
             self.assertEqual(adapter["adapter_id"], "fake-adapter")
             self.assertEqual(adapter["discovered"], 3)
             self.assertEqual(adapter["added"], 3)
+            self.assertEqual(adapter["rendered"], 3)
+            self.assertEqual(adapter["recycled"], 0)
             self.assertEqual(adapter["stop"], "MAX_ITEMS")
             self.assertEqual(adapter["profile_mode"], "ephemeral")
             self.assertIsNone(adapter["profile_dir"])
@@ -414,6 +417,35 @@ class HybridRuntimeTests(unittest.TestCase):
             rule = write_package(root, base, ADAPTER_OK)
             (root / "adapter.py").unlink()
             with self.assertRaisesRegex(RuleError, "entrypoint"):
+                load_rule(rule)
+
+    def test_adapter_proxy_is_validated(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary, fixture_server() as base:
+            root = Path(temporary)
+            rule = write_package(root, base, ADAPTER_OK)
+            data = yaml.safe_load(rule.read_text(encoding="utf-8"))
+            source = data["discovery"]["sources"][0]
+            source["browser"]["proxy"] = "http://127.0.0.1:7897"
+            rule.write_text(
+                yaml.safe_dump(data, sort_keys=False, allow_unicode=True),
+                encoding="utf-8",
+            )
+            load_rule(rule)
+
+            source["browser"]["proxy"] = "ftp://127.0.0.1:7897"
+            rule.write_text(
+                yaml.safe_dump(data, sort_keys=False, allow_unicode=True),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(RuleError, "proxy"):
+                load_rule(rule)
+
+            source["browser"]["proxy"] = "http://user:secret@127.0.0.1:7897"
+            rule.write_text(
+                yaml.safe_dump(data, sort_keys=False, allow_unicode=True),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(RuleError, "credentials"):
                 load_rule(rule)
 
     def test_declarative_cannot_use_adapter_source(self) -> None:
