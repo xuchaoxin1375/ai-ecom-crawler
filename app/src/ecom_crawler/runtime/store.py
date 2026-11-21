@@ -74,12 +74,15 @@ CREATE TABLE IF NOT EXISTS task_resources (
     pid INTEGER,
     path TEXT,
     lease_token INTEGER,
+    expires_at REAL,
     created_at TEXT NOT NULL,
     PRIMARY KEY (task_id, resource_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_task_resources_task
     ON task_resources(task_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_task_resources_browser_slot
+    ON task_resources(resource_id) WHERE kind = 'browser_slot';
 """
 
 TASK_COLUMNS = {
@@ -182,6 +185,14 @@ class TaskStore:
                 connection.execute(
                     "ALTER TABLE task_resources ADD COLUMN lease_token INTEGER"
                 )
+            if "expires_at" not in resource_columns:
+                connection.execute(
+                    "ALTER TABLE task_resources ADD COLUMN expires_at REAL"
+                )
+            connection.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_task_resources_browser_slot "
+                "ON task_resources(resource_id) WHERE kind = 'browser_slot'"
+            )
 
     def _insert_task(self, connection: sqlite3.Connection, task: Task) -> None:
         connection.execute(
@@ -956,6 +967,60 @@ class TaskStore:
                 ),
             )
 
+    def claim_browser_slot(
+        self,
+        *,
+        task_id: str,
+        lease_token: int,
+        limit: int,
+        ttl_seconds: float,
+    ) -> str | None:
+        """Atomically claim one of ``limit`` browser slots across workers."""
+        if limit <= 0:
+            return None
+        now = time.time()
+        expires_at = now + max(float(ttl_seconds), 1.0)
+        with self._connect() as connection:
+            connection.execute(
+                "DELETE FROM task_resources "
+                "WHERE kind = 'browser_slot' AND expires_at IS NOT NULL "
+                "AND expires_at <= ?",
+                (now,),
+            )
+            for index in range(limit):
+                resource_id = f"browser-slot:{index}"
+                cursor = connection.execute(
+                    """
+                    INSERT OR IGNORE INTO task_resources (
+                        task_id, resource_id, kind, lease_token, expires_at, created_at
+                    ) VALUES (?, ?, 'browser_slot', ?, ?, ?)
+                    """,
+                    (task_id, resource_id, int(lease_token), expires_at, utc_now()),
+                )
+                if cursor.rowcount:
+                    return resource_id
+        return None
+
+    def renew_browser_slot(
+        self, task_id: str, resource_id: str, *, ttl_seconds: float
+    ) -> bool:
+        expires_at = time.time() + max(float(ttl_seconds), 1.0)
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "UPDATE task_resources SET expires_at = ? "
+                "WHERE task_id = ? AND resource_id = ? AND kind = 'browser_slot'",
+                (expires_at, task_id, resource_id),
+            )
+            return cursor.rowcount > 0
+
+    def release_browser_slot(self, task_id: str, resource_id: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "DELETE FROM task_resources "
+                "WHERE task_id = ? AND resource_id = ? AND kind = 'browser_slot'",
+                (task_id, resource_id),
+            )
+
     def list_resources(
         self,
         task_id: str | None = None,
@@ -984,6 +1049,7 @@ class TaskStore:
                 "pid": row["pid"],
                 "path": row["path"],
                 "lease_token": row["lease_token"],
+                "expires_at": row["expires_at"],
                 "created_at": row["created_at"],
             }
             for row in rows

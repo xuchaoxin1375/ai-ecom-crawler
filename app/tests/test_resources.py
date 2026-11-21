@@ -42,7 +42,10 @@ class ResourceCleanupTests(unittest.TestCase):
         register_path(self.store, "task-token", target, lease_token=1)
 
         report = cleanup_task_resources(self.store, "task-token", lease_token=2)
-        self.assertEqual(report, {"processes": 0, "paths": 0, "failed": 0})
+        self.assertEqual(
+            report,
+            {"processes": 0, "paths": 0, "browser_slots": 0, "failed": 0},
+        )
         self.assertTrue(target.exists())
 
         report = cleanup_task_resources(self.store, "task-token", lease_token=1)

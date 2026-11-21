@@ -63,7 +63,7 @@ def cleanup_task_resources(
     Passing a lease token also includes legacy rows without a token, but never
     touches resources registered by a newer lease holder.
     """
-    report = {"processes": 0, "paths": 0, "failed": 0}
+    report = {"processes": 0, "paths": 0, "browser_slots": 0, "failed": 0}
     resources = store.list_resources(task_id)
     if lease_token is not None:
         resources = [
@@ -82,6 +82,11 @@ def cleanup_task_resources(
             ok = remove_path(Path(str(resource["path"])))
             if ok:
                 report["paths"] += 1
+        elif kind == "browser_slot":
+            store.release_browser_slot(
+                task_id, str(resource.get("resource_id") or "")
+            )
+            report["browser_slots"] += 1
         else:
             ok = False
         if ok:
@@ -96,14 +101,14 @@ def cleanup_all_registered(
     *,
     grace_seconds: float = 1.0,
 ) -> dict[str, int]:
-    report = {"tasks": 0, "processes": 0, "paths": 0, "failed": 0}
+    report = {"tasks": 0, "processes": 0, "paths": 0, "browser_slots": 0, "failed": 0}
     task_ids = {str(resource["task_id"]) for resource in store.list_resources()}
     for task_id in sorted(task_ids):
         result = cleanup_task_resources(
             store, task_id, grace_seconds=grace_seconds
         )
         report["tasks"] += 1
-        for key in ("processes", "paths", "failed"):
+        for key in ("processes", "paths", "browser_slots", "failed"):
             report[key] += result[key]
     return report
 

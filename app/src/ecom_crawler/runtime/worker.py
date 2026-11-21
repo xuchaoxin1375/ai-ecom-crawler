@@ -166,6 +166,9 @@ class Worker:
         )
         self._leases: dict[str, Lease] = {}
         self._lease_lock = threading.Lock()
+        self._browser_slots: dict[str, str] = {}
+        self._browser_slot_lock = threading.Lock()
+        self.browser_slot_ttl_seconds = max(30.0, self.lease_ttl_seconds * 2)
         self._heartbeat_stop = threading.Event()
         self._heartbeat_thread: threading.Thread | None = None
         self._next_settle = 0.0
@@ -247,6 +250,17 @@ class Worker:
                 }:
                     continue
                 logger.warning("lease lost for task %s", lease.task_id)
+            with self._browser_slot_lock:
+                browser_slots = list(self._browser_slots.items())
+            for task_id, resource_id in browser_slots:
+                if not self.store.renew_browser_slot(
+                    task_id,
+                    resource_id,
+                    ttl_seconds=self.browser_slot_ttl_seconds,
+                ):
+                    logger.warning(
+                        "browser slot lost for task %s (%s)", task_id, resource_id
+                    )
 
     def _register_lease(self, lease: Lease) -> None:
         with self._lease_lock:
@@ -348,6 +362,28 @@ class Worker:
                     return True
         return False
 
+    def _acquire_browser_slot(self, task_id: str, lease: Lease) -> str | None:
+        if self.max_browser_tasks <= 0:
+            return None
+        while True:
+            resource_id = self.store.claim_browser_slot(
+                task_id=task_id,
+                lease_token=lease.token,
+                limit=self.max_browser_tasks,
+                ttl_seconds=self.browser_slot_ttl_seconds,
+            )
+            if resource_id is not None:
+                with self._browser_slot_lock:
+                    self._browser_slots[task_id] = resource_id
+                return resource_id
+            time.sleep(0.2)
+
+    def _release_browser_slot(self, task_id: str) -> None:
+        with self._browser_slot_lock:
+            resource_id = self._browser_slots.pop(task_id, None)
+        if resource_id is not None:
+            self.store.release_browser_slot(task_id, resource_id)
+
     def _run_task(self, task: Task, lease: Lease) -> None:
         browser_slot = False
         try:
@@ -374,6 +410,7 @@ class Worker:
             if self._browser_semaphore is not None and self._needs_browser(rule):
                 self._browser_semaphore.acquire()
                 browser_slot = True
+                self._acquire_browser_slot(task.task_id, lease)
             try:
                 context = FetcherContext(
                     rule=rule,
@@ -401,8 +438,10 @@ class Worker:
             except Exception as exc:  # noqa: BLE001 - task boundary
                 self._fail(task, lease, "ENVIRONMENT_ERROR", f"{type(exc).__name__}: {exc}")
         finally:
-            if browser_slot and self._browser_semaphore is not None:
-                self._browser_semaphore.release()
+            if browser_slot:
+                self._release_browser_slot(task.task_id)
+                if self._browser_semaphore is not None:
+                    self._browser_semaphore.release()
             self._release_lease(lease)
             try:
                 cleanup_task_resources(

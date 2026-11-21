@@ -188,7 +188,7 @@ runtime:
 ## 控制面（submit / worker / pause / resume / cancel）
 
 - `submit` 只创建 `QUEUED` 任务，不启动执行；`worker` 常驻读取账本中的 `QUEUED` 任务。
-- `worker`／`serve` 的 `--max-browser-tasks` 限制每个 worker 进程同时运行的 browser／hybrid 任务数（默认 1，0 表示不限制）；这是单进程配额，跨进程配额仍未实现。
+- `worker`／`serve` 的 `--max-browser-tasks` 限制每个 worker 进程同时运行的 browser／hybrid 任务数（默认 1，0 表示不限制）。同一 SQLite 账本上的多个 worker 通过 `browser_slot` 行协调到同一上限；跨机配额仍未实现。
 - `pause` 把 `RUNNING` 改为 `PAUSING`；runner 停止派发新工作，等在途结清后写 `PAUSED`。
 - `cancel` 把 `RUNNING`／`PAUSING` 改为 `CANCELLING`；runner 等在途结束，拒绝迟到结果，写 `CANCELLED`。`DRAFT`／`QUEUED`／`PAUSED` 直接进入 `CANCELLED`。
 - `resume` 把 `PAUSED` 改回 `QUEUED`，由 `worker` 重新领取；不恢复浏览器内存或旧会话。
