@@ -13,6 +13,8 @@ let currentTaskId = null;
 let currentKind = "product";
 let rulesLoaded = false;
 let rulesCache = [];
+let lastListLoadedAt = null;
+let lastDetailLoadedAt = null;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -58,11 +60,64 @@ function requestId() {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+const COUNT_LABELS = {
+  discovered_urls: "发现 URL",
+  pending_navigation_entries: "待访问导航",
+  product_candidates: "商品候选",
+  pending_products: "待处理商品",
+  in_flight_products: "在途商品",
+  in_flight: "在途",
+  processed_products: "已处理商品",
+  valid_products: "有效商品",
+  excluded_products: "业务排除",
+  failed_products: "失败商品",
+  partial_description_products: "部分描述",
+  navigation_urls: "导航页",
+  url_candidates: "URL 候选",
+  pending_urls: "待处理 URL",
+  valid_urls: "有效 URL",
+  excluded_urls: "排除 URL",
+  failed_urls: "失败 URL",
+};
+
+function countLabel(key) {
+  return COUNT_LABELS[key] || key;
+}
+
+function trustedTime(value) {
+  return value ? value.toLocaleString("zh-CN", { hour12: false }) : "无";
+}
+
 function countsText(counts) {
   if (!counts || typeof counts !== "object") return "-";
-  return Object.entries(counts)
-    .map(([key, value]) => `${key}=${value}`)
-    .join("  ");
+  const entries = Object.entries(counts);
+  if (!entries.length) return "-";
+  const order = [
+    "valid_products",
+    "excluded_products",
+    "failed_products",
+    "pending_products",
+    "in_flight_products",
+    "in_flight",
+    "discovered_urls",
+    "valid_urls",
+    "excluded_urls",
+    "failed_urls",
+    "pending_urls",
+  ];
+  const parts = [];
+  for (const key of order) {
+    if (!(key in counts)) continue;
+    const value = counts[key];
+    if (value === 0 && !["valid_products", "valid_urls", "discovered_urls"].includes(key)) {
+      continue;
+    }
+    parts.push(`${countLabel(key)} ${value}`);
+  }
+  if (!parts.length) {
+    return entries.map(([key, value]) => `${countLabel(key)} ${value}`).join(" · ");
+  }
+  return parts.join(" · ");
 }
 
 function stateClass(state) {
@@ -142,11 +197,15 @@ async function loadList() {
   if (archived) params.set("include_archived", "true");
   try {
     const payload = await api(`/api/tasks?${params.toString()}`);
+    lastListLoadedAt = new Date();
     renderList(payload.items || []);
     setStatus(listStatus, `共 ${payload.total ?? 0} 个任务`);
   } catch (error) {
-    renderList([]);
-    setStatus(listStatus, `读取失败：${error.message}`, true);
+    setStatus(
+      listStatus,
+      `读取失败：${error.message}（最后可信时间：${trustedTime(lastListLoadedAt)}）`,
+      true,
+    );
   }
 }
 
@@ -255,6 +314,7 @@ function renderDetail(task) {
   document.title = `${task.task_id} · 采集任务`;
   document.querySelector("#detail-title").textContent = task.task_id;
   document.querySelector("#export-link").href = `/api/tasks/${encodeURIComponent(task.task_id)}/export`;
+  document.querySelector("#export-link").hidden = false;
   const coverage = task.coverage?.status || "UNKNOWN";
   const stop = task.stop_reason || "-";
   const outcome = task.outcome || "-";
@@ -275,7 +335,7 @@ function renderDetail(task) {
   renderControls(task);
   const counts = task.counts || {};
   document.querySelector("#detail-counts").innerHTML = Object.entries(counts)
-    .map(([key, value]) => `<div class="count"><span>${escapeHtml(key)}</span><strong>${escapeHtml(value)}</strong></div>`)
+    .map(([key, value]) => `<div class="count"><span>${escapeHtml(countLabel(key))}</span><strong>${escapeHtml(value)}</strong></div>`)
     .join("");
 
   const quality = Array.isArray(task.quality_exceptions) ? task.quality_exceptions : [];
@@ -296,6 +356,7 @@ async function loadItems(taskId, kind) {
     const payload = await api(
       `/api/tasks/${encodeURIComponent(taskId)}/items?kind=${encodeURIComponent(kind)}&limit=200`,
     );
+    if (currentTaskId !== taskId) return;
     if (!payload.items?.length) {
       itemRows.innerHTML = '<tr><td colspan="4" class="empty">暂无记录</td></tr>';
     } else {
@@ -313,21 +374,46 @@ async function loadItems(taskId, kind) {
     }
     setStatus(itemsStatus, `共 ${payload.total ?? 0} 条`);
   } catch (error) {
-    itemRows.innerHTML = "";
+    if (currentTaskId !== taskId) return;
     setStatus(itemsStatus, `读取失败：${error.message}`, true);
   }
 }
 
+function clearDetail(taskId) {
+  document.title = `${taskId} · 采集任务`;
+  document.querySelector("#detail-title").textContent = taskId;
+  document.querySelector("#detail-meta").innerHTML = "";
+  document.querySelector("#detail-counts").innerHTML = "";
+  document.querySelector("#detail-quality").innerHTML = "";
+  document.querySelector("#detail-controls").innerHTML = "";
+  document.querySelector("#export-link").href = "#";
+  document.querySelector("#export-link").hidden = true;
+  itemRows.innerHTML = "";
+  setStatus(itemsStatus, "");
+}
+
 async function loadDetail(taskId) {
+  const changed = taskId !== currentTaskId;
+  if (changed) {
+    lastDetailLoadedAt = null;
+    clearDetail(taskId);
+  }
   currentTaskId = taskId;
   setStatus(detailStatus, "加载中…");
   try {
     const task = await api(`/api/tasks/${encodeURIComponent(taskId)}`);
+    if (currentTaskId !== taskId) return;
+    lastDetailLoadedAt = new Date();
     renderDetail(task);
     setStatus(detailStatus, "");
     await loadItems(taskId, currentKind);
   } catch (error) {
-    setStatus(detailStatus, `读取失败：${error.message}`, true);
+    if (currentTaskId !== taskId) return;
+    setStatus(
+      detailStatus,
+      `读取失败：${error.message}（最后可信时间：${trustedTime(lastDetailLoadedAt)}）`,
+      true,
+    );
   }
 }
 
