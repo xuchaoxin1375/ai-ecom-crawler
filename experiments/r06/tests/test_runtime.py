@@ -1112,6 +1112,70 @@ class ProductTests(unittest.TestCase):
             )
 
 
+class ValidationClassificationTests(unittest.TestCase):
+    def _run_product(self, html: str, task_id: str) -> tuple[WorkItem, dict]:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = TaskStore(root / "tasks.db")
+            rule = load_rule(PLAN)
+            task = make_task("product", task_id)
+            store.create_task(task)
+            fetcher = FakeFetcher(
+                {
+                    ROBOTS: (200, ROBOTS_OK),
+                    ENTRY: (200, ENTRY_HTML),
+                    PRODUCT: (200, html),
+                }
+            )
+            TaskRunner(store, rule, task, fetcher=fetcher, out_root=root / "tasks").run()
+            item = store.items(task.task_id, "product")[0]
+            result = json.loads(
+                (root / "tasks" / task.task_id / "task-result.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            return item, result
+
+    def test_missing_name_is_failed_not_excluded(self) -> None:
+        html = (
+            "<html><head>"
+            '<meta property="og:image" content="https://www.familidoo.fr/img/p.jpg">'
+            '<meta property="product:price:amount" content="12.00">'
+            '<meta property="product:price:currency" content="EUR">'
+            '<link rel="canonical" href="https://www.familidoo.fr/fr/cat/1-a.html">'
+            "</head><body></body></html>"
+        )
+        item, result = self._run_product(html, "drift-missing-name")
+        self.assertEqual(item.state, "FAILED")
+        self.assertEqual(item.failure_class, "permanent")
+        self.assertEqual(item.result["reason"], "validation_error")
+        self.assertIn("missing_name", item.result["reasons"])
+        self.assertEqual(result["counts"]["valid_products"], 0)
+        self.assertEqual(result["counts"]["excluded_products"], 0)
+        self.assertEqual(result["counts"]["failed_products"], 1)
+        self.assertEqual(result["outcome"], "FAILED")
+
+    def test_zero_price_is_excluded_not_failed(self) -> None:
+        html = (
+            "<html><head>"
+            '<meta property="og:image" content="https://www.familidoo.fr/img/p.jpg">'
+            '<meta property="product:price:amount" content="0">'
+            '<meta property="product:pretax_price:amount" content="0">'
+            '<meta property="product:price:currency" content="EUR">'
+            '<link rel="canonical" href="https://www.familidoo.fr/fr/cat/1-a.html">'
+            "</head><body>"
+            '<h1 itemprop="name">Zero Price Product</h1>'
+            "</body></html>"
+        )
+        item, result = self._run_product(html, "zero-price")
+        self.assertEqual(item.state, "EXCLUDED")
+        self.assertIn("zero_or_missing_price", item.result["reasons"])
+        self.assertEqual(result["counts"]["valid_products"], 0)
+        self.assertEqual(result["counts"]["excluded_products"], 1)
+        self.assertEqual(result["counts"]["failed_products"], 0)
+        self.assertEqual(result["outcome"], "COMPLETED")
+
+
 class RetryTests(unittest.TestCase):
     def test_transient_failure_retries_until_success(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -275,7 +275,16 @@ class TaskRunner:
         product = extract_product(page, plan)
         reasons = validate_product(product, plan)
         if reasons:
-            return "EXCLUDED", {"reasons": reasons}
+            business_reasons = [reason for reason in reasons if reason == "zero_or_missing_price"]
+            field_errors = [reason for reason in reasons if reason != "zero_or_missing_price"]
+            if field_errors:
+                return self._failure(
+                    item,
+                    "permanent",
+                    "validation_error",
+                    reasons=reasons,
+                )
+            return "EXCLUDED", {"reasons": business_reasons}
         canonical = str(product.values.get("source_url") or result.url)
         if not self._is_allowed_url(canonical):
             canonical = result.url
