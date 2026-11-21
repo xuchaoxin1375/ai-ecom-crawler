@@ -20,23 +20,27 @@
 - 分类过滤、选项合并与 `attributes` 兼容序列化。
 - 9 列业务 CSV、`task-result.json`、内部记录和排除／失败诊断。
 - 计数不变量、`outcome` 推导、`quality_exceptions` 异常索引。
-- `export`、`validate`、`run`、`submit`、`worker`、`pause`、`resume`、`cancel`、`status` 和 `list` CLI 子命令。
+- `export`、`validate`、`run`、`submit`、`worker`、`pause`、`resume`、`cancel`、`status`、`list` 和 `serve` CLI 子命令。
 - 声明式规则包读取与校验；`entry_links`、`sitemap`、`listing`、`html_index`、`public_json` 发现来源。
 - 静态发现、获取、提取、基础重试和 SQLite 任务账本。
 - `run` 执行 product 任务并自动接入 D02 导出。
 - 单 worker 控制面：`submit` 入队，`worker` 常驻执行，`pause`／`resume`／`cancel` 从另一个进程改账本，runner 在检查点响应并拒收迟到结果。
+- 只读 FastAPI API：`/api/health`、任务列表／详情、URL／商品分页和 zip 导出。
+- 只读静态页面：任务列表、详情、计数、质量异常和导出入口；暂无创建和控制按钮。
 
 尚未实现：
 
 - 浏览器／动态渲染、挑战页会话复用和资源回收。
 - 跨进程租约；当前只允许一个 `worker` 消费同一账本。
-- app 原生状态模型、Web UI 和构建会话。
+- 创建／控制 API、SSE、归档字段和完整 Web UI；`serve` 当前只读。
+- app 原生状态模型和构建会话。
 - 生产级浏览器／进程孤儿回收；R06 的静态单进程能力已抽取，但不是最终形态。
 
 ## 布局
 
 - `src/ecom_crawler/`：应用代码。
 - `src/ecom_crawler/runtime/`、`executor/`：从 R06 抽取的静态单进程运行时和提取器。
+- `src/ecom_crawler/web/`：只读 FastAPI 应用和静态页面。
 - `src/ecom_crawler/execution.py`、`bridge.py`：执行入口与 R06→D02 转换。
 - `schemas/`：候选输入、内部商品记录和任务结果的 JSON Schema。
 - `tests/`：T1 契约／单元测试和本地 fixture 集成测试，无外部网络。
@@ -50,7 +54,7 @@ python -m uv run --project app --extra dev python -m unittest discover -s app/te
 python -m uv run ruff check app
 ```
 
-`jsonschema` 是测试依赖；缺失时测试会失败，不会 skip。应用运行依赖包括 `lxml`、`pyyaml`、`scrapling`、`curl_cffi`、`patchright`、`browserforge` 和 `protego`。
+`jsonschema` 和 `httpx` 是测试依赖；缺失时测试会失败，不会 skip。应用运行依赖包括 `lxml`、`pyyaml`、`scrapling`、`curl_cffi`、`patchright`、`browserforge`、`protego`、`fastapi` 和 `uvicorn`。
 
 ## CLI
 
@@ -59,6 +63,7 @@ python -m uv run --project app ecom-crawler --version
 python -m uv run --project app ecom-crawler run --rule /path/to/rule.yaml --db /path/to/tasks.db --out-root /path/to/tasks --task-id sample-001 --task-type product --max-products 6
 python -m uv run --project app ecom-crawler submit --rule /path/to/rule.yaml --db /path/to/tasks.db --task-id sample-002
 python -m uv run --project app ecom-crawler worker --db /path/to/tasks.db --out-root /path/to/tasks
+python -m uv run --project app ecom-crawler serve --db /path/to/tasks.db --out-root /path/to/tasks --port 8765
 python -m uv run --project app ecom-crawler pause --db /path/to/tasks.db --task-id sample-002
 python -m uv run --project app ecom-crawler resume --db /path/to/tasks.db --task-id sample-002
 python -m uv run --project app ecom-crawler cancel --db /path/to/tasks.db --task-id sample-002
@@ -72,6 +77,7 @@ python -m uv run --project app ecom-crawler validate --task-result /path/to/task
 - `run` 每次执行一个任务；product 任务完成后自动导出到 `<out-root>/<task-id>/export`，discovery 任务只写运行时 URL 清单和任务结果。
 - `run` 的退出码表示任务是否实际执行；业务结论看 `task-result.json` 的 `outcome`。计划或用法错误返回 2。
 - `run` 是一次性入口，不提供可恢复的控制；需要暂停／恢复／取消时用 `submit` 入队，再在另一个 shell 运行 `worker`，用 `pause`／`resume`／`cancel` 控制。外部暂停 `run` 任务后，`run` 以 2 退出并提示用 `worker` 恢复。
+- `serve` 只绑定回环地址，提供只读 API 和静态页面；它不启动 worker，执行仍由独立的 `worker` 进程负责。页面关闭不会停止 `worker`。
 - `worker` 默认 `--max-tasks 1`，按 `QUEUED` 取任务；Ctrl+C 停止领取新任务并等待已启动任务结束，已取消任务用 `cancel` 处理。
 - `pause` 只接受 `RUNNING`，`resume` 只接受 `PAUSED`；重复请求按当前状态幂等返回，非法转移返回 2。
 - `status` 和 `list` 是只读入口；`--json` 输出可直接给脚本消费。任务计数仍以 `task-result.json` 和 `docs/09` 为准。
@@ -99,6 +105,15 @@ python -m uv run --project app ecom-crawler validate --task-result /path/to/task
 - 同进程 A20 已覆盖：同域两任务并行，暂停／取消一个，另一个继续并保持独立输出；同域请求共用限速器。
 - 跨进程租约、浏览器资源回收和跨进程 A20 仍未实现。
 - 证据：`tests/test_control.py` 覆盖状态转移、启动对账和单实例锁；`tests/test_control_flow.py` 覆盖暂停结清、恢复、取消拒收迟到结果、`run_forever` 和同进程 A20。
+
+## 只读 Web 切片（serve）
+
+- `serve` 用 FastAPI 托管 `/api/*` 和 `static/`，默认 `127.0.0.1:8765`，拒绝非回环地址。
+- API：`GET /api/health`、`GET /api/tasks`、`GET /api/tasks/{id}`、`GET /api/tasks/{id}/items?kind=url|product`、`GET /api/tasks/{id}/export`。
+- 导出 zip 只允许 `products.csv`、`task-result.json`、`records.jsonl` 和 `diagnostics/` 下的排除／失败文件；`partial=true` 才允许导出未结束任务。
+- 页面是只读预览：列表、详情、计数、覆盖、质量异常、URL／商品表格和导出；没有创建、暂停、取消和归档按钮。
+- 页面每 3 秒轮询详情；SSE、创建／控制 API、`site_key`／`archived_at` 账本字段和前端原型评审在后续切片。
+- 证据：`tests/test_web.py` 覆盖健康、列表筛选、详情、items 分页、导出白名单、未结束导出和 404。
 
 ## 输入契约
 

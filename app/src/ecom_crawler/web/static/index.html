@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>采集任务 · 只读预览</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="#/tasks">电商采集</a>
+      <span class="badge">只读预览</span>
+      <span class="hint">控制与创建在后续切片接入</span>
+    </header>
+
+    <main id="app">
+      <section id="list-view">
+        <div class="page-head">
+          <h1>任务</h1>
+          <button id="refresh-list" type="button">刷新</button>
+        </div>
+
+        <form id="filters" class="filters">
+          <label>
+            状态
+            <select id="filter-state">
+              <option value="">全部</option>
+              <option value="QUEUED">QUEUED</option>
+              <option value="RUNNING">RUNNING</option>
+              <option value="PAUSING">PAUSING</option>
+              <option value="PAUSED">PAUSED</option>
+              <option value="CANCELLING">CANCELLING</option>
+              <option value="CANCELLED">CANCELLED</option>
+              <option value="FINISHED">FINISHED</option>
+            </select>
+          </label>
+          <label>
+            类型
+            <select id="filter-type">
+              <option value="">全部</option>
+              <option value="product">product</option>
+              <option value="discovery">discovery</option>
+            </select>
+          </label>
+        </form>
+
+        <div id="list-status" class="status" role="status"></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>任务</th>
+                <th>类型</th>
+                <th>站点 / 方案</th>
+                <th>市场</th>
+                <th>状态</th>
+                <th>结果</th>
+                <th>计数</th>
+                <th>更新时间</th>
+              </tr>
+            </thead>
+            <tbody id="task-rows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="detail-view" hidden>
+        <div class="page-head">
+          <div>
+            <a href="#/tasks" class="back">← 返回任务列表</a>
+            <h1 id="detail-title">任务详情</h1>
+          </div>
+          <div class="actions">
+            <button id="refresh-detail" type="button">刷新</button>
+            <a id="export-link" class="button-link" href="#" download>导出 zip</a>
+          </div>
+        </div>
+
+        <div id="detail-status" class="status" role="status"></div>
+        <div id="detail-meta" class="meta-grid"></div>
+        <div id="detail-counts" class="counts"></div>
+        <div id="detail-quality" class="panel"></div>
+
+        <div class="tabs" role="tablist">
+          <button type="button" class="tab active" data-kind="product">商品</button>
+          <button type="button" class="tab" data-kind="url">网址</button>
+        </div>
+        <div id="items-status" class="status" role="status"></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>URL</th>
+                <th>状态</th>
+                <th>失败分类</th>
+                <th>尝试</th>
+              </tr>
+            </thead>
+            <tbody id="item-rows"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="/static/app.js"></script>
+  </body>
+</html>
