@@ -88,6 +88,7 @@ R06 原先把所有 `validate_product` 原因都映射为 `EXCLUDED`。这会掩
 - 证据：
   - `app/tests/test_browser_actions.py`：本地追加型列表，两种推进各 6／6；schema 版本和静态 navigation 校验。
   - `experiments/d07/browser-listing/`：`scrapingcourse.com` 公开练习页，`load_more` 1 次点击后 24 条、`infinite_scroll` 2 次滚动后 36 条，均取前 15 个商品、15／15 有效（多次复跑，约 75–88 秒）。
+  - `experiments/d07/url-pagination-batch/`：5 个法国基准站的 URL 可寻址检查。`mapetitemercerie.com` 两页各 10／10（`?page=2`），`gaspardetleonie.com` 26／26（Shopify `rel=next`，第 2 页 2 条），`touchatou.fr` 22／22（`/page/2/`，第 2 页 2 条）；`atelier-leonie.fr` 单页 40、无下一页，`tissus.net` 静态无商品卡片、留待浏览器／API。全部静态、0 失败。
 
 ## 测试结果
 
@@ -103,7 +104,7 @@ python -m uv run --project experiments/framework-compare/scrapling `
 
 - **不是 D07 完成**：生产 `app` 执行器、任务账本、控制面、单实例锁、同进程 A20、单机跨进程租约、进程／目录资源回收、真实浏览器进程／profile 回收和两种有界浏览器推进已落地；跨进程资源配额、浏览器实例配额、虚拟列表／复杂内部滚动、跨机租约和自动化漂移修复仍未实现。
 - **可复用的改进**：字段错误与业务排除的分类已修正，并进入 R06 回归测试；`app` 控制面复用同一状态语义；租约和资源登记不改变对外任务状态；浏览器挑战壳要按渲染后的最终状态判断，不能只看首个 HTTP 响应。
-- **下一步优先级**：先对新的无限滚动／加载更多站做 URL 可寻址检查；再补虚拟列表、复杂内部滚动、浏览器实例配额和跨进程资源配额。D08 控制界面不得早于这些结论。
+- **下一步优先级**：URL 可寻址检查已覆盖 `ecolaines` 与 5 个法国基准站；接下来补虚拟列表、复杂内部滚动、浏览器实例配额和跨进程资源配额，并对 `tissus.net` 这类 JS／API 列表做浏览器或公开 API 验证。D08 控制界面不得早于这些结论。
 
 ## 限制
 

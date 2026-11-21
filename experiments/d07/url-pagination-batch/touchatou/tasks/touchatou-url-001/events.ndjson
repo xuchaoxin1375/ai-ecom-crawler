@@ -1,0 +1,27 @@
+{"ts": "2026-11-21T15:50:19Z", "event": "task_reconciled", "in_flight": 0, "reset": 0, "failed": 0, "orphan_files_removed": 0, "stale_result": false, "corrupt_product_lines": 0, "uncommitted_product_lines": 0}
+{"ts": "2026-11-21T15:50:19Z", "event": "task_started", "task_type": "product", "plan_id": "touchatou-url-pages"}
+{"ts": "2026-11-21T15:50:23Z", "event": "item_finished", "item_type": "navigation", "url": "https://touchatou.fr/categorie-produit/tissus-de-noel/", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:50:26Z", "event": "item_finished", "item_type": "product", "url": "https://touchatou.fr/boutique/tissu-ameublement-ecossais-ambar/", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:50:27Z", "event": "item_finished", "item_type": "product", "url": "https://touchatou.fr/boutique/tissu-ameublement-ecossais-escocia-lurex/", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:50:29Z", "event": "item_finished", "item_type": "product", "url": "https://touchatou.fr/boutique/carre-de-tissu-jacquard-couronne-de-noel-47-x-47-cm/", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:50:31Z", "event": "item_finished", "item_type": "product", "url": "https://touchatou.fr/boutique/carre-de-tissu-velours-noel-northpole-45x50-cm/", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:50:33Z", "event": "item_finished", "item_type": "product", "url": "https://touchatou.fr/boutique/carre-de-tissu-velours-noel-sauce-45x50-cm/", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:50:35Z", "event": "item_finished", "item_type": "product", "url": "https://touchatou.fr/boutique/carre-de-tissu-velours-noel-buddy-45x50-cm/", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:50:38Z", "event": "item_finished", "item_type": "product", "url": "https://touchatou.fr/boutique/carre-de-tissu-velours-noel-neolon-45x50-cm/", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:50:40Z", "event": "item_finished", "item_type": "product", "url": "https://touchatou.fr/boutique/carre-de-tissu-velours-noel-zafira-45x50-cm/", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:50:41Z", "event": "item_finished", "item_type": "product", "url": "https://touchatou.fr/boutique/carre-de-tissu-velours-noel-liro-45x50-cm/", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:50:43Z", "event": "item_finished", "item_type": "product", "url": "https://touchatou.fr/boutique/tissu-calendrier-de-lavent-elan-blanc-a-confectionner/", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:50:45Z", "event": "item_finished", "item_type": "product", "url": "https://touchatou.fr/boutique/tissu-noel-ville/", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:50:47Z", "event": "item_finished", "item_type": "product", "url": "https://touchatou.fr/boutique/tissu-noel-avion/", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:50:49Z", "event": "item_finished", "item_type": "product", "url": "https://touchatou.fr/boutique/tissu-lutins/", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:50:52Z", "event": "item_finished", "item_type": "product", "url": "https://touchatou.fr/boutique/tissu-koala-givre/", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:50:54Z", "event": "item_finished", "item_type": "product", "url": "https://touchatou.fr/boutique/tissu-village-enneige/", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:50:56Z", "event": "item_finished", "item_type": "product", "url": "https://touchatou.fr/boutique/tissu-pingouins/", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:50:58Z", "event": "item_finished", "item_type": "product", "url": "https://touchatou.fr/boutique/tissu-joulua/", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:51:00Z", "event": "item_finished", "item_type": "product", "url": "https://touchatou.fr/boutique/tissu-pain-depices/", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:51:02Z", "event": "item_finished", "item_type": "product", "url": "https://touchatou.fr/boutique/tissu-sweat-de-noel-nounours-etoile/", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:51:04Z", "event": "item_finished", "item_type": "product", "url": "https://touchatou.fr/boutique/tissu-sweat-de-noel-petit-renne/", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:51:06Z", "event": "item_finished", "item_type": "navigation", "url": "https://touchatou.fr/categorie-produit/tissus-de-noel/page/2/", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:51:08Z", "event": "item_finished", "item_type": "product", "url": "https://touchatou.fr/boutique/tissu-noel-ecossais/", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:51:10Z", "event": "item_finished", "item_type": "product", "url": "https://touchatou.fr/boutique/tissu-de-noel-nicolas-jacquard-pere-noel/", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:51:10Z", "event": "task_finished", "state": "FINISHED", "outcome": "COMPLETED", "stop_reason": "NATURAL_END"}

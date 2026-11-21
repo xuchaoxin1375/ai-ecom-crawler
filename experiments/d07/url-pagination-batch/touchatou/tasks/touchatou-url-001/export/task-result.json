@@ -1,0 +1,264 @@
+{
+  "task_id": "touchatou-url-001",
+  "task_type": "product",
+  "plan_id": "touchatou-url-pages",
+  "plan_version": "2026.11.21-1",
+  "market": "FR",
+  "locale": "fr-FR",
+  "state": "FINISHED",
+  "outcome": "COMPLETED",
+  "stop_reason": "NATURAL_END",
+  "started_at": "2026-11-21T15:50:19Z",
+  "finished_at": "2026-11-21T15:51:10Z",
+  "counts": {
+    "discovered_urls": 24,
+    "pending_navigation_entries": 0,
+    "product_candidates": 22,
+    "pending_products": 0,
+    "in_flight_products": 0,
+    "processed_products": 22,
+    "valid_products": 22,
+    "excluded_products": 0,
+    "failed_products": 0,
+    "partial_description_products": 0
+  },
+  "coverage": {
+    "status": "PARTIAL",
+    "denominator_source": "declared-source product candidates",
+    "denominator": 22,
+    "covered": 22,
+    "notes": "Bounded sample from one entry page; not full-site coverage."
+  },
+  "business_acceptance": {
+    "status": "NOT_REVIEWED",
+    "accepted_by": null,
+    "accepted_at": null,
+    "reason": "R06 runtime prototype; no business sign-off yet.",
+    "scope": "discovery sources declared by the rule"
+  },
+  "quality_exceptions": [
+    {
+      "source_url": "https://touchatou.fr/boutique/carre-de-tissu-jacquard-couronne-de-noel-47-x-47-cm/",
+      "description_status": "SUMMARY_FALLBACK",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED",
+        "description_html": "SUMMARY_FALLBACK"
+      }
+    },
+    {
+      "source_url": "https://touchatou.fr/boutique/carre-de-tissu-velours-noel-buddy-45x50-cm/",
+      "description_status": "SUMMARY_FALLBACK",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED",
+        "description_html": "SUMMARY_FALLBACK"
+      }
+    },
+    {
+      "source_url": "https://touchatou.fr/boutique/carre-de-tissu-velours-noel-liro-45x50-cm/",
+      "description_status": "SUMMARY_FALLBACK",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED",
+        "description_html": "SUMMARY_FALLBACK"
+      }
+    },
+    {
+      "source_url": "https://touchatou.fr/boutique/carre-de-tissu-velours-noel-neolon-45x50-cm/",
+      "description_status": "SUMMARY_FALLBACK",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED",
+        "description_html": "SUMMARY_FALLBACK"
+      }
+    },
+    {
+      "source_url": "https://touchatou.fr/boutique/carre-de-tissu-velours-noel-northpole-45x50-cm/",
+      "description_status": "SUMMARY_FALLBACK",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED",
+        "description_html": "SUMMARY_FALLBACK"
+      }
+    },
+    {
+      "source_url": "https://touchatou.fr/boutique/carre-de-tissu-velours-noel-sauce-45x50-cm/",
+      "description_status": "SUMMARY_FALLBACK",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED",
+        "description_html": "SUMMARY_FALLBACK"
+      }
+    },
+    {
+      "source_url": "https://touchatou.fr/boutique/carre-de-tissu-velours-noel-zafira-45x50-cm/",
+      "description_status": "SUMMARY_FALLBACK",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED",
+        "description_html": "SUMMARY_FALLBACK"
+      }
+    },
+    {
+      "source_url": "https://touchatou.fr/boutique/tissu-ameublement-ecossais-ambar/",
+      "description_status": "SUMMARY_FALLBACK",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED",
+        "description_html": "SUMMARY_FALLBACK"
+      }
+    },
+    {
+      "source_url": "https://touchatou.fr/boutique/tissu-ameublement-ecossais-escocia-lurex/",
+      "description_status": "SUMMARY_FALLBACK",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED",
+        "description_html": "SUMMARY_FALLBACK"
+      }
+    },
+    {
+      "source_url": "https://touchatou.fr/boutique/tissu-calendrier-de-lavent-elan-blanc-a-confectionner/",
+      "description_status": "SUMMARY_FALLBACK",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED",
+        "category": "NOT_FOUND",
+        "description_html": "SUMMARY_FALLBACK"
+      }
+    },
+    {
+      "source_url": "https://touchatou.fr/boutique/tissu-de-noel-nicolas-jacquard-pere-noel/",
+      "description_status": "SUMMARY_FALLBACK",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED",
+        "category": "NOT_FOUND",
+        "description_html": "SUMMARY_FALLBACK"
+      }
+    },
+    {
+      "source_url": "https://touchatou.fr/boutique/tissu-joulua/",
+      "description_status": "SUMMARY_FALLBACK",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED",
+        "category": "NOT_FOUND",
+        "description_html": "SUMMARY_FALLBACK"
+      }
+    },
+    {
+      "source_url": "https://touchatou.fr/boutique/tissu-koala-givre/",
+      "description_status": "SUMMARY_FALLBACK",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED",
+        "category": "NOT_FOUND",
+        "description_html": "SUMMARY_FALLBACK"
+      }
+    },
+    {
+      "source_url": "https://touchatou.fr/boutique/tissu-lutins/",
+      "description_status": "SUMMARY_FALLBACK",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED",
+        "category": "NOT_FOUND",
+        "description_html": "SUMMARY_FALLBACK"
+      }
+    },
+    {
+      "source_url": "https://touchatou.fr/boutique/tissu-noel-avion/",
+      "description_status": "SUMMARY_FALLBACK",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED",
+        "category": "NOT_FOUND",
+        "description_html": "SUMMARY_FALLBACK"
+      }
+    },
+    {
+      "source_url": "https://touchatou.fr/boutique/tissu-noel-ecossais/",
+      "description_status": "SUMMARY_FALLBACK",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED",
+        "category": "NOT_FOUND",
+        "description_html": "SUMMARY_FALLBACK"
+      }
+    },
+    {
+      "source_url": "https://touchatou.fr/boutique/tissu-noel-ville/",
+      "description_status": "SUMMARY_FALLBACK",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED",
+        "category": "NOT_FOUND",
+        "description_html": "SUMMARY_FALLBACK"
+      }
+    },
+    {
+      "source_url": "https://touchatou.fr/boutique/tissu-pain-depices/",
+      "description_status": "SUMMARY_FALLBACK",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED",
+        "category": "NOT_FOUND",
+        "description_html": "SUMMARY_FALLBACK"
+      }
+    },
+    {
+      "source_url": "https://touchatou.fr/boutique/tissu-pingouins/",
+      "description_status": "SUMMARY_FALLBACK",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED",
+        "category": "NOT_FOUND",
+        "description_html": "SUMMARY_FALLBACK"
+      }
+    },
+    {
+      "source_url": "https://touchatou.fr/boutique/tissu-sweat-de-noel-nounours-etoile/",
+      "description_status": "SUMMARY_FALLBACK",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED",
+        "category": "NOT_FOUND",
+        "description_html": "SUMMARY_FALLBACK"
+      }
+    },
+    {
+      "source_url": "https://touchatou.fr/boutique/tissu-sweat-de-noel-petit-renne/",
+      "description_status": "SUMMARY_FALLBACK",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED",
+        "category": "NOT_FOUND",
+        "description_html": "SUMMARY_FALLBACK"
+      }
+    },
+    {
+      "source_url": "https://touchatou.fr/boutique/tissu-village-enneige/",
+      "description_status": "SUMMARY_FALLBACK",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED",
+        "category": "NOT_FOUND",
+        "description_html": "SUMMARY_FALLBACK"
+      }
+    }
+  ],
+  "runtime": {
+    "llm_calls": 0,
+    "raw_pages_retained": false
+  },
+  "limitations": [
+    "Bounded to the declared discovery sources and limits; not full-site coverage.",
+    "Static HTML only; no browser rendering, login or access-control bypass.",
+    "Runtime LLM calls: 0; no raw page HTML is retained.",
+    "Benchmark French fabric site; bounded sample of a two-page category.",
+    "The theme provides load-more/infinite-scroll UI, but page 2 is a normal URL (/page/2/) linked by rel=next, so the static engine follows it.",
+    "Prices are the current per-10cm display; no tax, shipping or variant audit."
+  ]
+}

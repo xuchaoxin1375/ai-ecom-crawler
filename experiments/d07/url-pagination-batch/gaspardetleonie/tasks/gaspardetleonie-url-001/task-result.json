@@ -1,0 +1,501 @@
+{
+  "task_id": "gaspardetleonie-url-001",
+  "task_type": "product",
+  "plan_id": "gaspardetleonie-url-pages",
+  "plan_version": "2026.11.21-1",
+  "market": "FR",
+  "locale": "fr-FR",
+  "state": "FINISHED",
+  "outcome": "COMPLETED",
+  "stop_reason": "NATURAL_END",
+  "stop_detail": "entry-page sample exhausted",
+  "started_at": "2026-11-21T15:50:19Z",
+  "finished_at": "2026-11-21T15:50:58Z",
+  "counts": {
+    "navigation_urls": 2,
+    "discovered_urls": 28,
+    "product_candidates": 26,
+    "pending_products": 0,
+    "in_flight_products": 0,
+    "processed_products": 26,
+    "valid_products": 26,
+    "excluded_products": 0,
+    "failed_products": 0,
+    "partial_description_products": 0
+  },
+  "failure_classes": {
+    "transient": 0,
+    "permanent": 0,
+    "blocked": 0,
+    "unknown": 0
+  },
+  "recovery": {
+    "in_flight": 0,
+    "reset": 0,
+    "failed": 0,
+    "orphan_files_removed": 0,
+    "stale_result": false,
+    "corrupt_product_lines": 0,
+    "uncommitted_product_lines": 0
+  },
+  "coverage": {
+    "status": "PARTIAL",
+    "denominator_source": "declared-source product candidates",
+    "denominator": 26,
+    "covered": 26,
+    "notes": "Bounded sample from one entry page; not full-site coverage."
+  },
+  "business_acceptance": {
+    "status": "NOT_REVIEWED",
+    "accepted_by": null,
+    "accepted_at": null,
+    "reason": "R06 runtime prototype; no business sign-off yet.",
+    "scope": "discovery sources declared by the rule"
+  },
+  "quality_exceptions": [
+    {
+      "source_url": "https://www.gaspardetleonie.com/products/tissu-french-terry-gratte-coeurs-noirs-blanc-poppy-designed-for-you-vendu-x10cm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "category": "NOT_FOUND"
+      }
+    },
+    {
+      "source_url": "https://www.gaspardetleonie.com/products/tissu-popeline-de-coton-giada-rouge-bleu-vendu-x10cm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "category": "NOT_FOUND"
+      }
+    },
+    {
+      "source_url": "https://www.gaspardetleonie.com/products/tissu-popeline-de-coton-danyl-marron-rouge-vendu-x10cm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "category": "NOT_FOUND"
+      }
+    },
+    {
+      "source_url": "https://www.gaspardetleonie.com/products/tissu-popeline-de-coton-judelia-marron-rose-vendu-x10cm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "category": "NOT_FOUND"
+      }
+    },
+    {
+      "source_url": "https://www.gaspardetleonie.com/products/tissu-velours-milleraies-dima-bleu-vert-vendu-x10cm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "category": "NOT_FOUND"
+      }
+    },
+    {
+      "source_url": "https://www.gaspardetleonie.com/products/tissu-popeline-de-coton-stretch-rayures-rouge-blanc-vendu-x10cm-copie",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "category": "NOT_FOUND"
+      }
+    },
+    {
+      "source_url": "https://www.gaspardetleonie.com/products/tissu-popeline-de-coton-stretch-rayures-rose-blanc-vendu-x10cm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "category": "NOT_FOUND"
+      }
+    },
+    {
+      "source_url": "https://www.gaspardetleonie.com/products/tissu-popeline-de-coton-stretch-rayures-marine-blanc-vendu-x10cm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "category": "NOT_FOUND"
+      }
+    },
+    {
+      "source_url": "https://www.gaspardetleonie.com/products/tissu-polaire-jacquard-big-apples-ecru-citrouille-vendu-x10cm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "category": "NOT_FOUND"
+      }
+    },
+    {
+      "source_url": "https://www.gaspardetleonie.com/products/tissu-popeline-de-coton-rayures-bleu-ciel-blanc-vendu-x10cm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "category": "NOT_FOUND"
+      }
+    },
+    {
+      "source_url": "https://www.gaspardetleonie.com/products/tissu-doudoune-matelasse-double-uni-bordeaux-vendu-x10cm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "category": "NOT_FOUND"
+      }
+    },
+    {
+      "source_url": "https://www.gaspardetleonie.com/products/tissu-doudoune-matelasse-double-uni-kaki-vendu-x10cm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "category": "NOT_FOUND"
+      }
+    },
+    {
+      "source_url": "https://www.gaspardetleonie.com/products/tissu-coton-matelasse-fleuri-vendu-x10cm-3",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "category": "NOT_FOUND"
+      }
+    },
+    {
+      "source_url": "https://www.gaspardetleonie.com/products/tissu-coton-matelasse-fleuri-vendu-x10cm-2",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "category": "NOT_FOUND"
+      }
+    },
+    {
+      "source_url": "https://www.gaspardetleonie.com/products/tissu-coton-matelasse-fleuri-vendu-x10cm-1",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "category": "NOT_FOUND"
+      }
+    },
+    {
+      "source_url": "https://www.gaspardetleonie.com/products/tissu-coton-matelasse-fleuri-vendu-x10cm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "category": "NOT_FOUND"
+      }
+    },
+    {
+      "source_url": "https://www.gaspardetleonie.com/products/tissu-polaire-teddy-leopard-ecru-vendu-x10cm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "category": "NOT_FOUND"
+      }
+    },
+    {
+      "source_url": "https://www.gaspardetleonie.com/products/tissu-doudoune-matelasse-double-pois-blanc-noir-vendu-x10cm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "category": "NOT_FOUND"
+      }
+    },
+    {
+      "source_url": "https://www.gaspardetleonie.com/products/tissu-doudoune-matelasse-double-leopard-brun-beige-vendu-x10cm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "category": "NOT_FOUND"
+      }
+    },
+    {
+      "source_url": "https://www.gaspardetleonie.com/products/tissu-doudoune-matelasse-double-vichy-orange-mauve-vendu-x10cm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "category": "NOT_FOUND"
+      }
+    },
+    {
+      "source_url": "https://www.gaspardetleonie.com/products/tissu-flanelle-de-coton-tartan-bleu-marine-vendu-x10cm-1",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "category": "NOT_FOUND"
+      }
+    },
+    {
+      "source_url": "https://www.gaspardetleonie.com/products/tissu-flanelle-de-coton-tartan-vendu-x10cm-6",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "category": "NOT_FOUND"
+      }
+    },
+    {
+      "source_url": "https://www.gaspardetleonie.com/products/tissu-flanelle-de-coton-tartan-vert-olive-rouillevendu-x10cm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "category": "NOT_FOUND"
+      }
+    },
+    {
+      "source_url": "https://www.gaspardetleonie.com/products/tissu-flanelle-de-coton-tartan-bleu-rouge-ornage-vendu-x10cm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "category": "NOT_FOUND"
+      }
+    },
+    {
+      "source_url": "https://www.gaspardetleonie.com/products/tissu-flanelle-de-coton-tartan-bleu-vert-vendu-x10cm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "category": "NOT_FOUND"
+      }
+    },
+    {
+      "source_url": "https://www.gaspardetleonie.com/products/tissu-flanelle-de-coton-tartan-rouge-vert-vendu-x10cm",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "category": "NOT_FOUND"
+      }
+    }
+  ],
+  "pricing": {
+    "policy": "Choose the smaller public pretax/gross pair per docs/02.",
+    "products": [
+      {
+        "source_url": "https://www.gaspardetleonie.com/products/tissu-french-terry-gratte-coeurs-noirs-blanc-poppy-designed-for-you-vendu-x10cm",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 1.69,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://www.gaspardetleonie.com/products/tissu-popeline-de-coton-giada-rouge-bleu-vendu-x10cm",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 1.19,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://www.gaspardetleonie.com/products/tissu-popeline-de-coton-danyl-marron-rouge-vendu-x10cm",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 0.99,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://www.gaspardetleonie.com/products/tissu-popeline-de-coton-judelia-marron-rose-vendu-x10cm",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 1.19,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://www.gaspardetleonie.com/products/tissu-velours-milleraies-dima-bleu-vert-vendu-x10cm",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 1.39,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://www.gaspardetleonie.com/products/tissu-popeline-de-coton-stretch-rayures-rouge-blanc-vendu-x10cm-copie",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 1.19,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://www.gaspardetleonie.com/products/tissu-popeline-de-coton-stretch-rayures-rose-blanc-vendu-x10cm",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 1.19,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://www.gaspardetleonie.com/products/tissu-popeline-de-coton-stretch-rayures-marine-blanc-vendu-x10cm",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 1.19,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://www.gaspardetleonie.com/products/tissu-polaire-jacquard-big-apples-ecru-citrouille-vendu-x10cm",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 1.79,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://www.gaspardetleonie.com/products/tissu-popeline-de-coton-rayures-bleu-ciel-blanc-vendu-x10cm",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 1.19,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://www.gaspardetleonie.com/products/tissu-doudoune-matelasse-double-uni-bordeaux-vendu-x10cm",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 1.89,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://www.gaspardetleonie.com/products/tissu-doudoune-matelasse-double-uni-kaki-vendu-x10cm",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 1.89,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://www.gaspardetleonie.com/products/tissu-coton-matelasse-fleuri-vendu-x10cm-3",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 1.99,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://www.gaspardetleonie.com/products/tissu-coton-matelasse-fleuri-vendu-x10cm-2",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 1.99,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://www.gaspardetleonie.com/products/tissu-coton-matelasse-fleuri-vendu-x10cm-1",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 1.99,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://www.gaspardetleonie.com/products/tissu-coton-matelasse-fleuri-vendu-x10cm",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 1.99,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://www.gaspardetleonie.com/products/tissu-polaire-teddy-leopard-ecru-vendu-x10cm",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 1.39,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://www.gaspardetleonie.com/products/tissu-doudoune-matelasse-double-pois-blanc-noir-vendu-x10cm",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 2.19,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://www.gaspardetleonie.com/products/tissu-doudoune-matelasse-double-leopard-brun-beige-vendu-x10cm",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 1.89,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://www.gaspardetleonie.com/products/tissu-doudoune-matelasse-double-vichy-orange-mauve-vendu-x10cm",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 1.89,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://www.gaspardetleonie.com/products/tissu-flanelle-de-coton-tartan-bleu-marine-vendu-x10cm-1",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 1.39,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://www.gaspardetleonie.com/products/tissu-flanelle-de-coton-tartan-vendu-x10cm-6",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 1.19,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://www.gaspardetleonie.com/products/tissu-flanelle-de-coton-tartan-vert-olive-rouillevendu-x10cm",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 1.39,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://www.gaspardetleonie.com/products/tissu-flanelle-de-coton-tartan-bleu-rouge-ornage-vendu-x10cm",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 1.39,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://www.gaspardetleonie.com/products/tissu-flanelle-de-coton-tartan-bleu-vert-vendu-x10cm",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 1.39,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://www.gaspardetleonie.com/products/tissu-flanelle-de-coton-tartan-rouge-vert-vendu-x10cm",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 1.39,
+        "basis": "unspecified"
+      }
+    ]
+  },
+  "runtime": {
+    "executor": "r06-runtime/0.3",
+    "llm_calls": 0,
+    "raw_pages_retained": false,
+    "http_engine": "scrapling.FetcherSession (curl_cffi, static HTML)",
+    "fetch_engines": [
+      "static"
+    ],
+    "browser": {
+      "launched": false,
+      "headless": null,
+      "binary": null,
+      "version": null,
+      "pid": null,
+      "profile": null
+    }
+  },
+  "access": {
+    "entry_url": "https://www.gaspardetleonie.com/collections/tissus",
+    "sources": [
+      "listing"
+    ],
+    "robots_url": "",
+    "robots_status": 0,
+    "robots_sitemaps": [],
+    "robots_policy": "sitemap_line_only",
+    "delay_ms": 1000,
+    "max_products": 26,
+    "max_urls": 100,
+    "max_seconds": 240,
+    "max_attempts": 2,
+    "browser_launched": false,
+    "login_used": false
+  },
+  "resources": {
+    "browser_launched": false,
+    "browser_pid": null,
+    "browser_profile": null,
+    "processes": [],
+    "orphan_files_removed": 0
+  },
+  "limitations": [
+    "Bounded to the declared discovery sources and limits; not full-site coverage.",
+    "Static HTML only; no browser rendering, login or access-control bypass.",
+    "Runtime LLM calls: 0; no raw page HTML is retained.",
+    "Benchmark French fabric site; bounded sample of the first two collection pages.",
+    "Shopify collection exposes pagination metadata and ?page=N, so the rule follows link[rel=next] instead of scrolling.",
+    "Prices are the site's current per-10cm display; no variant, shipping or tax audit."
+  ]
+}

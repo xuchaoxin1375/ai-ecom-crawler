@@ -1,0 +1,261 @@
+{
+  "task_id": "mapetitemercerie-url-004",
+  "task_type": "product",
+  "plan_id": "mapetitemercerie-url-pages",
+  "plan_version": "2026.11.21-1",
+  "market": "FR",
+  "locale": "fr-FR",
+  "state": "FINISHED",
+  "outcome": "COMPLETED",
+  "stop_reason": "NATURAL_END",
+  "stop_detail": "entry-page sample exhausted",
+  "started_at": "2026-11-21T15:51:35Z",
+  "finished_at": "2026-11-21T15:51:55Z",
+  "counts": {
+    "navigation_urls": 2,
+    "discovered_urls": 12,
+    "product_candidates": 10,
+    "pending_products": 0,
+    "in_flight_products": 0,
+    "processed_products": 10,
+    "valid_products": 10,
+    "excluded_products": 0,
+    "failed_products": 0,
+    "partial_description_products": 1
+  },
+  "failure_classes": {
+    "transient": 0,
+    "permanent": 0,
+    "blocked": 0,
+    "unknown": 0
+  },
+  "recovery": {
+    "in_flight": 0,
+    "reset": 0,
+    "failed": 0,
+    "orphan_files_removed": 0,
+    "stale_result": false,
+    "corrupt_product_lines": 0,
+    "uncommitted_product_lines": 0
+  },
+  "coverage": {
+    "status": "PARTIAL",
+    "denominator_source": "declared-source product candidates",
+    "denominator": 10,
+    "covered": 10,
+    "notes": "Bounded sample from one entry page; not full-site coverage."
+  },
+  "business_acceptance": {
+    "status": "NOT_REVIEWED",
+    "accepted_by": null,
+    "accepted_at": null,
+    "reason": "R06 runtime prototype; no business sign-off yet.",
+    "scope": "discovery sources declared by the rule"
+  },
+  "quality_exceptions": [
+    {
+      "source_url": "https://www.mapetitemercerie.com/fr/fourrure-mouton/115618-fourrure-mouton-sherpa-x-10cm.html",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED"
+      }
+    },
+    {
+      "source_url": "https://www.mapetitemercerie.com/fr/unie/113143-tissu-doublure-acetate.html",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED"
+      }
+    },
+    {
+      "source_url": "https://www.mapetitemercerie.com/fr/tissu-flanelle-et-gratte/85645-tissu-flanelle-douceur-x-10cm.html",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED"
+      }
+    },
+    {
+      "source_url": "https://www.mapetitemercerie.com/fr/double-gaze-floquee/74567-tissu-double-gaze-de-coton-pois-dore.html",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED"
+      }
+    },
+    {
+      "source_url": "https://www.mapetitemercerie.com/fr/tissu-minky/94092-tissu-velours-minky-doux-relief-a-pois-eva-x-10cm.html",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED"
+      }
+    },
+    {
+      "source_url": "https://www.mapetitemercerie.com/fr/glitter-paillette-lame/88957-tissu-velours-sequins-brodes-jenny-x-10cm.html",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED"
+      }
+    },
+    {
+      "source_url": "https://www.mapetitemercerie.com/fr/popeline-motifs/98769-tissu-popeline-de-coton-vichy-suzy-x-10cm.html",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED"
+      }
+    },
+    {
+      "source_url": "https://www.mapetitemercerie.com/fr/popeline-motifs/98793-tissu-popeline-de-coton-vichy-july-x-10cm.html",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED"
+      }
+    },
+    {
+      "source_url": "https://www.mapetitemercerie.com/fr/fourrure-mouton/121094-tissu-fourrure-sherpa-retro-ecru.html",
+      "description_status": "complete",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED"
+      }
+    },
+    {
+      "source_url": "https://www.mapetitemercerie.com/fr/dentelle/119822-tissu-dentelle-stretch-alice.html",
+      "description_status": "partial",
+      "partial_reason": "Fallback description container used; the full description was not available.",
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED"
+      }
+    }
+  ],
+  "pricing": {
+    "policy": "Choose the smaller public pretax/gross pair per docs/02.",
+    "products": [
+      {
+        "source_url": "https://www.mapetitemercerie.com/fr/fourrure-mouton/115618-fourrure-mouton-sherpa-x-10cm.html",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 0.98,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://www.mapetitemercerie.com/fr/unie/113143-tissu-doublure-acetate.html",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 0.58,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://www.mapetitemercerie.com/fr/tissu-flanelle-et-gratte/85645-tissu-flanelle-douceur-x-10cm.html",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 0.98,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://www.mapetitemercerie.com/fr/double-gaze-floquee/74567-tissu-double-gaze-de-coton-pois-dore.html",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 0.98,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://www.mapetitemercerie.com/fr/tissu-minky/94092-tissu-velours-minky-doux-relief-a-pois-eva-x-10cm.html",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 0.89,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://www.mapetitemercerie.com/fr/glitter-paillette-lame/88957-tissu-velours-sequins-brodes-jenny-x-10cm.html",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 1.98,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://www.mapetitemercerie.com/fr/popeline-motifs/98769-tissu-popeline-de-coton-vichy-suzy-x-10cm.html",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 1.02,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://www.mapetitemercerie.com/fr/popeline-motifs/98793-tissu-popeline-de-coton-vichy-july-x-10cm.html",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 1.02,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://www.mapetitemercerie.com/fr/fourrure-mouton/121094-tissu-fourrure-sherpa-retro-ecru.html",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 1.69,
+        "basis": "unspecified"
+      },
+      {
+        "source_url": "https://www.mapetitemercerie.com/fr/dentelle/119822-tissu-dentelle-stretch-alice.html",
+        "displayed": null,
+        "pretax": null,
+        "chosen": 0.82,
+        "basis": "unspecified"
+      }
+    ]
+  },
+  "runtime": {
+    "executor": "r06-runtime/0.3",
+    "llm_calls": 0,
+    "raw_pages_retained": false,
+    "http_engine": "scrapling.FetcherSession (curl_cffi, static HTML)",
+    "fetch_engines": [
+      "static"
+    ],
+    "browser": {
+      "launched": false,
+      "headless": null,
+      "binary": null,
+      "version": null,
+      "pid": null,
+      "profile": null
+    }
+  },
+  "access": {
+    "entry_url": "https://www.mapetitemercerie.com/fr/1499-tissus-mode",
+    "sources": [
+      "listing"
+    ],
+    "robots_url": "",
+    "robots_status": 0,
+    "robots_sitemaps": [],
+    "robots_policy": "sitemap_line_only",
+    "delay_ms": 1000,
+    "max_products": 10,
+    "max_urls": 100,
+    "max_seconds": 180,
+    "max_attempts": 2,
+    "browser_launched": false,
+    "login_used": false
+  },
+  "resources": {
+    "browser_launched": false,
+    "browser_pid": null,
+    "browser_profile": null,
+    "processes": [],
+    "orphan_files_removed": 0
+  },
+  "limitations": [
+    "Bounded to the declared discovery sources and limits; not full-site coverage.",
+    "Static HTML only; no browser rendering, login or access-control bypass.",
+    "Runtime LLM calls: 0; no raw page HTML is retained.",
+    "Benchmark French fabric site; bounded sample of the first two category pages.",
+    "PrestaShop listing exposes ?page=N; product cards also carry variant URLs, so the scope keeps only the base product URL (one number before the slug).",
+    "Prices are the site's current TTC display; no shipping or variant audit."
+  ]
+}

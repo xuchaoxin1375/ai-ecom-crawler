@@ -1,0 +1,15 @@
+{"ts": "2026-11-21T15:51:35Z", "event": "task_reconciled", "in_flight": 0, "reset": 0, "failed": 0, "orphan_files_removed": 0, "stale_result": false, "corrupt_product_lines": 0, "uncommitted_product_lines": 0}
+{"ts": "2026-11-21T15:51:35Z", "event": "task_started", "task_type": "product", "plan_id": "mapetitemercerie-url-pages"}
+{"ts": "2026-11-21T15:51:39Z", "event": "item_finished", "item_type": "navigation", "url": "https://www.mapetitemercerie.com/fr/1499-tissus-mode", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:51:40Z", "event": "item_finished", "item_type": "product", "url": "https://www.mapetitemercerie.com/fr/fourrure-mouton/115618-fourrure-mouton-sherpa-x-10cm.html", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:51:42Z", "event": "item_finished", "item_type": "product", "url": "https://www.mapetitemercerie.com/fr/unie/113143-tissu-doublure-acetate.html", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:51:43Z", "event": "item_finished", "item_type": "product", "url": "https://www.mapetitemercerie.com/fr/tissu-flanelle-et-gratte/85645-tissu-flanelle-douceur-x-10cm.html", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:51:44Z", "event": "item_finished", "item_type": "product", "url": "https://www.mapetitemercerie.com/fr/double-gaze-floquee/74567-tissu-double-gaze-de-coton-pois-dore.html", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:51:46Z", "event": "item_finished", "item_type": "product", "url": "https://www.mapetitemercerie.com/fr/tissu-minky/94092-tissu-velours-minky-doux-relief-a-pois-eva-x-10cm.html", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:51:47Z", "event": "item_finished", "item_type": "product", "url": "https://www.mapetitemercerie.com/fr/glitter-paillette-lame/88957-tissu-velours-sequins-brodes-jenny-x-10cm.html", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:51:49Z", "event": "item_finished", "item_type": "product", "url": "https://www.mapetitemercerie.com/fr/popeline-motifs/98769-tissu-popeline-de-coton-vichy-suzy-x-10cm.html", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:51:50Z", "event": "item_finished", "item_type": "product", "url": "https://www.mapetitemercerie.com/fr/popeline-motifs/98793-tissu-popeline-de-coton-vichy-july-x-10cm.html", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:51:52Z", "event": "item_finished", "item_type": "product", "url": "https://www.mapetitemercerie.com/fr/fourrure-mouton/121094-tissu-fourrure-sherpa-retro-ecru.html", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:51:53Z", "event": "item_finished", "item_type": "product", "url": "https://www.mapetitemercerie.com/fr/dentelle/119822-tissu-dentelle-stretch-alice.html", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:51:55Z", "event": "item_finished", "item_type": "navigation", "url": "https://www.mapetitemercerie.com/fr/1499-tissus-mode?page=2", "state": "DONE", "failure_class": null}
+{"ts": "2026-11-21T15:51:55Z", "event": "task_finished", "state": "FINISHED", "outcome": "COMPLETED", "stop_reason": "NATURAL_END"}
