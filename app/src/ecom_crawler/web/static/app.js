@@ -124,6 +124,25 @@ const TASK_TYPE_LABELS = {
   discovery: "发现",
 };
 
+const DESCRIPTION_STATUS_LABELS = {
+  complete: "完整",
+  partial: "部分",
+  summary_fallback: "摘要回退",
+  not_provided: "未提供",
+  failed: "失败",
+};
+
+const MISSING_FIELD_LABELS = {
+  name: "名称",
+  price: "价格",
+  currency: "币种",
+  primary_image_url: "主图",
+  description: "描述",
+  category: "分类",
+  brand: "品牌",
+  availability: "库存",
+};
+
 const COVERAGE_LABELS = {
   KNOWN: "已知",
   PARTIAL: "部分",
@@ -487,10 +506,36 @@ function renderDetail(task) {
 
   const quality = Array.isArray(task.quality_exceptions) ? task.quality_exceptions : [];
   document.querySelector("#detail-quality").innerHTML = quality.length
-    ? `<h2>质量异常</h2><ul>${quality
-        .map((item) => `<li><code>${escapeHtml(JSON.stringify(item))}</code></li>`)
+    ? `<h2>质量异常</h2><ul class="quality-list">${quality
+        .map((item) => renderQualityItem(item))
         .join("")}</ul>`
     : `<h2>质量异常</h2><p class="muted">无</p>`;
+}
+
+function renderQualityItem(item) {
+  if (!item || typeof item !== "object") {
+    return `<li><code>${escapeHtml(String(item))}</code></li>`;
+  }
+  const source = item.source_url
+    ? `<a href="${escapeHtml(item.source_url)}" target="_blank" rel="noreferrer">${escapeHtml(item.source_url)}</a>`
+    : "（来源未知）";
+  const status = labelFor(DESCRIPTION_STATUS_LABELS, item.description_status || "complete");
+  const partial = item.partial_reason
+    ? ` · 部分原因：${escapeHtml(item.partial_reason)}`
+    : "";
+  const missing = item.missing_reasons && typeof item.missing_reasons === "object"
+    ? Object.entries(item.missing_reasons)
+        .filter(([, value]) => value)
+        .map(([key, value]) => {
+          const label = MISSING_FIELD_LABELS[key] || key;
+          return `${escapeHtml(label)}：${escapeHtml(String(value))}`;
+        })
+    : [];
+  return `<li>
+    <div class="quality-source">${source}</div>
+    <div class="quality-meta">描述状态：${escapeHtml(status)}${partial}</div>
+    ${missing.length ? `<div class="quality-missing">缺失字段：${missing.join("；")}</div>` : ""}
+  </li>`;
 }
 
 async function loadItems(taskId, kind) {
