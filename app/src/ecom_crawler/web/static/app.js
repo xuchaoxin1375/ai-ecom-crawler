@@ -143,6 +143,13 @@ const MISSING_FIELD_LABELS = {
   availability: "库存",
 };
 
+const MISSING_REASON_LABELS = {
+  NOT_PROVIDED: "未提供",
+  UNKNOWN: "未知",
+  PARTIAL: "部分",
+  FAILED: "失败",
+};
+
 const COVERAGE_LABELS = {
   KNOWN: "已知",
   PARTIAL: "部分",
@@ -528,7 +535,8 @@ function renderQualityItem(item) {
         .filter(([, value]) => value)
         .map(([key, value]) => {
           const label = MISSING_FIELD_LABELS[key] || key;
-          return `${escapeHtml(label)}：${escapeHtml(String(value))}`;
+          const reason = labelFor(MISSING_REASON_LABELS, String(value));
+          return `${escapeHtml(label)}：${escapeHtml(reason)}`;
         })
     : [];
   return `<li>
