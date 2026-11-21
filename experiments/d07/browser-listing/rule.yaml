@@ -1,0 +1,161 @@
+schema_version: "1.2"
+rule_id: "scrapingcourse-load-more"
+rule_version: "2026.11.21-1"
+kind: declarative
+status: candidate
+
+site:
+  name: "ScrapingCourse Load More"
+  entry_urls: ["https://www.scrapingcourse.com/button-click"]
+  allowed_origins:
+    - "https://www.scrapingcourse.com"
+    - "https://scrapingcourse.com"
+  allowed_path_prefixes: ["/button-click", "/ecommerce/product/"]
+  market: "US"
+  locale: "en-US"
+  currency: "USD"
+
+scope:
+  include: ['^/ecommerce/product/']
+  exclude: ["/cart", "/checkout", "/my-account"]
+
+capabilities:
+  discovery: true
+  product: true
+
+discovery:
+  sources:
+    - type: listing
+      url: "https://www.scrapingcourse.com/button-click"
+      product_link_selector: '#product-grid a[href*="/ecommerce/product/"]'
+      advance:
+        type: load_more
+        button_selector: "#load-more-btn"
+        max_clicks: 1
+        settle_ms: 2000
+        no_new_stop: 1
+  product_url_patterns: ['^/ecommerce/product/[^/]+/?$']
+  url_identity: "canonical"
+
+fetch:
+  default_engine: "browser"
+  concurrency: 1
+  delay_ms: 1000
+  retry: {max_attempts: 2, backoff_ms: 1000}
+  timeout_ms: 45000
+  browser:
+    headless: true
+    disable_resources: true
+    wait_until: "domcontentloaded"
+  per_url_type:
+    navigation:
+      engine: "browser"
+      wait_selector: "#product-grid a.product-item, #product-grid a[href*='/ecommerce/product/']"
+      timeout_ms: 45000
+    product:
+      engine: "browser"
+      wait_selector: "h1.product_title"
+      timeout_ms: 45000
+  challenge_handling: "none; stop and record"
+
+extract:
+  fields:
+    name:
+      required: true
+      fallbacks:
+        - {type: json_ld, path: "name", label: "json_ld"}
+        - {type: css_text, selector: "h1.product_title", label: "h1"}
+    price.amount:
+      required: true
+      fallbacks:
+        - {type: json_ld, path: "offers.price", label: "json_ld", take: "min_positive"}
+        - {type: css_text, selector: "p.price", label: "price_text"}
+    price.currency:
+      required: true
+      fallbacks:
+        - {type: json_ld, path: "offers.priceCurrency", label: "json_ld"}
+    primary_image_url:
+      required: true
+      fallbacks:
+        - {type: json_ld, path: "image", label: "json_ld"}
+        - {type: css_attr, selector: 'meta[property="og:image"]', attr: "content", label: "og_image", absolute: true}
+    description_html:
+      required: false
+      fallbacks:
+        - {type: json_ld, path: "description", label: "json_ld", description_status: "fallback"}
+        - {type: css_html, selector: ".woocommerce-product-details__short-description", label: "short_description", description_status: "partial"}
+    category:
+      required: false
+      fallbacks:
+        - type: breadcrumb
+          selector: "nav.woocommerce-breadcrumb a"
+          label: "breadcrumb"
+          drop_last: true
+          exclude: ["Home"]
+    brand:
+      required: false
+      fallbacks:
+        - {type: json_ld, path: "brand.name", label: "json_ld"}
+    source_url:
+      required: true
+      fallbacks:
+        - {type: canonical, label: "canonical"}
+
+normalize:
+  price:
+    tax_basis: "EXCLUSIVE"
+    choose: "smaller_public_pair"
+    positive_only: true
+  description:
+    mode: "clean_html"
+    statuses: ["complete", "partial", "fallback", "not_provided", "failed"]
+  options:
+    exclude_quantity: true
+    strip_price_delta: true
+
+validate:
+  required_fields:
+    - "name"
+    - "price.amount"
+    - "price.currency"
+    - "primary_image_url"
+    - "source_url"
+  assertions:
+    - {field: "price.amount", op: ">", value: 0}
+    - {field: "price.currency", op: "matches", value: "^[A-Z]{3}$"}
+  partial_description: "allowed_with_flag"
+
+output:
+  url_list:
+    enabled: true
+    columns: ["url", "source", "status", "title"]
+    format: "csv"
+  product_csv:
+    enabled: true
+    columns: 9
+    format: "csv"
+  task_result: true
+
+task_defaults:
+  max_urls: 50
+  max_products: 15
+  max_seconds: 240
+  concurrency:
+    navigation: 1
+    product: 1
+
+compatibility:
+  os: ["windows", "linux", "wsl2"]
+  runtime: "python>=3.11"
+  dependencies: ["patchright==1.64.4", "scrapling==0.5.1"]
+  browser: "patchright CDP"
+
+evidence:
+  sample_urls: ["https://www.scrapingcourse.com/button-click"]
+  expected: []
+  verified_at: null
+  limitations:
+    - "Public scraping practice site; bounded load-more sample, not a production store."
+    - "The AJAX endpoint appends ten products per click; this rule clicks once and caps at 15 products."
+
+notes: "Browser load-more evidence: initial 12 cards, click appends 10, then product pages use WooCommerce JSON-LD."

@@ -14,6 +14,10 @@ from .models import FetchResult
 logger = logging.getLogger(__name__)
 
 
+class UnsupportedAdvanceError(RuntimeError):
+    """The selected fetch engine cannot perform a browser-only advance."""
+
+
 class DomainLimiter:
     """Serialize requests per domain across tasks in the same worker process."""
 
@@ -90,6 +94,18 @@ class ScraplingFetcher:
             return FetchResult(status=status, url=final_url, body=bytes(body))
         return FetchResult(status=0, url=url, error=last_error)
 
+    def get_listing(
+        self,
+        url: str,
+        *,
+        advance: dict[str, Any],
+        item_selector: str | None = None,
+        item_type: str | None = None,
+    ) -> FetchResult:
+        raise UnsupportedAdvanceError(
+            "load_more/infinite_scroll require a browser engine for the listing"
+        )
+
     def describe(self) -> dict[str, Any]:
         return {
             "engine": "static",
@@ -163,6 +179,28 @@ class HybridFetcher:
         engine = self._engine_for(item_type)
         fetcher = self._fetcher(engine)
         return fetcher.get(url, item_type=item_type)
+
+    def get_listing(
+        self,
+        url: str,
+        *,
+        advance: dict[str, Any],
+        item_selector: str | None = None,
+        item_type: str | None = None,
+    ) -> FetchResult:
+        engine = self._engine_for(item_type)
+        fetcher = self._fetcher(engine)
+        method = getattr(fetcher, "get_listing", None)
+        if not callable(method):
+            raise UnsupportedAdvanceError(
+                "load_more/infinite_scroll require a browser engine for the listing"
+            )
+        return method(
+            url,
+            advance=advance,
+            item_selector=item_selector,
+            item_type=item_type,
+        )
 
     def describe(self) -> dict[str, Any]:
         descriptions = {

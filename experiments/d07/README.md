@@ -76,6 +76,18 @@ R06 原先把所有 `validate_product` 原因都映射为 `EXCLUDED`。这会掩
   - `experiments/d07/browser-mercerine/`：mercerine 首页 503 壳渲染后 3／3（约 80 秒），一个浏览器会话复用 4 个请求。
   - `crash_test.py`：强杀 worker 后 Chromium 仍存活；租约过期后新 worker 接管，终止遗留 Chromium、删除 profile、资源表清空，任务重跑 1／1。
 
+## 2026-11-21 浏览器交互推进（load_more／infinite_scroll）
+
+`app` 在浏览器 fetcher 上增加两种有界推进，要求 `schema_version: "1.2"` 且 listing navigation 走浏览器。
+
+- `load_more`：`button_selector`、`max_clicks`、`settle_ms`、`no_new_stop`；点击后等条目数增加，按钮消失／禁用即停。
+- `infinite_scroll`：`container`、`mode`（`auto`／`scroll`／`wheel`）、`max_scrolls`、`settle_ms`、`no_new_stop`；滚动 window 或指定容器。
+- 只支持追加型列表：最终 DOM 保留前面条目；虚拟列表只保留最后一批，不能用该实现直接采全量。
+- 列表工作项结果记录 `advance.type`、`steps`、`items`、`stop`；最终 DOM 仍走现有链接发现和 scope 过滤。
+- 证据：
+  - `app/tests/test_browser_actions.py`：本地追加型列表，两种推进各 6／6；schema 版本和静态 navigation 校验。
+  - `experiments/d07/browser-listing/`：`scrapingcourse.com` 公开练习页，`load_more` 1 次点击后 24 条、`infinite_scroll` 2 次滚动后 36 条，均取前 15 个商品、15／15 有效（约 84／88 秒）。
+
 ## 测试结果
 
 ```powershell
@@ -84,19 +96,20 @@ python -m uv run --project experiments/framework-compare/scrapling `
   python -m unittest discover -s experiments/r06/tests -v
 ```
 
-结果：**83 个测试通过**，无 skip。覆盖原子写、契约、提取、运行时、重试、恢复、控制、并行、Schema 和新的字段分类。`app` 当前 **135 个测试通过**（含 8 个浏览器配置／路由／fixture 用例、4 个桥接状态用例和 1 个原子写用例），`ruff check app` 通过；真实浏览器用例在缺少 Chromium 的环境中会跳过，本机运行结果为通过。
+结果：**83 个测试通过**，无 skip。覆盖原子写、契约、提取、运行时、重试、恢复、控制、并行、Schema 和新的字段分类。`app` 当前 **139 个测试通过**（含 8 个浏览器配置／路由／fixture 用例、4 个 load_more／infinite_scroll 用例、4 个桥接状态用例和 1 个原子写用例），`ruff check app` 通过；真实浏览器用例在缺少 Chromium 的环境中会跳过，本机运行结果为通过。
 
 ## D07 结论
 
-- **不是 D07 完成**：生产 `app` 执行器、任务账本、控制面、单实例锁、同进程 A20、单机跨进程租约、进程／目录资源回收和真实浏览器进程／profile 回收已落地；跨进程资源配额、浏览器实例配额、交互式浏览器推进、跨机租约和自动化漂移修复仍未实现。
+- **不是 D07 完成**：生产 `app` 执行器、任务账本、控制面、单实例锁、同进程 A20、单机跨进程租约、进程／目录资源回收、真实浏览器进程／profile 回收和两种有界浏览器推进已落地；跨进程资源配额、浏览器实例配额、虚拟列表／复杂内部滚动、跨机租约和自动化漂移修复仍未实现。
 - **可复用的改进**：字段错误与业务排除的分类已修正，并进入 R06 回归测试；`app` 控制面复用同一状态语义；租约和资源登记不改变对外任务状态；浏览器挑战壳要按渲染后的最终状态判断，不能只看首个 HTTP 响应。
-- **下一步优先级**：补 load more／滚动等交互推进、浏览器实例配额和跨进程资源配额；D08 控制界面不得早于这些结论。
+- **下一步优先级**：补虚拟列表／复杂内部滚动、浏览器实例配额和跨进程资源配额；D08 控制界面不得早于这些结论。
 
 ## 限制
 
 - 现有真实站点控制证据来自 Tognar（静态）和 mercerine（浏览器），仍是单 worker、单机；不能代表多进程或浏览器池。
 - 浏览器证据是首页 3 个商品的有界样本，不是全站；headless 通过不代表挑战站长期稳定。
-- 浏览器 adapter v0 只渲染页面，不执行 load more、滚动或点击；浏览器实例配额和跨机回收未验证。
+- 浏览器 adapter 已支持渲染、任务级回收和追加型 `load_more`／`infinite_scroll`；虚拟列表、复杂内部滚动、浏览器实例配额和跨机回收未验证。
+- 浏览器交互证据来自公开练习页和本地 fixture，不是基准站或生产店铺；只有首页列表的有界样本。
 - R06 的 `RetryTests` 是 fixture 级，不覆盖真实 429 `Retry-After`、代理切换和会话复用。
 - A20 只验证了并行启动，没有验证一个任务暂停／取消时另一个任务的计数和输出不受影响。
 - 没有任务管理 API 或 Web UI，不能验证用户可见的取消、归档和恢复旅程；`app` 控制面目前是 CLI + SQLite，单 worker。

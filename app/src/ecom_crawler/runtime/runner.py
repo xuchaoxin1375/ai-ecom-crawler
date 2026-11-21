@@ -21,6 +21,7 @@ from ecom_crawler.executor.normalize import csv_safe, format_price
 from ecom_crawler.executor.runner import CSV_COLUMNS, build_record, discover_urls, validate_product
 
 from .atomic import append_jsonl, write_json, write_text
+from .fetcher import UnsupportedAdvanceError
 from .models import Lease, Task, WorkItem, utc_now
 from .rule import RulePackage
 from .store import LeaseLostError, TaskStore
@@ -311,7 +312,24 @@ class TaskRunner:
             futures.pop(future, None)
 
     def _process_item(self, item: WorkItem) -> tuple[str, dict[str, Any]]:
-        result = self.fetcher.get(item.url, item_type=item.item_type)
+        advance = item.result.get("advance", {}) if item.discovered_from == "listing" else {}
+        if advance.get("type") in {"load_more", "infinite_scroll"}:
+            get_listing = getattr(self.fetcher, "get_listing", None)
+            if not callable(get_listing):
+                return self._failure(item, "permanent", "unsupported_advance")
+            try:
+                result = get_listing(
+                    item.url,
+                    advance=advance,
+                    item_selector=item.result.get("link_selector"),
+                    item_type=item.item_type,
+                )
+            except UnsupportedAdvanceError as exc:
+                return self._failure(
+                    item, "permanent", "unsupported_advance", detail=str(exc)
+                )
+        else:
+            result = self.fetcher.get(item.url, item_type=item.item_type)
         if result.meta.get("challenge_suspected"):
             raise StopTask("ACCESS_DENIED", f"challenge page for {item.url}")
         if result.status == 0:
@@ -559,12 +577,16 @@ class TaskRunner:
                 parent=item.url,
                 result={**item.result, "page": next_page},
             )
-        return "DONE", {
+        payload: dict[str, Any] = {
             "links": len(urls),
             "added": added,
             "next": next_url,
             "stop": "no_new_items" if added == 0 else None,
         }
+        advance_stats = result.meta.get("advance")
+        if advance_stats:
+            payload["advance"] = advance_stats
+        return "DONE", payload
 
     def _next_listing_url(
         self, item: WorkItem, page: HtmlPage, advance: dict[str, Any]
