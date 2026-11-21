@@ -66,8 +66,26 @@ main {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 16px;
   margin-bottom: 16px;
+}
+
+.page-head > div {
+  min-width: 0;
+}
+
+.list-head {
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.list-head h1 {
+  margin: 0;
+}
+
+.list-head button {
+  margin-left: 4px;
 }
 
 h1 {
@@ -142,6 +160,10 @@ a:focus-visible {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.detail-controls {
+  margin-bottom: 4px;
 }
 
 .control-row button {
@@ -264,8 +286,15 @@ tr:last-child td {
 
 .actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
+  justify-content: flex-end;
+}
+
+.page-head .actions {
+  flex: 1 1 100%;
+  justify-content: flex-start;
 }
 
 .meta-grid {

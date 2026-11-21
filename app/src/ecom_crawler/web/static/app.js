@@ -367,7 +367,7 @@ function route() {
   } else {
     detailView.hidden = true;
     listView.hidden = false;
-    document.title = "采集任务 · 只读预览";
+    document.title = "采集任务 · 本地控制台";
     currentTaskId = null;
     loadRules();
     loadList();
