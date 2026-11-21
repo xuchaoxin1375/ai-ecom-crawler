@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import sqlite3
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from .models import Task, WorkItem, json_dumps, json_loads, utc_now
+from .models import Lease, Task, WorkItem, json_dumps, json_loads, utc_now
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS tasks (
@@ -24,6 +25,10 @@ CREATE TABLE IF NOT EXISTS tasks (
     market TEXT,
     rule_path TEXT,
     archived_at TEXT,
+    lease_owner TEXT,
+    lease_token INTEGER NOT NULL DEFAULT 0,
+    lease_expires_at REAL,
+    lease_heartbeat_at REAL,
     input_json TEXT NOT NULL,
     limits_json TEXT NOT NULL,
     output_json TEXT NOT NULL,
@@ -61,6 +66,20 @@ CREATE TABLE IF NOT EXISTS task_requests (
     request_json TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS task_resources (
+    task_id TEXT NOT NULL,
+    resource_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    pid INTEGER,
+    path TEXT,
+    lease_token INTEGER,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (task_id, resource_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_resources_task
+    ON task_resources(task_id);
 """
 
 TASK_COLUMNS = {
@@ -94,6 +113,10 @@ class RequestConflictError(ValueError):
     """Raised when an idempotency key is reused with a different request."""
 
 
+class LeaseLostError(ValueError):
+    """Raised when a worker tries to write after its task lease expired or moved."""
+
+
 class TaskStore:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
@@ -125,6 +148,24 @@ class TaskStore:
             for column in ("site_key", "domain_key", "market", "rule_path", "archived_at"):
                 if column not in task_columns:
                     connection.execute(f"ALTER TABLE tasks ADD COLUMN {column} TEXT")
+            if "lease_owner" not in task_columns:
+                connection.execute("ALTER TABLE tasks ADD COLUMN lease_owner TEXT")
+            if "lease_token" not in task_columns:
+                connection.execute(
+                    "ALTER TABLE tasks ADD COLUMN lease_token INTEGER NOT NULL DEFAULT 0"
+                )
+            if "lease_expires_at" not in task_columns:
+                connection.execute(
+                    "ALTER TABLE tasks ADD COLUMN lease_expires_at REAL"
+                )
+            if "lease_heartbeat_at" not in task_columns:
+                connection.execute(
+                    "ALTER TABLE tasks ADD COLUMN lease_heartbeat_at REAL"
+                )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_tasks_lease "
+                "ON tasks(state, lease_expires_at)"
+            )
             item_columns = {
                 row["name"]
                 for row in connection.execute("PRAGMA table_info(task_items)")
@@ -132,6 +173,14 @@ class TaskStore:
             if "failure_class" not in item_columns:
                 connection.execute(
                     "ALTER TABLE task_items ADD COLUMN failure_class TEXT"
+                )
+            resource_columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(task_resources)")
+            }
+            if "lease_token" not in resource_columns:
+                connection.execute(
+                    "ALTER TABLE task_resources ADD COLUMN lease_token INTEGER"
                 )
 
     def _insert_task(self, connection: sqlite3.Connection, task: Task) -> None:
@@ -236,7 +285,13 @@ class TaskStore:
             rows = connection.execute(query, params).fetchall()
         return [_task_from_row(row) for row in rows]
 
-    def update_task(self, task_id: str, **fields: Any) -> None:
+    def update_task(
+        self,
+        task_id: str,
+        *,
+        lease: Lease | None = None,
+        **fields: Any,
+    ) -> None:
         unknown = set(fields) - TASK_COLUMNS
         if unknown:
             raise ValueError(f"unknown task fields: {sorted(unknown)}")
@@ -253,11 +308,185 @@ class TaskStore:
             assignments.append("updated_at = ?")
             values.append(utc_now())
         values.append(task_id)
+        statement = f"UPDATE tasks SET {', '.join(assignments)} WHERE task_id = ?"
+        if lease is None:
+            with self._connect() as connection:
+                connection.execute(statement, values)
+            return
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                _require_lease(connection, lease)
+                connection.execute(statement, values)
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+
+    def claim_tasks(
+        self,
+        owner: str,
+        limit: int,
+        ttl_seconds: float,
+    ) -> list[tuple[Task, Lease]]:
+        """Atomically claim up to ``limit`` queued tasks for one worker.
+
+        Call :meth:`settle_expired_tasks` first so abandoned ``RUNNING`` tasks
+        are back in ``QUEUED``.  Each claim increments the task's fencing
+        token, which invalidates every older lease.
+        """
+        if limit < 1:
+            return []
+        now = time.time()
+        claimed_at = utc_now()
+        expires_at = now + max(float(ttl_seconds), 0.1)
+        claimed: list[tuple[Task, Lease]] = []
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                rows = connection.execute(
+                    """
+                    SELECT * FROM tasks
+                    WHERE archived_at IS NULL
+                      AND state = 'QUEUED'
+                      AND (
+                          lease_owner IS NULL
+                          OR lease_expires_at IS NULL
+                          OR lease_expires_at <= ?
+                      )
+                    ORDER BY created_at, task_id
+                    LIMIT ?
+                    """,
+                    (now, limit),
+                ).fetchall()
+                for row in rows:
+                    token = int(row["lease_token"] or 0) + 1
+                    cursor = connection.execute(
+                        """
+                        UPDATE tasks
+                        SET state = 'RUNNING',
+                            lease_owner = ?,
+                            lease_token = ?,
+                            lease_expires_at = ?,
+                            lease_heartbeat_at = ?,
+                            started_at = COALESCE(started_at, ?),
+                            updated_at = ?
+                        WHERE task_id = ?
+                          AND state = 'QUEUED'
+                          AND (
+                              lease_owner IS NULL
+                              OR lease_expires_at IS NULL
+                              OR lease_expires_at <= ?
+                          )
+                        """,
+                        (
+                            owner,
+                            token,
+                            expires_at,
+                            now,
+                            claimed_at,
+                            claimed_at,
+                            row["task_id"],
+                            now,
+                        ),
+                    )
+                    if cursor.rowcount != 1:
+                        continue
+                    fresh = connection.execute(
+                        "SELECT * FROM tasks WHERE task_id = ?",
+                        (row["task_id"],),
+                    ).fetchone()
+                    if fresh is None:
+                        continue
+                    claimed.append(
+                        (
+                            _task_from_row(fresh),
+                            Lease(
+                                task_id=str(row["task_id"]),
+                                owner=owner,
+                                token=token,
+                                expires_at=expires_at,
+                            ),
+                        )
+                    )
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+        return claimed
+
+    def check_lease(self, lease: Lease) -> bool:
+        with self._connect() as connection:
+            return _lease_valid(connection, lease)
+
+    def assert_lease(self, lease: Lease) -> None:
+        if not self.check_lease(lease):
+            raise LeaseLostError(
+                f"lease for task {lease.task_id} is no longer owned by {lease.owner}"
+            )
+
+    def renew_lease(self, lease: Lease, ttl_seconds: float) -> bool:
+        """Extend a lease; return False when the worker no longer owns it."""
+        now = time.time()
+        expires_at = now + max(float(ttl_seconds), 0.1)
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE tasks
+                SET lease_expires_at = ?,
+                    lease_heartbeat_at = ?
+                WHERE task_id = ?
+                  AND lease_owner = ?
+                  AND lease_token = ?
+                  AND lease_expires_at IS NOT NULL
+                  AND lease_expires_at > ?
+                  AND state IN ('RUNNING', 'PAUSING', 'CANCELLING')
+                """,
+                (
+                    expires_at,
+                    now,
+                    lease.task_id,
+                    lease.owner,
+                    lease.token,
+                    now,
+                ),
+            )
+            return cursor.rowcount == 1
+
+    def release_lease(self, lease: Lease) -> None:
+        """Release a lease without resetting the task's fencing token."""
         with self._connect() as connection:
             connection.execute(
-                f"UPDATE tasks SET {', '.join(assignments)} WHERE task_id = ?",
-                values,
+                """
+                UPDATE tasks
+                SET lease_owner = NULL,
+                    lease_expires_at = NULL,
+                    lease_heartbeat_at = NULL,
+                    updated_at = ?
+                WHERE task_id = ?
+                  AND lease_owner = ?
+                  AND lease_token = ?
+                """,
+                (utc_now(), lease.task_id, lease.owner, lease.token),
             )
+
+    def lease_info(self, task_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT lease_owner, lease_token, lease_expires_at, lease_heartbeat_at
+                FROM tasks WHERE task_id = ?
+                """,
+                (task_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "owner": row["lease_owner"],
+            "token": int(row["lease_token"] or 0),
+            "expires_at": row["lease_expires_at"],
+            "heartbeat_at": row["lease_heartbeat_at"],
+        }
 
     def request_start(self, task_id: str) -> Task:
         """Move a DRAFT task to QUEUED; repeated starts are idempotent."""
@@ -416,41 +645,59 @@ class TaskStore:
             raise TaskNotFoundError(f"unknown task: {task_id}")
         return task
 
-    def add_item(self, item: WorkItem) -> bool:
+    def add_item(self, item: WorkItem, *, lease: Lease | None = None) -> bool:
+        values = (
+            item.task_id,
+            item.item_id,
+            item.item_type,
+            item.url,
+            item.normalized_url,
+            item.stage,
+            item.state,
+            item.attempts,
+            item.failure_class,
+            item.parent_url,
+            item.discovered_from,
+            json_dumps(item.result),
+            item.updated_at,
+        )
+        statement = """
+            INSERT OR IGNORE INTO task_items (
+                task_id, item_id, item_type, url, normalized_url, stage,
+                state, attempts, failure_class, parent_url, discovered_from,
+                result_json, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        if lease is None:
+            with self._connect() as connection:
+                cursor = connection.execute(statement, values)
+                return cursor.rowcount == 1
         with self._connect() as connection:
-            cursor = connection.execute(
-                """
-                INSERT OR IGNORE INTO task_items (
-                    task_id, item_id, item_type, url, normalized_url, stage,
-                    state, attempts, failure_class, parent_url, discovered_from,
-                    result_json, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    item.task_id,
-                    item.item_id,
-                    item.item_type,
-                    item.url,
-                    item.normalized_url,
-                    item.stage,
-                    item.state,
-                    item.attempts,
-                    item.failure_class,
-                    item.parent_url,
-                    item.discovered_from,
-                    json_dumps(item.result),
-                    item.updated_at,
-                ),
-            )
-            return cursor.rowcount == 1
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                _require_lease(connection, lease)
+                cursor = connection.execute(statement, values)
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+        return cursor.rowcount == 1
 
-    def claim_items(self, task_id: str, limit: int) -> list[WorkItem]:
+    def claim_items(
+        self,
+        task_id: str,
+        limit: int,
+        *,
+        lease: Lease | None = None,
+    ) -> list[WorkItem]:
         if limit < 1:
             return []
         claimed: list[WorkItem] = []
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
+                if lease is not None:
+                    _require_lease(connection, lease)
                 rows = connection.execute(
                     """
                     SELECT * FROM task_items
@@ -488,128 +735,134 @@ class TaskStore:
         result: dict[str, Any] | None = None,
         *,
         failure_class: str | None = None,
+        lease: Lease | None = None,
     ) -> None:
-        with self._connect() as connection:
-            connection.execute(
-                """
-                UPDATE task_items
-                SET state = ?, failure_class = ?, result_json = ?, updated_at = ?
-                WHERE task_id = ? AND item_id = ?
-                """,
-                (
-                    state,
-                    failure_class,
-                    json_dumps(result or {}),
-                    utc_now(),
-                    task_id,
-                    item_id,
-                ),
-            )
-
-    def reconcile_task(self, task_id: str, max_attempts: int) -> dict[str, int]:
-        """Reset in-flight items after a crash; fail those out of attempts."""
-        max_attempts = max(int(max_attempts), 1)
+        values = (
+            state,
+            failure_class,
+            json_dumps(result or {}),
+            utc_now(),
+            task_id,
+            item_id,
+        )
+        statement = """
+            UPDATE task_items
+            SET state = ?, failure_class = ?, result_json = ?, updated_at = ?
+            WHERE task_id = ? AND item_id = ?
+        """
+        if lease is None:
+            with self._connect() as connection:
+                connection.execute(statement, values)
+            return
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
-                rows = connection.execute(
-                    """
-                    SELECT * FROM task_items
-                    WHERE task_id = ? AND state = 'IN_FLIGHT'
-                    """,
-                    (task_id,),
-                ).fetchall()
-                reset = 0
-                failed = 0
-                now = utc_now()
-                for row in rows:
-                    attempts = int(row["attempts"])
-                    if attempts >= max_attempts:
-                        result = {
-                            "reason": "attempts_exhausted",
-                            "failure_class": "transient",
-                            "attempts": attempts,
-                        }
-                        connection.execute(
-                            """
-                            UPDATE task_items
-                            SET state = 'FAILED', failure_class = 'transient',
-                                result_json = ?, updated_at = ?
-                            WHERE task_id = ? AND item_id = ?
-                            """,
-                            (json_dumps(result), now, task_id, row["item_id"]),
-                        )
-                        failed += 1
-                    else:
-                        connection.execute(
-                            """
-                            UPDATE task_items
-                            SET state = 'PENDING', failure_class = NULL,
-                                updated_at = ?
-                            WHERE task_id = ? AND item_id = ?
-                            """,
-                            (now, task_id, row["item_id"]),
-                        )
-                        reset += 1
+                _require_lease(connection, lease)
+                connection.execute(statement, values)
                 connection.commit()
             except Exception:
                 connection.rollback()
                 raise
-        return {"in_flight": len(rows), "reset": reset, "failed": failed}
 
-    def recover_orphaned_tasks(self) -> dict[str, int]:
-        """Requeue tasks left RUNNING by a crashed single-process worker.
+    def reconcile_task(
+        self,
+        task_id: str,
+        max_attempts: int,
+        *,
+        lease: Lease | None = None,
+    ) -> dict[str, int]:
+        """Reset in-flight items after a crash; fail those out of attempts."""
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                if lease is not None:
+                    _require_lease(connection, lease)
+                result = _reconcile_items(
+                    connection, task_id, max_attempts, utc_now()
+                )
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+        return result
 
-        A task paused during shutdown becomes PAUSED; a task cancelled during
-        shutdown becomes CANCELLED. This assumes one worker process; a
-        multi-process worker needs leases before calling it.
+    def settle_expired_tasks(self) -> dict[str, Any]:
+        """Settle tasks whose lease expired, leaving live leases untouched.
+
+        ``RUNNING`` returns to ``QUEUED`` and resets in-flight items;
+        ``PAUSING`` settles to ``PAUSED`` after the same reset; ``CANCELLING``
+        becomes ``CANCELLED`` and rejects in-flight results.  This is the
+        cross-process counterpart of the old single-worker startup recovery.
         """
+        now = time.time()
+        now_iso = utc_now()
+        task_ids: list[str] = []
+        task_tokens: dict[str, int] = {}
+        requeued = 0
+        paused = 0
+        cancelled = 0
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
                 rows = connection.execute(
                     """
-                    SELECT task_id, state FROM tasks
+                    SELECT * FROM tasks
                     WHERE state IN ('RUNNING', 'PAUSING', 'CANCELLING')
-                    """
+                      AND (
+                          lease_owner IS NULL
+                          OR lease_expires_at IS NULL
+                          OR lease_expires_at <= ?
+                      )
+                    """,
+                    (now,),
                 ).fetchall()
-                now = utc_now()
-                requeued = 0
-                paused = 0
-                cancelled = 0
                 for row in rows:
+                    task_id = str(row["task_id"])
+                    task_ids.append(task_id)
+                    task_tokens[task_id] = int(row["lease_token"] or 0)
+                    max_attempts = int(
+                        json_loads(row["limits_json"], {}).get("max_attempts", 2)
+                    )
                     if row["state"] == "RUNNING":
+                        _reconcile_items(connection, task_id, max_attempts, now_iso)
                         connection.execute(
                             """
                             UPDATE tasks
                             SET state = 'QUEUED', outcome = NULL,
                                 stop_reason = NULL, finished_at = NULL,
-                                updated_at = ?
+                                lease_owner = NULL, lease_expires_at = NULL,
+                                lease_heartbeat_at = NULL, updated_at = ?
                             WHERE task_id = ?
                             """,
-                            (now, row["task_id"]),
+                            (now_iso, task_id),
                         )
                         requeued += 1
                     elif row["state"] == "PAUSING":
+                        _reconcile_items(connection, task_id, max_attempts, now_iso)
                         connection.execute(
                             """
                             UPDATE tasks
-                            SET state = 'PAUSED', updated_at = ?
+                            SET state = 'PAUSED',
+                                lease_owner = NULL, lease_expires_at = NULL,
+                                lease_heartbeat_at = NULL, updated_at = ?
                             WHERE task_id = ?
                             """,
-                            (now, row["task_id"]),
+                            (now_iso, task_id),
                         )
                         paused += 1
                     else:
+                        _reject_in_flight(connection, task_id, now_iso)
                         connection.execute(
                             """
                             UPDATE tasks
                             SET state = 'CANCELLED', outcome = 'CANCELLED',
                                 stop_reason = 'USER_CANCELLED',
-                                finished_at = ?, updated_at = ?
+                                finished_at = ?, updated_at = ?,
+                                lease_owner = NULL, lease_expires_at = NULL,
+                                lease_heartbeat_at = NULL
                             WHERE task_id = ?
                             """,
-                            (now, now, row["task_id"]),
+                            (now_iso, now_iso, task_id),
                         )
                         cancelled += 1
                 connection.commit()
@@ -617,11 +870,17 @@ class TaskStore:
                 connection.rollback()
                 raise
         return {
-            "recovered": len(rows),
+            "recovered": len(task_ids),
             "requeued": requeued,
             "paused": paused,
             "cancelled": cancelled,
+            "task_ids": task_ids,
+            "task_tokens": task_tokens,
         }
+
+    def recover_orphaned_tasks(self) -> dict[str, Any]:
+        """Backward-compatible alias for :meth:`settle_expired_tasks`."""
+        return self.settle_expired_tasks()
 
     def reset_in_flight(self, task_id: str) -> int:
         with self._connect() as connection:
@@ -662,6 +921,184 @@ class TaskStore:
     def count_items(self, task_id: str, item_type: str | None = None) -> int:
         return sum(self.item_counts(task_id, item_type).values())
 
+    def add_resource(
+        self,
+        task_id: str,
+        resource_id: str,
+        kind: str,
+        *,
+        pid: int | None = None,
+        path: str | Path | None = None,
+        lease_token: int | None = None,
+    ) -> None:
+        """Record a process or filesystem resource owned by a task.
+
+        A future browser adapter registers its process and profile directory
+        here so normal completion and crash recovery can clean both up.  The
+        optional lease token keeps a stale holder from deleting the resources
+        of the worker that took the task over.
+        """
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO task_resources (
+                    task_id, resource_id, kind, pid, path, lease_token, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    task_id,
+                    resource_id,
+                    kind,
+                    int(pid) if pid is not None else None,
+                    str(path) if path is not None else None,
+                    int(lease_token) if lease_token is not None else None,
+                    utc_now(),
+                ),
+            )
+
+    def list_resources(
+        self,
+        task_id: str | None = None,
+        *,
+        lease_token: int | None = None,
+    ) -> list[dict[str, Any]]:
+        query = "SELECT * FROM task_resources"
+        clauses: list[str] = []
+        params: list[Any] = []
+        if task_id is not None:
+            clauses.append("task_id = ?")
+            params.append(task_id)
+        if lease_token is not None:
+            clauses.append("lease_token = ?")
+            params.append(int(lease_token))
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        query += " ORDER BY created_at, resource_id"
+        with self._connect() as connection:
+            rows = connection.execute(query, params).fetchall()
+        return [
+            {
+                "task_id": row["task_id"],
+                "resource_id": row["resource_id"],
+                "kind": row["kind"],
+                "pid": row["pid"],
+                "path": row["path"],
+                "lease_token": row["lease_token"],
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
+
+    def remove_resource(self, task_id: str, resource_id: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "DELETE FROM task_resources WHERE task_id = ? AND resource_id = ?",
+                (task_id, resource_id),
+            )
+
+    def clear_resources(self, task_id: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "DELETE FROM task_resources WHERE task_id = ?", (task_id,)
+            )
+
+
+def _lease_valid(
+    connection: sqlite3.Connection,
+    lease: Lease,
+    now: float | None = None,
+) -> bool:
+    current = time.time() if now is None else now
+    row = connection.execute(
+        """
+        SELECT 1 FROM tasks
+        WHERE task_id = ?
+          AND lease_owner = ?
+          AND lease_token = ?
+          AND lease_expires_at IS NOT NULL
+          AND lease_expires_at > ?
+        """,
+        (lease.task_id, lease.owner, lease.token, current),
+    ).fetchone()
+    return row is not None
+
+
+def _require_lease(
+    connection: sqlite3.Connection,
+    lease: Lease,
+    now: float | None = None,
+) -> None:
+    if not _lease_valid(connection, lease, now):
+        raise LeaseLostError(
+            f"lease for task {lease.task_id} is no longer owned by {lease.owner}"
+        )
+
+
+def _reconcile_items(
+    connection: sqlite3.Connection,
+    task_id: str,
+    max_attempts: int,
+    now: str,
+) -> dict[str, int]:
+    max_attempts = max(int(max_attempts), 1)
+    rows = connection.execute(
+        """
+        SELECT * FROM task_items
+        WHERE task_id = ? AND state = 'IN_FLIGHT'
+        """,
+        (task_id,),
+    ).fetchall()
+    reset = 0
+    failed = 0
+    for row in rows:
+        attempts = int(row["attempts"])
+        if attempts >= max_attempts:
+            result = {
+                "reason": "attempts_exhausted",
+                "failure_class": "transient",
+                "attempts": attempts,
+            }
+            connection.execute(
+                """
+                UPDATE task_items
+                SET state = 'FAILED', failure_class = 'transient',
+                    result_json = ?, updated_at = ?
+                WHERE task_id = ? AND item_id = ?
+                """,
+                (json_dumps(result), now, task_id, row["item_id"]),
+            )
+            failed += 1
+        else:
+            connection.execute(
+                """
+                UPDATE task_items
+                SET state = 'PENDING', failure_class = NULL,
+                    updated_at = ?
+                WHERE task_id = ? AND item_id = ?
+                """,
+                (now, task_id, row["item_id"]),
+            )
+            reset += 1
+    return {"in_flight": len(rows), "reset": reset, "failed": failed}
+
+
+def _reject_in_flight(
+    connection: sqlite3.Connection,
+    task_id: str,
+    now: str,
+) -> int:
+    result = {"reason": "task_cancelled", "failure_class": "blocked"}
+    cursor = connection.execute(
+        """
+        UPDATE task_items
+        SET state = 'FAILED', failure_class = 'blocked',
+            result_json = ?, updated_at = ?
+        WHERE task_id = ? AND state = 'IN_FLIGHT'
+        """,
+        (json_dumps(result), now, task_id),
+    )
+    return cursor.rowcount
+
 
 def _task_from_row(row: sqlite3.Row) -> Task:
     return Task(
@@ -685,6 +1122,10 @@ def _task_from_row(row: sqlite3.Row) -> Task:
         market=row["market"],
         rule_path=row["rule_path"],
         archived_at=row["archived_at"],
+        lease_owner=row["lease_owner"],
+        lease_token=int(row["lease_token"] or 0),
+        lease_expires_at=row["lease_expires_at"],
+        lease_heartbeat_at=row["lease_heartbeat_at"],
     )
 
 

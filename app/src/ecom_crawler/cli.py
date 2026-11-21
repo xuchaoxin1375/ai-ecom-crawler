@@ -9,6 +9,7 @@ import signal
 import sys
 import threading
 from collections.abc import Sequence
+from contextlib import nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -116,6 +117,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
     worker.add_argument("--per-domain-rps", type=float, default=1.0)
     worker.add_argument("--poll-interval", type=float, default=0.5)
+    worker.add_argument(
+        "--lease-ttl",
+        type=float,
+        default=30.0,
+        help="task lease lifetime in seconds (default: 30)",
+    )
+    worker.add_argument(
+        "--heartbeat-interval",
+        type=float,
+        default=None,
+        help="lease renewal interval in seconds (default: min(5, ttl/3))",
+    )
+    worker.add_argument(
+        "--allow-multi-worker",
+        action="store_true",
+        help="skip the single-instance lock and share the ledger via task leases",
+    )
 
     for name, help_text in (
         ("pause", "request a pause for a running task"),
@@ -179,17 +197,37 @@ def build_parser() -> argparse.ArgumentParser:
         help="managed worker task slots (default: 1)",
     )
     serve.add_argument("--per-domain-rps", type=float, default=1.0)
+    serve.add_argument(
+        "--lease-ttl",
+        type=float,
+        default=30.0,
+        help="managed worker task lease lifetime in seconds (default: 30)",
+    )
+    serve.add_argument(
+        "--heartbeat-interval",
+        type=float,
+        default=None,
+        help="managed worker lease renewal interval in seconds",
+    )
+    serve.add_argument(
+        "--allow-multi-worker",
+        action="store_true",
+        help="skip the single-instance lock and share the ledger via task leases",
+    )
     return parser
 
 
 def _run_worker(args: argparse.Namespace) -> int:
-    with worker_lock(args.db):
+    lock = nullcontext() if args.allow_multi_worker else worker_lock(args.db)
+    with lock:
         store = TaskStore(args.db)
         worker = Worker(
             store,
             out_root=args.out_root,
             max_tasks=args.max_tasks,
             per_domain_rps=args.per_domain_rps,
+            lease_ttl_seconds=args.lease_ttl,
+            heartbeat_interval=args.heartbeat_interval,
         )
         stop = threading.Event()
 
@@ -234,14 +272,16 @@ def _serve(args: argparse.Namespace) -> int:
         manage_worker=not args.no_worker,
         max_tasks=args.max_tasks,
         per_domain_rps=args.per_domain_rps,
+        lease_ttl_seconds=args.lease_ttl,
+        heartbeat_interval=args.heartbeat_interval,
     )
     mode = "read-only" if args.no_worker else "managed worker"
+    if args.allow_multi_worker:
+        mode += ", shared ledger"
     print(f"serving http://{host}:{args.port} ({mode})")
-    if args.no_worker:
+    lock = nullcontext() if args.no_worker or args.allow_multi_worker else worker_lock(args.db)
+    with lock:
         uvicorn.run(app, host=host, port=args.port, log_level="info")
-    else:
-        with worker_lock(args.db):
-            uvicorn.run(app, host=host, port=args.port, log_level="info")
     return 0
 
 
@@ -261,6 +301,12 @@ def _task_payload(store: TaskStore, task: Task) -> dict[str, Any]:
         "updated_at": task.updated_at,
         "started_at": task.started_at,
         "finished_at": task.finished_at,
+        "lease": {
+            "owner": task.lease_owner,
+            "token": task.lease_token,
+            "expires_at": task.lease_expires_at,
+            "heartbeat_at": task.lease_heartbeat_at,
+        },
     }
 
 
@@ -282,6 +328,12 @@ def _print_status(store: TaskStore, task_id: str, *, as_json: bool) -> int:
         f"type: {payload['task_type']}"
     )
     print("items: " + " ".join(f"{key}={value}" for key, value in payload["items"].items()))
+    if payload["lease"]["owner"]:
+        print(
+            f"lease: {payload['lease']['owner']} "
+            f"token={payload['lease']['token']} "
+            f"expires_at={payload['lease']['expires_at']}"
+        )
     print(f"updated: {payload['updated_at']}")
     return 0
 

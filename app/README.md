@@ -1,6 +1,6 @@
 # 生产应用（app/）
 
-本目录是 monorepo 中生产应用的承载位置。当前已落地 **D02 数据合同与导出 CLI**，以及 **D04 v0 静态单进程执行器**：规则包 → 发现／获取／提取 → SQLite 任务账本 → D02 导出。浏览器、跨进程租约、Web UI 和构建会话仍未实现。
+本目录是 monorepo 中生产应用的承载位置。当前已落地 **D02 数据合同与导出 CLI**，以及 **D04 v0 静态执行器**：规则包 → 发现／获取／提取 → SQLite 任务账本 → D02 导出。静态 worker 现已带跨进程任务租约和资源登记／回收；浏览器 adapter、完整跨进程 A20 和构建会话仍未实现。
 
 ## 边界
 
@@ -25,16 +25,18 @@
 - 静态发现、获取、提取、基础重试和 SQLite 任务账本。
 - `run` 执行 product 任务并自动接入 D02 导出。
 - 单 worker 控制面：`submit` 入队，`worker` 常驻执行，`pause`／`resume`／`cancel` 从另一个进程改账本，runner 在检查点响应并拒收迟到结果。
+- 跨进程任务租约：`tasks` 表保存 `lease_owner`、单调递增的 `lease_token`、到期时间和心跳；`claim_tasks` 原子领取，心跳线程续约，过期任务由任意 worker 对账回收，旧持有者的写入按租约条件拒绝。
+- `task_resources` 资源登记：登记子进程 PID 和 profile／临时目录；任务结束、取消或过期接管时按租约令牌回收，避免误删新持有者的资源。
 - FastAPI API：健康、规则目录、任务列表／详情、创建／启动／暂停／恢复／取消／归档／还原、URL／商品分页、SSE 和 zip 导出。
 - 本地静态页面：任务列表、创建、详情、控制按钮、计数、质量异常、items 和导出入口。
 - 账本增加 `site_key`、`domain_key`、`market`、`rule_path`、`archived_at` 和创建幂等键；旧库自动加列。
 
 尚未实现：
 
-- 浏览器／动态渲染、挑战页会话复用和资源回收。
-- 跨进程租约；当前只允许一个 `worker` 消费同一账本。
+- 浏览器／动态渲染、挑战页会话复用；浏览器 adapter 接入时应通过 `runtime.resources` 登记子进程和 profile 目录。
+- 跨进程 A20 的真实资源配额、浏览器实例配额和跨机租约；当前租约在单机 SQLite 上验证。
 - 永久移除、异步残留回收、构建会话和完整前端原型评审。
-- 生产级浏览器／进程孤儿回收；R06 的静态单进程能力已抽取，但不是最终形态。
+- 生产级浏览器孤儿回收；静态 worker 的进程／目录登记与回收已落地，但没有真实浏览器路径可验证。
 
 ## 布局
 
@@ -63,6 +65,7 @@ python -m uv run --project app ecom-crawler --version
 python -m uv run --project app ecom-crawler run --rule /path/to/rule.yaml --db /path/to/tasks.db --out-root /path/to/tasks --task-id sample-001 --task-type product --max-products 6
 python -m uv run --project app ecom-crawler submit --rule /path/to/rule.yaml --db /path/to/tasks.db --task-id sample-002
 python -m uv run --project app ecom-crawler worker --db /path/to/tasks.db --out-root /path/to/tasks
+python -m uv run --project app ecom-crawler worker --db /path/to/tasks.db --out-root /path/to/tasks --allow-multi-worker --lease-ttl 30
 python -m uv run --project app ecom-crawler serve --db /path/to/tasks.db --out-root /path/to/tasks --rules-dir /path/to/rules --port 8765
 python -m uv run --project app ecom-crawler pause --db /path/to/tasks.db --task-id sample-002
 python -m uv run --project app ecom-crawler resume --db /path/to/tasks.db --task-id sample-002
@@ -101,10 +104,21 @@ python -m uv run --project app ecom-crawler validate --task-result /path/to/task
 - `cancel` 把 `RUNNING`／`PAUSING` 改为 `CANCELLING`；runner 等在途结束，拒绝迟到结果，写 `CANCELLED`。`DRAFT`／`QUEUED`／`PAUSED` 直接进入 `CANCELLED`。
 - `resume` 把 `PAUSED` 改回 `QUEUED`，由 `worker` 重新领取；不恢复浏览器内存或旧会话。
 - 状态转移校验在 `TaskStore.request_*`，不在 CLI 或页面里重复实现；非法转移和未知任务返回 2。
-- `worker` 启动时获取 `<db>.worker.lock` 单实例锁；锁由操作系统在进程退出时释放，残留锁文件不会阻止下次启动。
+- `worker` 默认获取 `<db>.worker.lock` 单实例锁；锁由操作系统在进程退出时释放，残留锁文件不会阻止下次启动。加 `--allow-multi-worker` 后跳过该锁，多个 worker 进程通过任务租约共享同一账本。
+- 任务领取是原子的：`claim_tasks` 把 `QUEUED` 改为 `RUNNING` 并递增 `lease_token`；同一任务同一时刻只有一个持有者。心跳默认每 `min(5, ttl/3)` 秒续约；租约过期后，任意 worker 的对账扫描会把 `RUNNING` 放回 `QUEUED`、把 `PAUSING` 结清为 `PAUSED`、把 `CANCELLING` 结清为 `CANCELLED`。
+- 旧持有者继续写会命中 `LeaseLostError`：`update_task`、`add_item`、`claim_items`、`mark_item` 和 `reconcile_task` 都支持同一事务内的租约校验。恢复时还会丢弃未被账本 `DONE` 工作项确认的 `products.jsonl` 尾行。
 - 同进程 A20 已覆盖：同域两任务并行，暂停／取消一个，另一个继续并保持独立输出；同域请求共用限速器。
-- 跨进程租约、浏览器资源回收和跨进程 A20 仍未实现。
-- 证据：`tests/test_control.py` 覆盖状态转移、启动对账和单实例锁；`tests/test_control_flow.py` 覆盖暂停结清、恢复、取消拒收迟到结果、`run_forever` 和同进程 A20。
+- 跨进程任务领取、过期接管和旧写拒绝已有测试；真实浏览器实例配额、跨进程资源配额和跨机租约仍未实现。
+- 证据：`tests/test_control.py` 覆盖状态转移、启动对账和单实例锁；`tests/test_control_flow.py` 覆盖暂停结清、恢复、取消拒收迟到结果、`run_forever`、心跳续约、双 worker 单任务和过期接管；`tests/test_lease.py` 覆盖跨进程原子领取、过期回收、旧写拒绝和旧库迁移；`tests/test_resources.py` 覆盖进程／目录回收和租约令牌隔离。
+
+## 租约与资源回收
+
+- `TaskStore.claim_tasks(owner, limit, ttl_seconds)` 在 `BEGIN IMMEDIATE` 中领取任务，返回带 `lease_token` 的 `Lease`；重复调用不会把同一任务发给两个 worker。
+- `renew_lease` 只在租约尚未过期且持有者、令牌和状态都匹配时续期；过期后不能“复活”，必须由对账重新排队。
+- `settle_expired_tasks` 只处理租约缺失或已过期的任务，不碰活租约；`RUNNING` 回 `QUEUED` 并重置在途项，`PAUSING` 结清为 `PAUSED`，`CANCELLING` 结清为 `CANCELLED` 并拒收在途结果。
+- `TaskRunner` 在每个循环、领取工作项、写结果和收尾前校验租约；写入层再用同一事务的条件更新做二次拒绝，避免旧持有者在新持有者接管后继续写账本。
+- `runtime.resources` 提供 `register_process`、`register_path` 和 `cleanup_task_resources`：浏览器 adapter 应登记子进程 PID 和 profile 目录，并带当前 `lease_token`；回收时不会碰更新令牌的资源。
+- 资源记录存在 SQLite 的 `task_resources` 表，任务结束、取消和过期接管都会触发回收；静态运行时没有自带浏览器资源，因此实际浏览器回收仍未验证。
 
 ## Web 服务（serve）
 
@@ -226,7 +240,7 @@ CSV 对以 `=`、`+`、`-`、`@` 开头的文本单元格加单引号，防止�
 ## 已知限制
 
 - 当前有 T1 契约／单元测试和本地 HTTP fixture 集成；D03／A08／D04 有真实站点证据，但不是 T4 生产验收。
-- `runtime/`、`executor/` 从 R06 抽取，当前是单进程、静态 HTML；浏览器、跨进程租约和浏览器资源回收未接入。控制面已支持单 worker 的暂停／恢复／取消。
+- `runtime/`、`executor/` 从 R06 抽取，当前是静态 HTML；租约和资源登记已支持多 worker 进程，但浏览器 adapter、浏览器实例配额和跨机租约未接入。控制面支持暂停／恢复／取消。
 - `run` 已接入 SQLite 任务账本；`export` 仍可独立使用 `task.json` + `candidates.jsonl`，不依赖账本。
 - `description.blocks` 的 `kind` 由提取端标注；本层不按关键词猜测政策或适配区块。
 - `description_status` 必须由提取端显式给出；本层不从正文长度或选择器命中情况推断完整／未提供。
