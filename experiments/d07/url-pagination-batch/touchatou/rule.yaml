@@ -1,0 +1,145 @@
+schema_version: "1.1"
+rule_id: "touchatou-url-pages"
+rule_version: "2026.11.21-1"
+kind: declarative
+status: candidate
+
+site:
+  name: "Touchatou"
+  entry_urls: ["https://touchatou.fr/categorie-produit/tissus-de-noel/"]
+  allowed_origins: ["https://touchatou.fr"]
+  allowed_path_prefixes: ["/categorie-produit/", "/boutique/"]
+  market: "FR"
+  locale: "fr-FR"
+  currency: "EUR"
+
+scope:
+  include: ['^/boutique/[^/]+/?$']
+  exclude: ["/panier", "/commande", "/mon-compte"]
+
+capabilities:
+  discovery: true
+  product: true
+
+discovery:
+  sources:
+    - type: listing
+      url: "https://touchatou.fr/categorie-produit/tissus-de-noel/"
+      product_link_selector: 'ul.products li.product h2.woocommerce-loop-product__title a'
+      advance:
+        type: next_link
+        selector: 'link[rel="next"]'
+        max_pages: 2
+  product_url_patterns: ['^/boutique/[^/]+/?$']
+  url_identity: "canonical"
+
+fetch:
+  default_engine: "static"
+  concurrency: 1
+  delay_ms: 1000
+  retry: {max_attempts: 2, backoff_ms: 1000}
+  timeout_ms: 45000
+  browser: false
+  login: false
+  challenge_handling: "none; stop and record"
+
+extract:
+  fields:
+    name:
+      required: true
+      fallbacks:
+        - {type: json_ld, path: "name", label: "json_ld"}
+        - {type: css_text, selector: "h1.product_title", label: "product_title"}
+    price.amount:
+      required: true
+      fallbacks:
+        - {type: json_ld, path: "offers.price", label: "json_ld", take: "min_positive"}
+        - {type: css_text, selector: "p.price .woocommerce-Price-amount", label: "price_text"}
+    price.currency:
+      required: true
+      fallbacks:
+        - {type: json_ld, path: "offers.priceCurrency", label: "json_ld"}
+    primary_image_url:
+      required: true
+      fallbacks:
+        - {type: json_ld, path: "image", label: "json_ld"}
+        - {type: css_attr, selector: 'meta[property="og:image"]', attr: "content", label: "og_image", absolute: true}
+    description_html:
+      required: false
+      fallbacks:
+        - {type: json_ld, path: "description", label: "json_ld", description_status: "fallback"}
+        - {type: css_html, selector: ".woocommerce-product-details__short-description", label: "short_description", description_status: "partial"}
+    category:
+      required: false
+      fallbacks:
+        - type: breadcrumb
+          selector: "nav.ct-breadcrumbs a"
+          label: "breadcrumb"
+          drop_last: true
+          exclude: ["Accueil"]
+    source_url:
+      required: true
+      fallbacks:
+        - {type: canonical, label: "canonical"}
+
+normalize:
+  price:
+    tax_basis: "INCLUSIVE"
+    choose: "smaller_public_pair"
+    positive_only: true
+  description:
+    mode: "clean_html"
+    statuses: ["complete", "partial", "fallback", "not_provided", "failed"]
+  options:
+    exclude_quantity: true
+    strip_price_delta: true
+
+validate:
+  required_fields:
+    - "name"
+    - "price.amount"
+    - "price.currency"
+    - "primary_image_url"
+    - "source_url"
+  assertions:
+    - {field: "price.amount", op: ">", value: 0}
+    - {field: "price.currency", op: "matches", value: "^[A-Z]{3}$"}
+  partial_description: "allowed_with_flag"
+
+output:
+  url_list:
+    enabled: true
+    columns: ["url", "source", "status", "title"]
+    format: "csv"
+  product_csv:
+    enabled: true
+    columns: 9
+    format: "csv"
+  task_result: true
+
+task_defaults:
+  max_urls: 30
+  max_products: 10
+  max_seconds: 180
+  concurrency:
+    navigation: 1
+    product: 1
+
+compatibility:
+  os: ["windows", "linux", "wsl2"]
+  runtime: "python>=3.11"
+  dependencies: ["scrapling==0.5.1"]
+  browser: "none; WooCommerce /page/N/"
+
+evidence:
+  sample_urls:
+    - "https://touchatou.fr/categorie-produit/tissus-de-noel/"
+    - "https://touchatou.fr/categorie-produit/tissus-de-noel/page/2/"
+  expected: []
+  verified_at: null
+  limitations:
+    - "Benchmark French fabric site; bounded sample of a two-page category."
+    - "The theme provides load-more/infinite-scroll UI, but page 2 is a normal URL (/page/2/) linked by rel=next, so the static engine follows it."
+    - "Prices are the current per-10cm display; no tax, shipping or variant audit."
+
+notes: "URL-addressable pagination on a benchmark WooCommerce store: the visible load-more state is also a plain /page/N/ URL, so next_link is used instead of scrolling."

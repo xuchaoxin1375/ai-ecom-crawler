@@ -1,0 +1,150 @@
+schema_version: "1.1"
+rule_id: "gaspardetleonie-url-pages"
+rule_version: "2026.11.21-1"
+kind: declarative
+status: candidate
+
+site:
+  name: "Gaspard et Léonie"
+  entry_urls: ["https://www.gaspardetleonie.com/collections/tissus"]
+  allowed_origins: ["https://www.gaspardetleonie.com"]
+  allowed_path_prefixes: ["/collections/", "/products/"]
+  market: "FR"
+  locale: "fr-FR"
+  currency: "EUR"
+
+scope:
+  include: ['^/products/[^/]+/?$']
+  exclude: ["/cart", "/checkout", "/account", "/policies/"]
+
+capabilities:
+  discovery: true
+  product: true
+
+discovery:
+  sources:
+    - type: listing
+      url: "https://www.gaspardetleonie.com/collections/tissus"
+      product_link_selector: '.product-list .product-item a.product-item__title'
+      advance:
+        type: next_link
+        selector: 'link[rel="next"]'
+        max_pages: 2
+  product_url_patterns: ['^/products/[^/]+/?$']
+  url_identity: "canonical"
+
+fetch:
+  default_engine: "static"
+  concurrency: 1
+  delay_ms: 1000
+  retry: {max_attempts: 2, backoff_ms: 1000}
+  timeout_ms: 45000
+  browser: false
+  login: false
+  challenge_handling: "none; stop and record"
+
+extract:
+  fields:
+    name:
+      required: true
+      fallbacks:
+        - {type: json_ld, path: "name", label: "json_ld"}
+        - {type: css_text, selector: "h1.product-meta__title", label: "h1"}
+    price.amount:
+      required: true
+      fallbacks:
+        - {type: json_ld, path: "offers.price", label: "json_ld", take: "min_positive"}
+        - {type: css_attr, selector: 'meta[property="product:price:amount"]', attr: "content", label: "meta_price"}
+    price.currency:
+      required: true
+      fallbacks:
+        - {type: json_ld, path: "offers.priceCurrency", label: "json_ld"}
+        - {type: css_attr, selector: 'meta[property="product:price:currency"]', attr: "content", label: "meta_currency"}
+    primary_image_url:
+      required: true
+      fallbacks:
+        - {type: json_ld, path: "image", label: "json_ld"}
+        - {type: css_attr, selector: 'meta[property="og:image"]', attr: "content", label: "og_image", absolute: true}
+    description_html:
+      required: false
+      fallbacks:
+        - {type: json_ld, path: "description", label: "json_ld", description_status: "complete"}
+        - {type: css_html, selector: ".product-meta__description", label: "description", description_status: "partial"}
+    category:
+      required: false
+      fallbacks:
+        - type: breadcrumb
+          selector: "nav.breadcrumb a"
+          label: "breadcrumb"
+          drop_last: true
+          exclude: ["Accueil"]
+    brand:
+      required: false
+      fallbacks:
+        - {type: json_ld, path: "brand.name", label: "json_ld"}
+    source_url:
+      required: true
+      fallbacks:
+        - {type: canonical, label: "canonical"}
+
+normalize:
+  price:
+    tax_basis: "INCLUSIVE"
+    choose: "smaller_public_pair"
+    positive_only: true
+  description:
+    mode: "clean_html"
+    statuses: ["complete", "partial", "fallback", "not_provided", "failed"]
+  options:
+    exclude_quantity: true
+    strip_price_delta: true
+
+validate:
+  required_fields:
+    - "name"
+    - "price.amount"
+    - "price.currency"
+    - "primary_image_url"
+    - "source_url"
+  assertions:
+    - {field: "price.amount", op: ">", value: 0}
+    - {field: "price.currency", op: "matches", value: "^[A-Z]{3}$"}
+  partial_description: "allowed_with_flag"
+
+output:
+  url_list:
+    enabled: true
+    columns: ["url", "source", "status", "title"]
+    format: "csv"
+  product_csv:
+    enabled: true
+    columns: 9
+    format: "csv"
+  task_result: true
+
+task_defaults:
+  max_urls: 30
+  max_products: 10
+  max_seconds: 180
+  concurrency:
+    navigation: 1
+    product: 1
+
+compatibility:
+  os: ["windows", "linux", "wsl2"]
+  runtime: "python>=3.11"
+  dependencies: ["scrapling==0.5.1"]
+  browser: "none; Shopify collection rel=next"
+
+evidence:
+  sample_urls:
+    - "https://www.gaspardetleonie.com/collections/tissus"
+    - "https://www.gaspardetleonie.com/collections/tissus?page=2"
+  expected: []
+  verified_at: null
+  limitations:
+    - "Benchmark French fabric site; bounded sample of the first two collection pages."
+    - "Shopify collection exposes pagination metadata and ?page=N, so the rule follows link[rel=next] instead of scrolling."
+    - "Prices are the site's current per-10cm display; no variant, shipping or tax audit."
+
+notes: "URL-addressable pagination on a benchmark Shopify store; link[rel=next] points to ?page=2 and the static engine can fetch it directly."
