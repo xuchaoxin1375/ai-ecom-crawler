@@ -53,7 +53,7 @@
 
 ```powershell
 python -m uv run --project app --extra dev python -m unittest discover -s app/tests -t app -v
-python -m uv run ruff check app
+python -m uv run --project app --extra dev ruff check app
 ```
 
 `jsonschema`、`httpx` 和 `ruff` 是开发依赖；`jsonschema`／`httpx` 缺失时测试会失败，不会 skip。应用运行依赖包括 `lxml`、`pyyaml`、`scrapling`、`curl_cffi`、`patchright`、`browserforge`、`protego`、`fastapi` 和 `uvicorn`。

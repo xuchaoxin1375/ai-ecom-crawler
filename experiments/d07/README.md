@@ -42,7 +42,7 @@ R06 原先把所有 `validate_product` 原因都映射为 `EXCLUDED`。这会掩
 - 启动时 `recover_orphaned_tasks()` 对账：`RUNNING` → `QUEUED`，`PAUSING` → `PAUSED`，`CANCELLING` → `CANCELLED`。
 - 跨进程 `submit` → `status` → `cancel` 冒烟通过（独立 Python 进程共享同一 SQLite）；跨进程 `worker` 的暂停／恢复仍未做自动化。
 
-测试：`app/tests/test_control.py`（10 个转移／恢复／锁用例）和 `app/tests/test_control_flow.py`（8 个流程／A20／CLI 用例）；`app` 总计 88 个测试通过（含 9 个 D08 Web API 用例），`ruff check app` 通过。
+测试：`app/tests/test_control.py`（10 个转移／恢复／锁用例）和 `app/tests/test_control_flow.py`（当时 8 个流程／A20／CLI 用例）；当时 `app` 总计 88 个测试通过（含 9 个 D08 Web API 用例），`ruff check app` 通过。租约补入后的当前测试数见下文“测试结果”。
 
 ## 2026-11-21 单机跨进程租约与资源回收
 
