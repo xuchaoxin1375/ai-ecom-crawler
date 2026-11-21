@@ -1,6 +1,6 @@
 # 生产应用（app/）
 
-本目录是 monorepo 中生产应用的承载位置。当前已落地 **D02 数据合同与导出 CLI**，以及 **D04 v0 静态执行器**：规则包 → 发现／获取／提取 → SQLite 任务账本 → D02 导出。静态 worker 现已带跨进程任务租约和资源登记／回收；浏览器 adapter、完整跨进程 A20 和构建会话仍未实现。
+本目录是 monorepo 中生产应用的承载位置。当前已落地 **D02 数据合同与导出 CLI**、**D04 v0 静态执行器**和 **浏览器 adapter v0**：规则包 → 发现／获取／提取 → SQLite 任务账本 → D02 导出。静态 worker 带跨进程任务租约和资源登记／回收；浏览器 worker 按任务启动 Patchright CDP，登记并回收浏览器进程和 profile；完整跨进程 A20、load-more／滚动和构建会话仍未实现。
 
 ## 边界
 
@@ -23,6 +23,7 @@
 - `export`、`validate`、`run`、`submit`、`worker`、`pause`、`resume`、`cancel`、`status`、`list` 和 `serve` CLI 子命令。
 - 声明式规则包读取与校验；`entry_links`、`sitemap`、`listing`、`html_index`、`public_json` 发现来源。
 - 静态发现、获取、提取、基础重试和 SQLite 任务账本。
+- 浏览器 fetcher：`fetch.default_engine: browser`、`fetch.per_url_type` 按 `navigation`／`product` 路由、Patchright CDP 启动、任务级 profile、`wait_selector`／`wait_until`／`wait_ms`／`network_idle`、渲染后的有效状态读取和任务级进程／目录登记回收。
 - `run` 执行 product 任务并自动接入 D02 导出。
 - 单 worker 控制面：`submit` 入队，`worker` 常驻执行，`pause`／`resume`／`cancel` 从另一个进程改账本，runner 在检查点响应并拒收迟到结果。
 - 跨进程任务租约：`tasks` 表保存 `lease_owner`、单调递增的 `lease_token`、到期时间和心跳；`claim_tasks` 原子领取，心跳线程续约，过期任务由任意 worker 对账回收，旧持有者的写入按租约条件拒绝。
@@ -34,15 +35,15 @@
 
 尚未实现：
 
-- 浏览器／动态渲染、挑战页会话复用；浏览器 adapter 接入时应通过 `runtime.resources` 登记子进程和 profile 目录。
+- load more、无限滚动、虚拟列表、点击和 POST／GraphQL；浏览器 adapter 只做渲染，不做交互推进。
 - 跨进程 A20 的真实资源配额、浏览器实例配额和跨机租约；当前租约在单机 SQLite 上验证。
 - 永久移除、异步残留回收、构建会话 UI、`request_dependency` 工具桥、真实依赖安装和完整前端原型评审。
-- 生产级浏览器孤儿回收；静态 worker 的进程／目录登记与回收已落地，但没有真实浏览器路径可验证。
+- 生产级浏览器孤儿回收的跨机路径；本机强杀 worker 后的租约接管已演练，浏览器进程和 profile 会被回收。
 
 ## 布局
 
 - `src/ecom_crawler/`：应用代码。
-- `src/ecom_crawler/runtime/`、`executor/`：从 R06 抽取的静态单进程运行时和提取器。
+- `src/ecom_crawler/runtime/`、`executor/`：从 R06 抽取的静态运行时和提取器；`runtime/browser.py` 是 Patchright CDP 浏览器 fetcher。
 - `src/ecom_crawler/web/`：本地 FastAPI 应用和静态页面。
 - `src/ecom_crawler/execution.py`、`bridge.py`：执行入口与 R06→D02 转换。
 - `schemas/`：候选输入、内部商品记录和任务结果的 JSON Schema。
@@ -57,7 +58,13 @@ python -m uv run --project app --extra dev python -m unittest discover -s app/te
 python -m uv run --project app --extra dev ruff check app
 ```
 
-`jsonschema`、`httpx` 和 `ruff` 是开发依赖；`jsonschema`／`httpx` 缺失时测试会失败，不会 skip。应用运行依赖包括 `lxml`、`pyyaml`、`scrapling`、`curl_cffi`、`patchright`、`browserforge`、`protego`、`fastapi` 和 `uvicorn`。
+`jsonschema`、`httpx` 和 `ruff` 是开发依赖；`jsonschema`／`httpx` 缺失时测试会失败，不会 skip。应用运行依赖包括 `lxml`、`pyyaml`、`scrapling[fetchers]`、`patchright`、`protego`、`fastapi` 和 `uvicorn`；`scrapling[fetchers]` 会带 `curl_cffi`、`playwright`、`browserforge` 和 `msgspec`。浏览器模式还需要 Chromium：
+
+```powershell
+python -m patchright install chromium
+```
+
+`real_chrome: true` 时使用系统 Chrome／Edge，不依赖 Patchright 的 Chromium 下载。
 
 ## CLI
 
@@ -89,6 +96,29 @@ python -m uv run --project app ecom-crawler validate --task-result /path/to/task
 - `export` 的退出码表示导出流程是否成功，不表示业务结论；业务结论看 `task-result.json` 的 `outcome`。
 - `export` 的输入或任务元数据错误返回 2；`validate` 的校验失败返回 1。
 
+## 浏览器规则（browser）
+
+```yaml
+fetch:
+  default_engine: "browser"
+  per_url_type:
+    navigation: {engine: "static"}
+    product:
+      engine: "browser"
+      wait_selector: "h1.product-name"
+  browser:
+    headless: true
+    real_chrome: false
+    disable_resources: true
+    challenge_wait_ms: 0
+```
+
+- `browser` 接受布尔值或选项对象。选项包括 `headless`、`real_chrome`、`executable_path`、`wait_until`、`wait_selector`、`wait_selector_state`、`wait_ms`、`network_idle`、`network_idle_timeout_ms`、`disable_resources`、`challenge_wait_ms`、`timeout_ms`、`locale`、`timezone`、`user_agent`、`extra_flags`、`profile_name`。
+- 浏览器按任务懒启动：一个 Chromium/Chrome + 一个 page，请求串行；任务结果在 `runtime.browser` 记录 binary／version／pid／profile，在 `access.browser_launched` 和 `resources.browser_pid` 记录是否使用。
+- 浏览器子进程和 `<out-root>/<task-id>/browser-profile` 登记在 `task_resources`；正常结束、取消、租约过期接管都会回收。本机强杀 worker 后由新 worker 接管并回收的演练见 `experiments/d07/browser-mercerine/`。
+- 首次响应可能是 403／429／503 挑战壳，站点自己的 JS 跳转后才出现正文；fetcher 在等待完成后读取 navigation timing 的最终 `responseStatus`，并可用 `wait_selector` 作为就绪条件。它不点击、不过验证码、不绕过登录或付费。挑战识别是标题启发式，可能漏判或误判，最终以就绪信号、正文和任务结果为准。
+- 浏览器 fetcher 是 thread-affine，浏览器任务不走线程池；暂停／取消在条目边界生效，单次导航仍受 `timeout_ms` 约束。
+
 ## 执行入口（run）
 
 `run` 读取一个声明式规则包，创建任务并在当前进程执行：
@@ -96,7 +126,7 @@ python -m uv run --project app ecom-crawler validate --task-result /path/to/task
 - 规则包：YAML manifest；`rule_id`／`rule_version` 必须与任务一致；支持 `entry_links`、`sitemap`、`listing`、`html_index`、`public_json` 来源。
 - 账本：`--db` 指向的 SQLite 文件，记录任务、工作项、状态、尝试次数和失败分类。
 - 输出：`<out-root>/<task-id>/` 下有 `task-result.json`、`products.jsonl`、`urls.csv`、`events.ndjson` 等运行时产物；product 任务另有 `app-run/` 和 `export/`。
-- 当前是单进程、静态 HTML；浏览器、跨进程租约和资源回收未接入。
+- 当前是单进程运行时；静态 HTML、浏览器渲染、SQLite 租约和资源回收已接入，跨机租约、跨进程资源配额和交互推进未接入。
 
 ## 控制面（submit / worker / pause / resume / cancel）
 
@@ -118,8 +148,8 @@ python -m uv run --project app ecom-crawler validate --task-result /path/to/task
 - `renew_lease` 只在租约尚未过期且持有者、令牌和状态都匹配时续期；过期后不能“复活”，必须由对账重新排队。
 - `settle_expired_tasks` 只处理租约缺失或已过期的任务，不碰活租约；`RUNNING` 回 `QUEUED` 并重置在途项，`PAUSING` 结清为 `PAUSED`，`CANCELLING` 结清为 `CANCELLED` 并拒收在途结果。
 - `TaskRunner` 在每个循环、领取工作项、写结果和收尾前校验租约；写入层再用同一事务的条件更新做二次拒绝，避免旧持有者在新持有者接管后继续写账本。
-- `runtime.resources` 提供 `register_process`、`register_path` 和 `cleanup_task_resources`：浏览器 adapter 应登记子进程 PID 和 profile 目录，并带当前 `lease_token`；回收时不会碰更新令牌的资源。
-- 资源记录存在 SQLite 的 `task_resources` 表，任务结束、取消和过期接管都会触发回收；静态运行时没有自带浏览器资源，因此实际浏览器回收仍未验证。
+- `runtime.resources` 提供 `register_process`、`register_path` 和 `cleanup_task_resources`：浏览器 fetcher 登记子进程 PID 和 `browser-profile` 目录，并带当前 `lease_token`；回收时不会碰更新令牌的资源。
+- 资源记录存在 SQLite 的 `task_resources` 表，任务结束、取消和过期接管都会触发回收。浏览器路径已用本地 fixture 和真实站点验证正常回收；本机强杀 worker 后，新 worker 接管并杀掉遗留 Chromium、删除 profile 的演练见 `experiments/d07/browser-mercerine/crash_test.py`。
 
 ## 构建 harness 适配器
 
@@ -248,12 +278,14 @@ CSV 对以 `=`、`+`、`-`、`@` 开头的文本单元格加单引号，防止�
 
 - `test_execution.py::test_fixture_rule_runs_and_exports`：本地 HTTP fixture，规则 → 2 商品采集 → 账本 → D02 导出。
 - `test_execution.py::test_cli_run_command`：同一 fixture 走 `ecom-crawler run`。
+- `tests/test_browser.py`：本地 JS 商品页，静态 HTML 不含名称／价格，浏览器渲染后 1／1 有效；断言 task result 的浏览器字段、导出 CSV、资源表清空、profile 删除和 PID 退出。
 - `experiments/d04/production/README.md`：`familidoo` 6 商品、7 请求、7 秒，CSV 与 D05 字节一致。
+- `experiments/d07/browser-mercerine/`：mercerine 首页 503 挑战壳，浏览器渲染后 3／3 商品（EUR）；同一浏览器会话；强杀 worker 后新 worker 接管，遗留 Chromium PID 终止、profile 删除、资源表清空，任务重跑完成。
 
 ## 已知限制
 
-- 当前有 T1 契约／单元测试和本地 HTTP fixture 集成；D03／A08／D04 有真实站点证据，但不是 T4 生产验收。
-- `runtime/`、`executor/` 从 R06 抽取，当前是静态 HTML；租约和资源登记已支持多 worker 进程，但浏览器 adapter、浏览器实例配额和跨机租约未接入。控制面支持暂停／恢复／取消。
+- 当前有 T1 契约／单元测试和本地 HTTP fixture 集成；D03／A08／D04 有真实站点证据，但不是 T4 生产验收。浏览器路径另有本地 JS fixture、mercerine 真实站点和强杀接管证据。
+- `runtime/`、`executor/` 从 R06 抽取；静态和浏览器两类 fetcher 共用同一 runner，浏览器任务逐条串行执行。租约和资源登记已支持多 worker 进程，但浏览器实例配额和跨机租约未接入。控制面支持暂停／恢复／取消。
 - `run` 已接入 SQLite 任务账本；`export` 仍可独立使用 `task.json` + `candidates.jsonl`，不依赖账本。
 - `description.blocks` 的 `kind` 由提取端标注；本层不按关键词猜测政策或适配区块。
 - `description_status` 必须由提取端显式给出；本层不从正文长度或选择器命中情况推断完整／未提供。

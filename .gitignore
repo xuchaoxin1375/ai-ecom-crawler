@@ -15,12 +15,14 @@ serviceAccountKey.json
 *.db-wal
 *.db-shm
 *.db-journal
+*.db.worker.lock
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
 *.sqlite3
 *.sqlite3-wal
 *.sqlite3-shm
+browser-profile/
 Thumbs.db
 .DS_Store
 dist/

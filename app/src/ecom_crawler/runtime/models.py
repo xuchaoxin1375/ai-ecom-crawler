@@ -121,6 +121,7 @@ class FetchResult:
     url: str
     body: bytes = b""
     error: str = ""
+    meta: dict[str, Any] = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:

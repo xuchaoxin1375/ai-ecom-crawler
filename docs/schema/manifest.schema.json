@@ -405,7 +405,63 @@
           "type": "string"
         },
         "browser": {
-          "type": "boolean"
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "headless": {"type": "boolean"},
+                "real_chrome": {"type": "boolean"},
+                "executable_path": {"type": "string", "minLength": 1},
+                "extra_flags": {
+                  "type": "array",
+                  "items": {"type": "string", "minLength": 1}
+                },
+                "user_agent": {"type": "string", "minLength": 1},
+                "locale": {"type": "string", "minLength": 1},
+                "timezone": {"type": "string", "minLength": 1},
+                "challenge_wait_ms": {"type": "integer", "minimum": 0},
+                "profile_name": {"type": "string", "minLength": 1},
+                "timeout_ms": {"type": "number", "exclusiveMinimum": 0},
+                "wait_until": {
+                  "enum": ["commit", "domcontentloaded", "load", "networkidle"]
+                },
+                "wait_selector": {"type": "string", "minLength": 1},
+                "wait_selector_state": {
+                  "enum": ["attached", "detached", "hidden", "visible"]
+                },
+                "wait_ms": {"type": "integer", "minimum": 0},
+                "network_idle": {"type": "boolean"},
+                "network_idle_timeout_ms": {"type": "integer", "minimum": 0},
+                "disable_resources": {"type": "boolean"}
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "per_url_type": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "engine": {"enum": ["static", "browser", "http_json"]},
+              "wait_until": {
+                "enum": ["commit", "domcontentloaded", "load", "networkidle"]
+              },
+              "wait_selector": {"type": "string", "minLength": 1},
+              "wait_selector_state": {
+                "enum": ["attached", "detached", "hidden", "visible"]
+              },
+              "wait_ms": {"type": "integer", "minimum": 0},
+              "network_idle": {"type": "boolean"},
+              "network_idle_timeout_ms": {"type": "integer", "minimum": 0},
+              "disable_resources": {"type": "boolean"},
+              "timeout_ms": {"type": "number", "exclusiveMinimum": 0}
+            },
+            "additionalProperties": false
+          }
         },
         "login": {
           "type": "boolean"

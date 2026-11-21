@@ -1,0 +1,151 @@
+schema_version: "1.1"
+rule_id: "mercerine-browser"
+rule_version: "2026.11.21-1"
+kind: declarative
+status: candidate
+
+site:
+  name: "Mercerine"
+  entry_urls: ["https://www.mercerine.com/"]
+  allowed_origins: ["https://www.mercerine.com"]
+  allowed_path_prefixes: ["/"]
+  market: "FR"
+  locale: "fr-FR"
+  currency: "EUR"
+
+scope:
+  include: ['-\d+\.html$']
+  exclude: ["/connexion", "/mon-compte", "/panier", "/commande", "/magasins"]
+  notes: "Bounded browser check: one homepage and at most five product pages."
+
+capabilities:
+  discovery: true
+  product: true
+
+discovery:
+  strategies: ["entry_links"]
+  entry_url: "https://www.mercerine.com/"
+  link_selector: 'a[href$=".html"]'
+  product_url_patterns: ['-\d+\.html$']
+  url_identity: "canonical"
+
+fetch:
+  default_engine: "browser"
+  concurrency: 1
+  delay_ms: 1000
+  retry: {max_attempts: 2, backoff_ms: 1000}
+  timeout_ms: 60000
+  browser:
+    headless: true
+    disable_resources: true
+    wait_until: "domcontentloaded"
+    network_idle: false
+  per_url_type:
+    navigation:
+      wait_selector: 'a[href$=".html"]'
+      wait_ms: 500
+      timeout_ms: 60000
+    product:
+      wait_selector: "h1.product-name"
+      wait_ms: 500
+      timeout_ms: 60000
+  challenge_handling: "none; wait for the site's own JS, stop and record"
+
+extract:
+  fields:
+    name:
+      required: true
+      fallbacks:
+        - {type: json_ld, path: "name", label: "json_ld"}
+        - {type: css_text, selector: "h1.product-name", label: "h1"}
+    price.amount:
+      required: true
+      fallbacks:
+        - {type: json_ld, path: "offers.price", label: "json_ld", take: "min_positive"}
+        - {type: css_attr, selector: 'meta[property="product:price:amount"]', attr: "content", label: "meta_price"}
+    price.currency:
+      required: true
+      fallbacks:
+        - {type: json_ld, path: "offers.priceCurrency", label: "json_ld"}
+        - {type: css_attr, selector: 'meta[property="product:price:currency"]', attr: "content", label: "meta_currency"}
+    primary_image_url:
+      required: true
+      fallbacks:
+        - {type: json_ld, path: "image", label: "json_ld"}
+        - {type: css_attr, selector: 'meta[property="og:image"]', attr: "content", label: "og_image", absolute: true}
+    description_html:
+      required: false
+      fallbacks:
+        - {type: json_ld, path: "description", label: "json_ld", description_status: "fallback"}
+        - {type: css_html, selector: "div[id^='product-description-short-']", label: "short_description", description_status: "partial"}
+    category:
+      required: false
+      fallbacks:
+        - {type: json_ld, path: "category", label: "json_ld"}
+    brand:
+      required: false
+      fallbacks:
+        - {type: json_ld, path: "brand.name", label: "json_ld"}
+    source_url:
+      required: true
+      fallbacks:
+        - {type: canonical, label: "canonical"}
+
+normalize:
+  price:
+    tax_basis: "INCLUSIVE"
+    choose: "smaller_public_pair"
+    positive_only: true
+  description:
+    mode: "clean_html"
+    statuses: ["complete", "partial", "fallback", "not_provided", "failed"]
+  options:
+    exclude_quantity: true
+    strip_price_delta: true
+
+validate:
+  required_fields:
+    - "name"
+    - "price.amount"
+    - "price.currency"
+    - "primary_image_url"
+    - "source_url"
+  assertions:
+    - {field: "price.amount", op: ">", value: 0}
+    - {field: "price.currency", op: "matches", value: "^[A-Z]{3}$"}
+  partial_description: "allowed_with_flag"
+
+output:
+  url_list:
+    enabled: true
+    columns: ["url", "source", "status", "title"]
+    format: "csv"
+  product_csv:
+    enabled: true
+    columns: 9
+    format: "csv"
+  task_result: true
+
+task_defaults:
+  max_urls: 10
+  max_products: 5
+  max_seconds: 180
+  concurrency:
+    navigation: 1
+    product: 1
+
+compatibility:
+  os: ["windows", "linux", "wsl2"]
+  runtime: "python>=3.11"
+  dependencies: ["patchright==1.64.4", "scrapling==0.5.1"]
+  browser: "patchright CDP, Chromium"
+
+evidence:
+  sample_urls: ["https://www.mercerine.com/"]
+  expected: []
+  verified_at: null
+  limitations:
+    - "Bounded browser check; not full-site coverage."
+    - "The homepage and product pages answer the first request with 503 and render after the site's own JS; no challenge bypass."
+
+notes: "Browser adapter evidence: static requests stay on the 503 shell, browser rendering reaches the product JSON-LD."

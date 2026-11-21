@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
-from typing import Any
+from collections.abc import Callable
+from typing import Any, Self
 from urllib.parse import urlparse
 
 from .models import FetchResult
+
+logger = logging.getLogger(__name__)
 
 
 class DomainLimiter:
@@ -42,6 +46,7 @@ class ScraplingFetcher:
         timeout_ms: int = 45000,
         max_attempts: int = 2,
         backoff_ms: int = 1000,
+        session_manager: Any | None = None,
     ) -> None:
         self.session = session
         self.limiter = limiter
@@ -50,8 +55,9 @@ class ScraplingFetcher:
         self.backoff = max(backoff_ms, 0) / 1000
         self.requests = 0
         self.retries = 0
+        self._session_manager = session_manager
 
-    def get(self, url: str) -> FetchResult:
+    def get(self, url: str, *, item_type: str | None = None) -> FetchResult:
         last_error = ""
         for attempt in range(1, self.max_attempts + 1):
             if self.limiter is not None:
@@ -84,6 +90,151 @@ class ScraplingFetcher:
             return FetchResult(status=status, url=final_url, body=bytes(body))
         return FetchResult(status=0, url=url, error=last_error)
 
+    def describe(self) -> dict[str, Any]:
+        return {
+            "engine": "static",
+            "engines_used": ["static"] if self.requests else [],
+            "thread_affine": False,
+            "browser_launched": False,
+        }
+
+    def close(self) -> None:
+        if self._session_manager is not None:
+            manager = self._session_manager
+            self._session_manager = None
+            try:
+                manager.__exit__(None, None, None)
+            except Exception:
+                logger.debug("static session close failed", exc_info=True)
+
     def _sleep_backoff(self, attempt: int) -> None:
         if self.backoff > 0:
             time.sleep(min(self.backoff * (2 ** (attempt - 1)), 5.0))
+
+
+class HybridFetcher:
+    """Route each work item to a lazily built engine.
+
+    ``default_engine`` and ``overrides`` use the same names as the rule
+    package: ``static``, ``browser`` or ``http_json``.  ``http_json`` is a
+    static HTTP request in this runtime.  Engines are built lazily so a rule
+    that never reaches a browser URL does not launch one.
+    """
+
+    def __init__(
+        self,
+        *,
+        default_engine: str,
+        overrides: dict[str, str],
+        builders: dict[str, Callable[[], Any]],
+    ) -> None:
+        self.default_engine = normalize_engine(default_engine)
+        self.overrides = {
+            key: normalize_engine(value) for key, value in overrides.items()
+        }
+        self.builders = builders
+        self._fetchers: dict[str, Any] = {}
+        self._lock = threading.Lock()
+        self._thread_affine = "browser" in {
+            self.default_engine,
+            *self.overrides.values(),
+        }
+
+    @property
+    def thread_affine(self) -> bool:
+        # The runner decides between inline and pooled items before the first
+        # fetch.  A hybrid plan that may reach the browser must therefore
+        # declare thread affinity up front, not after the browser is built.
+        return self._thread_affine
+
+    @property
+    def requests(self) -> int:
+        return sum(
+            int(getattr(fetcher, "requests", 0)) for fetcher in self._fetchers.values()
+        )
+
+    @property
+    def retries(self) -> int:
+        return sum(
+            int(getattr(fetcher, "retries", 0)) for fetcher in self._fetchers.values()
+        )
+
+    def get(self, url: str, *, item_type: str | None = None) -> FetchResult:
+        engine = self._engine_for(item_type)
+        fetcher = self._fetcher(engine)
+        return fetcher.get(url, item_type=item_type)
+
+    def describe(self) -> dict[str, Any]:
+        descriptions = {
+            engine: fetcher.describe()
+            for engine, fetcher in self._fetchers.items()
+            if hasattr(fetcher, "describe")
+        }
+        engines_used = sorted(
+            {
+                engine
+                for engine, description in descriptions.items()
+                if description.get("engines_used")
+            }
+        )
+        merged: dict[str, Any] = {
+            "engine": "hybrid",
+            "thread_affine": self.thread_affine,
+            "engines_used": engines_used,
+            "engines": descriptions,
+        }
+        browser = descriptions.get("browser")
+        if browser:
+            for key in (
+                "browser_launched",
+                "browser_headless",
+                "browser_binary",
+                "browser_version",
+                "browser_pid",
+                "browser_profile",
+            ):
+                if key in browser:
+                    merged[key] = browser[key]
+        else:
+            merged["browser_launched"] = False
+        return merged
+
+    def close(self) -> None:
+        for engine in reversed(list(self._fetchers)):
+            fetcher = self._fetchers.pop(engine)
+            try:
+                fetcher.close()
+            except Exception:
+                logger.debug("engine close failed: %s", engine, exc_info=True)
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.close()
+
+    def _engine_for(self, item_type: str | None) -> str:
+        if item_type and item_type in self.overrides:
+            return self.overrides[item_type]
+        return self.default_engine
+
+    def _fetcher(self, engine: str) -> Any:
+        with self._lock:
+            fetcher = self._fetchers.get(engine)
+            if fetcher is not None:
+                return fetcher
+            builder = self.builders.get(engine)
+            if builder is None:
+                raise RuntimeError(f"no fetcher builder for engine={engine}")
+            fetcher = builder()
+            self._fetchers[engine] = fetcher
+            return fetcher
+
+
+def normalize_engine(value: str) -> str:
+    engine = str(value or "static").strip().lower()
+    if engine == "http_json":
+        return "static"
+    if engine not in {"static", "browser"}:
+        raise ValueError(f"unsupported fetch engine: {value!r}")
+    return engine
