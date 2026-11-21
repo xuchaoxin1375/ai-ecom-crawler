@@ -156,6 +156,12 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--db", required=True, type=Path, help="SQLite task ledger")
     serve.add_argument("--out-root", required=True, type=Path, help="task output root")
     serve.add_argument(
+        "--rules-dir",
+        type=Path,
+        default=None,
+        help="managed rule package directory for create/control",
+    )
+    serve.add_argument(
         "--host",
         default="127.0.0.1",
         help="loopback address (default: 127.0.0.1)",
@@ -211,7 +217,7 @@ def _serve(args: argparse.Namespace) -> int:
 
     print(f"serving http://{host}:{args.port} (read-only)")
     uvicorn.run(
-        create_app(args.db, args.out_root),
+        create_app(args.db, args.out_root, args.rules_dir),
         host=host,
         port=args.port,
         log_level="info",

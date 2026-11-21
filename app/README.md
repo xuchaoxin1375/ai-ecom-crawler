@@ -25,22 +25,23 @@
 - 静态发现、获取、提取、基础重试和 SQLite 任务账本。
 - `run` 执行 product 任务并自动接入 D02 导出。
 - 单 worker 控制面：`submit` 入队，`worker` 常驻执行，`pause`／`resume`／`cancel` 从另一个进程改账本，runner 在检查点响应并拒收迟到结果。
-- 只读 FastAPI API：`/api/health`、任务列表／详情、URL／商品分页和 zip 导出。
-- 只读静态页面：任务列表、详情、计数、质量异常和导出入口；暂无创建和控制按钮。
+- FastAPI API：健康、规则目录、任务列表／详情、创建／启动／暂停／恢复／取消／归档／还原、URL／商品分页、SSE 和 zip 导出。
+- 本地静态页面：任务列表、创建、详情、控制按钮、计数、质量异常、items 和导出入口。
+- 账本增加 `site_key`、`domain_key`、`market`、`rule_path`、`archived_at` 和创建幂等键；旧库自动加列。
 
 尚未实现：
 
 - 浏览器／动态渲染、挑战页会话复用和资源回收。
 - 跨进程租约；当前只允许一个 `worker` 消费同一账本。
-- 创建／控制 API、SSE、归档字段和完整 Web UI；`serve` 当前只读。
-- app 原生状态模型和构建会话。
+- service-managed worker：`serve` 不启动执行器，需另跑 `worker`。
+- 永久移除、异步残留回收、构建会话和完整前端原型评审。
 - 生产级浏览器／进程孤儿回收；R06 的静态单进程能力已抽取，但不是最终形态。
 
 ## 布局
 
 - `src/ecom_crawler/`：应用代码。
 - `src/ecom_crawler/runtime/`、`executor/`：从 R06 抽取的静态单进程运行时和提取器。
-- `src/ecom_crawler/web/`：只读 FastAPI 应用和静态页面。
+- `src/ecom_crawler/web/`：本地 FastAPI 应用和静态页面。
 - `src/ecom_crawler/execution.py`、`bridge.py`：执行入口与 R06→D02 转换。
 - `schemas/`：候选输入、内部商品记录和任务结果的 JSON Schema。
 - `tests/`：T1 契约／单元测试和本地 fixture 集成测试，无外部网络。
@@ -106,14 +107,16 @@ python -m uv run --project app ecom-crawler validate --task-result /path/to/task
 - 跨进程租约、浏览器资源回收和跨进程 A20 仍未实现。
 - 证据：`tests/test_control.py` 覆盖状态转移、启动对账和单实例锁；`tests/test_control_flow.py` 覆盖暂停结清、恢复、取消拒收迟到结果、`run_forever` 和同进程 A20。
 
-## 只读 Web 切片（serve）
+## Web 服务（serve）
 
-- `serve` 用 FastAPI 托管 `/api/*` 和 `static/`，默认 `127.0.0.1:8765`，拒绝非回环地址。
-- API：`GET /api/health`、`GET /api/tasks`、`GET /api/tasks/{id}`、`GET /api/tasks/{id}/items?kind=url|product`、`GET /api/tasks/{id}/export`。
+- `serve` 用 FastAPI 托管 `/api/*` 和 `static/`，默认 `127.0.0.1:8765`，拒绝非回环地址；`--rules-dir` 指向受管规则包目录。
+- 只读 API：`GET /api/health`、`GET /api/rules`、`GET /api/tasks`、`GET /api/tasks/{id}`、`GET /api/tasks/{id}/items?kind=url|product`、`GET /api/tasks/{id}/export`。
+- 写 API：`POST /api/tasks`（`DRAFT` + `request_id` 幂等）、`start`、`pause`、`resume`、`cancel`、`archive`、`restore`。
+- `GET /api/tasks/{id}/events` 是 SSE：连接先发 `snapshot`，再转发 `events.ndjson` 增量，终态发 `end`；断线重连以快照为准。
 - 导出 zip 只允许 `products.csv`、`task-result.json`、`records.jsonl` 和 `diagnostics/` 下的排除／失败文件；`partial=true` 才允许导出未结束任务。
-- 页面是只读预览：列表、详情、计数、覆盖、质量异常、URL／商品表格和导出；没有创建、暂停、取消和归档按钮。
-- 页面每 3 秒轮询详情；SSE、创建／控制 API、`site_key`／`archived_at` 账本字段和前端原型评审在后续切片。
-- 证据：`tests/test_web.py` 覆盖健康、列表筛选、详情、items 分页、导出白名单、未结束导出和 404。
+- 页面支持列表、创建、详情、控制按钮、计数、覆盖、质量异常、items 和导出；控制请求显示“已受理”，最终状态以账本为准。
+- `serve` 不启动 worker；创建／启动的任务保持 `QUEUED`，需要另跑 `ecom-crawler worker`。service-managed worker 和前端原型评审仍未做。
+- 证据：`tests/test_web.py` 覆盖健康、规则目录、列表筛选、详情、items 分页、创建幂等、控制转移、归档／还原、SSE、导出白名单和错误码。
 
 ## 输入契约
 

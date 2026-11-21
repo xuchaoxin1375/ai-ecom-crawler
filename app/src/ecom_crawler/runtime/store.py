@@ -19,6 +19,11 @@ CREATE TABLE IF NOT EXISTS tasks (
     state TEXT NOT NULL,
     outcome TEXT,
     stop_reason TEXT,
+    site_key TEXT,
+    domain_key TEXT,
+    market TEXT,
+    rule_path TEXT,
+    archived_at TEXT,
     input_json TEXT NOT NULL,
     limits_json TEXT NOT NULL,
     output_json TEXT NOT NULL,
@@ -49,6 +54,13 @@ CREATE TABLE IF NOT EXISTS task_items (
 
 CREATE INDEX IF NOT EXISTS idx_task_items_state
     ON task_items(task_id, item_type, state);
+
+CREATE TABLE IF NOT EXISTS task_requests (
+    request_id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    request_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 """
 
 TASK_COLUMNS = {
@@ -61,6 +73,11 @@ TASK_COLUMNS = {
     "counters",
     "started_at",
     "finished_at",
+    "site_key",
+    "domain_key",
+    "market",
+    "rule_path",
+    "archived_at",
     "updated_at",
 }
 
@@ -71,6 +88,10 @@ class TaskNotFoundError(ValueError):
 
 class TaskTransitionError(ValueError):
     """Raised when a control command is invalid for the task's current state."""
+
+
+class RequestConflictError(ValueError):
+    """Raised when an idempotency key is reused with a different request."""
 
 
 class TaskStore:
@@ -101,6 +122,9 @@ class TaskStore:
                 connection.execute(
                     "ALTER TABLE tasks RENAME COLUMN rule_version TO plan_version"
                 )
+            for column in ("site_key", "domain_key", "market", "rule_path", "archived_at"):
+                if column not in task_columns:
+                    connection.execute(f"ALTER TABLE tasks ADD COLUMN {column} TEXT")
             item_columns = {
                 row["name"]
                 for row in connection.execute("PRAGMA table_info(task_items)")
@@ -110,37 +134,88 @@ class TaskStore:
                     "ALTER TABLE task_items ADD COLUMN failure_class TEXT"
                 )
 
+    def _insert_task(self, connection: sqlite3.Connection, task: Task) -> None:
+        connection.execute(
+            """
+            INSERT INTO tasks (
+                task_id, plan_id, plan_version, task_type, state, outcome,
+                stop_reason, site_key, domain_key, market, rule_path, archived_at,
+                input_json, limits_json, output_json, counters_json,
+                created_at, updated_at, started_at, finished_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                task.task_id,
+                task.plan_id,
+                task.plan_version,
+                task.task_type,
+                task.state,
+                task.outcome,
+                task.stop_reason,
+                task.site_key,
+                task.domain_key,
+                task.market,
+                task.rule_path,
+                task.archived_at,
+                json_dumps(task.input),
+                json_dumps(task.limits),
+                json_dumps(task.output),
+                json_dumps(task.counters),
+                task.created_at,
+                task.updated_at,
+                task.started_at,
+                task.finished_at,
+            ),
+        )
+
     def create_task(self, task: Task) -> None:
         with self._connect() as connection:
             try:
-                connection.execute(
-                    """
-                    INSERT INTO tasks (
-                        task_id, plan_id, plan_version, task_type, state, outcome,
-                        stop_reason, input_json, limits_json, output_json,
-                        counters_json, created_at, updated_at, started_at, finished_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        task.task_id,
-                        task.plan_id,
-                        task.plan_version,
-                        task.task_type,
-                        task.state,
-                        task.outcome,
-                        task.stop_reason,
-                        json_dumps(task.input),
-                        json_dumps(task.limits),
-                        json_dumps(task.output),
-                        json_dumps(task.counters),
-                        task.created_at,
-                        task.updated_at,
-                        task.started_at,
-                        task.finished_at,
-                    ),
-                )
+                self._insert_task(connection, task)
             except sqlite3.IntegrityError as exc:
                 raise ValueError(f"task already exists: {task.task_id}") from exc
+
+    def create_task_idempotent(
+        self,
+        task: Task,
+        request_id: str,
+        request_json: str,
+    ) -> tuple[Task, bool]:
+        """Insert a task once per request id; return (task, created)."""
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                row = connection.execute(
+                    "SELECT task_id, request_json FROM task_requests WHERE request_id = ?",
+                    (request_id,),
+                ).fetchone()
+                if row is not None:
+                    if str(row["request_json"]) != request_json:
+                        raise RequestConflictError(
+                            f"request_id {request_id} was used with a different request"
+                        )
+                    task_id = str(row["task_id"])
+                    connection.commit()
+                    existing = self.get_task(task_id)
+                    if existing is None:
+                        raise TaskNotFoundError(f"unknown task: {task_id}")
+                    return existing, False
+                self._insert_task(connection, task)
+                connection.execute(
+                    """
+                    INSERT INTO task_requests (request_id, task_id, request_json, created_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (request_id, task.task_id, request_json, utc_now()),
+                )
+                connection.commit()
+            except sqlite3.IntegrityError as exc:
+                connection.rollback()
+                raise ValueError(f"task already exists: {task.task_id}") from exc
+            except Exception:
+                connection.rollback()
+                raise
+        return task, True
 
     def get_task(self, task_id: str) -> Task | None:
         with self._connect() as connection:
@@ -225,6 +300,60 @@ class TaskStore:
             default_target="CANCELLED",
             finalize_cancel=True,
         )
+
+    def request_archive(self, task_id: str) -> Task:
+        """Hide a terminal task in the recycle area; only visibility changes."""
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                row = connection.execute(
+                    "SELECT state, archived_at FROM tasks WHERE task_id = ?",
+                    (task_id,),
+                ).fetchone()
+                if row is None:
+                    raise TaskNotFoundError(f"unknown task: {task_id}")
+                if row["archived_at"] is None:
+                    if row["state"] not in {"FINISHED", "CANCELLED"}:
+                        raise TaskTransitionError(
+                            f"cannot archive task {task_id} in state {row['state']}"
+                        )
+                    connection.execute(
+                        "UPDATE tasks SET archived_at = ?, updated_at = ? WHERE task_id = ?",
+                        (utc_now(), utc_now(), task_id),
+                    )
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+        task = self.get_task(task_id)
+        if task is None:
+            raise TaskNotFoundError(f"unknown task: {task_id}")
+        return task
+
+    def request_restore(self, task_id: str) -> Task:
+        """Restore an archived task to the normal list; no re-collection."""
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                row = connection.execute(
+                    "SELECT archived_at FROM tasks WHERE task_id = ?",
+                    (task_id,),
+                ).fetchone()
+                if row is None:
+                    raise TaskNotFoundError(f"unknown task: {task_id}")
+                if row["archived_at"] is not None:
+                    connection.execute(
+                        "UPDATE tasks SET archived_at = NULL, updated_at = ? WHERE task_id = ?",
+                        (utc_now(), task_id),
+                    )
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+        task = self.get_task(task_id)
+        if task is None:
+            raise TaskNotFoundError(f"unknown task: {task_id}")
+        return task
 
     def _transition(
         self,
@@ -551,6 +680,11 @@ def _task_from_row(row: sqlite3.Row) -> Task:
         updated_at=row["updated_at"],
         started_at=row["started_at"],
         finished_at=row["finished_at"],
+        site_key=row["site_key"],
+        domain_key=row["domain_key"],
+        market=row["market"],
+        rule_path=row["rule_path"],
+        archived_at=row["archived_at"],
     )
 
 

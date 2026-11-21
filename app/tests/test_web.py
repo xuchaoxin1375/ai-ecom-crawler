@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import shutil
 import tempfile
 import unittest
 import zipfile
@@ -80,7 +81,19 @@ class WebApiTests(unittest.TestCase):
                 stage="discover",
             )
         )
-        self.client = TestClient(create_app(self.db_path, self.out_root))
+        self.rules_dir = self.root / "rules"
+        self.rules_dir.mkdir()
+        self.rule_source = (
+            Path(__file__).parents[2]
+            / "experiments"
+            / "d03"
+            / "familidoo"
+            / "familidoo-d03.yaml"
+        )
+        shutil.copy(self.rule_source, self.rules_dir / "familidoo.yaml")
+        self.client = TestClient(
+            create_app(self.db_path, self.out_root, self.rules_dir)
+        )
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
@@ -142,6 +155,106 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(response.json()["error"]["code"], "EXPORT_NOT_READY")
         partial = self.client.get("/api/tasks/running-1/export?partial=true")
         self.assertEqual(partial.status_code, 404)
+
+    def _first_rule(self) -> dict:
+        payload = self.client.get("/api/rules").json()
+        self.assertTrue(payload["configured"])
+        self.assertTrue(payload["items"])
+        return payload["items"][0]
+
+    def test_rules_catalog_and_create_idempotency(self) -> None:
+        rules = self.client.get("/api/rules")
+        self.assertEqual(rules.status_code, 200)
+        payload = rules.json()
+        self.assertTrue(payload["configured"])
+        rule = payload["items"][0]
+        self.assertTrue(rule["valid"])
+        self.assertIn("product", rule["task_types"])
+        self.assertNotIn(":\\\\", rule["path"])
+
+        body = {
+            "request_id": "req-1",
+            "rule_id": rule["rule_id"],
+            "rule_version": rule["rule_version"],
+            "task_type": "product",
+            "limits": {"max_products": 6, "max_seconds": 30, "max_attempts": 1},
+        }
+        created = self.client.post("/api/tasks", json=body)
+        self.assertEqual(created.status_code, 201)
+        first = created.json()
+        self.assertTrue(first["created"])
+        task_id = first["task"]["task_id"]
+        self.assertEqual(first["task"]["state"], "DRAFT")
+        self.assertIsNotNone(first["task"]["market"])
+
+        replay = self.client.post("/api/tasks", json=body)
+        self.assertEqual(replay.status_code, 200)
+        self.assertFalse(replay.json()["created"])
+        self.assertEqual(replay.json()["task"]["task_id"], task_id)
+
+        conflict_body = dict(body)
+        conflict_body["limits"] = {"max_products": 3}
+        conflict = self.client.post("/api/tasks", json=conflict_body)
+        self.assertEqual(conflict.status_code, 409)
+        self.assertEqual(conflict.json()["error"]["code"], "CONFLICT")
+
+        start = self.client.post(f"/api/tasks/{task_id}/start")
+        self.assertEqual(start.status_code, 202)
+        self.assertEqual(start.json()["state"], "QUEUED")
+        pause = self.client.post(f"/api/tasks/{task_id}/pause")
+        self.assertEqual(pause.status_code, 409)
+        self.assertEqual(pause.json()["error"]["code"], "INVALID_STATE")
+        cancel = self.client.post(f"/api/tasks/{task_id}/cancel")
+        self.assertEqual(cancel.status_code, 202)
+        self.assertEqual(cancel.json()["state"], "CANCELLED")
+
+        archive = self.client.post(f"/api/tasks/{task_id}/archive")
+        self.assertEqual(archive.status_code, 202)
+        self.assertIsNotNone(archive.json()["archived_at"])
+        default_list = self.client.get("/api/tasks").json()
+        self.assertNotIn(task_id, [item["task_id"] for item in default_list["items"]])
+        archived_list = self.client.get("/api/tasks?include_archived=true").json()
+        self.assertIn(task_id, [item["task_id"] for item in archived_list["items"]])
+
+        restore = self.client.post(f"/api/tasks/{task_id}/restore")
+        self.assertEqual(restore.status_code, 202)
+        self.assertIsNone(restore.json()["archived_at"])
+        default_list = self.client.get("/api/tasks").json()
+        self.assertIn(task_id, [item["task_id"] for item in default_list["items"]])
+
+    def test_archive_running_task_is_rejected(self) -> None:
+        rule = self._first_rule()
+        body = {
+            "request_id": "req-archive-running",
+            "rule_id": rule["rule_id"],
+            "rule_version": rule["rule_version"],
+            "task_type": "product",
+        }
+        task_id = self.client.post("/api/tasks", json=body).json()["task"]["task_id"]
+        self.client.post(f"/api/tasks/{task_id}/start")
+        response = self.client.post(f"/api/tasks/{task_id}/archive")
+        self.assertEqual(response.status_code, 409)
+
+    def test_events_stream_snapshot_and_end(self) -> None:
+        rule = self._first_rule()
+        body = {
+            "request_id": "req-events",
+            "rule_id": rule["rule_id"],
+            "rule_version": rule["rule_version"],
+            "task_type": "product",
+        }
+        task_id = self.client.post("/api/tasks", json=body).json()["task"]["task_id"]
+        self.client.post(f"/api/tasks/{task_id}/cancel")
+        lines: list[str] = []
+        with self.client.stream("GET", f"/api/tasks/{task_id}/events") as response:
+            self.assertEqual(response.status_code, 200)
+            for line in response.iter_lines():
+                lines.append(line)
+                if line == "event: end":
+                    break
+        text = "\n".join(lines)
+        self.assertIn("event: snapshot", text)
+        self.assertIn("event: end", text)
 
 
 if __name__ == "__main__":

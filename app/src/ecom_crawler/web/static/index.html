@@ -10,7 +10,7 @@
     <header class="topbar">
       <a class="brand" href="#/tasks">电商采集</a>
       <span class="badge">只读预览</span>
-      <span class="hint">控制与创建在后续切片接入</span>
+      <span class="hint">控制请求需独立的 worker 进程执行</span>
     </header>
 
     <main id="app">
@@ -19,6 +19,39 @@
           <h1>任务</h1>
           <button id="refresh-list" type="button">刷新</button>
         </div>
+
+        <section class="panel create-panel">
+          <h2>创建任务</h2>
+          <form id="create-form" class="create-form">
+            <label>
+              规则包
+              <select id="rule-select" required>
+                <option value="">加载中…</option>
+              </select>
+            </label>
+            <label>
+              类型
+              <select id="create-type">
+                <option value="product">product</option>
+                <option value="discovery">discovery</option>
+              </select>
+            </label>
+            <label>
+              最大商品
+              <input id="create-max-products" type="number" min="1" value="20" />
+            </label>
+            <label>
+              最大 URL
+              <input id="create-max-urls" type="number" min="1" value="100" />
+            </label>
+            <label>
+              最大秒数
+              <input id="create-max-seconds" type="number" min="1" value="180" />
+            </label>
+            <button id="create-submit" type="submit">创建并启动</button>
+          </form>
+          <div id="create-status" class="status" role="status"></div>
+        </section>
 
         <form id="filters" class="filters">
           <label>
@@ -41,6 +74,10 @@
               <option value="product">product</option>
               <option value="discovery">discovery</option>
             </select>
+          </label>
+          <label class="check">
+            <input id="filter-archived" type="checkbox" />
+            包含归档
           </label>
         </form>
 
@@ -71,6 +108,7 @@
             <h1 id="detail-title">任务详情</h1>
           </div>
           <div class="actions">
+            <div id="detail-controls" class="control-row"></div>
             <button id="refresh-detail" type="button">刷新</button>
             <a id="export-link" class="button-link" href="#" download>导出 zip</a>
           </div>

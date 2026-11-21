@@ -104,7 +104,8 @@ a:focus-visible {
   outline-offset: 2px;
 }
 
-.filters {
+.filters,
+.create-form {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
@@ -113,6 +114,40 @@ a:focus-visible {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--radius);
+}
+
+.create-panel {
+  margin-bottom: 16px;
+}
+
+.create-form {
+  margin-bottom: 4px;
+  padding: 0;
+  border: 0;
+}
+
+.create-form input[type="number"] {
+  width: 92px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  font: inherit;
+}
+
+.check {
+  color: var(--text);
+}
+
+.control-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.control-row button {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 label {
