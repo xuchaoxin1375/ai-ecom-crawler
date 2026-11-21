@@ -58,6 +58,11 @@ class Task:
     updated_at: str = field(default_factory=utc_now)
     started_at: str | None = None
     finished_at: str | None = None
+    site_key: str | None = None
+    domain_key: str | None = None
+    market: str | None = None
+    rule_path: str | None = None
+    archived_at: str | None = None
 
     def __post_init__(self) -> None:
         if self.task_type not in TASK_TYPES:

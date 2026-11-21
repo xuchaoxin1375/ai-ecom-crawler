@@ -1,22 +1,33 @@
-"""Read-only FastAPI surface for the first D08 slice."""
+"""Local FastAPI surface for the D08 read-only and control slices."""
 
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import re
+import time
+import uuid
 import zipfile
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 
 from .. import __version__
+from ..execution import build_task
+from ..model import ContractError
 from ..runtime.models import Task, WorkItem
-from ..runtime.rule import load_rule
-from ..runtime.store import TaskStore
+from ..runtime.rule import RuleError, load_rule
+from ..runtime.store import (
+    RequestConflictError,
+    TaskNotFoundError,
+    TaskStore,
+    TaskTransitionError,
+)
 
 STATIC_DIR = Path(__file__).with_name("static")
 EXPORT_FILES = (
@@ -26,7 +37,21 @@ EXPORT_FILES = (
     "diagnostics/excluded.jsonl",
     "diagnostics/failed.jsonl",
 )
-ITEM_STATES = ("PENDING", "IN_FLIGHT", "DONE", "EXCLUDED", "FAILED")
+
+
+class Limits(BaseModel):
+    max_urls: int = Field(default=100, ge=1, le=100000)
+    max_products: int = Field(default=20, ge=1, le=10000)
+    max_seconds: int = Field(default=180, ge=1, le=86400)
+    max_attempts: int = Field(default=2, ge=1, le=10)
+
+
+class CreateTaskRequest(BaseModel):
+    request_id: str = Field(min_length=1, max_length=200)
+    rule_id: str
+    rule_version: str
+    task_type: Literal["product", "discovery"] = "product"
+    limits: Limits = Field(default_factory=Limits)
 
 
 def _load_result(out_root: Path, task_id: str) -> dict[str, Any]:
@@ -40,23 +65,14 @@ def _load_result(out_root: Path, task_id: str) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
-def _rule_site(task: Task) -> tuple[str | None, str | None]:
-    rule_path = task.input.get("rule_path")
-    if not rule_path:
-        return None, None
-    try:
-        site = load_rule(Path(str(rule_path))).site
-    except Exception:  # noqa: BLE001 - a missing rule must not break the list
-        return None, None
-    name = site.get("name")
-    market = site.get("market")
-    return (str(name) if name else None, str(market) if market else None)
-
-
 def _counts(store: TaskStore, task: Task, result: dict[str, Any]) -> dict[str, int]:
     raw = result.get("counts")
     if isinstance(raw, dict) and raw:
-        return {str(key): int(value) for key, value in raw.items() if isinstance(value, int)}
+        return {
+            str(key): int(value)
+            for key, value in raw.items()
+            if isinstance(value, int) and not isinstance(value, bool)
+        }
     items = store.item_counts(task.task_id)
     return {
         "pending": items.get("PENDING", 0),
@@ -69,21 +85,20 @@ def _counts(store: TaskStore, task: Task, result: dict[str, Any]) -> dict[str, i
 
 def _summary(store: TaskStore, task: Task, out_root: Path) -> dict[str, Any]:
     result = _load_result(out_root, task.task_id)
-    site_key, market = _rule_site(task)
     return {
         "task_id": task.task_id,
         "task_type": task.task_type,
         "plan_id": task.plan_id,
         "plan_version": task.plan_version,
-        "site_key": site_key or task.plan_id,
-        "market": market,
+        "site_key": task.site_key or task.plan_id,
+        "market": task.market,
         "state": task.state,
         "outcome": task.outcome,
         "stop_reason": task.stop_reason,
         "counts": _counts(store, task, result),
         "coverage": result.get("coverage") or {"status": "UNKNOWN"},
         "quality_exceptions": result.get("quality_exceptions") or [],
-        "archived_at": None,
+        "archived_at": task.archived_at,
         "created_at": task.created_at,
         "updated_at": task.updated_at,
     }
@@ -111,10 +126,91 @@ def _error(code: str, message: str, status_code: int) -> HTTPException:
     return HTTPException(status_code=status_code, detail={"code": code, "message": message})
 
 
-def create_app(db_path: str | Path, out_root: str | Path) -> FastAPI:
+def _sse(event: str, data: Any) -> str:
+    payload = data if isinstance(data, str) else json.dumps(data, ensure_ascii=False)
+    return f"event: {event}\ndata: {payload}\n\n"
+
+
+def _rule_entries(rules_dir: Path | None) -> list[dict[str, Any]]:
+    if rules_dir is None or not rules_dir.is_dir():
+        return []
+    root = rules_dir.resolve()
+    entries: list[dict[str, Any]] = []
+    for path in sorted(root.rglob("*")):
+        if path.suffix.lower() not in {".yaml", ".yml"} or not path.is_file():
+            continue
+        resolved = path.resolve()
+        if not resolved.is_relative_to(root):
+            continue
+        entry: dict[str, Any] = {
+            "path": resolved.relative_to(root).as_posix(),
+            "rule_id": None,
+            "rule_version": None,
+            "task_types": [],
+            "site": None,
+            "market": None,
+            "locale": None,
+            "currency": None,
+            "valid": False,
+            "errors": [],
+        }
+        try:
+            rule = load_rule(resolved)
+        except Exception as exc:  # noqa: BLE001 - invalid rules are catalog data
+            entry["errors"].append(f"{type(exc).__name__}: {exc}")
+        else:
+            site = rule.site if isinstance(rule.site, dict) else {}
+            capabilities = (
+                rule.capabilities if isinstance(rule.capabilities, dict) else {}
+            )
+            entry.update(
+                {
+                    "rule_id": rule.rule_id,
+                    "rule_version": rule.rule_version,
+                    "task_types": [
+                        name
+                        for name in ("product", "discovery")
+                        if capabilities.get(name)
+                    ],
+                    "site": site.get("name"),
+                    "market": site.get("market"),
+                    "locale": site.get("locale"),
+                    "currency": site.get("currency"),
+                    "valid": True,
+                }
+            )
+        entries.append(entry)
+
+    groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for entry in entries:
+        if entry["valid"] and entry["rule_id"] and entry["rule_version"]:
+            groups.setdefault(
+                (str(entry["rule_id"]), str(entry["rule_version"])), []
+            ).append(entry)
+    for group in groups.values():
+        if len(group) > 1:
+            for entry in group:
+                entry["valid"] = False
+                entry["errors"].append("duplicate rule_id/version")
+    entries.sort(
+        key=lambda entry: (
+            str(entry["rule_id"] or ""),
+            str(entry["rule_version"] or ""),
+            str(entry["path"]),
+        )
+    )
+    return entries
+
+
+def create_app(
+    db_path: str | Path,
+    out_root: str | Path,
+    rules_dir: str | Path | None = None,
+) -> FastAPI:
     store = TaskStore(db_path)
     root = Path(out_root)
     root.mkdir(parents=True, exist_ok=True)
+    rules = Path(rules_dir).resolve() if rules_dir is not None else None
 
     app = FastAPI(
         title="ecom-crawler",
@@ -125,6 +221,7 @@ def create_app(db_path: str | Path, out_root: str | Path) -> FastAPI:
     )
     app.state.store = store
     app.state.out_root = root
+    app.state.rules_dir = rules
 
     @app.exception_handler(HTTPException)
     async def http_error(request: Request, exc: HTTPException) -> JSONResponse:
@@ -140,6 +237,26 @@ def create_app(db_path: str | Path, out_root: str | Path) -> FastAPI:
             },
         )
 
+    def require_task(task_id: str) -> Task:
+        task = store.get_task(task_id)
+        if task is None:
+            raise _error("NOT_FOUND", f"unknown task: {task_id}", 404)
+        return task
+
+    def control(task_id: str, action: str) -> dict[str, Any]:
+        try:
+            task = getattr(store, f"request_{action}")(task_id)
+        except TaskNotFoundError as exc:
+            raise _error("NOT_FOUND", str(exc), 404) from exc
+        except TaskTransitionError as exc:
+            raise _error("INVALID_STATE", str(exc), 409) from exc
+        return {
+            "accepted": True,
+            "task_id": task.task_id,
+            "state": task.state,
+            "archived_at": task.archived_at,
+        }
+
     @app.get("/", include_in_schema=False)
     def index() -> FileResponse:
         return FileResponse(STATIC_DIR / "index.html")
@@ -152,31 +269,96 @@ def create_app(db_path: str | Path, out_root: str | Path) -> FastAPI:
             "db": str(store.path),
             "tasks": len(store.list_tasks()),
             "worker": "external",
+            "rules_configured": rules is not None and rules.is_dir(),
+        }
+
+    @app.get("/api/rules")
+    def list_rules() -> dict[str, Any]:
+        return {
+            "configured": rules is not None and rules.is_dir(),
+            "items": _rule_entries(rules),
         }
 
     @app.get("/api/tasks")
     def list_tasks(
         state: Annotated[list[str] | None, Query()] = None,
         task_type: Annotated[str | None, Query()] = None,
+        include_archived: Annotated[bool, Query()] = False,
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         offset: Annotated[int, Query(ge=0)] = 0,
     ) -> dict[str, Any]:
         tasks = store.list_tasks(set(state) if state else None)
+        tasks = [
+            task
+            for task in tasks
+            if include_archived or task.archived_at is None
+        ]
         if task_type:
             tasks = [task for task in tasks if task.task_type == task_type]
         total = len(tasks)
-        page = tasks[offset : offset + limit]
         return {
             "total": total,
-            "items": [_summary(store, task, root) for task in page],
+            "items": [_summary(store, task, root) for task in tasks[offset : offset + limit]],
         }
+
+    @app.post("/api/tasks", status_code=201)
+    def create_task(payload: CreateTaskRequest) -> JSONResponse:
+        if rules is None or not rules.is_dir():
+            raise _error("RULES_NOT_CONFIGURED", "serve --rules-dir is not set", 400)
+        entries = _rule_entries(rules)
+        matches = [
+            entry
+            for entry in entries
+            if entry.get("rule_id") == payload.rule_id
+            and entry.get("rule_version") == payload.rule_version
+        ]
+        if not matches:
+            raise _error("NOT_FOUND", "rule package not found", 404)
+        if len(matches) != 1 or not matches[0]["valid"]:
+            raise _error("INVALID_RULE", "rule package is invalid or duplicated", 400)
+        entry = matches[0]
+        if payload.task_type not in entry["task_types"]:
+            raise _error(
+                "INVALID_TASK_TYPE",
+                f"rule does not support {payload.task_type}",
+                400,
+            )
+        try:
+            task = build_task(
+                rule_path=rules / str(entry["path"]),
+                task_id=f"web-{uuid.uuid4().hex[:12]}",
+                task_type=payload.task_type,
+                max_urls=payload.limits.max_urls,
+                max_products=payload.limits.max_products,
+                max_seconds=payload.limits.max_seconds,
+                max_attempts=payload.limits.max_attempts,
+            )
+        except (RuleError, ContractError) as exc:
+            raise _error("INVALID_RULE", str(exc), 400) from exc
+        request_json = json.dumps(
+            payload.model_dump(),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        try:
+            task, created = store.create_task_idempotent(
+                task,
+                payload.request_id,
+                request_json,
+            )
+        except RequestConflictError as exc:
+            raise _error("CONFLICT", str(exc), 409) from exc
+        except ValueError as exc:
+            raise _error("CONFLICT", str(exc), 409) from exc
+        return JSONResponse(
+            status_code=201 if created else 200,
+            content={"created": created, "task": _summary(store, task, root)},
+        )
 
     @app.get("/api/tasks/{task_id}")
     def get_task(task_id: str) -> dict[str, Any]:
-        task = store.get_task(task_id)
-        if task is None:
-            raise _error("NOT_FOUND", f"unknown task: {task_id}", 404)
-        return _summary(store, task, root)
+        return _summary(store, require_task(task_id), root)
 
     @app.get("/api/tasks/{task_id}/items")
     def list_items(
@@ -185,8 +367,7 @@ def create_app(db_path: str | Path, out_root: str | Path) -> FastAPI:
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         offset: Annotated[int, Query(ge=0)] = 0,
     ) -> dict[str, Any]:
-        if store.get_task(task_id) is None:
-            raise _error("NOT_FOUND", f"unknown task: {task_id}", 404)
+        require_task(task_id)
         item_type = "navigation" if kind == "url" else "product"
         items = store.items(task_id, item_type)
         return {
@@ -194,11 +375,72 @@ def create_app(db_path: str | Path, out_root: str | Path) -> FastAPI:
             "items": [_item_payload(item) for item in items[offset : offset + limit]],
         }
 
+    @app.post("/api/tasks/{task_id}/start", status_code=202)
+    def start_task(task_id: str) -> dict[str, Any]:
+        return control(task_id, "start")
+
+    @app.post("/api/tasks/{task_id}/pause", status_code=202)
+    def pause_task(task_id: str) -> dict[str, Any]:
+        return control(task_id, "pause")
+
+    @app.post("/api/tasks/{task_id}/resume", status_code=202)
+    def resume_task(task_id: str) -> dict[str, Any]:
+        return control(task_id, "resume")
+
+    @app.post("/api/tasks/{task_id}/cancel", status_code=202)
+    def cancel_task(task_id: str) -> dict[str, Any]:
+        return control(task_id, "cancel")
+
+    @app.post("/api/tasks/{task_id}/archive", status_code=202)
+    def archive_task(task_id: str) -> dict[str, Any]:
+        return control(task_id, "archive")
+
+    @app.post("/api/tasks/{task_id}/restore", status_code=202)
+    def restore_task(task_id: str) -> dict[str, Any]:
+        return control(task_id, "restore")
+
+    @app.get("/api/tasks/{task_id}/events")
+    async def task_events(task_id: str) -> StreamingResponse:
+        require_task(task_id)
+
+        async def stream() -> Any:
+            yield _sse("snapshot", _summary(store, require_task(task_id), root))
+            path = root / task_id / "events.ndjson"
+            offset = path.stat().st_size if path.is_file() else 0
+            last_heartbeat = time.monotonic()
+            while True:
+                if path.is_file():
+                    size = path.stat().st_size
+                    if size < offset:
+                        offset = 0
+                    if size > offset:
+                        with path.open("r", encoding="utf-8") as handle:
+                            handle.seek(offset)
+                            chunk = handle.read()
+                            offset = handle.tell()
+                        for line in chunk.splitlines():
+                            if line.strip():
+                                yield _sse("update", line)
+                current = store.get_task(task_id)
+                if current is None:
+                    break
+                if current.state in {"FINISHED", "CANCELLED"}:
+                    yield _sse("end", {"state": current.state})
+                    break
+                if time.monotonic() - last_heartbeat >= 15:
+                    yield ": keep-alive\n\n"
+                    last_heartbeat = time.monotonic()
+                await asyncio.sleep(0.5)
+
+        return StreamingResponse(
+            stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
     @app.get("/api/tasks/{task_id}/export")
     def export_task(task_id: str, partial: bool = False) -> Response:
-        task = store.get_task(task_id)
-        if task is None:
-            raise _error("NOT_FOUND", f"unknown task: {task_id}", 404)
+        task = require_task(task_id)
         if task.state not in {"FINISHED", "CANCELLED"} and not partial:
             raise _error("EXPORT_NOT_READY", "task is not finished; use partial=true", 409)
         run_dir = (root / task_id).resolve()

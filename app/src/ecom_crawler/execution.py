@@ -11,6 +11,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from .bridge import convert_task_to_run_dir
 from .model import ContractError, ExportResult
@@ -30,7 +31,7 @@ class ExecutionResult:
     export_dir: Path | None = None
 
 
-def _build_task(
+def build_task(
     *,
     rule_path: Path,
     task_id: str,
@@ -66,6 +67,10 @@ def _build_task(
             "url_list": True,
             "product_csv": task_type == "product",
         },
+        site_key=str(rule.site.get("name") or urlparse(rule.entry_url).hostname or rule.rule_id),
+        domain_key=urlparse(rule.entry_url).hostname or "",
+        market=str(rule.site.get("market")) if rule.site.get("market") else None,
+        rule_path=str(rule_path),
     )
 
 
@@ -81,7 +86,7 @@ def submit_task(
     max_attempts: int = 2,
 ) -> Task:
     """Create a QUEUED task without executing it."""
-    task = _build_task(
+    task = build_task(
         rule_path=rule_path,
         task_id=task_id,
         task_type=task_type,
@@ -113,7 +118,7 @@ def run_task(
     per_domain_rps: float = 1.0,
 ) -> tuple[dict[str, Any], Path]:
     """Create and run one task, returning its result and task directory."""
-    task = _build_task(
+    task = build_task(
         rule_path=rule_path,
         task_id=task_id,
         task_type=task_type,
