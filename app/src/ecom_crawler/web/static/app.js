@@ -30,7 +30,11 @@ function setStatus(element, message, isError = false) {
 
 async function api(path, options = {}) {
   const headers = { Accept: "application/json", ...(options.headers || {}) };
+  const method = (options.method || "GET").toUpperCase();
   if (options.body) headers["Content-Type"] = "application/json";
+  if (method !== "GET" && method !== "HEAD") {
+    headers["X-Requested-With"] = "XMLHttpRequest";
+  }
   const response = await fetch(path, { ...options, headers });
   const text = await response.text();
   let payload = {};

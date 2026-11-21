@@ -14,6 +14,12 @@ from ecom_crawler.runtime.models import Task, WorkItem
 from ecom_crawler.runtime.store import TaskStore
 from ecom_crawler.web.app import create_app
 
+CLIENT_HEADERS = {
+    "Host": "127.0.0.1:8765",
+    "Origin": "http://127.0.0.1:8765",
+    "X-Requested-With": "XMLHttpRequest",
+}
+
 
 def make_task(task_id: str, state: str = "FINISHED", task_type: str = "product") -> Task:
     return Task(
@@ -92,11 +98,18 @@ class WebApiTests(unittest.TestCase):
         )
         shutil.copy(self.rule_source, self.rules_dir / "familidoo.yaml")
         self.client = TestClient(
-            create_app(self.db_path, self.out_root, self.rules_dir)
+            create_app(self.db_path, self.out_root, self.rules_dir),
+            headers=CLIENT_HEADERS,
         )
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
+
+    def _client_with(self, headers: dict[str, str]) -> TestClient:
+        return TestClient(
+            create_app(self.db_path, self.out_root, self.rules_dir),
+            headers=headers,
+        )
 
     def test_health_and_read_only_index(self) -> None:
         health = self.client.get("/api/health")
@@ -113,7 +126,7 @@ class WebApiTests(unittest.TestCase):
             self.rules_dir,
             manage_worker=True,
         )
-        with TestClient(app) as client:
+        with TestClient(app, headers=CLIENT_HEADERS) as client:
             health = client.get("/api/health").json()
             self.assertEqual(health["worker"], "managed")
             self.assertEqual(health["max_tasks"], 1)
@@ -267,6 +280,102 @@ class WebApiTests(unittest.TestCase):
         text = "\n".join(lines)
         self.assertIn("event: snapshot", text)
         self.assertIn("event: end", text)
+
+    def test_write_requires_same_origin_and_requested_with(self) -> None:
+        rule = self._first_rule()
+        body = {
+            "request_id": "req-guard",
+            "rule_id": rule["rule_id"],
+            "rule_version": rule["rule_version"],
+            "task_type": "product",
+        }
+        cross = self._client_with(
+            {
+                "Host": "127.0.0.1:8765",
+                "Origin": "http://evil.test",
+                "X-Requested-With": "XMLHttpRequest",
+            }
+        )
+        response = cross.post("/api/tasks", json=body)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["error"]["code"], "FORBIDDEN")
+
+        null_origin = self._client_with(
+            {
+                "Host": "127.0.0.1:8765",
+                "Origin": "null",
+                "X-Requested-With": "XMLHttpRequest",
+            }
+        )
+        self.assertEqual(null_origin.post("/api/tasks", json=body).status_code, 403)
+
+        missing_header = self._client_with(
+            {
+                "Host": "127.0.0.1:8765",
+                "Origin": "http://127.0.0.1:8765",
+            }
+        )
+        self.assertEqual(missing_header.post("/api/tasks", json=body).status_code, 403)
+
+        bad_host = self._client_with(
+            {
+                "Host": "evil.test",
+                "Origin": "http://127.0.0.1:8765",
+                "X-Requested-With": "XMLHttpRequest",
+            }
+        )
+        self.assertEqual(bad_host.get("/api/health").status_code, 403)
+
+        read_only = self._client_with({"Host": "127.0.0.1:8765"})
+        self.assertEqual(read_only.get("/api/health").status_code, 200)
+
+        valid = self.client.post(
+            "/api/tasks",
+            json={**body, "request_id": "req-guard-ok"},
+        )
+        self.assertEqual(valid.status_code, 201)
+
+    def test_items_limit_is_bounded(self) -> None:
+        self.assertEqual(
+            self.client.get("/api/tasks/task-1/items?limit=200").status_code,
+            200,
+        )
+        self.assertEqual(
+            self.client.get("/api/tasks/task-1/items?limit=201").status_code,
+            422,
+        )
+        self.assertEqual(
+            self.client.get("/api/tasks/task-1/items?limit=0").status_code,
+            422,
+        )
+
+    def test_rule_lookup_rejects_path_traversal(self) -> None:
+        rule = self._first_rule()
+        body = {
+            "request_id": "req-traversal",
+            "rule_id": "../outside",
+            "rule_version": rule["rule_version"],
+            "task_type": "product",
+        }
+        response = self.client.post("/api/tasks", json=body)
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["error"]["code"], "NOT_FOUND")
+
+    def test_rule_catalog_skips_symlink_escape(self) -> None:
+        outside = self.root / "outside.yaml"
+        shutil.copy(self.rule_source, outside)
+        link = self.rules_dir / "escape.yaml"
+        try:
+            link.symlink_to(outside)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlink creation is unavailable")
+        payload = self.client.get("/api/rules").json()
+        self.assertNotIn("escape.yaml", [item["path"] for item in payload["items"]])
+
+    def test_not_found_does_not_leak_absolute_paths(self) -> None:
+        response = self.client.get("/api/tasks/missing")
+        self.assertEqual(response.status_code, 404)
+        self.assertNotIn(str(self.root), response.text)
 
 
 if __name__ == "__main__":

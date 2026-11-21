@@ -14,6 +14,7 @@ import zipfile
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any, Literal
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
@@ -128,8 +129,51 @@ def _safe_filename(task: Task) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "-", raw)
 
 
+WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
 def _error(code: str, message: str, status_code: int) -> HTTPException:
     return HTTPException(status_code=status_code, detail={"code": code, "message": message})
+
+
+def _forbidden(message: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=403,
+        content={
+            "error": {
+                "code": "FORBIDDEN",
+                "message": message,
+                "details": {},
+            }
+        },
+    )
+
+
+def _hostname_only(host_header: str) -> str:
+    value = host_header.strip().lower()
+    if value.startswith("["):
+        closing = value.find("]")
+        return value[1:closing] if closing >= 0 else value
+    if value.count(":") == 1:
+        return value.rsplit(":", 1)[0]
+    return value
+
+
+def _is_loopback_host(host_header: str) -> bool:
+    return _hostname_only(host_header) in LOOPBACK_HOSTS
+
+
+def _origin_matches_host(origin: str, host_header: str) -> bool:
+    try:
+        parsed = urlsplit(origin)
+    except ValueError:
+        return False
+    if parsed.scheme != "http" or not parsed.netloc:
+        return False
+    if not _is_loopback_host(parsed.netloc):
+        return False
+    return parsed.netloc.lower() == host_header.strip().lower()
 
 
 def _sse(event: str, data: Any) -> str:
@@ -262,6 +306,19 @@ def create_app(
     app.state.out_root = root
     app.state.rules_dir = rules
     app.state.worker_managed = manage_worker
+
+    @app.middleware("http")
+    async def same_origin_guard(request: Request, call_next: Any) -> Any:
+        host = request.headers.get("host", "")
+        if not _is_loopback_host(host):
+            return _forbidden("request host is not loopback")
+        if request.method.upper() in WRITE_METHODS:
+            origin = request.headers.get("origin", "")
+            if not _origin_matches_host(origin, host):
+                return _forbidden("write requests require a same-origin loopback Origin")
+            if request.headers.get("x-requested-with") != "XMLHttpRequest":
+                return _forbidden("write requests require X-Requested-With: XMLHttpRequest")
+        return await call_next(request)
 
     @app.exception_handler(HTTPException)
     async def http_error(request: Request, exc: HTTPException) -> JSONResponse:
