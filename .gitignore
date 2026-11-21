@@ -11,6 +11,11 @@ serviceAccountKey.json
 *.log
 *.tmp.*
 *.temp.*
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
 Thumbs.db
 .DS_Store
 dist/

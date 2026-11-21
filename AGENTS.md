@@ -20,7 +20,7 @@
 
 - 新增或复核站点后，把日期、实际出口、客户端、请求数、结论写回对应 probe 的 `probe.json` / `README.md`，或 `docs/12` 的初筛表；不要只留在会话里。
 - 文档改动后运行 `python scripts/export_docs.py`，再用 `python scripts/export_docs.py --check dist/ai-ecom-crawler-docs.zip` 复核；纯 Markdown 改动至少检查相对链接。
-- 不提交 `dist/`、密钥、Cookie、浏览器 profile 或整页原文。
+- 不提交 `dist/`、密钥、Cookie、浏览器 profile、整页原文或运行期任务数据库（`tasks.db` 等）；需要证据时保留任务结果、CSV、事件摘要或可重跑命令。
 
 ## 仓库校验
 

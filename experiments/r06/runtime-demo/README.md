@@ -41,4 +41,4 @@ python experiments/r06/tools/validate_runtime.py --root experiments/r06/runtime-
 
 ## 边界
 
-这是单站、单入口、静态 HTML 的原型；`tasks.db` 是本地任务账本，包含任务状态和工作项，不包含整页 HTML。任务记录和 `task-result.json` 输出 `plan_*`；失败分类、重试上限、原子写和逻辑对账由无网络测试覆盖。真实站点的暂停／取消、跨进程和进程崩溃恢复仍未做。
+这是单站、单入口、静态 HTML 的原型；`tasks.db` 是本机任务账本，包含任务状态和工作项，不包含整页 HTML，不随仓库分发。任务记录和 `task-result.json` 输出 `plan_*`；失败分类、重试上限、原子写和逻辑对账由无网络测试覆盖。真实站点的暂停／取消、跨进程和进程崩溃恢复仍未做。

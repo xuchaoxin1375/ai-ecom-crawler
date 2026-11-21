@@ -73,6 +73,6 @@
 
 - `package/`：方案与依赖。
 - `wsl-environment.txt`：OS、Python 和包版本。
-- `wsl/tasks.db`、`wsl/tasks/d05-clean-001/`：WSL 任务账本、事件、商品和任务结果。
+- `wsl/tasks/d05-clean-001/`：WSL 任务事件、商品和任务结果；`wsl/tasks.db` 是本机任务账本，不随仓库分发，可按 `run-log.md` 重跑生成。
 - `app-run/`、`export/`：接入 D02 后的导出与校验结果。
 - `run-log.md`：时间线与依赖发现。
