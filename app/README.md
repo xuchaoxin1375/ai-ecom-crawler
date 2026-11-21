@@ -1,6 +1,6 @@
 # 生产应用（app/）
 
-本目录是 monorepo 中生产应用的承载位置。当前已落地 **D02 数据合同与导出 CLI** 的最小可运行骨架：候选商品记录 → 规范化 → 9 列业务 CSV、内部记录、任务结果和诊断清单。发现、抓取、任务账本、SQLite、Web UI 和浏览器仍未实现（D03 起）。
+本目录是 monorepo 中生产应用的承载位置。当前已落地 **D02 数据合同与导出 CLI**，以及 **D04 v0 静态单进程执行器**：规则包 → 发现／获取／提取 → SQLite 任务账本 → D02 导出。浏览器、跨进程租约、Web UI 和构建会话仍未实现。
 
 ## 边界
 
@@ -20,20 +20,25 @@
 - 分类过滤、选项合并与 `attributes` 兼容序列化。
 - 9 列业务 CSV、`task-result.json`、内部记录和排除／失败诊断。
 - 计数不变量、`outcome` 推导、`quality_exceptions` 异常索引。
-- `export` 与 `validate` 两个 CLI 子命令。
+- `export`、`validate` 和 `run` 三个 CLI 子命令。
+- 声明式规则包读取与校验；`entry_links`、`sitemap`、`listing`、`html_index`、`public_json` 发现来源。
+- 静态发现、获取、提取、基础重试和 SQLite 任务账本。
+- `run` 执行 product 任务并自动接入 D02 导出。
 
 尚未实现：
 
-- 网络请求、入口发现、分页、抓取、重试和挑战处理。
-- SQLite 任务账本、暂停／恢复／取消、跨进程 worker。
-- Web UI、构建会话、浏览器 adapter、真实站点验收。
-- `task_type=discovery` 的 URL 计数导出；当前导出只接受 `product`。
+- 浏览器／动态渲染、挑战页会话复用和资源回收。
+- 暂停／取消 / 任务状态的 CLI 控制；账本已有状态字段，但没有命令入口。
+- 跨进程租约、app 原生状态模型、Web UI 和构建会话。
+- 生产级浏览器／进程孤儿回收；R06 的静态单进程能力已抽取，但不是最终形态。
 
 ## 布局
 
 - `src/ecom_crawler/`：应用代码。
+- `src/ecom_crawler/runtime/`、`executor/`：从 R06 抽取的静态单进程运行时和提取器。
+- `src/ecom_crawler/execution.py`、`bridge.py`：执行入口与 R06→D02 转换。
 - `schemas/`：候选输入、内部商品记录和任务结果的 JSON Schema。
-- `tests/`：T1 契约与单元测试，无网络。
+- `tests/`：T1 契约／单元测试和本地 fixture 集成测试，无外部网络。
 - `pyproject.toml`：独立依赖与 `ecom-crawler` 入口。
 - `uv.lock`：应用依赖锁定。
 
@@ -44,20 +49,33 @@ python -m uv run --project app --extra dev python -m unittest discover -s app/te
 python -m uv run ruff check app
 ```
 
-`jsonschema` 是测试依赖；缺失时测试会失败，不会 skip。应用运行依赖只有 `lxml`。
+`jsonschema` 是测试依赖；缺失时测试会失败，不会 skip。应用运行依赖包括 `lxml`、`pyyaml`、`scrapling`、`curl_cffi`、`patchright`、`browserforge` 和 `protego`。
 
 ## CLI
 
 ```powershell
 python -m uv run --project app ecom-crawler --version
+python -m uv run --project app ecom-crawler run --rule /path/to/rule.yaml --db /path/to/tasks.db --out-root /path/to/tasks --task-id sample-001 --task-type product --max-products 6
 python -m uv run --project app ecom-crawler export --run-dir /path/to/run --out-dir /path/to/out
 python -m uv run --project app ecom-crawler validate --run-dir /path/to/out
 python -m uv run --project app ecom-crawler validate --task-result /path/to/task-result.json
 ```
 
+- `run` 每次执行一个任务；product 任务完成后自动导出到 `<out-root>/<task-id>/export`，discovery 任务只写运行时 URL 清单和任务结果。
+- `run` 的退出码表示任务是否实际执行；业务结论看 `task-result.json` 的 `outcome`。计划或用法错误返回 2。
+- `run` 暂不提供暂停／取消命令；账本已有状态字段，但 CLI 控制入口后置。
 - `export` 默认拒绝覆盖已存在的 `products.csv`／`task-result.json`；需要覆盖时加 `--force`。
 - `export` 的退出码表示导出流程是否成功，不表示业务结论；业务结论看 `task-result.json` 的 `outcome`。
 - `export` 的输入或任务元数据错误返回 2；`validate` 的校验失败返回 1。
+
+## 执行入口（run）
+
+`run` 读取一个声明式规则包，创建任务并在当前进程执行：
+
+- 规则包：YAML manifest；`rule_id`／`rule_version` 必须与任务一致；支持 `entry_links`、`sitemap`、`listing`、`html_index`、`public_json` 来源。
+- 账本：`--db` 指向的 SQLite 文件，记录任务、工作项、状态、尝试次数和失败分类。
+- 输出：`<out-root>/<task-id>/` 下有 `task-result.json`、`products.jsonl`、`urls.csv`、`events.ndjson` 等运行时产物；product 任务另有 `app-run/` 和 `export/`。
+- 当前是单进程、静态 HTML；浏览器、跨进程租约和资源回收未接入。
 
 ## 输入契约
 
@@ -157,13 +175,20 @@ CSV 对以 `=`、`+`、`-`、`@` 开头的文本单元格加单引号，防止�
 | A18 基础字段与分块描述 | `test_normalize.py::test_blocks_split_product_copy_relations_and_policy`、`test_availability_channel_values_are_not_stock`、`test_pipeline.py::test_missing_brand_reason_conflicts_with_present_brand` |
 | 合成示例回归 | `test_golden_examples.py::test_examples_reproduce_csv_and_task_result` |
 
+## D04 执行器证据
+
+- `test_execution.py::test_fixture_rule_runs_and_exports`：本地 HTTP fixture，规则 → 2 商品采集 → 账本 → D02 导出。
+- `test_execution.py::test_cli_run_command`：同一 fixture 走 `ecom-crawler run`。
+- `experiments/d04/production/README.md`：`familidoo` 6 商品、7 请求、7 秒，CSV 与 D05 字节一致。
+
 ## 已知限制
 
-- 当前只有 T1 契约与单元测试，没有 T2 fixture 集成、T3 实站验证或 T4 生产验收。
+- 当前有 T1 契约／单元测试和本地 HTTP fixture 集成；D03／A08／D04 有真实站点证据，但不是 T4 生产验收。
+- `runtime/`、`executor/` 从 R06 抽取，当前是单进程、静态 HTML；浏览器、跨进程租约、暂停／取消 CLI 和资源回收未接入。
+- `run` 已接入 SQLite 任务账本；`export` 仍可独立使用 `task.json` + `candidates.jsonl`，不依赖账本。
 - `description.blocks` 的 `kind` 由提取端标注；本层不按关键词猜测政策或适配区块。
 - `description_status` 必须由提取端显式给出；本层不从正文长度或选择器命中情况推断完整／未提供。
 - 单一分隔符后三位数字的价格必须带 `locale` 才能判定；缺省时按 `AMBIGUOUS_PRICE` 排除，不猜。
-- `discovered_urls`、待处理数和导航数由调用方提供；导出层不做发现，也不构造全站分母。
+- `discovered_urls`、待处理数和导航数由调用方或运行时提供；导出层不构造全站分母。
 - `outcome` 是推导值，不接受调用方直接覆盖。
-- 尚未接入 SQLite 任务账本；`task.json` 是当前导出层的任务元数据输入。
 - `schemas/` 目前随仓库分发，尚未打进 wheel；安装包与 schema 分发在 R14 处理。

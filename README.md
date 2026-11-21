@@ -7,7 +7,7 @@
 | 路径 | 作用 |
 | --- | --- |
 | `AGENTS.md` | 代理执行约定：站点评估入口、已有结论复用与探测预算 |
-| `app/` | 生产应用承载目录（monorepo）；当前有 D02 数据合同与导出 CLI，不进入文档导出包 |
+| `app/` | 生产应用承载目录（monorepo）；当前有 D02 数据合同与导出 CLI，以及 D04 v0 静态单进程执行器；不进入文档导出包 |
 | `docs/` | 业务核心：需求、数据标准、流程、交付、验收、界面、Agent 约定、方案契约、状态契约、实施路线、需求对照、验收基准站点、框架对比实验、技术选型 ADR、方法指导、合成示例 |
 | `scripts/export_docs.py` | 生成可分发的文档 ZIP 与 `manifest.json`，并可按清单复核 |
 | `scripts/setup_crawl_env.py` | 创建仓库外的共享 uv venv，安装采集基线并执行冒烟 |
@@ -59,7 +59,7 @@ python -m uv run --project app --extra dev python -m unittest discover -s app/te
 
 ## 当前状态与边界
 
-- 这是业务与验收基线；`app/` 目前只有 D02 数据合同与导出 CLI，`experiments/d01/javaestate` 是有限的单站试点，`experiments/r06/` 是单站执行器与任务运行时原型，都不能当作完整采集应用。D01 已由用户授权代理签字为“有条件通过（试点）”；ADR 0001～0003 已 Accepted，0004～0007 仍为 Proposed 并写明退出条件，详见[G0 结项记录](docs/24-G0结项记录.md)。
+- 这是业务与验收基线；`app/` 目前有 D02 数据合同与导出 CLI，以及 D04 v0 静态单进程执行器；`experiments/d01/javaestate` 是有限的单站试点，`experiments/r06/` 是单站执行器与任务运行时原型，都不能当作完整采集应用。D01 已由用户授权代理签字为“有条件通过（试点）”；ADR 0001～0003 已 Accepted，0004～0007 仍为 Proposed 并写明退出条件，详见[G0 结项记录](docs/24-G0结项记录.md)。
 - 参考实现来自 `skills-for-developer` 真源中的 `resilient-browser-fetch`；本仓库不附源码副本，方法摘要见 `docs/方法指导/04-浏览器与会话复用.md`，需要代码时按当前上游版本验证。
 - 文档包不包含真实商品网页、生产数据库、密钥、登录会话或浏览器二进制。
 - 分发前请确认文档与上游参考的使用范围；本仓库最终闭源，原创代码与文档未授予开源复用许可（见 `LICENSE`），第三方网站内容、商标、商品数据和样本页面不在授权范围内；第三方依赖和上游 `resilient-browser-fetch` 保留各自许可证。
