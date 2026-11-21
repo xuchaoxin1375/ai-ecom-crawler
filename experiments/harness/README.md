@@ -45,6 +45,15 @@ python -m uv run --project app python experiments/harness/opencode_smoke.py `
 - `close` 删除 session 并停止 server；结果 `FINISHED`／`closed`，保留 `result.json` 与 `session.ndjson` 两个产物。
 - 本机未发现适配器遗留的 server 进程。
 
-未覆盖：真实 prompt、执行中的 `interrupt`、pause-gate 插件、`request_dependency` 安装和 BuildService/UI。它们在 `app/tests/test_harness.py` 的 fake server 测试中只覆盖协议分支，不是真实模型或真实构建证据。
+## 2026-11-21 真实 prompt + interrupt
+
+按项目方授权使用 `opencode-go` 的 `deepseek-v4.1-flash`（`variant=high`）跑了一次真实 prompt，并在 `session.execution.started` 后取消。
+
+- session：`ses_e01fa4a15ffeExTzwyVwn37o4w`；模型：`{"providerID":"opencode-go","id":"deepseek-v4.1-flash","variant":"high"}`。
+- prompt 被接纳（`msg_1fe05b62f001JpfasGspi6GSMW`），订阅到 `session.execution.started`，随后 `cancel` 成功，结果为 `CANCELLED`／`cancelled`。
+- 取消路径执行了 `interrupt`、权限清理和 session 删除；work 区保留 `result.json` 与 `session.ndjson`，server 被回收。
+- 这次是执行中中断，不验证模型自然完成；`app/tests/test_harness.py` 的 fake server 覆盖 finished 分支。
+
+未覆盖：pause-gate 插件、`request_dependency` 安装、BuildService/UI、真实自然完成和真实工具权限事件（权限创建／回复已用真实 server 的无模型探针验证）。
 
 server 使用当前 OpenCode 的 provider 配置；构建工作区隔离，但 OpenCode 自身的数据目录尚未按构建强制隔离。每次冒烟会删除 session，不保留模型对话。
