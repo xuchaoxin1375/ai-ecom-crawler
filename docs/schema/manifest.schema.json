@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "采集方案 manifest v1.0",
+  "title": "采集方案 manifest v1.0～v1.2",
   "description": "校验运行时规则包（rule_*）与对外方案包（plan_*）两种投影。两种投影共享 site/scope/discovery/fetch/extract 语义；跨字段约束仍由执行器校验。",
   "oneOf": [
     {
@@ -187,7 +187,13 @@
                     "required": ["type"],
                     "properties": {
                       "type": {
-                        "enum": ["none", "page_param", "next_link"]
+                        "enum": [
+                          "none",
+                          "page_param",
+                          "next_link",
+                          "load_more",
+                          "infinite_scroll"
+                        ]
                       },
                       "param": {
                         "type": "string",
@@ -197,10 +203,41 @@
                         "type": "string",
                         "minLength": 1
                       },
+                      "button_selector": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "container": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "item_selector": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "mode": {
+                        "enum": ["auto", "scroll", "wheel"]
+                      },
                       "start": {
                         "type": "integer"
                       },
                       "max_pages": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "max_clicks": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "max_scrolls": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "settle_ms": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "no_new_stop": {
                         "type": "integer",
                         "minimum": 1
                       }
@@ -586,7 +623,7 @@
       ],
       "properties": {
         "schema_version": {
-          "enum": ["1.0", "1.1"]
+          "enum": ["1.0", "1.1", "1.2"]
         },
         "rule_id": {
           "type": "string",
@@ -829,7 +866,7 @@
       ],
       "properties": {
         "schema_version": {
-          "enum": ["1.0", "1.1"]
+          "enum": ["1.0", "1.1", "1.2"]
         },
         "plan_id": {
           "type": "string",

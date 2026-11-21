@@ -24,6 +24,7 @@
 - 声明式规则包读取与校验；`entry_links`、`sitemap`、`listing`、`html_index`、`public_json` 发现来源。
 - 静态发现、获取、提取、基础重试和 SQLite 任务账本。
 - 浏览器 fetcher：`fetch.default_engine: browser`、`fetch.per_url_type` 按 `navigation`／`product` 路由、Patchright CDP 启动、任务级 profile、`wait_selector`／`wait_until`／`wait_ms`／`network_idle`、渲染后的有效状态读取和任务级进程／目录登记回收。
+- 浏览器列表推进：`schema_version: "1.2"` 的 `listing` 支持 `load_more`（按钮点击）和 `infinite_scroll`（window／容器滚动），记录 `steps`／`items`／`stop`；只支持追加型列表。
 - `run` 执行 product 任务并自动接入 D02 导出。
 - 单 worker 控制面：`submit` 入队，`worker` 常驻执行，`pause`／`resume`／`cancel` 从另一个进程改账本，runner 在检查点响应并拒收迟到结果。
 - 跨进程任务租约：`tasks` 表保存 `lease_owner`、单调递增的 `lease_token`、到期时间和心跳；`claim_tasks` 原子领取，心跳线程续约，过期任务由任意 worker 对账回收，旧持有者的写入按租约条件拒绝。
@@ -35,7 +36,7 @@
 
 尚未实现：
 
-- load more、无限滚动、虚拟列表、点击和 POST／GraphQL；浏览器 adapter 只做渲染，不做交互推进。
+- 虚拟列表、复杂内部滚动、任意点击序列和 POST／GraphQL；当前 `load_more`／`infinite_scroll` 只支持追加型列表。
 - 跨进程 A20 的真实资源配额、浏览器实例配额和跨机租约；当前租约在单机 SQLite 上验证。
 - 永久移除、异步残留回收、构建会话 UI、`request_dependency` 工具桥、真实依赖安装和完整前端原型评审。
 - 生产级浏览器孤儿回收的跨机路径；本机强杀 worker 后的租约接管已演练，浏览器进程和 profile 会被回收。
@@ -115,6 +116,33 @@ fetch:
 
 - `browser` 接受布尔值或选项对象。选项包括 `headless`、`real_chrome`、`executable_path`、`wait_until`、`wait_selector`、`wait_selector_state`、`wait_ms`、`network_idle`、`network_idle_timeout_ms`、`disable_resources`、`challenge_wait_ms`、`timeout_ms`、`locale`、`timezone`、`user_agent`、`extra_flags`、`profile_name`。
 - 浏览器按任务懒启动：一个 Chromium/Chrome + 一个 page，请求串行；任务结果在 `runtime.browser` 记录 binary／version／pid／profile，在 `access.browser_launched` 和 `resources.browser_pid` 记录是否使用。
+- listing 的 `advance` 支持 `load_more`／`infinite_scroll`（需要 `schema_version: "1.2"` 且 listing 走浏览器）：
+
+```yaml
+discovery:
+  sources:
+    - type: listing
+      url: "https://example.test/category/"
+      product_link_selector: ".product a"
+      advance:
+        type: load_more
+        button_selector: "#load-more"
+        max_clicks: 3
+        settle_ms: 1500
+        no_new_stop: 2
+    - type: listing
+      url: "https://example.test/all/"
+      product_link_selector: ".product a"
+      advance:
+        type: infinite_scroll
+        container: "#product-grid"
+        mode: scroll
+        max_scrolls: 5
+        settle_ms: 1500
+        no_new_stop: 2
+```
+
+  `load_more` 点击按钮并等条目数增加；`infinite_scroll` 滚动 window 或指定容器。`max_clicks`／`max_scrolls`、`settle_ms` 和 `no_new_stop` 是有界停止条件；listing 工作项的结果会带 `advance` 统计。虚拟列表只保留最后一批，不能用该实现直接采全量。
 - 浏览器子进程和 `<out-root>/<task-id>/browser-profile` 登记在 `task_resources`；正常结束、取消、租约过期接管都会回收。本机强杀 worker 后由新 worker 接管并回收的演练见 `experiments/d07/browser-mercerine/`。
 - 首次响应可能是 403／429／503 挑战壳，站点自己的 JS 跳转后才出现正文；fetcher 在等待完成后读取 navigation timing 的最终 `responseStatus`，并可用 `wait_selector` 作为就绪条件。它不点击、不过验证码、不绕过登录或付费。挑战识别是标题启发式，可能漏判或误判，最终以就绪信号、正文和任务结果为准。
 - 浏览器 fetcher 是 thread-affine，浏览器任务不走线程池；暂停／取消在条目边界生效，单次导航仍受 `timeout_ms` 约束。
@@ -279,13 +307,16 @@ CSV 对以 `=`、`+`、`-`、`@` 开头的文本单元格加单引号，防止�
 - `test_execution.py::test_fixture_rule_runs_and_exports`：本地 HTTP fixture，规则 → 2 商品采集 → 账本 → D02 导出。
 - `test_execution.py::test_cli_run_command`：同一 fixture 走 `ecom-crawler run`。
 - `tests/test_browser.py`：本地 JS 商品页，静态 HTML 不含名称／价格，浏览器渲染后 1／1 有效；断言 task result 的浏览器字段、导出 CSV、资源表清空、profile 删除和 PID 退出。
+- `tests/test_browser_actions.py`：本地追加型列表，`load_more` 与 `infinite_scroll` 各 6／6；非法 schema 版本和静态 navigation 被拒绝。
 - `experiments/d04/production/README.md`：`familidoo` 6 商品、7 请求、7 秒，CSV 与 D05 字节一致。
 - `experiments/d07/browser-mercerine/`：mercerine 首页 503 挑战壳，浏览器渲染后 3／3 商品（EUR）；同一浏览器会话；强杀 worker 后新 worker 接管，遗留 Chromium PID 终止、profile 删除、资源表清空，任务重跑完成。
+- `experiments/d07/browser-listing/`：`scrapingcourse.com` 公开练习页，`load_more` 1 次点击后 24 条、`infinite_scroll` 2 次滚动后 36 条，均取前 15 个商品、15／15 有效。
 
 ## 已知限制
 
 - 当前有 T1 契约／单元测试和本地 HTTP fixture 集成；D03／A08／D04 有真实站点证据，但不是 T4 生产验收。浏览器路径另有本地 JS fixture、mercerine 真实站点和强杀接管证据。
 - `runtime/`、`executor/` 从 R06 抽取；静态和浏览器两类 fetcher 共用同一 runner，浏览器任务逐条串行执行。租约和资源登记已支持多 worker 进程，但浏览器实例配额和跨机租约未接入。控制面支持暂停／恢复／取消。
+- 浏览器 `load_more`／`infinite_scroll` 只支持追加型列表；虚拟列表、复杂内部滚动、任意点击序列和表单提交未实现。
 - `run` 已接入 SQLite 任务账本；`export` 仍可独立使用 `task.json` + `candidates.jsonl`，不依赖账本。
 - `description.blocks` 的 `kind` 由提取端标注；本层不按关键词猜测政策或适配区块。
 - `description_status` 必须由提取端显式给出；本层不从正文长度或选择器命中情况推断完整／未提供。

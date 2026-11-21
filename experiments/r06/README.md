@@ -19,7 +19,7 @@ R06 验证两件事：
 - JSON／CSV 原子替换、JSONL 单次追加＋fsync、残缺尾行修复；
 - 启动对账（`IN_FLIGHT` 重置或耗尽失败、方案版本校验、临时文件清理）和 `plan_*` 输出。
 
-暂不支持单 source seeds 列表、POST／GraphQL、load more／无限滚动、浏览器渲染、登录、跨进程队列、Web UI 和完整 NDJSON 协议；这些不在 R16 v0 范围内。
+暂不支持单 source seeds 列表、POST／GraphQL、load more／无限滚动、浏览器渲染、登录、跨进程队列、Web UI 和完整 NDJSON 协议；这些不在 R16 v0 范围内。`app` 的浏览器 adapter 已单独支持 load_more／infinite_scroll 和浏览器渲染，不代表 R16 原型支持。
 
 方案语义补充：`discovery.product_url_patterns` 和 `scope.exclude` 按正则匹配；`scope.include` 也按正则匹配 URL 的 path，不再使用 glob。`docs/08` 与 `docs/19` 已统一为这一语义。运行设计见 [`docs/19`](../../docs/19-采集规则与任务运行时.md)。
 
@@ -268,7 +268,7 @@ python experiments/r06/tools/validate_runtime.py --root experiments/r06/runtime-
 - 入口页只展示 6 个商品，未做 10～20 个随机抽样；6／6 是小样本全量，不是全站覆盖。
 - familidoo 只验证一个站点、一次运行；shopthebulkstore 是第二站 10 商品有界样本；没有独立复跑和跨环境导入。
 - 只支持静态 HTML；没有浏览器、登录、挑战处理或 JavaScript 渲染。
-- sitemap（含 gzip 和 robots `Sitemap:` 行）、`page_param`、`next_link`、`html_index`（含 1 层分类）和 `public_json` 已有真实站点有界验证，offset 另用公开 API 冒烟；cursor 仍只有 fixture；没有单 source seeds 列表、POST／GraphQL、load more／无限滚动或详情补全；多个 sources 有测试。
+- sitemap（含 gzip 和 robots `Sitemap:` 行）、`page_param`、`next_link`、`html_index`（含 1 层分类）和 `public_json` 已有真实站点有界验证，offset 另用公开 API 冒烟；cursor 仍只有 fixture；没有单 source seeds 列表、POST／GraphQL、load more／无限滚动或详情补全；多个 sources 有测试。`app` 的浏览器 adapter 已单独支持 load_more／infinite_scroll。
 - 运行时只有单 worker；有逻辑对账和失败分类测试，单 worker 强杀恢复已在 Tognar 演练；但没有跨进程锁、队列或租约，多进程未验证。
 - 单次运行执行器没有任务控制；任务控制只在 `runtime/` 中实现。
 - 没有 Web UI；`task list/status` 是 CLI。

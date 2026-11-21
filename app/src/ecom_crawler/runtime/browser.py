@@ -189,6 +189,31 @@ class BrowserFetcher:
     # Fetch API
     # ------------------------------------------------------------------
     def get(self, url: str, *, item_type: str | None = None) -> FetchResult:
+        return self._fetch(url, item_type=item_type)
+
+    def get_listing(
+        self,
+        url: str,
+        *,
+        advance: dict[str, Any],
+        item_selector: str | None = None,
+        item_type: str | None = None,
+    ) -> FetchResult:
+        return self._fetch(
+            url,
+            item_type=item_type,
+            advance=advance,
+            item_selector=item_selector,
+        )
+
+    def _fetch(
+        self,
+        url: str,
+        *,
+        item_type: str | None = None,
+        advance: dict[str, Any] | None = None,
+        item_selector: str | None = None,
+    ) -> FetchResult:
         options = self._options_for(item_type)
         last_error = ""
         for attempt in range(1, self.max_attempts + 1):
@@ -199,7 +224,12 @@ class BrowserFetcher:
                 self.retries += 1
             try:
                 with self._lock:
-                    return self._navigate(url, options)
+                    return self._navigate(
+                        url,
+                        options,
+                        advance=advance,
+                        item_selector=item_selector,
+                    )
             except Exception as exc:  # noqa: BLE001 - transport / browser boundary
                 last_error = f"{type(exc).__name__}: {exc}"
                 self._recover_if_dead()
@@ -239,7 +269,14 @@ class BrowserFetcher:
     # ------------------------------------------------------------------
     # Navigation
     # ------------------------------------------------------------------
-    def _navigate(self, url: str, options: PageOptions) -> FetchResult:
+    def _navigate(
+        self,
+        url: str,
+        options: PageOptions,
+        *,
+        advance: dict[str, Any] | None = None,
+        item_selector: str | None = None,
+    ) -> FetchResult:
         page = self._ensure_page(options)
         self._apply_resource_policy(page, options)
         response = page.goto(
@@ -266,11 +303,13 @@ class BrowserFetcher:
             page.wait_for_timeout(options.wait_ms)
         if self.config.launch.challenge_wait_ms and _is_challenge_title(page.title()):
             self._wait_for_challenge(page)
+        meta: dict[str, Any] = {"engine": "browser"}
+        if advance:
+            meta["advance"] = self._advance_listing(page, advance, item_selector)
         rendered_status = self._rendered_status(page)
         if rendered_status:
             status = rendered_status
         body = page.content().encode("utf-8")
-        meta: dict[str, Any] = {"engine": "browser"}
         if _is_challenge_title(page.title()):
             meta["challenge_suspected"] = True
         return FetchResult(status=status, url=final_url, body=body, meta=meta)
@@ -306,6 +345,120 @@ class BrowserFetcher:
                     return
             except Exception:  # noqa: BLE001 - page may be navigating
                 return
+
+    def _advance_listing(
+        self,
+        page: Any,
+        advance: dict[str, Any],
+        item_selector: str | None,
+    ) -> dict[str, Any]:
+        """Click or scroll a listing a bounded number of times.
+
+        The final DOM is returned to the runner, which applies the existing
+        link discovery and scope filters.  Append-style lists work; virtual
+        lists that discard earlier rows are intentionally out of scope.
+        """
+        advance_type = str(advance.get("type", ""))
+        selector = str(item_selector or advance.get("item_selector") or "").strip()
+        settle_ms = _non_negative_int(advance.get("settle_ms"), 1000)
+        no_new_stop = max(1, _positive_int(advance.get("no_new_stop"), 2))
+        if advance_type == "load_more":
+            max_steps = max(1, min(_positive_int(advance.get("max_clicks"), 10), 50))
+        else:
+            max_steps = max(1, min(_positive_int(advance.get("max_scrolls"), 10), 50))
+        stats: dict[str, Any] = {
+            "type": advance_type,
+            "steps": 0,
+            "items": 0,
+            "stop": "MAX_STEPS",
+            "max_steps": max_steps,
+        }
+        if not selector:
+            stats["stop"] = "MISSING_ITEM_SELECTOR"
+            return stats
+        try:
+            previous = int(page.locator(selector).count())
+        except Exception as exc:  # noqa: BLE001 - invalid selector boundary
+            stats["stop"] = "INVALID_ITEM_SELECTOR"
+            stats["detail"] = f"{type(exc).__name__}: {exc}"
+            return stats
+        stats["items"] = previous
+        stalls = 0
+        for step in range(max_steps):
+            try:
+                if advance_type == "load_more":
+                    if not self._click_load_more(page, advance):
+                        stats["stop"] = "BUTTON_GONE"
+                        break
+                elif not self._scroll_once(page, advance):
+                    stats["stop"] = "SCROLL_FAILED"
+                    break
+            except Exception as exc:  # noqa: BLE001 - action boundary
+                stats["stop"] = "ACTION_FAILED"
+                stats["detail"] = f"{type(exc).__name__}: {exc}"
+                break
+            stats["steps"] = step + 1
+            if settle_ms:
+                page.wait_for_timeout(settle_ms)
+            try:
+                current = int(page.locator(selector).count())
+            except Exception as exc:  # noqa: BLE001 - page may be navigating
+                stats["stop"] = "INVALID_ITEM_SELECTOR"
+                stats["detail"] = f"{type(exc).__name__}: {exc}"
+                break
+            stats["items"] = current
+            if current > previous:
+                previous = current
+                stalls = 0
+            else:
+                stalls += 1
+                if stalls >= no_new_stop:
+                    stats["stop"] = "NO_NEW_ITEMS"
+                    break
+        return stats
+
+    def _click_load_more(self, page: Any, advance: dict[str, Any]) -> bool:
+        selector = str(advance.get("button_selector") or "").strip()
+        if not selector:
+            return False
+        locator = page.locator(selector)
+        if locator.count() == 0:
+            return False
+        button = locator.first
+        if not button.is_enabled():
+            return False
+        button.click()
+        return True
+
+    def _scroll_once(self, page: Any, advance: dict[str, Any]) -> bool:
+        mode = str(advance.get("mode", "auto")).strip().lower()
+        if mode not in {"auto", "scroll", "wheel"}:
+            mode = "auto"
+        container = str(advance.get("container") or "").strip()
+        if container:
+            locator = page.locator(container)
+            if locator.count() == 0:
+                return False
+            target = locator.first
+            if mode == "wheel":
+                box = target.bounding_box()
+                if not box:
+                    return False
+                page.mouse.move(
+                    box["x"] + box["width"] / 2,
+                    box["y"] + box["height"] / 2,
+                )
+                page.mouse.wheel(0, 2000)
+            else:
+                target.evaluate("el => { el.scrollTop = el.scrollHeight; }")
+            return True
+        if mode == "wheel":
+            viewport = page.viewport_size or {"width": 1280, "height": 720}
+            page.mouse.move(viewport["width"] / 2, viewport["height"] / 2)
+            page.mouse.wheel(0, 2000)
+        else:
+            page.evaluate("() => window.scrollTo(0, document.body.scrollHeight)")
+        return True
 
     def _options_for(self, item_type: str | None) -> PageOptions:
         if item_type and item_type in self.config.page_by_type:

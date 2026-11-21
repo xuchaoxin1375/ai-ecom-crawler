@@ -1,0 +1,187 @@
+{
+  "task_id": "browser-listing-002",
+  "task_type": "product",
+  "plan_id": "scrapingcourse-infinite-scroll",
+  "plan_version": "2026.11.21-1",
+  "market": "US",
+  "locale": "en-US",
+  "state": "FINISHED",
+  "outcome": "COMPLETED",
+  "stop_reason": "NATURAL_END",
+  "started_at": "2026-11-21T14:58:45Z",
+  "finished_at": "2026-11-21T15:00:02Z",
+  "counts": {
+    "discovered_urls": 16,
+    "pending_navigation_entries": 0,
+    "product_candidates": 15,
+    "pending_products": 0,
+    "in_flight_products": 0,
+    "processed_products": 15,
+    "valid_products": 15,
+    "excluded_products": 0,
+    "failed_products": 0,
+    "partial_description_products": 0
+  },
+  "coverage": {
+    "status": "PARTIAL",
+    "denominator_source": "declared-source product candidates",
+    "denominator": 15,
+    "covered": 15,
+    "notes": "Bounded sample from one entry page; not full-site coverage."
+  },
+  "business_acceptance": {
+    "status": "NOT_REVIEWED",
+    "accepted_by": null,
+    "accepted_at": null,
+    "reason": "R06 runtime prototype; no business sign-off yet.",
+    "scope": "discovery sources declared by the rule"
+  },
+  "quality_exceptions": [
+    {
+      "source_url": "https://www.scrapingcourse.com/ecommerce/product/abominable-hoodie/",
+      "description_status": "SUMMARY_FALLBACK",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED",
+        "description_html": "SUMMARY_FALLBACK"
+      }
+    },
+    {
+      "source_url": "https://www.scrapingcourse.com/ecommerce/product/ajax-full-zip-sweatshirt/",
+      "description_status": "SUMMARY_FALLBACK",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED",
+        "description_html": "SUMMARY_FALLBACK"
+      }
+    },
+    {
+      "source_url": "https://www.scrapingcourse.com/ecommerce/product/beaumont-summit-kit/",
+      "description_status": "SUMMARY_FALLBACK",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED",
+        "description_html": "SUMMARY_FALLBACK"
+      }
+    },
+    {
+      "source_url": "https://www.scrapingcourse.com/ecommerce/product/bruno-compete-hoodie/",
+      "description_status": "SUMMARY_FALLBACK",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED",
+        "description_html": "SUMMARY_FALLBACK"
+      }
+    },
+    {
+      "source_url": "https://www.scrapingcourse.com/ecommerce/product/chaz-kangeroo-hoodie/",
+      "description_status": "SUMMARY_FALLBACK",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED",
+        "description_html": "SUMMARY_FALLBACK"
+      }
+    },
+    {
+      "source_url": "https://www.scrapingcourse.com/ecommerce/product/frankie-sweatshirt/",
+      "description_status": "SUMMARY_FALLBACK",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED",
+        "description_html": "SUMMARY_FALLBACK"
+      }
+    },
+    {
+      "source_url": "https://www.scrapingcourse.com/ecommerce/product/grayson-crewneck-sweatshirt/",
+      "description_status": "SUMMARY_FALLBACK",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED",
+        "description_html": "SUMMARY_FALLBACK"
+      }
+    },
+    {
+      "source_url": "https://www.scrapingcourse.com/ecommerce/product/hero-hoodie/",
+      "description_status": "SUMMARY_FALLBACK",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED",
+        "description_html": "SUMMARY_FALLBACK"
+      }
+    },
+    {
+      "source_url": "https://www.scrapingcourse.com/ecommerce/product/hollister-backyard-sweatshirt/",
+      "description_status": "SUMMARY_FALLBACK",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED",
+        "description_html": "SUMMARY_FALLBACK"
+      }
+    },
+    {
+      "source_url": "https://www.scrapingcourse.com/ecommerce/product/hyperion-elements-jacket/",
+      "description_status": "SUMMARY_FALLBACK",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED",
+        "description_html": "SUMMARY_FALLBACK"
+      }
+    },
+    {
+      "source_url": "https://www.scrapingcourse.com/ecommerce/product/mach-street-sweatshirt/",
+      "description_status": "SUMMARY_FALLBACK",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED",
+        "description_html": "SUMMARY_FALLBACK"
+      }
+    },
+    {
+      "source_url": "https://www.scrapingcourse.com/ecommerce/product/marco-lightweight-active-hoodie/",
+      "description_status": "SUMMARY_FALLBACK",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED",
+        "description_html": "SUMMARY_FALLBACK"
+      }
+    },
+    {
+      "source_url": "https://www.scrapingcourse.com/ecommerce/product/oslo-trek-hoodie/",
+      "description_status": "SUMMARY_FALLBACK",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED",
+        "description_html": "SUMMARY_FALLBACK"
+      }
+    },
+    {
+      "source_url": "https://www.scrapingcourse.com/ecommerce/product/stark-fundamental-hoodie/",
+      "description_status": "SUMMARY_FALLBACK",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED",
+        "description_html": "SUMMARY_FALLBACK"
+      }
+    },
+    {
+      "source_url": "https://www.scrapingcourse.com/ecommerce/product/teton-pullover-hoodie/",
+      "description_status": "SUMMARY_FALLBACK",
+      "partial_reason": null,
+      "missing_reasons": {
+        "brand": "NOT_PROVIDED",
+        "description_html": "SUMMARY_FALLBACK"
+      }
+    }
+  ],
+  "runtime": {
+    "llm_calls": 0,
+    "raw_pages_retained": false
+  },
+  "limitations": [
+    "Bounded to the declared discovery sources and limits; not full-site coverage.",
+    "Browser rendering was used for declared URL types; challenges, login and access-control bypass are not attempted.",
+    "Runtime LLM calls: 0; no raw page HTML is retained.",
+    "Public scraping practice site; bounded load-more sample, not a production store.",
+    "The AJAX endpoint appends ten products per scroll; this rule scrolls twice and caps at 15 products."
+  ]
+}

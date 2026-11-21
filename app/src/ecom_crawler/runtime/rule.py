@@ -13,12 +13,19 @@ from ecom_crawler.executor.manifest import validate_plan
 
 from .models import TASK_TYPES, utc_now
 
-SCHEMA_VERSIONS = {"1.0", "1.1"}
+SCHEMA_VERSIONS = {"1.0", "1.1", "1.2"}
 RULE_STATUSES = {"candidate", "verified", "deprecated"}
 SUPPORTED_KINDS = {"declarative"}
 SUPPORTED_DISCOVERY = {"entry_links"}
 SUPPORTED_SOURCES = {"entry_links", "sitemap", "listing", "html_index", "public_json"}
-SUPPORTED_ADVANCE = {"none", "page_param", "next_link"}
+SUPPORTED_ADVANCE = {
+    "none",
+    "page_param",
+    "next_link",
+    "load_more",
+    "infinite_scroll",
+}
+SUPPORTED_SCROLL_MODES = {"auto", "scroll", "wheel"}
 SUPPORTED_ENGINES = {"static", "browser", "http_json"}
 SUPPORTED_WAIT_UNTIL = {"commit", "domcontentloaded", "load", "networkidle"}
 SUPPORTED_SELECTOR_STATES = {"attached", "detached", "hidden", "visible"}
@@ -355,6 +362,19 @@ def _validate_common(data: dict[str, Any]) -> None:
                 "fetch.browser=false conflicts with a browser engine; "
                 "remove browser: false or use a static engine"
             )
+    advance_types = _listing_advance_types(discovery)
+    if advance_types & {"load_more", "infinite_scroll"}:
+        navigation_engine = _navigation_engine(fetch, engine)
+        if navigation_engine != "browser":
+            raise RuleError(
+                "load_more/infinite_scroll require a browser engine for navigation; "
+                "set fetch.default_engine=browser or "
+                "fetch.per_url_type.navigation.engine=browser"
+            )
+        if data["schema_version"] != "1.2":
+            raise RuleError(
+                "load_more/infinite_scroll require schema_version 1.2"
+            )
 
     output = _require_mapping(data["output"], "output")
     if not output:
@@ -589,6 +609,35 @@ def _validate_advance(value: Any, path: str) -> None:
         _require_string(advance.get("param", "page"), f"{path}.advance.param")
     if advance_type == "next_link" and "selector" in advance:
         _require_string(advance.get("selector"), f"{path}.advance.selector")
+    if advance_type == "load_more":
+        _require_string(
+            advance.get("button_selector"), f"{path}.advance.button_selector"
+        )
+        _validate_positive_int(advance.get("max_clicks", 10), f"{path}.advance.max_clicks")
+    if advance_type == "infinite_scroll":
+        mode = str(advance.get("mode", "auto")).strip().lower()
+        if mode not in SUPPORTED_SCROLL_MODES:
+            raise RuleError(
+                f"unsupported {path}.advance.mode {mode!r}; "
+                f"supported: {sorted(SUPPORTED_SCROLL_MODES)}"
+            )
+        _validate_positive_int(
+            advance.get("max_scrolls", 10), f"{path}.advance.max_scrolls"
+        )
+    if "container" in advance and advance["container"] is not None:
+        _require_string(advance.get("container"), f"{path}.advance.container")
+    if "item_selector" in advance and advance["item_selector"] is not None:
+        _require_string(advance.get("item_selector"), f"{path}.advance.item_selector")
+    if "settle_ms" in advance and (
+        isinstance(advance["settle_ms"], bool)
+        or not isinstance(advance["settle_ms"], int)
+        or advance["settle_ms"] < 0
+    ):
+        raise RuleError(f"{path}.advance.settle_ms must be a non-negative integer")
+    if "no_new_stop" in advance:
+        _validate_positive_int(
+            advance.get("no_new_stop"), f"{path}.advance.no_new_stop"
+        )
     if "start" in advance and (
         isinstance(advance["start"], bool) or not isinstance(advance["start"], int)
     ):
@@ -599,6 +648,34 @@ def _validate_advance(value: Any, path: str) -> None:
         or advance["max_pages"] < 1
     ):
         raise RuleError(f"{path}.advance.max_pages must be a positive integer")
+
+
+def _listing_advance_types(discovery: dict[str, Any]) -> set[str]:
+    types: set[str] = set()
+    sources = discovery.get("sources", [])
+    if not isinstance(sources, list):
+        return types
+    for source in sources:
+        if not isinstance(source, dict) or source.get("type") != "listing":
+            continue
+        advance = source.get("advance", {})
+        if isinstance(advance, dict) and advance.get("type"):
+            types.add(str(advance["type"]))
+    return types
+
+
+def _navigation_engine(fetch: dict[str, Any], default: str) -> str:
+    per_type = fetch.get("per_url_type", {})
+    if isinstance(per_type, dict):
+        navigation = per_type.get("navigation")
+        if isinstance(navigation, dict) and navigation.get("engine"):
+            return str(navigation["engine"])
+    return default
+
+
+def _validate_positive_int(value: Any, path: str) -> None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise RuleError(f"{path} must be a positive integer")
 
 
 def _validate_public_json_source(source: dict[str, Any], path: str) -> None:
