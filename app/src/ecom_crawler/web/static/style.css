@@ -138,6 +138,21 @@ a:focus-visible {
   margin-bottom: 16px;
 }
 
+.create-panel summary {
+  cursor: pointer;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.create-panel summary:focus-visible {
+  outline: 3px solid #9cc3dd;
+  outline-offset: 2px;
+}
+
+.create-panel[open] summary {
+  margin-bottom: 8px;
+}
+
 .create-form {
   margin-bottom: 4px;
   padding: 0;
@@ -199,6 +214,13 @@ select {
   color: var(--danger);
 }
 
+.table-hint {
+  display: none;
+  margin: -2px 0 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .table-wrap {
   overflow-x: auto;
   background: var(--panel);
@@ -227,6 +249,7 @@ th {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.03em;
+  white-space: nowrap;
 }
 
 tr:last-child td {
@@ -351,6 +374,10 @@ tr:last-child td {
   border-radius: var(--radius);
 }
 
+.panel:empty {
+  display: none;
+}
+
 .panel ul {
   margin: 0;
   padding-left: 18px;
@@ -377,6 +404,10 @@ tr:last-child td {
   main {
     width: calc(100% - 24px);
     margin-top: 16px;
+  }
+
+  .table-hint {
+    display: block;
   }
 
   .meta-grid {
