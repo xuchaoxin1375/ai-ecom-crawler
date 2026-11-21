@@ -132,7 +132,7 @@ python -m uv run --project app --extra dev python -m unittest app.tests.test_hyb
 
 - `app run` 已支持 adapter discovery，超时按进程组终止；但 adapter 的浏览器实例和临时目录尚未登记到 `task_resources`，正常退出后的孤儿扫描仍需补。
 - 未在真实基准站验证；虚拟列表的稳定 ID 属性、滚动容器和终止文案因站而异，需要逐站配置。
-- 未实现浏览器实例配额、跨进程资源配额和跨机租约。
+- 未实现浏览器实例配额和跨进程资源配额；跨机租约为 v1 外。
 - 未处理登录、挑战页、私有 XHR、网络重放或多步状态；`app run` 目前只支持 adapter 返回 URL 后由声明式 `fetch`／`extract` 处理商品页。
 
 ## 文件

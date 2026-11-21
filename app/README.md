@@ -37,9 +37,9 @@
 尚未实现：
 
 - 虚拟列表、任意点击序列和 POST／GraphQL；当前 `load_more`／`infinite_scroll` 只支持追加型列表，内部滚动容器（`container`）的追加型列表已有本地 fixture。
-- 跨进程 A20 的真实资源配额、浏览器实例配额和跨机租约；当前租约在单机 SQLite 上验证。
+- 跨进程 A20 的真实资源配额和浏览器实例配额；跨机租约为 v1 外，当前租约在单机 SQLite 上验证。
 - 永久移除、异步残留回收、构建会话 UI、`request_dependency` 工具桥、真实依赖安装和完整前端原型评审。
-- 生产级浏览器孤儿回收的跨机路径；本机强杀 worker 后的租约接管已演练，浏览器进程和 profile 会被回收。
+- 跨机浏览器孤儿回收为 v1 外；本机强杀 worker 后的租约接管已演练，浏览器进程和 profile 会被回收。
 
 ## 布局
 
@@ -183,12 +183,12 @@ runtime:
 - 规则包：YAML manifest；`rule_id`／`rule_version` 必须与任务一致；声明式支持 `entry_links`、`sitemap`、`listing`、`html_index`、`public_json` 来源；hybrid 还支持 `discovery.sources[].type=adapter`。
 - 账本：`--db` 指向的 SQLite 文件，记录任务、工作项、状态、尝试次数和失败分类。
 - 输出：`<out-root>/<task-id>/` 下有 `task-result.json`、`products.jsonl`、`urls.csv`、`events.ndjson` 等运行时产物；product 任务另有 `app-run/` 和 `export/`。
-- 当前是单进程运行时；静态 HTML、浏览器渲染、SQLite 租约、资源回收、`load_more`／`infinite_scroll` 和 hybrid adapter discovery 已接入；跨机租约、跨进程资源配额和 adapter 浏览器实例回收未接入。
+- 当前是单进程运行时；静态 HTML、浏览器渲染、SQLite 租约、资源回收、`load_more`／`infinite_scroll` 和 hybrid adapter discovery 已接入；跨进程资源配额和 adapter 浏览器实例回收未接入；跨机租约为 v1 外。
 
 ## 控制面（submit / worker / pause / resume / cancel）
 
 - `submit` 只创建 `QUEUED` 任务，不启动执行；`worker` 常驻读取账本中的 `QUEUED` 任务。
-- `worker`／`serve` 的 `--max-browser-tasks` 限制每个 worker 进程同时运行的 browser／hybrid 任务数（默认 1，0 表示不限制）。同一 SQLite 账本上的多个 worker 通过 `browser_slot` 行协调到同一上限；跨机配额仍未实现。
+- `worker`／`serve` 的 `--max-browser-tasks` 限制每个 worker 进程同时运行的 browser／hybrid 任务数（默认 1，0 表示不限制）。同一 SQLite 账本上的多个 worker 通过 `browser_slot` 行协调到同一上限；跨机配额为 v1 外。
 - `pause` 把 `RUNNING` 改为 `PAUSING`；runner 停止派发新工作，等在途结清后写 `PAUSED`。
 - `cancel` 把 `RUNNING`／`PAUSING` 改为 `CANCELLING`；runner 等在途结束，拒绝迟到结果，写 `CANCELLED`。`DRAFT`／`QUEUED`／`PAUSED` 直接进入 `CANCELLED`。
 - `resume` 把 `PAUSED` 改回 `QUEUED`，由 `worker` 重新领取；不恢复浏览器内存或旧会话。
@@ -197,7 +197,7 @@ runtime:
 - 任务领取是原子的：`claim_tasks` 把 `QUEUED` 改为 `RUNNING` 并递增 `lease_token`；同一任务同一时刻只有一个持有者。心跳默认每 `min(5, ttl/3)` 秒续约；租约过期后，任意 worker 的对账扫描会把 `RUNNING` 放回 `QUEUED`、把 `PAUSING` 结清为 `PAUSED`、把 `CANCELLING` 结清为 `CANCELLED`。
 - 旧持有者继续写会命中 `LeaseLostError`：`update_task`、`add_item`、`claim_items`、`mark_item` 和 `reconcile_task` 都支持同一事务内的租约校验。恢复时还会丢弃未被账本 `DONE` 工作项确认的 `products.jsonl` 尾行。
 - 同进程 A20 已覆盖：同域两任务并行，暂停／取消一个，另一个继续并保持独立输出；同域请求共用限速器。
-- 跨进程任务领取、过期接管和旧写拒绝已有测试；真实浏览器实例配额、跨进程资源配额和跨机租约仍未实现。
+- 跨进程任务领取、过期接管和旧写拒绝已有测试；真实浏览器实例配额和跨进程资源配额仍未实现；跨机租约为 v1 外。
 - 证据：`tests/test_control.py` 覆盖状态转移、启动对账和单实例锁；`tests/test_control_flow.py` 覆盖暂停结清、恢复、取消拒收迟到结果、`run_forever`、心跳续约、双 worker 单任务和过期接管；`tests/test_lease.py` 覆盖跨进程原子领取、过期回收、旧写拒绝和旧库迁移；`tests/test_resources.py` 覆盖进程／目录回收和租约令牌隔离。
 
 ## 租约与资源回收
@@ -346,7 +346,7 @@ CSV 对以 `=`、`+`、`-`、`@` 开头的文本单元格加单引号，防止�
 ## 已知限制
 
 - 当前有 T1 契约／单元测试和本地 HTTP fixture 集成；D03／A08／D04 有真实站点证据，但不是 T4 生产验收。浏览器路径另有本地 JS fixture、mercerine 真实站点和强杀接管证据。
-- `runtime/`、`executor/` 从 R06 抽取；静态和浏览器两类 fetcher 共用同一 runner，浏览器任务逐条串行执行。租约和资源登记已支持多 worker 进程，但浏览器实例配额和跨机租约未接入。控制面支持暂停／恢复／取消。
+- `runtime/`、`executor/` 从 R06 抽取；静态和浏览器两类 fetcher 共用同一 runner，浏览器任务逐条串行执行。租约和资源登记已支持多 worker 进程，但浏览器实例配额未接入；跨机租约为 v1 外。控制面支持暂停／恢复／取消。
 - 浏览器 `load_more`／`infinite_scroll` 只支持追加型列表；内部滚动容器（`container`）已有本地 fixture（6／6）。虚拟列表不扩声明式 primitive，走 hybrid adapter：adapter discovery 已接入并有本地端到端 12／12；更复杂的内部滚动、任意点击序列和表单提交未实现。
 - `run` 已接入 SQLite 任务账本；`export` 仍可独立使用 `task.json` + `candidates.jsonl`，不依赖账本。
 - `description.blocks` 的 `kind` 由提取端标注；本层不按关键词猜测政策或适配区块。
