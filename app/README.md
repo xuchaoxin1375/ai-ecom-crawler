@@ -36,7 +36,7 @@
 
 - 浏览器／动态渲染、挑战页会话复用；浏览器 adapter 接入时应通过 `runtime.resources` 登记子进程和 profile 目录。
 - 跨进程 A20 的真实资源配额、浏览器实例配额和跨机租约；当前租约在单机 SQLite 上验证。
-- 永久移除、异步残留回收、BuildService／构建会话 UI、pause-gate 插件、依赖安装和完整前端原型评审。
+- 永久移除、异步残留回收、BuildService／构建会话 UI、`request_dependency` 工具桥、真实依赖安装和完整前端原型评审。
 - 生产级浏览器孤儿回收；静态 worker 的进程／目录登记与回收已落地，但没有真实浏览器路径可验证。
 
 ## 布局
@@ -124,12 +124,13 @@ python -m uv run --project app ecom-crawler validate --task-result /path/to/task
 ## 构建 harness 适配器
 
 - `harness/` 只服务构建期，不进入采集运行时；执行期仍零 LLM。
-- `OpenCodeServer` 在回环地址用随机端口和随机 `OPENCODE_PASSWORD` 启动 `opencode serve`，记录版本并在关闭时回收进程树；`OPENCODE_BIN` 可覆盖可执行文件。server 使用当前 OpenCode 的 provider 配置；构建工作区隔离，但 OpenCode 自身的数据目录尚未按构建强制隔离，当前每次冒烟会删除 session。
+- `OpenCodeServer` 在回环地址用随机端口和随机 `OPENCODE_PASSWORD` 启动 `opencode serve`，记录版本并在关闭时回收进程树；`OPENCODE_BIN` 可覆盖可执行文件。构建 server 的 cwd 指向 `work/`，使工作区内的 `.opencode/plugins/` 被发现。server 使用当前 OpenCode 的 provider 配置；构建工作区隔离，但 OpenCode 自身的数据目录尚未按构建强制隔离，当前每次冒烟会删除 session。
 - `OpenCodeClient` 封装 ADR 0006 的最小端点：session 创建／查询／删除、prompt、permission 列表／创建／回复、model、interrupt、message、export 和 `/api/event` SSE。
 - `OpenCodeHttpAdapter` 实现 `start_build`、`send_prompt`、`stream_events`、`reply_permission`、`pause`／`resume`、`cancel`、`collect_artifacts` 和 `close`；构建会话状态独立于采集任务状态。
-- 每次构建在 `sessions/<build_id>/` 下创建 `input/`、`work/`、`out/`、`logs/` 和 `control/`；`control/pause.json` 是 pause-gate 的控制文件，读取失败按暂停处理（fail closed）。
+- 每次构建在 `sessions/<build_id>/` 下创建 `input/`、`work/`、`out/`、`logs/` 和 `control/`；`control/pause.json` 是 pause-gate 的控制文件，读取失败按暂停处理（fail closed）。`BuildWorkspace.create` 会把 `pause-gate` 插件写入 `work/.opencode/plugins/pause-gate/`；插件在权限 hook 中把暂停期间原本 `allow` 的工具动作提升为 `ask`，并把动作和效果写入 `control/pause-gate.log`。真实 shell 工具冒烟已看到 `shell allow -> ask`。
 - 事件归一化把 OpenCode 事件映射为 `phase_changed`、`tool_started`、`tool_finished`、`permission_requested`、`permission_replied`、`message_delta`、`finished`、`error` 等；推理事件只记录 `redacted`，不保存私有推理。
-- 真实、无模型的冒烟与结果见 `experiments/harness/README.md`。`request_dependency`、pause-gate 插件、BuildService 和构建会话 UI 仍未接入；真实 prompt 和真实执行中中断尚未验证。
+- `DependencyPolicy` 提供基线／allowlist 判定和隔离安装边界：包名、版本和 manager 先校验，安装只调用显式 build interpreter 的 `pip`，不经 shell；未配置策略或安装器时返回 `approval_required`。`OpenCodeHttpAdapter.request_dependency` 会写结构化事件，但 OpenCode 侧的 `request_dependency` 工具桥仍未接入。
+- 真实、无模型的冒烟与结果见 `experiments/harness/README.md`。BuildService 和构建会话 UI 仍未接入；真实自然完成尚未验证。
 
 ## Web 服务（serve）
 

@@ -9,9 +9,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .dependencies import DependencyPolicy, DependencyRequest
 from .events import normalize_event
 from .models import BuildTask, HarnessEvent, utc_now
-from .opencode import OpenCodeClient, OpenCodeServer
+from .opencode import OpenCodeClient, OpenCodeHttpError, OpenCodeServer
 from .workspace import BuildWorkspace
 
 ADAPTER_VERSION = "opencode-http/0.1"
@@ -123,6 +124,8 @@ class OpenCodeHttpAdapter(HarnessAdapter):
         model: dict[str, Any] | None = None,
         permissions: list[dict[str, Any]] | None = None,
         event_timeout: float | None = None,
+        pause_gate: bool = True,
+        dependency_policy: DependencyPolicy | None = None,
     ) -> None:
         if server is not None and client is not None:
             raise ValueError("pass server or client, not both")
@@ -132,15 +135,19 @@ class OpenCodeHttpAdapter(HarnessAdapter):
         self.model = model
         self.permissions = permissions
         self.event_timeout = event_timeout
+        self.pause_gate = pause_gate
+        self.dependency_policy = dependency_policy
         self.sessions: dict[str, BuildSession] = {}
         self._lock = threading.RLock()
         self._owns_server = client is None
 
-    def _ensure_client(self) -> OpenCodeClient:
+    def _ensure_client(self, *, cwd: Path | None = None) -> OpenCodeClient:
         with self._lock:
             if self.client is None:
                 if self.server is None:
-                    self.server = OpenCodeServer()
+                    self.server = OpenCodeServer(cwd=cwd)
+                elif cwd is not None and self.server.cwd is None:
+                    self.server.cwd = cwd
                 self.client = self.server.start()
             return self.client
 
@@ -195,8 +202,12 @@ class OpenCodeHttpAdapter(HarnessAdapter):
         with self._lock:
             if task.build_id in self.sessions:
                 raise HarnessStateError(f"build already exists: {task.build_id}")
-            workspace = BuildWorkspace.create(self.workspace_root, task)
-            client = self._ensure_client()
+            workspace = BuildWorkspace.create(
+                self.workspace_root,
+                task,
+                pause_gate=self.pause_gate,
+            )
+            client = self._ensure_client(cwd=workspace.work_dir)
             try:
                 created = client.create_session(
                     directory=str(workspace.work_dir),
@@ -273,12 +284,22 @@ class OpenCodeHttpAdapter(HarnessAdapter):
             session = self._require(build_id)
             if session.session_id is None:
                 raise HarnessStateError(f"build {build_id} has no session")
-            self._ensure_client().reply_permission(
-                session.session_id,
-                request_id,
-                decision,
-                message=message,
-            )
+            try:
+                self._ensure_client().reply_permission(
+                    session.session_id,
+                    request_id,
+                    decision,
+                    message=message,
+                )
+            except OpenCodeHttpError as exc:
+                if exc.status == 404 and exc.code == "PermissionNotFoundError":
+                    self._append_adapter_event(
+                        session,
+                        "permission_already_settled",
+                        request_id=request_id,
+                    )
+                    return
+                raise
             self._append_adapter_event(
                 session,
                 "permission_replied",
@@ -289,10 +310,29 @@ class OpenCodeHttpAdapter(HarnessAdapter):
     def request_dependency(
         self, build_id: str, request: dict[str, Any]
     ) -> dict[str, Any]:
-        self._require(build_id)
-        raise HarnessUnsupportedError(
-            "dependency installation is not wired into the adapter smoke yet"
+        session = self._require(build_id)
+        if self.dependency_policy is None:
+            raise HarnessUnsupportedError(
+                "no dependency policy is configured for this adapter"
+            )
+        decision = self.dependency_policy.request(
+            DependencyRequest.from_dict(request)
         )
+        event_type = {
+            "available": "dependency_available",
+            "installed": "dependency_installed",
+            "failed": "dependency_failed",
+            "denied": "dependency_denied",
+        }.get(decision.status, "dependency_requested")
+        self._append_adapter_event(
+            session,
+            event_type,
+            name=decision.name,
+            version=decision.version,
+            status=decision.status,
+            detail=decision.detail,
+        )
+        return decision.to_dict()
 
     def pause(self, build_id: str) -> BuildSession:
         with self._lock:

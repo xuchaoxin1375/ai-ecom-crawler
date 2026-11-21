@@ -375,6 +375,7 @@ class OpenCodeServer:
         password: str | None = None,
         startup_timeout: float = 30.0,
         env: dict[str, str] | None = None,
+        cwd: str | Path | None = None,
     ) -> None:
         self.command = list(command) if command else None
         self.host = host
@@ -382,6 +383,7 @@ class OpenCodeServer:
         self.password = password or secrets.token_urlsafe(24)
         self.startup_timeout = max(float(startup_timeout), 1.0)
         self.extra_env = dict(env or {})
+        self.cwd = Path(cwd).resolve() if cwd is not None else None
         self.process: subprocess.Popen[str] | None = None
         self.client: OpenCodeClient | None = None
         self.base_url: str | None = None
@@ -417,6 +419,7 @@ class OpenCodeServer:
                     encoding="utf-8",
                     errors="replace",
                     env=env,
+                    cwd=str(self.cwd) if self.cwd is not None else None,
                     start_new_session=os.name != "nt",
                 )
             except OSError as exc:

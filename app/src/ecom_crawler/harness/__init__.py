@@ -7,19 +7,24 @@ layout, an OpenCode HTTP/SSE client, event normalization and the
 """
 
 from .adapter import BuildSession, HarnessAdapter, OpenCodeHttpAdapter
+from .dependencies import DependencyPolicy, DependencyRequest
 from .events import normalize_event
 from .models import BuildTask, HarnessEvent
 from .opencode import OpenCodeClient, OpenCodeServer
+from .pause_gate import install_pause_gate
 from .workspace import BuildWorkspace
 
 __all__ = [
     "BuildSession",
     "BuildTask",
     "BuildWorkspace",
+    "DependencyPolicy",
+    "DependencyRequest",
     "HarnessAdapter",
     "HarnessEvent",
     "OpenCodeClient",
     "OpenCodeHttpAdapter",
     "OpenCodeServer",
+    "install_pause_gate",
     "normalize_event",
 ]

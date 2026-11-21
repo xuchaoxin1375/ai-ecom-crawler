@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .models import BuildTask, HarnessEvent, utc_now
+from .pause_gate import install_pause_gate
 
 
 def _atomic_json(path: Path, payload: dict[str, Any]) -> None:
@@ -69,6 +70,7 @@ class BuildWorkspace:
         task: BuildTask,
         *,
         force: bool = False,
+        pause_gate: bool = True,
     ) -> BuildWorkspace:
         base = Path(workspace_root).resolve()
         root = base / task.build_id
@@ -87,6 +89,8 @@ class BuildWorkspace:
             directory.mkdir(parents=True, exist_ok=True)
         workspace.write_task(task)
         workspace.set_paused(False)
+        if pause_gate:
+            install_pause_gate(workspace.work_dir)
         workspace.session_path.touch(exist_ok=True)
         workspace.write_result(
             {
