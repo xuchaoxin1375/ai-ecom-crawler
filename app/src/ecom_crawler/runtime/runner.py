@@ -25,7 +25,7 @@ from .models import Lease, Task, WorkItem, utc_now
 from .rule import RulePackage
 from .store import LeaseLostError, TaskStore
 
-RUNTIME_VERSION = "r06-runtime/0.2"
+RUNTIME_VERSION = "r06-runtime/0.3"
 
 
 class StopTask(Exception):
@@ -142,6 +142,8 @@ class TaskRunner:
         return control
 
     def _loop(self) -> str:
+        if getattr(self.fetcher, "thread_affine", False):
+            return self._loop_inline()
         concurrency = self._concurrency()
         with ThreadPoolExecutor(max_workers=concurrency) as pool:
             futures: dict[Future[tuple[str, dict[str, Any]]], WorkItem] = {}
@@ -214,6 +216,62 @@ class TaskRunner:
                     if counts.get("PENDING", 0) == 0 and counts.get("IN_FLIGHT", 0) == 0:
                         return "FINISHED"
 
+    def _loop_inline(self) -> str:
+        """Process one item at a time in the task thread for thread-affine fetchers."""
+        while True:
+            self.store.assert_lease(self.lease)
+            current = self.store.get_task(self.task.task_id)
+            if current is None:
+                raise RuntimeError(f"task disappeared: {self.task.task_id}")
+            if current.state == "PAUSING":
+                self._event("task_pausing", pending=0)
+                return "PAUSED"
+            if current.state == "CANCELLING":
+                self._event("task_cancelling", pending=0)
+                return "CANCELLED"
+            if current.state == "CANCELLED":
+                return "CANCELLED"
+            if current.state == "PAUSED":
+                return "PAUSED"
+            if self._budget_exceeded():
+                self._stop_reason = "BUDGET_EXHAUSTED"
+                self._stop_detail = "task budget exhausted"
+                return "FINISHED"
+
+            items = self.store.claim_items(self.task.task_id, 1, lease=self.lease)
+            if not items:
+                counts = self.store.item_counts(self.task.task_id)
+                if counts.get("PENDING", 0) == 0 and counts.get("IN_FLIGHT", 0) == 0:
+                    return "FINISHED"
+                time.sleep(self.poll_interval)
+                continue
+
+            item = items[0]
+            try:
+                state, result = self._process_item(item)
+            except StopTask as exc:
+                self._finish_item(
+                    item,
+                    "FAILED",
+                    {
+                        "reason": exc.reason.lower(),
+                        "failure_class": "blocked",
+                        "detail": exc.detail,
+                    },
+                )
+                self._stop_reason = exc.reason
+                self._stop_detail = exc.detail
+                return "FINISHED"
+            except LeaseLostError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - item boundary
+                state = "FAILED"
+                result = {
+                    "reason": f"item_error:{type(exc).__name__}",
+                    "failure_class": "permanent",
+                }
+            self._finish_item(item, state, result)
+
     def _drain(
         self,
         futures: dict[Future[tuple[str, dict[str, Any]]], WorkItem],
@@ -253,7 +311,9 @@ class TaskRunner:
             futures.pop(future, None)
 
     def _process_item(self, item: WorkItem) -> tuple[str, dict[str, Any]]:
-        result = self.fetcher.get(item.url)
+        result = self.fetcher.get(item.url, item_type=item.item_type)
+        if result.meta.get("challenge_suspected"):
+            raise StopTask("ACCESS_DENIED", f"challenge page for {item.url}")
         if result.status == 0:
             return self._failure(
                 item, "transient", "transport_error", error=result.error
@@ -1088,9 +1148,16 @@ class TaskRunner:
                     "missing_reasons": product.get("missing_reasons", {}),
                 }
             )
+        engine_info = self._engine_info()
+        browser_launched = bool(engine_info.get("browser_launched"))
         limitations = [
             "Bounded to the declared discovery sources and limits; not full-site coverage.",
-            "Static HTML only; no browser rendering, login or access-control bypass.",
+            (
+                "Browser rendering was used for declared URL types; challenges, login and "
+                "access-control bypass are not attempted."
+                if browser_launched
+                else "Static HTML only; no browser rendering, login or access-control bypass."
+            ),
             "Runtime LLM calls: 0; no raw page HTML is retained.",
         ]
         limitations.extend(self.rule.raw.get("evidence", {}).get("limitations", []))
@@ -1137,7 +1204,16 @@ class TaskRunner:
                 "executor": RUNTIME_VERSION,
                 "llm_calls": 0,
                 "raw_pages_retained": False,
-                "http_engine": "scrapling.FetcherSession (curl_cffi, static HTML)",
+                "http_engine": _engine_summary(engine_info),
+                "fetch_engines": engine_info.get("engines_used", []),
+                "browser": {
+                    "launched": browser_launched,
+                    "headless": engine_info.get("browser_headless"),
+                    "binary": engine_info.get("browser_binary"),
+                    "version": engine_info.get("browser_version"),
+                    "pid": engine_info.get("browser_pid"),
+                    "profile": engine_info.get("browser_profile"),
+                },
             },
             "access": {
                 "entry_url": self.rule.entry_url,
@@ -1151,18 +1227,33 @@ class TaskRunner:
                 "max_urls": self.task.limits.get("max_urls"),
                 "max_seconds": self.task.limits.get("max_seconds"),
                 "max_attempts": self._max_attempts(),
-                "browser_launched": False,
+                "browser_launched": browser_launched,
                 "login_used": False,
             },
             "resources": {
-                "browser_launched": False,
-                "processes": [],
+                "browser_launched": browser_launched,
+                "browser_pid": engine_info.get("browser_pid"),
+                "browser_profile": engine_info.get("browser_profile"),
+                "processes": (
+                    [engine_info["browser_pid"]]
+                    if engine_info.get("browser_pid")
+                    else []
+                ),
                 "orphan_files_removed": self._recovery.get(
                     "orphan_files_removed", 0
                 ),
             },
             "limitations": limitations,
         }
+
+    def _engine_info(self) -> dict[str, Any]:
+        describe = getattr(self.fetcher, "describe", None)
+        if not callable(describe):
+            return {}
+        try:
+            return dict(describe() or {})
+        except Exception:  # noqa: BLE001 - reporting must not fail a task
+            return {}
 
     def _failure_classes(self) -> dict[str, int]:
         counts = {"transient": 0, "permanent": 0, "blocked": 0, "unknown": 0}
@@ -1304,6 +1395,19 @@ class TaskRunner:
 
     def _append_jsonl(self, path: Path, payload: dict[str, Any]) -> None:
         append_jsonl(path, payload, lock=self._write_lock)
+
+
+def _engine_summary(engine_info: dict[str, Any]) -> str:
+    engines = engine_info.get("engines_used") or []
+    if engine_info.get("browser_launched"):
+        name = str(engine_info.get("browser_binary") or "chromium")
+        version = str(engine_info.get("browser_version") or "").strip()
+        mode = "headless" if engine_info.get("browser_headless") else "headful"
+        browser = f"patchright CDP ({name}{(' ' + version) if version else ''}, {mode})"
+        if "static" in engines:
+            return "scrapling.FetcherSession (curl_cffi, static HTML) + " + browser
+        return browser
+    return "scrapling.FetcherSession (curl_cffi, static HTML)"
 
 
 def _record_payload(record: Any) -> dict[str, Any]:

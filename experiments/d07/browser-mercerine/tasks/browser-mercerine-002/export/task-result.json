@@ -1,0 +1,60 @@
+{
+  "task_id": "browser-mercerine-002",
+  "task_type": "product",
+  "plan_id": "mercerine-browser",
+  "plan_version": "2026.11.21-1",
+  "market": "FR",
+  "locale": "fr-FR",
+  "state": "FINISHED",
+  "outcome": "COMPLETED",
+  "stop_reason": "NATURAL_END",
+  "started_at": "2026-11-21T14:10:19Z",
+  "finished_at": "2026-11-21T14:11:08Z",
+  "counts": {
+    "discovered_urls": 2,
+    "pending_navigation_entries": 0,
+    "product_candidates": 1,
+    "pending_products": 0,
+    "in_flight_products": 0,
+    "processed_products": 1,
+    "valid_products": 1,
+    "excluded_products": 0,
+    "failed_products": 0,
+    "partial_description_products": 0
+  },
+  "coverage": {
+    "status": "PARTIAL",
+    "denominator_source": "declared-source product candidates",
+    "denominator": 1,
+    "covered": 1,
+    "notes": "Bounded sample from one entry page; not full-site coverage."
+  },
+  "business_acceptance": {
+    "status": "NOT_REVIEWED",
+    "accepted_by": null,
+    "accepted_at": null,
+    "reason": "R06 runtime prototype; no business sign-off yet.",
+    "scope": "discovery sources declared by the rule"
+  },
+  "quality_exceptions": [
+    {
+      "source_url": "https://www.mercerine.com/tissu-fausse-fourrure-poils-longs-brun-caramel-66289.html",
+      "description_status": "SUMMARY_FALLBACK",
+      "partial_reason": null,
+      "missing_reasons": {
+        "description_html": "SUMMARY_FALLBACK"
+      }
+    }
+  ],
+  "runtime": {
+    "llm_calls": 0,
+    "raw_pages_retained": false
+  },
+  "limitations": [
+    "Bounded to the declared discovery sources and limits; not full-site coverage.",
+    "Browser rendering was used for declared URL types; challenges, login and access-control bypass are not attempted.",
+    "Runtime LLM calls: 0; no raw page HTML is retained.",
+    "Bounded browser check; not full-site coverage.",
+    "The homepage and product pages answer the first request with 503 and render after the site's own JS; no challenge bypass."
+  ]
+}

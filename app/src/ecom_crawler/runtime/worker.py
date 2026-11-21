@@ -10,41 +10,124 @@ import time
 import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from scrapling.fetchers import FetcherSession
 
 from .atomic import write_json
-from .fetcher import DomainLimiter, ScraplingFetcher
+from .browser import BrowserConfig, BrowserFetcher
+from .fetcher import DomainLimiter, HybridFetcher, ScraplingFetcher, normalize_engine
 from .models import Lease, Task, utc_now
 from .resources import cleanup_task_resources
 from .rule import RulePackage, load_rule
 from .runner import TaskRunner
 from .store import LeaseLostError, TaskStore
 
-FetcherFactory = Callable[[RulePackage, DomainLimiter], Any]
-
 logger = logging.getLogger(__name__)
 
 
-@contextmanager
-def default_fetcher(
-    rule: RulePackage, limiter: DomainLimiter
-) -> Iterator[ScraplingFetcher]:
+@dataclass(frozen=True)
+class FetcherContext:
+    """Everything an engine needs to fetch for one leased task."""
+
+    rule: RulePackage
+    limiter: DomainLimiter
+    store: TaskStore
+    task: Task
+    lease: Lease
+    out_root: Path
+
+
+FetcherFactory = Callable[[FetcherContext], Any]
+
+
+def engine_plan(rule: RulePackage) -> tuple[str, dict[str, str]]:
+    """Return the default engine and per-item-type overrides."""
     fetch = rule.fetch
-    with FetcherSession(
+    default = normalize_engine(str(fetch.get("default_engine", "static")))
+    overrides: dict[str, str] = {}
+    per_type = fetch.get("per_url_type", {})
+    if isinstance(per_type, dict):
+        for item_type, value in per_type.items():
+            if isinstance(value, dict) and value.get("engine"):
+                overrides[str(item_type)] = normalize_engine(str(value["engine"]))
+    return default, overrides
+
+
+def _retry_values(rule: RulePackage) -> tuple[int, int]:
+    retry = rule.fetch.get("retry", {})
+    return (
+        max(1, int(retry.get("max_attempts", 2))),
+        max(0, int(retry.get("backoff_ms", 1000))),
+    )
+
+
+def _make_static(context: FetcherContext) -> ScraplingFetcher:
+    fetch = context.rule.fetch
+    manager = FetcherSession(
         impersonate="chrome",
         timeout=float(fetch.get("timeout_ms", 45000)) / 1000,
         retries=1,
-    ) as session:
-        yield ScraplingFetcher(
-            session,
-            limiter=limiter,
-            timeout_ms=int(fetch.get("timeout_ms", 45000)),
-            max_attempts=int(fetch.get("retry", {}).get("max_attempts", 2)),
-            backoff_ms=int(fetch.get("retry", {}).get("backoff_ms", 1000)),
-        )
+    )
+    session = manager.__enter__()
+    max_attempts, backoff_ms = _retry_values(context.rule)
+    return ScraplingFetcher(
+        session,
+        limiter=context.limiter,
+        timeout_ms=int(fetch.get("timeout_ms", 45000)),
+        max_attempts=max_attempts,
+        backoff_ms=backoff_ms,
+        session_manager=manager,
+    )
+
+
+def _make_browser(context: FetcherContext) -> BrowserFetcher:
+    max_attempts, backoff_ms = _retry_values(context.rule)
+    return BrowserFetcher(
+        context.store,
+        task_id=context.task.task_id,
+        out_root=context.out_root,
+        config=BrowserConfig.from_fetch(context.rule.fetch),
+        limiter=context.limiter,
+        lease_token=context.lease.token,
+        max_attempts=max_attempts,
+        backoff_ms=backoff_ms,
+    )
+
+
+@contextmanager
+def default_fetcher(context: FetcherContext) -> Iterator[Any]:
+    default, overrides = engine_plan(context.rule)
+    engines = {default, *overrides.values()}
+    if engines == {"static"}:
+        fetcher = _make_static(context)
+        try:
+            yield fetcher
+        finally:
+            fetcher.close()
+        return
+    if engines == {"browser"}:
+        fetcher = _make_browser(context)
+        try:
+            yield fetcher
+        finally:
+            fetcher.close()
+        return
+    builders: dict[str, Callable[[], Any]] = {
+        "static": lambda: _make_static(context),
+        "browser": lambda: _make_browser(context),
+    }
+    hybrid = HybridFetcher(
+        default_engine=default,
+        overrides=overrides,
+        builders=builders,
+    )
+    try:
+        yield hybrid
+    finally:
+        hybrid.close()
 
 
 class Worker:
@@ -267,7 +350,15 @@ class Worker:
                 )
                 return
             try:
-                with self.fetcher_factory(rule, self.limiter) as fetcher:
+                context = FetcherContext(
+                    rule=rule,
+                    limiter=self.limiter,
+                    store=self.store,
+                    task=task,
+                    lease=lease,
+                    out_root=self.out_root,
+                )
+                with self.fetcher_factory(context) as fetcher:
                     runner = TaskRunner(
                         self.store,
                         rule,

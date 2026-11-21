@@ -1,0 +1,76 @@
+{
+  "task_id": "browser-mercerine-004",
+  "task_type": "product",
+  "plan_id": "mercerine-browser",
+  "plan_version": "2026.11.21-1",
+  "market": "FR",
+  "locale": "fr-FR",
+  "state": "FINISHED",
+  "outcome": "COMPLETED",
+  "stop_reason": "NATURAL_END",
+  "started_at": "2026-11-21T14:28:44Z",
+  "finished_at": "2026-11-21T14:30:33Z",
+  "counts": {
+    "discovered_urls": 4,
+    "pending_navigation_entries": 0,
+    "product_candidates": 3,
+    "pending_products": 0,
+    "in_flight_products": 0,
+    "processed_products": 3,
+    "valid_products": 3,
+    "excluded_products": 0,
+    "failed_products": 0,
+    "partial_description_products": 0
+  },
+  "coverage": {
+    "status": "PARTIAL",
+    "denominator_source": "declared-source product candidates",
+    "denominator": 3,
+    "covered": 3,
+    "notes": "Bounded sample from one entry page; not full-site coverage."
+  },
+  "business_acceptance": {
+    "status": "NOT_REVIEWED",
+    "accepted_by": null,
+    "accepted_at": null,
+    "reason": "R06 runtime prototype; no business sign-off yet.",
+    "scope": "discovery sources declared by the rule"
+  },
+  "quality_exceptions": [
+    {
+      "source_url": "https://www.mercerine.com/tissu-fausse-fourrure-poils-longs-brun-caramel-66289.html",
+      "description_status": "SUMMARY_FALLBACK",
+      "partial_reason": null,
+      "missing_reasons": {
+        "description_html": "SUMMARY_FALLBACK"
+      }
+    },
+    {
+      "source_url": "https://www.mercerine.com/tissu-french-terry-crepe-rose-motif-leopard-65436.html",
+      "description_status": "SUMMARY_FALLBACK",
+      "partial_reason": null,
+      "missing_reasons": {
+        "description_html": "SUMMARY_FALLBACK"
+      }
+    },
+    {
+      "source_url": "https://www.mercerine.com/tissu-jacquard-stretch-vieux-rose-a-motifs-en-relief-66541.html",
+      "description_status": "SUMMARY_FALLBACK",
+      "partial_reason": null,
+      "missing_reasons": {
+        "description_html": "SUMMARY_FALLBACK"
+      }
+    }
+  ],
+  "runtime": {
+    "llm_calls": 0,
+    "raw_pages_retained": false
+  },
+  "limitations": [
+    "Bounded to the declared discovery sources and limits; not full-site coverage.",
+    "Browser rendering was used for declared URL types; challenges, login and access-control bypass are not attempted.",
+    "Runtime LLM calls: 0; no raw page HTML is retained.",
+    "Bounded browser check; not full-site coverage.",
+    "The homepage and product pages answer the first request with 503 and render after the site's own JS; no challenge bypass."
+  ]
+}

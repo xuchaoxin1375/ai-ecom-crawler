@@ -177,7 +177,7 @@ class StaticFetcher:
     def __exit__(self, *args: object) -> bool:
         return False
 
-    def get(self, url: str) -> FetchResult:
+    def get(self, url: str, *, item_type: str | None = None) -> FetchResult:
         self.requests += 1
         if url.rstrip("/") == "https://fixture.test":
             return FetchResult(status=200, url=url, body=ENTRY_HTML.encode("utf-8"))
@@ -233,7 +233,7 @@ class GateFetcher:
     def __exit__(self, *args: object) -> bool:
         return False
 
-    def get(self, url: str) -> FetchResult:
+    def get(self, url: str, *, item_type: str | None = None) -> FetchResult:
         if url.rstrip("/") == f"https://fixture.test/{self.prefix}":
             return FetchResult(
                 status=200,
@@ -286,7 +286,7 @@ class ControlFlowTests(unittest.TestCase):
             out_root=self.out_root,
             max_tasks=1,
             per_domain_rps=50,
-            fetcher_factory=lambda rule, limiter: StaticFetcher(started, release),
+            fetcher_factory=lambda context: StaticFetcher(started, release),
         )
         thread = threading.Thread(target=worker.run_once, daemon=True)
         thread.start()
@@ -325,7 +325,7 @@ class ControlFlowTests(unittest.TestCase):
             out_root=self.out_root,
             max_tasks=2,
             per_domain_rps=50,
-            fetcher_factory=lambda rule, limiter: GateFetcher(rule, limiter, gates),
+            fetcher_factory=lambda context: GateFetcher(context.rule, context.limiter, gates),
         )
         thread = threading.Thread(target=worker.run_once, daemon=True)
         thread.start()
@@ -371,7 +371,7 @@ class ControlFlowTests(unittest.TestCase):
             out_root=self.out_root,
             max_tasks=2,
             per_domain_rps=50,
-            fetcher_factory=lambda rule, limiter: GateFetcher(rule, limiter, gates),
+            fetcher_factory=lambda context: GateFetcher(context.rule, context.limiter, gates),
         )
         thread = threading.Thread(target=worker.run_once, daemon=True)
         thread.start()
@@ -488,7 +488,7 @@ class ControlFlowTests(unittest.TestCase):
             out_root=self.out_root,
             max_tasks=1,
             per_domain_rps=50,
-            fetcher_factory=lambda rule, limiter: StaticFetcher(started, release),
+            fetcher_factory=lambda context: StaticFetcher(started, release),
             lease_ttl_seconds=1.0,
             heartbeat_interval=0.1,
         )
@@ -519,7 +519,7 @@ class ControlFlowTests(unittest.TestCase):
                 out_root=self.out_root,
                 max_tasks=1,
                 per_domain_rps=50,
-                fetcher_factory=lambda rule, limiter: StaticFetcher(),
+                fetcher_factory=lambda context: StaticFetcher(),
             )
             for _ in range(2)
         ]
@@ -586,7 +586,7 @@ class ControlFlowTests(unittest.TestCase):
             out_root=self.out_root,
             max_tasks=1,
             per_domain_rps=50,
-            fetcher_factory=lambda rule, limiter: StaticFetcher(),
+            fetcher_factory=lambda context: StaticFetcher(),
         )
         self.assertEqual(worker.run_once(), 1)
         stored = TaskStore(self.db_path).get_task(task.task_id)
@@ -685,7 +685,7 @@ class ControlFlowTests(unittest.TestCase):
             out_root=self.out_root,
             max_tasks=1,
             per_domain_rps=50,
-            fetcher_factory=lambda rule, limiter: StaticFetcher(),
+            fetcher_factory=lambda context: StaticFetcher(),
         )
         stop = threading.Event()
         thread = threading.Thread(

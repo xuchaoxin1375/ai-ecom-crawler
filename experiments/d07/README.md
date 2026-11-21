@@ -8,12 +8,12 @@
 
 | 领域 | 已有证据 | 状态 | 缺口 |
 | --- | --- | --- | --- |
-| A12 访问与重试 | R06 `RetryTests`（transient 重试、耗尽、blocked 分类）、`RobotsTests`；D01 S6 挑战页；A08 429／Chrome 指纹；D06 JSON／HTML 路径 | 部分 | 无浏览器会话复用自动化；无统一 429 `Retry-After` 处理；无代理／出口资源登记 |
-| A13 暂停／取消／恢复 | R06 `ControlTests`（暂停恢复、取消拒收迟到结果）、`RecoveryTests`（在途重置、尝试耗尽、孤儿状态、plan 版本不匹配）；Tognar 真实暂停／取消／强杀恢复；`app/tests/test_control.py`（状态转移、恢复对账、worker 单实例锁）、`test_control_flow.py`（暂停结清、恢复、取消拒收迟到结果、心跳续约、双 worker 单任务、过期接管）、`test_lease.py`（跨进程领取、旧写拒绝） | 原型 + `app` 单机跨进程租约通过 | 真实浏览器会话恢复；真实进程强杀接管；跨机租约 |
+| A12 访问与重试 | R06 `RetryTests`（transient 重试、耗尽、blocked 分类）、`RobotsTests`；D01 S6 挑战页；A08 429／Chrome 指纹；D06 JSON／HTML 路径；`app/tests/test_browser.py` 本地 JS fixture；`experiments/d07/browser-mercerine/` 真实站点 503 壳渲染与 3／3 | 部分 | 无统一 429 `Retry-After` 处理；无代理／出口资源登记；浏览器实例配额未验证 |
+| A13 暂停／取消／恢复 | R06 `ControlTests`（暂停恢复、取消拒收迟到结果）、`RecoveryTests`（在途重置、尝试耗尽、孤儿状态、plan 版本不匹配）；Tognar 真实暂停／取消／强杀恢复；`app/tests/test_control.py`（状态转移、恢复对账、worker 单实例锁）、`test_control_flow.py`（暂停结清、恢复、取消拒收迟到结果、心跳续约、双 worker 单任务、过期接管）、`test_lease.py`（跨进程领取、旧写拒绝）；`experiments/d07/browser-mercerine/crash_test.py` 真实浏览器强杀接管 | 原型 + `app` 单机跨进程租约 + 浏览器接管通过 | 真实浏览器会话恢复（内存／页面状态）和跨机租约 |
 | A15 漂移与修复 | A08 两轮方案修订（入口前缀、正文／分类／选项）；D03／D04 同方案复跑；R06 提取缺失值测试 | 部分 | 没有自动化漂移检测／修复；没有旧结果失效标记；分类问题本轮修正 |
 | A20 多任务并行 | R06 `ParallelTests`；`app/tests/test_control_flow.py` 的 `test_a20_pause_*`／`test_a20_cancel_*`：同域两任务并行，暂停／取消一个，另一个继续并输出独立；`test_two_workers_process_one_task_once` 验证两个 worker 不重复领取；`test_same_domain_limiter_serializes` 验证同域限速 | 通过（同进程 + 单机双进程） | 无跨进程资源配额和浏览器实例配额；同域限速仍是进程内 |
 | 原子写与幂等 | R06 `AtomicTests`、`StoreTests`；D02 app 原子写和幂等键；租约接管时丢弃未确认的商品输出尾行 | 通过（单机多进程） | 跨机幂等和真实浏览器输出未验证 |
-| 资源回收 | R06 `resources` 字段、无浏览器路径；D02 无外部资源；`app` 取消后无 `IN_FLIGHT`、无临时文件残留，`run_forever` 停止时 join 运行线程；`task_resources` 登记进程／目录并按租约令牌回收 | 部分 | 浏览器 adapter 未接入；真实浏览器 profile／进程回收未验证 |
+| 资源回收 | R06 `resources` 字段、无浏览器路径；D02 无外部资源；`app` 取消后无 `IN_FLIGHT`、无临时文件残留，`run_forever` 停止时 join 运行线程；`task_resources` 登记进程／目录并按租约令牌回收；浏览器 fetcher 登记 Chromium PID 和 `browser-profile`，正常结束与强杀接管均回收 | 通过（本机静态 + 浏览器） | 浏览器实例配额、跨机回收和异步残留回收 |
 
 ## 本轮修正：字段错误不再被当成业务排除
 
@@ -63,6 +63,19 @@ R06 原先把所有 `validate_product` 原因都映射为 `EXCLUDED`。这会掩
 - `experiments/d07/lease/multiprocess_demo.py`：本机两个独立 worker 进程共享账本，2 个任务各 2 个商品，`lease_token=1` 且结束后 `lease_owner` 已清空；运行方式见脚本头部。
 - WSL2 Ubuntu + Python 3.12.3：`test_lease.py` 7 个用例、`test_resources.py` 3 个用例通过；Linux 僵尸进程按 `/proc/<pid>/stat` 判死，避免把已终止子进程当成仍在运行。
 
+## 2026-11-21 浏览器 adapter 与强杀接管
+
+`app` 已接入 Patchright CDP 浏览器 fetcher，并按任务登记和回收 Chromium 进程与 profile。
+
+- 规则：`fetch.default_engine: browser` 或 `per_url_type.<navigation|product>.engine`；`browser` 可为布尔值或选项对象。
+- 生命周期：任务内懒启动一个 Chromium + 一个 page，请求串行；浏览器 fetcher 是 thread-affine，任务 item 不走线程池。
+- 就绪与状态：支持 `wait_selector`／`wait_until`／`wait_ms`／`network_idle`；渲染后读取 navigation timing 的最终 `responseStatus`，挑战壳的 503 不再直接判死。
+- 资源：Chromium PID 和 `<out-root>/<task-id>/browser-profile` 写入 `task_resources`；结束、取消和过期接管按租约令牌回收。
+- 证据：
+  - `app/tests/test_browser.py`：本地 JS 商品页，渲染后 1／1，资源表清空、profile 删除、PID 退出；另有配置、路由和非法引擎测试。
+  - `experiments/d07/browser-mercerine/`：mercerine 首页 503 壳渲染后 3／3（约 80 秒），一个浏览器会话复用 4 个请求。
+  - `crash_test.py`：强杀 worker 后 Chromium 仍存活；租约过期后新 worker 接管，终止遗留 Chromium、删除 profile、资源表清空，任务重跑 1／1。
+
 ## 测试结果
 
 ```powershell
@@ -71,17 +84,19 @@ python -m uv run --project experiments/framework-compare/scrapling `
   python -m unittest discover -s experiments/r06/tests -v
 ```
 
-结果：**83 个测试通过**，无 skip。覆盖原子写、契约、提取、运行时、重试、恢复、控制、并行、Schema 和新的字段分类。`app` 当前 **106 个测试通过**，含租约、资源回收、控制流和 Web API。
+结果：**83 个测试通过**，无 skip。覆盖原子写、契约、提取、运行时、重试、恢复、控制、并行、Schema 和新的字段分类。`app` 当前 **135 个测试通过**（含 8 个浏览器配置／路由／fixture 用例、4 个桥接状态用例和 1 个原子写用例），`ruff check app` 通过；真实浏览器用例在缺少 Chromium 的环境中会跳过，本机运行结果为通过。
 
 ## D07 结论
 
-- **不是 D07 完成**：生产 `app` 执行器、任务账本、控制面、单实例锁、同进程 A20、单机跨进程租约和进程／目录资源回收已落地；真实浏览器 adapter 回收、跨进程资源配额、真实进程强杀接管、跨机租约和自动化漂移修复仍未实现。
-- **可复用的改进**：字段错误与业务排除的分类已修正，并进入 R06 回归测试；`app` 控制面复用同一状态语义；租约和资源登记不改变对外任务状态。
-- **下一步优先级**：接浏览器 adapter 时把子进程和 profile 目录登记到 `task_resources`，再补跨进程资源配额和真实强杀接管；D08 控制界面不得早于这些结论。
+- **不是 D07 完成**：生产 `app` 执行器、任务账本、控制面、单实例锁、同进程 A20、单机跨进程租约、进程／目录资源回收和真实浏览器进程／profile 回收已落地；跨进程资源配额、浏览器实例配额、交互式浏览器推进、跨机租约和自动化漂移修复仍未实现。
+- **可复用的改进**：字段错误与业务排除的分类已修正，并进入 R06 回归测试；`app` 控制面复用同一状态语义；租约和资源登记不改变对外任务状态；浏览器挑战壳要按渲染后的最终状态判断，不能只看首个 HTTP 响应。
+- **下一步优先级**：补 load more／滚动等交互推进、浏览器实例配额和跨进程资源配额；D08 控制界面不得早于这些结论。
 
 ## 限制
 
-- 现有真实站点控制证据来自 Tognar，是单 worker、同进程；不能代表多进程或浏览器池。
+- 现有真实站点控制证据来自 Tognar（静态）和 mercerine（浏览器），仍是单 worker、单机；不能代表多进程或浏览器池。
+- 浏览器证据是首页 3 个商品的有界样本，不是全站；headless 通过不代表挑战站长期稳定。
+- 浏览器 adapter v0 只渲染页面，不执行 load more、滚动或点击；浏览器实例配额和跨机回收未验证。
 - R06 的 `RetryTests` 是 fixture 级，不覆盖真实 429 `Retry-After`、代理切换和会话复用。
 - A20 只验证了并行启动，没有验证一个任务暂停／取消时另一个任务的计数和输出不受影响。
 - 没有任务管理 API 或 Web UI，不能验证用户可见的取消、归档和恢复旅程；`app` 控制面目前是 CLI + SQLite，单 worker。

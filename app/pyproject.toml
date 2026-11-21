@@ -5,17 +5,15 @@ build-backend = "hatchling.build"
 [project]
 name = "ecom-crawler"
 version = "0.1.0"
-description = "D02 data contract and export CLI for the AI e-commerce crawler"
+description = "Declarative e-commerce crawler runtime, browser adapter and export CLI"
 requires-python = ">=3.11"
 dependencies = [
-    "browserforge==1.2.4",
-    "curl_cffi==0.17.0",
     "fastapi>=0.115,<1",
     "lxml>=5.3,<7",
     "patchright==1.64.4",
     "protego>=0.3,<1",
     "pyyaml==6.0.3",
-    "scrapling==0.5.1",
+    "scrapling[fetchers]==0.5.1",
     "uvicorn>=0.30,<1",
 ]
 

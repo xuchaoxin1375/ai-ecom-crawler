@@ -933,10 +933,10 @@ class TaskStore:
     ) -> None:
         """Record a process or filesystem resource owned by a task.
 
-        A future browser adapter registers its process and profile directory
-        here so normal completion and crash recovery can clean both up.  The
-        optional lease token keeps a stale holder from deleting the resources
-        of the worker that took the task over.
+        The browser adapter registers its process and profile directory here so
+        normal completion and crash recovery can clean both up.  The optional
+        lease token keeps a stale holder from deleting the resources of the
+        worker that took the task over.
         """
         with self._connect() as connection:
             connection.execute(

@@ -70,19 +70,33 @@ def parse_attributes(value: str) -> list[dict[str, Any]]:
     return groups
 
 
+def export_description_status(value: Any) -> str:
+    """Map the runtime's lowercase statuses to the D02 export vocabulary."""
+    text = str(value).strip().upper().replace(" ", "_")
+    return {
+        "FALLBACK": "SUMMARY_FALLBACK",
+        "SUMMARY": "SUMMARY_FALLBACK",
+        "FULL": "COMPLETE",
+        "MISSING": "NOT_PROVIDED",
+        "UNAVAILABLE": "NOT_PROVIDED",
+        "PARTIAL_EXTRACTION": "PARTIAL",
+    }.get(text, text)
+
+
 def to_candidate(
     product: dict[str, Any],
     task: dict[str, Any],
     *,
     partial_reason: str | None = None,
 ) -> dict[str, Any]:
-    status = product.get("description_status")
-    if not status:
+    raw_status = product.get("description_status")
+    if not raw_status:
         raise ValueError(
             f"product has no explicit description_status: {product.get('source_url')}"
         )
+    status = export_description_status(raw_status)
     reason = product.get("partial_reason")
-    if status.lower() == "partial" and partial_reason:
+    if status == "PARTIAL" and partial_reason:
         reason = partial_reason
     category = str(product.get("category") or "").strip()
     return {
@@ -137,9 +151,11 @@ def convert_task_to_run_dir(
     (out_dir / "task.json").write_text(
         json.dumps(task, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
+        newline="\n",
     )
     (out_dir / "candidates.jsonl").write_text(
         "\n".join(json.dumps(item, ensure_ascii=False) for item in candidates) + "\n",
         encoding="utf-8",
+        newline="\n",
     )
     return len(candidates)

@@ -19,6 +19,39 @@ SUPPORTED_KINDS = {"declarative"}
 SUPPORTED_DISCOVERY = {"entry_links"}
 SUPPORTED_SOURCES = {"entry_links", "sitemap", "listing", "html_index", "public_json"}
 SUPPORTED_ADVANCE = {"none", "page_param", "next_link"}
+SUPPORTED_ENGINES = {"static", "browser", "http_json"}
+SUPPORTED_WAIT_UNTIL = {"commit", "domcontentloaded", "load", "networkidle"}
+SUPPORTED_SELECTOR_STATES = {"attached", "detached", "hidden", "visible"}
+BROWSER_OPTION_KEYS = {
+    "headless",
+    "real_chrome",
+    "executable_path",
+    "extra_flags",
+    "user_agent",
+    "locale",
+    "timezone",
+    "challenge_wait_ms",
+    "profile_name",
+    "timeout_ms",
+    "wait_until",
+    "wait_selector",
+    "wait_selector_state",
+    "wait_ms",
+    "network_idle",
+    "network_idle_timeout_ms",
+    "disable_resources",
+}
+PAGE_OVERRIDE_KEYS = {
+    "engine",
+    "wait_until",
+    "wait_selector",
+    "wait_selector_state",
+    "wait_ms",
+    "network_idle",
+    "network_idle_timeout_ms",
+    "disable_resources",
+    "timeout_ms",
+}
 CORE_FIELDS = {"name", "price.amount", "price.currency", "primary_image_url", "source_url"}
 RULE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,80}$")
 
@@ -289,7 +322,12 @@ def _validate_common(data: dict[str, Any]) -> None:
             raise RuleError(f"invalid product_url_patterns regex: {exc}") from exc
 
     fetch = _require_mapping(data["fetch"], "fetch")
-    _require_string(fetch.get("default_engine"), "fetch.default_engine")
+    engine = _require_string(fetch.get("default_engine"), "fetch.default_engine")
+    if engine not in SUPPORTED_ENGINES:
+        raise RuleError(
+            f"unsupported fetch.default_engine {engine!r}; "
+            f"supported: {sorted(SUPPORTED_ENGINES)}"
+        )
     concurrency = fetch.get("concurrency", 1)
     if not isinstance(concurrency, int) or concurrency < 1:
         raise RuleError("fetch.concurrency must be a positive integer")
@@ -299,6 +337,24 @@ def _validate_common(data: dict[str, Any]) -> None:
     retry = _require_mapping(fetch.get("retry"), "fetch.retry")
     if not isinstance(retry.get("max_attempts", 1), int) or retry.get("max_attempts", 1) < 1:
         raise RuleError("fetch.retry.max_attempts must be a positive integer")
+    if "browser" in fetch:
+        _validate_browser_config(fetch["browser"])
+    if "per_url_type" in fetch:
+        _validate_per_url_type(fetch["per_url_type"])
+    if fetch.get("browser") is False:
+        engines = {engine}
+        per_type = fetch.get("per_url_type")
+        if isinstance(per_type, dict):
+            engines.update(
+                str(settings.get("engine"))
+                for settings in per_type.values()
+                if isinstance(settings, dict) and settings.get("engine")
+            )
+        if "browser" in engines:
+            raise RuleError(
+                "fetch.browser=false conflicts with a browser engine; "
+                "remove browser: false or use a static engine"
+            )
 
     output = _require_mapping(data["output"], "output")
     if not output:
@@ -318,6 +374,108 @@ def _validate_common(data: dict[str, Any]) -> None:
         for key in ("extract", "normalize", "validate"):
             if key not in data:
                 raise RuleError(f"product capability needs {key}")
+
+
+def _validate_browser_config(value: Any) -> None:
+    if isinstance(value, bool):
+        return
+    browser = _require_mapping(value, "fetch.browser")
+    unknown = set(browser) - BROWSER_OPTION_KEYS
+    if unknown:
+        raise RuleError(
+            f"unknown fetch.browser keys: {', '.join(sorted(unknown))}; "
+            f"supported: {', '.join(sorted(BROWSER_OPTION_KEYS))}"
+        )
+    for key in ("headless", "real_chrome", "network_idle", "disable_resources"):
+        if key in browser and not isinstance(browser[key], bool):
+            raise RuleError(f"fetch.browser.{key} must be a boolean")
+    for key in ("challenge_wait_ms", "wait_ms", "network_idle_timeout_ms"):
+        if key in browser and (
+            isinstance(browser[key], bool)
+            or not isinstance(browser[key], int)
+            or browser[key] < 0
+        ):
+            raise RuleError(f"fetch.browser.{key} must be a non-negative integer")
+    if "timeout_ms" in browser and (
+        isinstance(browser["timeout_ms"], bool)
+        or not isinstance(browser["timeout_ms"], (int, float))
+        or browser["timeout_ms"] <= 0
+    ):
+        raise RuleError("fetch.browser.timeout_ms must be positive")
+    for key in (
+        "executable_path",
+        "user_agent",
+        "locale",
+        "timezone",
+        "profile_name",
+        "wait_selector",
+    ):
+        if key in browser and browser[key] is not None:
+            _require_string(browser[key], f"fetch.browser.{key}")
+    if "extra_flags" in browser:
+        flags = _require_list(browser["extra_flags"], "fetch.browser.extra_flags")
+        for flag in flags:
+            _require_string(flag, "fetch.browser.extra_flags[]")
+    _validate_page_engine_fields(browser, "fetch.browser")
+
+
+def _validate_per_url_type(value: Any) -> None:
+    per_type = _require_mapping(value, "fetch.per_url_type")
+    for item_type, settings in per_type.items():
+        path = f"fetch.per_url_type.{item_type}"
+        _require_string(item_type, path)
+        settings = _require_mapping(settings, path)
+        unknown = set(settings) - PAGE_OVERRIDE_KEYS
+        if unknown:
+            raise RuleError(
+                f"unknown {path} keys: {', '.join(sorted(unknown))}; "
+                f"supported: {', '.join(sorted(PAGE_OVERRIDE_KEYS))}"
+            )
+        if "engine" in settings:
+            engine = _require_string(settings["engine"], f"{path}.engine")
+            if engine not in SUPPORTED_ENGINES:
+                raise RuleError(
+                    f"unsupported {path}.engine {engine!r}; "
+                    f"supported: {sorted(SUPPORTED_ENGINES)}"
+                )
+        _validate_page_engine_fields(settings, path)
+
+
+def _validate_page_engine_fields(settings: dict[str, Any], path: str) -> None:
+    if "wait_until" in settings:
+        value = _require_string(settings["wait_until"], f"{path}.wait_until")
+        if value not in SUPPORTED_WAIT_UNTIL:
+            raise RuleError(
+                f"unsupported {path}.wait_until {value!r}; "
+                f"supported: {sorted(SUPPORTED_WAIT_UNTIL)}"
+            )
+    if "wait_selector_state" in settings:
+        value = _require_string(
+            settings["wait_selector_state"], f"{path}.wait_selector_state"
+        )
+        if value not in SUPPORTED_SELECTOR_STATES:
+            raise RuleError(
+                f"unsupported {path}.wait_selector_state {value!r}; "
+                f"supported: {sorted(SUPPORTED_SELECTOR_STATES)}"
+            )
+    for key in ("network_idle", "disable_resources"):
+        if key in settings and not isinstance(settings[key], bool):
+            raise RuleError(f"{path}.{key} must be a boolean")
+    for key in ("wait_ms", "network_idle_timeout_ms"):
+        if key in settings and (
+            isinstance(settings[key], bool)
+            or not isinstance(settings[key], int)
+            or settings[key] < 0
+        ):
+            raise RuleError(f"{path}.{key} must be a non-negative integer")
+    if "timeout_ms" in settings and (
+        isinstance(settings["timeout_ms"], bool)
+        or not isinstance(settings["timeout_ms"], (int, float))
+        or settings["timeout_ms"] <= 0
+    ):
+        raise RuleError(f"{path}.timeout_ms must be positive")
+    if "wait_selector" in settings and settings["wait_selector"] is not None:
+        _require_string(settings["wait_selector"], f"{path}.wait_selector")
 
 
 def _validate_sources(value: Any, discovery: dict[str, Any]) -> None:

@@ -1,0 +1,45 @@
+{
+  "task_id": "browser-crash-001",
+  "worker_pid": 30416,
+  "browser_pid": 27956,
+  "profile": "crash/tasks/browser-crash-001/browser-profile",
+  "state_before_kill": "RUNNING",
+  "worker_returncode": 1,
+  "browser_alive_after_worker_kill": true,
+  "fresh_worker_pid": 22008,
+  "final_state": "FINISHED",
+  "final_lease_token": 2,
+  "finished": true,
+  "browser_alive_after_takeover": false,
+  "profile_exists_after_takeover": false,
+  "remaining_resources": 0,
+  "outcome": "COMPLETED",
+  "stop_reason": "NATURAL_END",
+  "counts": {
+    "navigation_urls": 1,
+    "discovered_urls": 2,
+    "product_candidates": 1,
+    "pending_products": 0,
+    "in_flight_products": 0,
+    "processed_products": 1,
+    "valid_products": 1,
+    "excluded_products": 0,
+    "failed_products": 0,
+    "partial_description_products": 0
+  },
+  "runtime": {
+    "executor": "r06-runtime/0.3",
+    "llm_calls": 0,
+    "raw_pages_retained": false,
+    "http_engine": "patchright CDP (chromium Chrome/156.0.8078.4, headless)",
+    "fetch_engines": ["browser"],
+    "browser": {
+      "launched": true,
+      "headless": true,
+      "binary": "chromium",
+      "version": "Chrome/156.0.8078.4",
+      "pid": 28080,
+      "profile": "browser-profile"
+    }
+  }
+}

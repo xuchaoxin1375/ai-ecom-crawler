@@ -50,7 +50,10 @@ def append_jsonl(
     path.parent.mkdir(parents=True, exist_ok=True)
     line = (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
     with (lock or _DEFAULT_LOCK):
-        fd = os.open(path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o644)
+        flags = os.O_APPEND | os.O_CREAT | os.O_WRONLY
+        if os.name == "nt":
+            flags |= os.O_BINARY
+        fd = os.open(path, flags, 0o644)
         try:
             os.write(fd, line)
             os.fsync(fd)
