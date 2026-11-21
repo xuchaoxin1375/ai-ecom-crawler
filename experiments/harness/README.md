@@ -73,6 +73,8 @@ python -m uv run --project app python experiments/harness/opencode_smoke.py `
 
 `DependencyPolicy` 已有单元测试（基线／allowlist／安装失败／非法包名和 manager／显式 build interpreter），但 OpenCode 侧的 `request_dependency` 工具桥和真实安装尚未接入。
 
+WSL2 Ubuntu + Python 3.12.3、`PYTHONPATH=app/src` 下，`test_harness.py` 7 个和 `test_dependencies.py` 6 个用例通过；WSL 没有安装真实 `opencode`，这里只验证 fake server 和策略层。
+
 未覆盖：BuildService/UI、真实自然完成、`request_dependency` 工具桥和真实依赖安装。
 
 server 使用当前 OpenCode 的 provider 配置；构建工作区隔离，但 OpenCode 自身的数据目录尚未按构建强制隔离。每次冒烟会删除 session，不保留模型对话。
