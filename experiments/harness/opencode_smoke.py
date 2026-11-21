@@ -80,9 +80,19 @@ def main() -> int:
         help="create the session with a shell=ask permission rule for the probe",
     )
     parser.add_argument(
+        "--allow-shell",
+        action="store_true",
+        help="create the session with a shell=allow rule for the pause-gate probe",
+    )
+    parser.add_argument(
         "--cancel-after-start",
         action="store_true",
         help="cancel/interrupt after the first execution-started event",
+    )
+    parser.add_argument(
+        "--pause-after-prompt",
+        action="store_true",
+        help="pause the build immediately after prompt admission to test pause-gate",
     )
     parser.add_argument("--timeout", type=float, default=120.0)
     parser.add_argument("--keep", action="store_true")
@@ -115,6 +125,8 @@ def main() -> int:
     permissions = None
     if args.ask_shell:
         permissions = [{"action": "shell", "resource": "*", "effect": "ask"}]
+    elif args.allow_shell:
+        permissions = [{"action": "shell", "resource": "*", "effect": "allow"}]
     adapter = OpenCodeHttpAdapter(
         workspace_root,
         permissions=permissions,
@@ -178,6 +190,9 @@ def main() -> int:
         if args.prompt:
             response = adapter.send_prompt(session.build_id, args.prompt)
             print(f"prompt admitted: {response.get('id')}")
+            if args.pause_after_prompt:
+                paused = adapter.pause(session.build_id)
+                print(f"paused: {paused.state}")
             deadline = time.monotonic() + args.timeout
             seen = 0
             while time.monotonic() < deadline:
@@ -229,6 +244,11 @@ def main() -> int:
             try:
                 closed = adapter.close(session.build_id)
                 print(f"closed: {closed.state}/{closed.outcome}")
+                if args.pause_after_prompt:
+                    log = closed.workspace.control_dir / "pause-gate.log"
+                    if log.is_file():
+                        print("pause-gate log:")
+                        print(log.read_text(encoding="utf-8"))
                 result = closed.workspace.read_result()
                 print(json.dumps(result, ensure_ascii=False, indent=2)[:4000])
             except Exception as exc:  # noqa: BLE001 - cleanup boundary

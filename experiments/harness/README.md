@@ -34,6 +34,14 @@ python -m uv run --project app python experiments/harness/opencode_smoke.py `
   --prompt "Read README.md and report the first heading." --cancel-after-start
 ```
 
+pause-gate 冒烟（仍会调用模型；shell 基线为 allow，暂停门应提升为 ask）：
+
+```powershell
+python -m uv run --project app python experiments/harness/opencode_smoke.py `
+  --prompt 'You must call the shell tool now with command `echo pause-gate-test`.' `
+  --pause-after-prompt --allow-shell --permission reject
+```
+
 `--workspace-root` 可指定构建工作区根目录；`--keep` 保留本次工作区用于检查，否则临时目录会在关闭后清理。脚本不会把 prompt 文本或服务端日志写入仓库。
 
 ## 2026-11-21 无模型结果
@@ -54,6 +62,17 @@ python -m uv run --project app python experiments/harness/opencode_smoke.py `
 - 取消路径执行了 `interrupt`、权限清理和 session 删除；work 区保留 `result.json` 与 `session.ndjson`，server 被回收。
 - 这次是执行中中断，不验证模型自然完成；`app/tests/test_harness.py` 的 fake server 覆盖 finished 分支。
 
-未覆盖：pause-gate 插件、`request_dependency` 安装、BuildService/UI、真实自然完成和真实工具权限事件（权限创建／回复已用真实 server 的无模型探针验证）。
+## 2026-11-21 pause-gate 真实工具冒烟
+
+同一模型（`opencode-go/deepseek-v4.1-flash`，variant high）执行一次 shell 工具请求，prompt 接纳后立即把 build 置为 `PAUSING`，基线 shell 权限为 `allow`。
+
+- `pause-gate` 插件写入 `work/.opencode/plugins/pause-gate/`；插件日志显示 `shell allow -> ask`。
+- 权限事件到达后由冒烟回复 `reject`；工具调用失败，session 最终 `FINISHED`／`closed`。
+- 说明暂停门在真实工具权限 hook 上生效；它不暂停模型推理，也不阻断已接纳的 prompt。
+- 证据：本次运行的 `control/pause-gate.log` 和 `out/session.ndjson`；工作区默认清理。
+
+`DependencyPolicy` 已有单元测试（基线／allowlist／安装失败／非法包名和 manager／显式 build interpreter），但 OpenCode 侧的 `request_dependency` 工具桥和真实安装尚未接入。
+
+未覆盖：BuildService/UI、真实自然完成、`request_dependency` 工具桥和真实依赖安装。
 
 server 使用当前 OpenCode 的 provider 配置；构建工作区隔离，但 OpenCode 自身的数据目录尚未按构建强制隔离。每次冒烟会删除 session，不保留模型对话。

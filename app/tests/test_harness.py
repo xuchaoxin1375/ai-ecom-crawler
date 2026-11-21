@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import subprocess
 import sys
 import tempfile
 import threading
@@ -15,6 +16,7 @@ from ecom_crawler.harness.adapter import (
     HarnessUnsupportedError,
     OpenCodeHttpAdapter,
 )
+from ecom_crawler.harness.dependencies import DependencyPolicy
 from ecom_crawler.harness.events import normalize_event
 from ecom_crawler.harness.models import BuildTask
 from ecom_crawler.harness.opencode import OpenCodeClient, OpenCodeServer
@@ -329,6 +331,15 @@ class HarnessTests(unittest.TestCase):
         self.assertEqual(FakeHandler.state.session["model"], task.model)
         self.assertTrue((session.workspace.work_dir).is_dir())
         self.assertTrue(session.workspace.task_path.is_file())
+        plugin = (
+            session.workspace.work_dir
+            / ".opencode"
+            / "plugins"
+            / "pause-gate"
+            / "index.js"
+        )
+        self.assertTrue(plugin.is_file())
+        self.assertIn("permission.hook", plugin.read_text(encoding="utf-8"))
 
         adapter.send_prompt(task.build_id, "make a plan")
         self.assertEqual(adapter.status(task.build_id).state, "RUNNING")
@@ -378,6 +389,37 @@ class HarnessTests(unittest.TestCase):
             adapter.status("missing")
         with self.assertRaises(HarnessUnsupportedError):
             adapter.request_dependency(task.build_id, {"package": "x"})
+        adapter.cancel(task.build_id)
+        adapter.close(task.build_id)
+
+    def test_adapter_dependency_policy_and_event(self) -> None:
+        policy = DependencyPolicy(
+            allowlist={"pyyaml": {"version": "6.0.3", "license": "MIT"}},
+            installer=lambda name, version, python: subprocess.CompletedProcess(
+                args=[name, version],
+                returncode=0,
+                stdout="ok",
+            ),
+            build_python=Path(sys.executable),
+        )
+        adapter = OpenCodeHttpAdapter(
+            self.root / "sessions",
+            client=self.client,
+            dependency_policy=policy,
+        )
+        task = self._task("build-deps")
+        session = adapter.start_build(task)
+        decision = adapter.request_dependency(
+            task.build_id, {"name": "pyyaml", "manager": "uv"}
+        )
+        self.assertEqual(decision["status"], "installed")
+        self.assertEqual(decision["license"], "MIT")
+        events = session.workspace.session_path.read_text(
+            encoding="utf-8"
+        ).splitlines()
+        self.assertTrue(
+            any(json.loads(line)["type"] == "dependency_installed" for line in events)
+        )
         adapter.cancel(task.build_id)
         adapter.close(task.build_id)
 
