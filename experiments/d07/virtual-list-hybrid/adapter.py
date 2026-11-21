@@ -184,8 +184,11 @@ def run(context: dict[str, Any]) -> int:
     max_items = positive_int(limits.get("max_items"), 100)
     max_batches = positive_int(limits.get("max_batches"), 10)
     max_seconds = positive_int(limits.get("max_seconds"), 60)
-    timeout_ms = positive_int(browser_options.get("timeout_ms"), 15000)
+    timeout_ms = positive_int(browser_options.get("timeout_ms"), 30000)
     headless = bool(browser_options.get("headless", True))
+    wait_state = str(browser_options.get("wait_state") or "attached").strip().lower()
+    if wait_state not in {"attached", "visible", "hidden", "detached"}:
+        raise ContextError(f"unsupported browser.wait_state {wait_state!r}")
     includes = compile_patterns(scope.get("include"), "include")
     excludes = compile_patterns(scope.get("exclude"), "exclude")
     script = collect_script(selector, id_attribute)
@@ -225,6 +228,8 @@ def run(context: dict[str, Any]) -> int:
         current = capture(page, script)
         added = 0
         for item in current:
+            if len(seen) >= max_items:
+                break
             url = item["url"]
             if not url or not allowed_url(url, includes, excludes):
                 continue
@@ -252,7 +257,7 @@ def run(context: dict[str, Any]) -> int:
         )
         page = browser_context.new_page()
         page.goto(entry_url, wait_until="domcontentloaded", timeout=timeout_ms)
-        page.wait_for_selector(selector, timeout=timeout_ms)
+        page.wait_for_selector(selector, state=wait_state, timeout=timeout_ms)
         start_url = str(page.url)
         final_url = start_url
 

@@ -1,0 +1,153 @@
+schema_version: "1.1"
+rule_id: "tissus-cretonne-hybrid"
+rule_version: "2026.11.22-1"
+kind: "hybrid"
+status: "candidate"
+
+site:
+  name: "tissus.net cretonne"
+  entry_urls: ["https://www.tissus.net/tissus/types-de-tissus/tissus-en-coton/cretonne/"]
+  allowed_origins: ["https://www.tissus.net"]
+  allowed_path_prefixes: ["/"]
+  market: "FR"
+  locale: "fr-FR"
+  currency: "EUR"
+
+scope:
+  include: ['^/[^/]+/a-\d+/?$']
+  exclude: ["/panier", "/commande", "/connexion", "/mon-compte"]
+
+capabilities:
+  discovery: true
+  product: true
+
+discovery:
+  sources:
+    - type: adapter
+      url: "https://www.tissus.net/tissus/types-de-tissus/tissus-en-coton/cretonne/"
+      advance:
+        item_selector: "article.cmp-product-thumb a"
+        id_attribute: "href"
+        mode: "scroll"
+        settle_ms: 1500
+        no_new_stop: 1
+      browser:
+        headless: true
+        timeout_ms: 45000
+        wait_state: "attached"
+      max_batches: 1
+      max_seconds: 60
+  product_url_patterns: ['^/[^/]+/a-\d+/?$']
+  url_identity: "canonical"
+
+runtime:
+  adapter_id: "virtual-list-patchright"
+  adapter_version: "2026.11.22-1"
+  entrypoint: "adapter.py"
+  protocol: "ndjson-stdio-v1"
+  capabilities: ["discovery"]
+
+fetch:
+  default_engine: "static"
+  concurrency: 1
+  delay_ms: 1000
+  retry: {max_attempts: 2, backoff_ms: 1000}
+  timeout_ms: 30000
+  browser: false
+  login: false
+  challenge_handling: "none; stop and record"
+
+extract:
+  fields:
+    name:
+      required: true
+      fallbacks:
+        - {type: json_ld, path: "name", label: "json_ld"}
+        - {type: css_text, selector: "h1", label: "h1"}
+    price.amount:
+      required: true
+      fallbacks:
+        - {type: json_ld, path: "offers.price", label: "json_ld", take: "min_positive"}
+        - {type: css_attr, selector: 'meta[property="product:price:amount"]', attr: "content", label: "meta_price"}
+    price.currency:
+      required: true
+      fallbacks:
+        - {type: json_ld, path: "offers.priceCurrency", label: "json_ld"}
+        - {type: css_attr, selector: 'meta[property="product:price:currency"]', attr: "content", label: "meta_currency"}
+    primary_image_url:
+      required: true
+      fallbacks:
+        - {type: json_ld, path: "image", label: "json_ld"}
+        - {type: css_attr, selector: 'meta[property="og:image"]', attr: "content", label: "og_image", absolute: true}
+    description_html:
+      required: false
+      fallbacks:
+        - {type: json_ld, path: "description", label: "json_ld", description_status: "fallback"}
+    brand:
+      required: false
+      fallbacks:
+        - {type: json_ld, path: "manufacturer.name", label: "json_ld"}
+    source_url:
+      required: true
+      fallbacks:
+        - {type: canonical, label: "canonical"}
+
+normalize:
+  price:
+    tax_basis: "unspecified"
+    choose: "smaller_public_pair"
+    positive_only: true
+  description:
+    mode: "clean_html"
+    statuses: ["complete", "partial", "fallback", "not_provided", "failed"]
+  options:
+    exclude_quantity: true
+    strip_price_delta: true
+
+validate:
+  required_fields:
+    - "name"
+    - "price.amount"
+    - "price.currency"
+    - "primary_image_url"
+    - "source_url"
+  assertions:
+    - {field: "price.amount", op: ">", value: 0}
+    - {field: "price.currency", op: "matches", value: "^[A-Z]{3}$"}
+  partial_description: "allowed_with_flag"
+
+output:
+  url_list:
+    enabled: true
+    columns: ["url", "source", "status", "title"]
+    format: "csv"
+  product_csv:
+    enabled: true
+    columns: 9
+    format: "csv"
+  task_result: true
+
+task_defaults:
+  max_urls: 20
+  max_products: 10
+  max_seconds: 180
+  concurrency:
+    navigation: 1
+    product: 1
+
+compatibility:
+  os: ["windows", "linux", "wsl2"]
+  runtime: "python>=3.11"
+  dependencies: ["patchright==1.64.4"]
+  browser: "patchright CDP for adapter discovery; static product pages"
+
+evidence:
+  sample_urls: ["https://www.tissus.net/tissus/types-de-tissus/tissus-en-coton/cretonne/"]
+  expected: []
+  verified_at: null
+  limitations:
+    - "Real JS-rendered listing; bounded to the first 10 product URLs, not the full category."
+    - "The adapter captures the rendered product cards; it is not proof of a virtual list or of full-category coverage."
+    - "Prices are the site's JSON-LD current offer; no tax, shipping or variant audit."
+
+notes: "Real-site hybrid discovery: static HTML has no product cards, the adapter reads the JS-rendered grid, and app extracts static product pages."

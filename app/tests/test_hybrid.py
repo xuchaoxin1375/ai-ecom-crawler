@@ -42,6 +42,10 @@ discovery:
   sources:
     - type: adapter
       url: "__BASE__/virtual.html"
+      browser:
+        headless: true
+        timeout_ms: 10000
+        wait_state: "attached"
       advance:
         item_selector: "a.product"
         container: "#feed"

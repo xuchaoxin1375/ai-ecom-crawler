@@ -366,6 +366,30 @@
                     "type": "string",
                     "format": "uri"
                   },
+                  "browser": {
+                    "type": "object",
+                    "properties": {
+                      "headless": {
+                        "type": "boolean"
+                      },
+                      "timeout_ms": {
+                        "type": "number",
+                        "exclusiveMinimum": 0
+                      },
+                      "locale": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "timezone": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "wait_state": {
+                        "enum": ["attached", "visible", "hidden", "detached"]
+                      }
+                    },
+                    "additionalProperties": false
+                  },
                   "advance": {
                     "type": "object",
                     "required": ["item_selector"],

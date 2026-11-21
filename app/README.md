@@ -174,7 +174,7 @@ runtime:
 - adapter 子进程超时受 `source.max_seconds` 和任务 `max_seconds` 约束；stdout 写入 `<out-root>/<task-id>/adapter.ndjson`，输入上下文写入 `adapter-context.json`。
 - 成功标准是 `done` + `discovered` 事件；`error` 或非零退出记为 `ADAPTER_FAILED`，不产生半成品商品。
 - `task-result.json` 的 `runtime.adapter` 记录 `discovered`／`added`／`skipped`／`stop`／`batches`／`requests`／`elapsed_ms`。
-- 当前只接入 adapter discovery，商品页仍由声明式 fetcher 处理；adapter 自己启动的 Chromium 尚未登记到 `task_resources`，超时强杀可能留下子进程，跨进程配额也未接入。本地端到端证据：`experiments/d07/virtual-list-hybrid/app-evidence/virtual-list-app-001/`。
+- 当前只接入 adapter discovery，商品页仍由声明式 fetcher 处理；adapter 自己启动的 Chromium 尚未登记到 `task_resources`，超时强杀可能留下子进程，跨进程配额也未接入。本地端到端证据：`experiments/d07/virtual-list-hybrid/app-evidence/virtual-list-app-001/`；真实 JS 渲染列表证据：`experiments/d07/tissus-adapter/`（10／10）。
 
 ## 执行入口（run）
 

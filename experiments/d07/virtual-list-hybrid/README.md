@@ -94,7 +94,7 @@ python adapter.py --context /path/to/context.json
 | `limits.max_batches` | 滚动批次上限（不含初始批次） |
 | `limits.max_seconds` | adapter 墙钟上限 |
 
-可选：`plan_id`、`plan_version`、`adapter_id`、`adapter_version`、`task_id`、`task_type`、`scope.include`／`exclude`、`browser.headless`／`timeout_ms`／`locale`／`timezone`。
+可选：`plan_id`、`plan_version`、`adapter_id`、`adapter_version`、`task_id`、`task_type`、`scope.include`／`exclude`、`browser.headless`／`timeout_ms`／`locale`／`timezone`／`wait_state`（默认 `attached`，避免被隐藏的重复卡片阻塞）。
 
 ### 输出事件
 

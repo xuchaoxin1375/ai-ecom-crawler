@@ -68,8 +68,8 @@ class TaskRunner:
         self.products_path = self.out_dir / "products.jsonl"
         self.events_path = self.out_dir / "events.ndjson"
         self.items_path = self.out_dir / "items.jsonl"
-        self.adapter_context_path = self.out_dir / "adapter-context.json"
-        self.adapter_ndjson_path = self.out_dir / "adapter.ndjson"
+        self.adapter_context_path = (self.out_dir / "adapter-context.json").resolve()
+        self.adapter_ndjson_path = (self.out_dir / "adapter.ndjson").resolve()
         self._adapter_stats: dict[str, Any] = {}
         self.urls_path = self.out_dir / "urls.csv"
         self.products_csv_path = self.out_dir / "products.csv"
@@ -874,7 +874,12 @@ class TaskRunner:
             min(task_seconds, int(source_seconds)) if source_seconds else task_seconds
         )
         max_batches = int(source.get("max_batches", advance.get("max_batches", 10)))
-        browser_config = self.rule.fetch.get("browser")
+        source_browser = source.get("browser")
+        browser_config = (
+            source_browser
+            if isinstance(source_browser, dict)
+            else self.rule.fetch.get("browser")
+        )
         browser = dict(browser_config) if isinstance(browser_config, dict) else {}
         browser.setdefault("headless", True)
         context = {
