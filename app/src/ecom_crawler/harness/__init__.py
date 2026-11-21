@@ -12,9 +12,11 @@ from .events import normalize_event
 from .models import BuildTask, HarnessEvent
 from .opencode import OpenCodeClient, OpenCodeServer
 from .pause_gate import install_pause_gate
+from .service import BuildService
 from .workspace import BuildWorkspace
 
 __all__ = [
+    "BuildService",
     "BuildSession",
     "BuildTask",
     "BuildWorkspace",

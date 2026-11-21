@@ -73,7 +73,9 @@ python -m uv run --project app python experiments/harness/opencode_smoke.py `
 
 `DependencyPolicy` 已有单元测试（基线／allowlist／安装失败／非法包名和 manager／显式 build interpreter），但 OpenCode 侧的 `request_dependency` 工具桥和真实安装尚未接入。
 
-WSL2 Ubuntu + Python 3.12.3、`PYTHONPATH=app/src` 下，`test_harness.py` 7 个和 `test_dependencies.py` 6 个用例通过；WSL 没有安装真实 `opencode`，这里只验证 fake server 和策略层。
+`BuildService` 服务边界已有 `test_service.py` 3 个用例：单活动构建、事件泵、暂停期间 held 权限、恢复时回复 `once`、finished 事件和依赖委托。
+
+WSL2 Ubuntu + Python 3.12.3、`PYTHONPATH=app/src` 下，`test_harness.py` 7 个、`test_dependencies.py` 6 个和 `test_service.py` 3 个用例通过；WSL 没有安装真实 `opencode`，这里只验证 fake server、策略层和服务层。
 
 未覆盖：BuildService/UI、真实自然完成、`request_dependency` 工具桥和真实依赖安装。
 
