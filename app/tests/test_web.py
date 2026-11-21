@@ -104,7 +104,19 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(health.json()["status"], "ok")
         index = self.client.get("/")
         self.assertEqual(index.status_code, 200)
-        self.assertIn("只读", index.text)
+        self.assertIn("采集", index.text)
+
+    def test_managed_worker_lifespan(self) -> None:
+        app = create_app(
+            self.db_path,
+            self.out_root,
+            self.rules_dir,
+            manage_worker=True,
+        )
+        with TestClient(app) as client:
+            health = client.get("/api/health").json()
+            self.assertEqual(health["worker"], "managed")
+            self.assertEqual(health["max_tasks"], 1)
 
     def test_list_detail_and_filters(self) -> None:
         payload = self.client.get("/api/tasks").json()

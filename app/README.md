@@ -33,7 +33,6 @@
 
 - 浏览器／动态渲染、挑战页会话复用和资源回收。
 - 跨进程租约；当前只允许一个 `worker` 消费同一账本。
-- service-managed worker：`serve` 不启动执行器，需另跑 `worker`。
 - 永久移除、异步残留回收、构建会话和完整前端原型评审。
 - 生产级浏览器／进程孤儿回收；R06 的静态单进程能力已抽取，但不是最终形态。
 
@@ -64,7 +63,7 @@ python -m uv run --project app ecom-crawler --version
 python -m uv run --project app ecom-crawler run --rule /path/to/rule.yaml --db /path/to/tasks.db --out-root /path/to/tasks --task-id sample-001 --task-type product --max-products 6
 python -m uv run --project app ecom-crawler submit --rule /path/to/rule.yaml --db /path/to/tasks.db --task-id sample-002
 python -m uv run --project app ecom-crawler worker --db /path/to/tasks.db --out-root /path/to/tasks
-python -m uv run --project app ecom-crawler serve --db /path/to/tasks.db --out-root /path/to/tasks --port 8765
+python -m uv run --project app ecom-crawler serve --db /path/to/tasks.db --out-root /path/to/tasks --rules-dir /path/to/rules --port 8765
 python -m uv run --project app ecom-crawler pause --db /path/to/tasks.db --task-id sample-002
 python -m uv run --project app ecom-crawler resume --db /path/to/tasks.db --task-id sample-002
 python -m uv run --project app ecom-crawler cancel --db /path/to/tasks.db --task-id sample-002
@@ -78,7 +77,7 @@ python -m uv run --project app ecom-crawler validate --task-result /path/to/task
 - `run` 每次执行一个任务；product 任务完成后自动导出到 `<out-root>/<task-id>/export`，discovery 任务只写运行时 URL 清单和任务结果。
 - `run` 的退出码表示任务是否实际执行；业务结论看 `task-result.json` 的 `outcome`。计划或用法错误返回 2。
 - `run` 是一次性入口，不提供可恢复的控制；需要暂停／恢复／取消时用 `submit` 入队，再在另一个 shell 运行 `worker`，用 `pause`／`resume`／`cancel` 控制。外部暂停 `run` 任务后，`run` 以 2 退出并提示用 `worker` 恢复。
-- `serve` 只绑定回环地址，提供只读 API 和静态页面；它不启动 worker，执行仍由独立的 `worker` 进程负责。页面关闭不会停止 `worker`。
+- `serve` 只绑定回环地址，默认启动托管 worker（持有 worker 单实例锁）；`--no-worker` 只提供 API／页面，执行由独立 `worker` 进程负责。页面关闭不会停止后台。
 - `worker` 默认 `--max-tasks 1`，按 `QUEUED` 取任务；Ctrl+C 停止领取新任务并等待已启动任务结束，已取消任务用 `cancel` 处理。
 - `pause` 只接受 `RUNNING`，`resume` 只接受 `PAUSED`；重复请求按当前状态幂等返回，非法转移返回 2。
 - `status` 和 `list` 是只读入口；`--json` 输出可直接给脚本消费。任务计数仍以 `task-result.json` 和 `docs/09` 为准。
@@ -110,12 +109,14 @@ python -m uv run --project app ecom-crawler validate --task-result /path/to/task
 ## Web 服务（serve）
 
 - `serve` 用 FastAPI 托管 `/api/*` 和 `static/`，默认 `127.0.0.1:8765`，拒绝非回环地址；`--rules-dir` 指向受管规则包目录。
+- 默认启动托管 worker（`--max-tasks` 默认 1），持有 `<db>.worker.lock`；`--no-worker` 可只读启动，便于另跑 `worker`。
 - 只读 API：`GET /api/health`、`GET /api/rules`、`GET /api/tasks`、`GET /api/tasks/{id}`、`GET /api/tasks/{id}/items?kind=url|product`、`GET /api/tasks/{id}/export`。
 - 写 API：`POST /api/tasks`（`DRAFT` + `request_id` 幂等）、`start`、`pause`、`resume`、`cancel`、`archive`、`restore`。
 - `GET /api/tasks/{id}/events` 是 SSE：连接先发 `snapshot`，再转发 `events.ndjson` 增量，终态发 `end`；断线重连以快照为准。
 - 导出 zip 只允许 `products.csv`、`task-result.json`、`records.jsonl` 和 `diagnostics/` 下的排除／失败文件；`partial=true` 才允许导出未结束任务。
 - 页面支持列表、创建、详情、控制按钮、计数、覆盖、质量异常、items 和导出；控制请求显示“已受理”，最终状态以账本为准。
-- `serve` 不启动 worker；创建／启动的任务保持 `QUEUED`，需要另跑 `ecom-crawler worker`。service-managed worker 和前端原型评审仍未做。
+- 托管 worker 在服务生命周期内执行 `QUEUED` 任务；服务退出时先停止领取新任务，再等待已启动任务结束。
+- `--no-worker` 时创建／启动的任务保持 `QUEUED`，需要另跑 `ecom-crawler worker`；完整前端原型评审仍未做。
 - 证据：`tests/test_web.py` 覆盖健康、规则目录、列表筛选、详情、items 分页、创建幂等、控制转移、归档／还原、SSE、导出白名单和错误码。
 
 ## 输入契约

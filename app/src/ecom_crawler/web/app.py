@@ -5,10 +5,13 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+import logging
 import re
+import threading
 import time
 import uuid
 import zipfile
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -28,6 +31,9 @@ from ..runtime.store import (
     TaskStore,
     TaskTransitionError,
 )
+from ..runtime.worker import Worker
+
+logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).with_name("static")
 EXPORT_FILES = (
@@ -206,11 +212,43 @@ def create_app(
     db_path: str | Path,
     out_root: str | Path,
     rules_dir: str | Path | None = None,
+    *,
+    manage_worker: bool = False,
+    max_tasks: int = 1,
+    per_domain_rps: float = 1.0,
 ) -> FastAPI:
     store = TaskStore(db_path)
     root = Path(out_root)
     root.mkdir(parents=True, exist_ok=True)
     rules = Path(rules_dir).resolve() if rules_dir is not None else None
+
+    @asynccontextmanager
+    async def lifespan(application: FastAPI) -> Any:
+        stop = threading.Event() if manage_worker else None
+        thread: threading.Thread | None = None
+        if stop is not None:
+            worker = Worker(
+                store,
+                out_root=root,
+                max_tasks=max_tasks,
+                per_domain_rps=per_domain_rps,
+            )
+            thread = threading.Thread(
+                target=worker.run_forever,
+                kwargs={"stop_event": stop},
+                name="managed-worker",
+                daemon=True,
+            )
+            thread.start()
+        try:
+            yield
+        finally:
+            if stop is not None:
+                stop.set()
+            if thread is not None:
+                thread.join(timeout=10)
+                if thread.is_alive():
+                    logger.warning("managed worker did not stop within 10s")
 
     app = FastAPI(
         title="ecom-crawler",
@@ -218,10 +256,12 @@ def create_app(
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
+        lifespan=lifespan,
     )
     app.state.store = store
     app.state.out_root = root
     app.state.rules_dir = rules
+    app.state.worker_managed = manage_worker
 
     @app.exception_handler(HTTPException)
     async def http_error(request: Request, exc: HTTPException) -> JSONResponse:
@@ -268,7 +308,8 @@ def create_app(
             "version": __version__,
             "db": str(store.path),
             "tasks": len(store.list_tasks()),
-            "worker": "external",
+            "worker": "managed" if manage_worker else "external",
+            "max_tasks": max_tasks if manage_worker else None,
             "rules_configured": rules is not None and rules.is_dir(),
         }
 

@@ -167,6 +167,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="loopback address (default: 127.0.0.1)",
     )
     serve.add_argument("--port", type=int, default=8765, help="HTTP port (default: 8765)")
+    serve.add_argument(
+        "--no-worker",
+        action="store_true",
+        help="serve only; do not start an in-process worker",
+    )
+    serve.add_argument(
+        "--max-tasks",
+        type=int,
+        default=1,
+        help="managed worker task slots (default: 1)",
+    )
+    serve.add_argument("--per-domain-rps", type=float, default=1.0)
     return parser
 
 
@@ -215,13 +227,21 @@ def _serve(args: argparse.Namespace) -> int:
 
     from .web.app import create_app
 
-    print(f"serving http://{host}:{args.port} (read-only)")
-    uvicorn.run(
-        create_app(args.db, args.out_root, args.rules_dir),
-        host=host,
-        port=args.port,
-        log_level="info",
+    app = create_app(
+        args.db,
+        args.out_root,
+        args.rules_dir,
+        manage_worker=not args.no_worker,
+        max_tasks=args.max_tasks,
+        per_domain_rps=args.per_domain_rps,
     )
+    mode = "read-only" if args.no_worker else "managed worker"
+    print(f"serving http://{host}:{args.port} ({mode})")
+    if args.no_worker:
+        uvicorn.run(app, host=host, port=args.port, log_level="info")
+    else:
+        with worker_lock(args.db):
+            uvicorn.run(app, host=host, port=args.port, log_level="info")
     return 0
 
 
