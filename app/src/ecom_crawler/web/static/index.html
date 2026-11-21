@@ -32,8 +32,8 @@
             <label>
               类型
               <select id="create-type">
-                <option value="product">product</option>
-                <option value="discovery">discovery</option>
+                <option value="product">商品</option>
+                <option value="discovery">发现</option>
               </select>
             </label>
             <label>
@@ -50,6 +50,7 @@
             </label>
             <button id="create-submit" type="submit">创建并启动</button>
           </form>
+          <p id="rule-context" class="muted"></p>
           <div id="create-status" class="status" role="status"></div>
         </details>
 
@@ -58,21 +59,22 @@
             状态
             <select id="filter-state">
               <option value="">全部</option>
-              <option value="QUEUED">QUEUED</option>
-              <option value="RUNNING">RUNNING</option>
-              <option value="PAUSING">PAUSING</option>
-              <option value="PAUSED">PAUSED</option>
-              <option value="CANCELLING">CANCELLING</option>
-              <option value="CANCELLED">CANCELLED</option>
-              <option value="FINISHED">FINISHED</option>
+              <option value="DRAFT">草稿</option>
+              <option value="QUEUED">排队中</option>
+              <option value="RUNNING">运行中</option>
+              <option value="PAUSING">暂停中</option>
+              <option value="PAUSED">已暂停</option>
+              <option value="CANCELLING">取消中</option>
+              <option value="CANCELLED">已取消</option>
+              <option value="FINISHED">已结束</option>
             </select>
           </label>
           <label>
             类型
             <select id="filter-type">
               <option value="">全部</option>
-              <option value="product">product</option>
-              <option value="discovery">discovery</option>
+              <option value="product">商品</option>
+              <option value="discovery">发现</option>
             </select>
           </label>
           <label class="check">
@@ -82,19 +84,19 @@
         </form>
 
         <div id="list-status" class="status" role="status"></div>
-        <p class="table-hint">窄屏下可横向滚动查看更多列。</p>
+        <p class="table-hint list-hint">窄屏已折叠次要列，完整信息见任务详情。</p>
         <div class="table-wrap">
-          <table>
+          <table class="list-table">
             <thead>
               <tr>
-                <th>任务</th>
-                <th>类型</th>
-                <th>站点 / 方案</th>
-                <th>市场</th>
-                <th>状态</th>
-                <th>结果</th>
-                <th>计数</th>
-                <th>更新时间</th>
+                <th class="col-task">任务</th>
+                <th class="col-type">类型</th>
+                <th class="col-site">站点 / 方案</th>
+                <th class="col-market">市场</th>
+                <th class="col-state">状态</th>
+                <th class="col-result">结果</th>
+                <th class="col-counts">计数</th>
+                <th class="col-updated">更新时间</th>
               </tr>
             </thead>
             <tbody id="task-rows"></tbody>
@@ -125,7 +127,7 @@
           <button type="button" class="tab" data-kind="url">网址</button>
         </div>
         <div id="items-status" class="status" role="status"></div>
-        <p class="table-hint">窄屏下可横向滚动查看更多列。</p>
+        <p class="table-hint items-hint">窄屏下可横向滚动查看更多列。</p>
         <div class="table-wrap">
           <table>
             <thead>
