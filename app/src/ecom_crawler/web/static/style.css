@@ -57,6 +57,12 @@ a {
   font-size: 13px;
 }
 
+.mobile-meta {
+  display: none;
+  margin-top: 2px;
+  font-size: 12px;
+}
+
 main {
   width: min(1280px, calc(100% - 48px));
   margin: 24px auto 64px;
@@ -268,12 +274,25 @@ tr:last-child td {
   font-size: 12px;
 }
 
+.col-type {
+  white-space: nowrap;
+}
+
+.counts-cell {
+  max-width: 320px;
+}
+
+.url {
+  word-break: break-all;
+}
+
 .state {
   display: inline-block;
   padding: 2px 7px;
   border-radius: 999px;
   background: #eef1f5;
   font-size: 12px;
+  white-space: nowrap;
 }
 
 .state-running,
@@ -407,6 +426,41 @@ tr:last-child td {
   }
 
   .table-hint {
+    display: block;
+  }
+
+  table {
+    min-width: 0;
+  }
+
+  .list-table {
+    table-layout: fixed;
+  }
+
+  .list-table .col-task {
+    width: 34%;
+  }
+
+  .list-table .col-site {
+    width: 30%;
+  }
+
+  .list-table .col-state {
+    width: 16%;
+  }
+
+  .list-table .col-result {
+    width: 20%;
+  }
+
+  .col-type,
+  .col-market,
+  .col-counts,
+  .col-updated {
+    display: none;
+  }
+
+  .mobile-meta {
     display: block;
   }
 

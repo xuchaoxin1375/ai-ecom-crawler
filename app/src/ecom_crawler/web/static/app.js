@@ -15,6 +15,8 @@ let rulesLoaded = false;
 let rulesCache = [];
 let lastListLoadedAt = null;
 let lastDetailLoadedAt = null;
+let lastItemsLoadedAt = null;
+let pendingControl = null;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -83,6 +85,55 @@ const COUNT_LABELS = {
   failed_urls: "失败 URL",
 };
 
+const STATE_LABELS = {
+  DRAFT: "草稿",
+  QUEUED: "排队中",
+  RUNNING: "运行中",
+  PAUSING: "暂停中",
+  PAUSED: "已暂停",
+  CANCELLING: "取消中",
+  CANCELLED: "已取消",
+  FINISHED: "已结束",
+  DONE: "完成",
+  FAILED: "失败",
+  IN_FLIGHT: "处理中",
+  PENDING: "待处理",
+  EXCLUDED: "已排除",
+};
+
+const OUTCOME_LABELS = {
+  COMPLETED: "完成",
+  PARTIAL: "部分完成",
+  FAILED: "失败",
+  CANCELLED: "已取消",
+};
+
+const STOP_REASON_LABELS = {
+  NATURAL_END: "自然结束",
+  BUDGET_EXHAUSTED: "预算耗尽",
+  ACCESS_DENIED: "访问被拒",
+  QUALITY_BLOCKED: "质量阻塞",
+  ENVIRONMENT_ERROR: "环境错误",
+  PLAN_ERROR: "方案错误",
+  USER_CANCELLED: "用户取消",
+  OTHER: "其他",
+};
+
+const TASK_TYPE_LABELS = {
+  product: "商品",
+  discovery: "发现",
+};
+
+const COVERAGE_LABELS = {
+  KNOWN: "已知",
+  PARTIAL: "部分",
+  UNKNOWN: "未知",
+};
+
+function labelFor(labels, value) {
+  return labels[value] || value || "-";
+}
+
 function countLabel(key) {
   return COUNT_LABELS[key] || key;
 }
@@ -134,6 +185,18 @@ function stateClass(state) {
   return `state state-${String(state || "").toLowerCase()}`;
 }
 
+function updateRuleContext() {
+  const select = document.querySelector("#rule-select");
+  const target = document.querySelector("#rule-context");
+  const key = select.value;
+  const rule = rulesCache.find(
+    (item) => `${item.rule_id}@${item.rule_version}` === key,
+  );
+  target.textContent = rule
+    ? `市场 ${rule.market || "-"} · 语言 ${rule.locale || "-"}`
+    : "";
+}
+
 async function loadRules() {
   if (rulesLoaded) return;
   rulesLoaded = true;
@@ -162,6 +225,7 @@ async function loadRules() {
         return `<option value="${escapeHtml(key)}">${escapeHtml(label)}</option>`;
       })
       .join("");
+    updateRuleContext();
     setStatus(createStatus, `已加载 ${valid.length} 个规则包`);
   } catch (error) {
     submit.disabled = true;
@@ -178,19 +242,27 @@ function renderList(tasks) {
     .map((task) => {
       const href = `#/tasks/${encodeURIComponent(task.task_id)}`;
       const archived = task.archived_at ? ' <span class="state state-excluded">归档</span>' : "";
+      const typeLabel = labelFor(TASK_TYPE_LABELS, task.task_type);
+      const stateText = labelFor(STATE_LABELS, task.state);
+      const outcomeText = task.outcome ? labelFor(OUTCOME_LABELS, task.outcome) : "-";
+      const stopText = task.stop_reason ? labelFor(STOP_REASON_LABELS, task.stop_reason) : "";
       return `
         <tr>
-          <td><a href="${href}">${escapeHtml(task.task_id)}</a>${archived}</td>
-          <td>${escapeHtml(task.task_type)}</td>
-          <td>
+          <td class="col-task">
+            <a href="${href}">${escapeHtml(task.task_id)}</a>${archived}
+            <div class="mobile-meta muted">${escapeHtml(typeLabel)} · ${escapeHtml(task.market || "-")}</div>
+            <div class="mobile-meta muted">${escapeHtml(countsText(task.counts))}</div>
+          </td>
+          <td class="col-type" title="${escapeHtml(task.task_type)}">${escapeHtml(typeLabel)}</td>
+          <td class="col-site">
             <div>${escapeHtml(task.site_key || "-")}</div>
             <div class="muted">${escapeHtml(task.plan_id)}@${escapeHtml(task.plan_version)}</div>
           </td>
-          <td>${escapeHtml(task.market || "-")}</td>
-          <td><span class="${stateClass(task.state)}">${escapeHtml(task.state)}</span></td>
-          <td>${escapeHtml(task.outcome || "-")}${task.stop_reason ? `<div class="muted">${escapeHtml(task.stop_reason)}</div>` : ""}</td>
-          <td class="counts-cell">${escapeHtml(countsText(task.counts))}</td>
-          <td>${escapeHtml(task.updated_at || "-")}</td>
+          <td class="col-market">${escapeHtml(task.market || "-")}</td>
+          <td class="col-state"><span class="${stateClass(task.state)}" title="${escapeHtml(task.state)}">${escapeHtml(stateText)}</span></td>
+          <td class="col-result">${escapeHtml(outcomeText)}${stopText ? `<div class="muted" title="${escapeHtml(task.stop_reason)}">${escapeHtml(stopText)}</div>` : ""}</td>
+          <td class="counts-cell col-counts">${escapeHtml(countsText(task.counts))}</td>
+          <td class="col-updated">${escapeHtml(task.updated_at || "-")}</td>
         </tr>`;
     })
     .join("");
@@ -300,6 +372,23 @@ function actionLabel(action) {
   }[action];
 }
 
+function controlStatusText(task) {
+  if (!pendingControl) return "";
+  const action = pendingControl.action;
+  const label = actionLabel(action);
+  const stateText = labelFor(STATE_LABELS, task.state);
+  const settled = {
+    pause: ["PAUSED"],
+    cancel: ["CANCELLED"],
+    archive: ["FINISHED", "CANCELLED"],
+    restore: ["FINISHED", "CANCELLED"],
+  }[action] || [];
+  if (settled.includes(task.state)) {
+    return `${label}已完成；当前 ${stateText}。`;
+  }
+  return `已受理：${label}；当前 ${stateText}；等待后台确认。`;
+}
+
 async function controlTask(action) {
   if (!currentTaskId) return;
   const controls = document.querySelector("#detail-controls");
@@ -312,14 +401,16 @@ async function controlTask(action) {
     const payload = await apiPost(
       `/api/tasks/${encodeURIComponent(currentTaskId)}/${action}`,
     );
+    pendingControl = { action, state: payload.state };
     setStatus(
       detailStatus,
-      `已受理：${actionLabel(action)}，当前 ${payload.state}；最终状态以任务账本为准。`,
+      `已受理：${actionLabel(action)}，当前 ${labelFor(STATE_LABELS, payload.state)}；最终状态以任务账本为准。`,
     );
     setTimeout(() => {
       if (currentTaskId) loadDetail(currentTaskId);
     }, 500);
   } catch (error) {
+    pendingControl = null;
     setStatus(detailStatus, `操作失败：${error.message}`, true);
   } finally {
     buttons.forEach((button) => {
@@ -359,18 +450,22 @@ function renderDetail(task) {
     : "任务未结束，只导出当前快照";
   exportLink.hidden = !exportable;
   const coverage = task.coverage?.status || "UNKNOWN";
-  const stop = task.stop_reason || "-";
-  const outcome = task.outcome || "-";
+  const stop = task.stop_reason;
+  const outcome = task.outcome;
+  const stateText = labelFor(STATE_LABELS, task.state);
+  const outcomeText = outcome ? labelFor(OUTCOME_LABELS, outcome) : "-";
+  const stopText = stop ? labelFor(STOP_REASON_LABELS, stop) : "-";
+  const typeText = labelFor(TASK_TYPE_LABELS, task.task_type);
   const qualityCount = Array.isArray(task.quality_exceptions) ? task.quality_exceptions.length : 0;
   document.querySelector("#detail-meta").innerHTML = `
-    <div><span class="label">状态</span><span class="${stateClass(task.state)}">${escapeHtml(task.state)}</span></div>
-    <div><span class="label">结果</span>${escapeHtml(outcome)}</div>
-    <div><span class="label">停止原因</span>${escapeHtml(stop)}</div>
+    <div><span class="label">状态</span><span class="${stateClass(task.state)}" title="${escapeHtml(task.state)}">${escapeHtml(stateText)}</span></div>
+    <div><span class="label">结果</span><span title="${escapeHtml(outcome || "")}">${escapeHtml(outcomeText)}</span></div>
+    <div><span class="label">停止原因</span><span title="${escapeHtml(stop || "")}">${escapeHtml(stopText)}</span></div>
     <div><span class="label">站点</span>${escapeHtml(task.site_key || "-")}</div>
     <div><span class="label">市场</span>${escapeHtml(task.market || "-")}</div>
     <div><span class="label">方案</span>${escapeHtml(task.plan_id)}@${escapeHtml(task.plan_version)}</div>
-    <div><span class="label">类型</span>${escapeHtml(task.task_type)}</div>
-    <div><span class="label">覆盖</span>${escapeHtml(coverage)}</div>
+    <div><span class="label">类型</span><span title="${escapeHtml(task.task_type)}">${escapeHtml(typeText)}</span></div>
+    <div><span class="label">覆盖</span><span title="${escapeHtml(coverage)}">${escapeHtml(labelFor(COVERAGE_LABELS, coverage))}</span></div>
     <div><span class="label">质量异常</span>${qualityCount}</div>
     <div><span class="label">归档</span>${task.archived_at ? "是" : "否"}</div>
     <div><span class="label">更新时间</span>${escapeHtml(task.updated_at || "-")}</div>
@@ -399,6 +494,9 @@ function renderDetail(task) {
 }
 
 async function loadItems(taskId, kind) {
+  if (kind !== currentKind) {
+    lastItemsLoadedAt = null;
+  }
   currentKind = kind;
   document.querySelectorAll(".tab").forEach((tab) => {
     tab.classList.toggle("active", tab.dataset.kind === kind);
@@ -409,6 +507,7 @@ async function loadItems(taskId, kind) {
       `/api/tasks/${encodeURIComponent(taskId)}/items?kind=${encodeURIComponent(kind)}&limit=200`,
     );
     if (currentTaskId !== taskId) return;
+    lastItemsLoadedAt = new Date();
     if (!payload.items?.length) {
       itemRows.innerHTML = '<tr><td colspan="4" class="empty">暂无记录</td></tr>';
     } else {
@@ -417,7 +516,7 @@ async function loadItems(taskId, kind) {
           (item) => `
           <tr>
             <td class="url">${escapeHtml(item.url)}</td>
-            <td><span class="${stateClass(item.state)}">${escapeHtml(item.state)}</span></td>
+            <td><span class="${stateClass(item.state)}" title="${escapeHtml(item.state)}">${escapeHtml(labelFor(STATE_LABELS, item.state))}</span></td>
             <td>${escapeHtml(item.failure_class || "-")}</td>
             <td>${escapeHtml(item.attempts ?? 0)}</td>
           </tr>`,
@@ -427,11 +526,17 @@ async function loadItems(taskId, kind) {
     setStatus(itemsStatus, `共 ${payload.total ?? 0} 条`);
   } catch (error) {
     if (currentTaskId !== taskId) return;
-    setStatus(itemsStatus, `读取失败：${error.message}`, true);
+    setStatus(
+      itemsStatus,
+      `读取失败：${error.message}（最后可信时间：${trustedTime(lastItemsLoadedAt)}）`,
+      true,
+    );
   }
 }
 
 function clearDetail(taskId) {
+  lastItemsLoadedAt = null;
+  pendingControl = null;
   document.title = `${taskId} · 采集任务`;
   document.querySelector("#detail-title").textContent = taskId;
   document.querySelector("#detail-meta").innerHTML = "";
@@ -459,7 +564,7 @@ async function loadDetail(taskId) {
     if (currentTaskId !== taskId) return;
     lastDetailLoadedAt = new Date();
     renderDetail(task);
-    setStatus(detailStatus, "");
+    setStatus(detailStatus, controlStatusText(task));
     await loadItems(taskId, currentKind);
   } catch (error) {
     if (currentTaskId !== taskId) return;
@@ -519,6 +624,7 @@ function route() {
 }
 
 document.querySelector("#create-form").addEventListener("submit", createTask);
+document.querySelector("#rule-select").addEventListener("change", updateRuleContext);
 document.querySelector("#refresh-list").addEventListener("click", loadList);
 document.querySelector("#refresh-detail").addEventListener("click", () => {
   if (currentTaskId) loadDetail(currentTaskId);
