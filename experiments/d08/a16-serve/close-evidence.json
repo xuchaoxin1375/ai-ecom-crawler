@@ -1,0 +1,105 @@
+{
+  "task_id": "web-07ef0932ba3b",
+  "closed_page_at": "RUNNING",
+  "timeline": [
+    {
+      "t": 0.03,
+      "state": "FINISHED",
+      "counts": {
+        "navigation_urls": 1,
+        "discovered_urls": 7,
+        "product_candidates": 6,
+        "pending_products": 0,
+        "in_flight_products": 0,
+        "processed_products": 6,
+        "valid_products": 6,
+        "excluded_products": 0,
+        "failed_products": 0,
+        "partial_description_products": 0
+      }
+    }
+  ],
+  "final": {
+    "task_id": "web-07ef0932ba3b",
+    "task_type": "product",
+    "plan_id": "familidoo-fr-d03",
+    "plan_version": "2026.11.21-1",
+    "site_key": "Familidoo",
+    "market": "FR",
+    "state": "FINISHED",
+    "outcome": "COMPLETED",
+    "stop_reason": "NATURAL_END",
+    "counts": {
+      "navigation_urls": 1,
+      "discovered_urls": 7,
+      "product_candidates": 6,
+      "pending_products": 0,
+      "in_flight_products": 0,
+      "processed_products": 6,
+      "valid_products": 6,
+      "excluded_products": 0,
+      "failed_products": 0,
+      "partial_description_products": 0
+    },
+    "coverage": {
+      "status": "PARTIAL",
+      "denominator_source": "declared-source product candidates",
+      "denominator": 6,
+      "covered": 6,
+      "notes": "Bounded sample from one entry page; not full-site coverage."
+    },
+    "quality_exceptions": [
+      {
+        "source_url": "https://www.familidoo.fr/fr/poussette-quadruple/74464-poussette-4-places-lidoo-lite-cosmic-black-0615402035002.html",
+        "description_status": "complete",
+        "partial_reason": null,
+        "missing_reasons": {
+          "brand": "NOT_PROVIDED"
+        }
+      },
+      {
+        "source_url": "https://www.familidoo.fr/fr/poussette-quadruple/8-poussette-4-places-lidoo-star-dj04frl-4712928372676.html",
+        "description_status": "complete",
+        "partial_reason": null,
+        "missing_reasons": {
+          "brand": "NOT_PROVIDED"
+        }
+      },
+      {
+        "source_url": "https://www.familidoo.fr/fr/poussette-quadruple/193-poussette-4-places-lidoo-city-h4e-full-grey-4712928374274.html",
+        "description_status": "complete",
+        "partial_reason": null,
+        "missing_reasons": {
+          "brand": "NOT_PROVIDED"
+        }
+      },
+      {
+        "source_url": "https://www.familidoo.fr/fr/poussette-compacte/183-poussette-compacte-lidoo-one-noire-4712928373475.html",
+        "description_status": "complete",
+        "partial_reason": null,
+        "missing_reasons": {
+          "brand": "NOT_PROVIDED"
+        }
+      },
+      {
+        "source_url": "https://www.familidoo.fr/fr/libeca/316-veilleuse-5-en-1-baby-dream-machine-0617092971653.html",
+        "description_status": "complete",
+        "partial_reason": null,
+        "missing_reasons": {
+          "brand": "NOT_PROVIDED"
+        }
+      },
+      {
+        "source_url": "https://www.familidoo.fr/fr/iglu/74427-bascule-en-mousse-iglu-banane-4751005644831.html",
+        "description_status": "complete",
+        "partial_reason": null,
+        "missing_reasons": {
+          "brand": "NOT_PROVIDED"
+        }
+      }
+    ],
+    "archived_at": null,
+    "created_at": "2026-11-21T02:00:08Z",
+    "updated_at": "2026-11-21T02:00:24Z"
+  }
+}

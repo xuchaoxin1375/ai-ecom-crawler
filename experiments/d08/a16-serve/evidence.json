@@ -1,0 +1,814 @@
+{
+  "rule": {
+    "path": "familidoo-d03.yaml",
+    "rule_id": "familidoo-fr-d03",
+    "rule_version": "2026.11.21-1",
+    "task_types": [
+      "product",
+      "discovery"
+    ],
+    "site": "Familidoo",
+    "market": "FR",
+    "locale": "fr-FR",
+    "currency": "EUR",
+    "valid": true,
+    "errors": []
+  },
+  "request_id": "a16-1795226159",
+  "task_id": "web-ce6f2cc5a950",
+  "timeline": [
+    {
+      "t": 0.03,
+      "state": "QUEUED",
+      "counts": {
+        "pending": 0,
+        "in_flight": 0,
+        "valid_products": 0,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 0.28,
+      "state": "QUEUED",
+      "counts": {
+        "pending": 0,
+        "in_flight": 0,
+        "valid_products": 0,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 0.54,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 1,
+        "in_flight": 0,
+        "valid_products": 0,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 0.8,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 0,
+        "in_flight": 1,
+        "valid_products": 0,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 1.09,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 0,
+        "in_flight": 1,
+        "valid_products": 0,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 1.34,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 0,
+        "in_flight": 1,
+        "valid_products": 0,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 1.6,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 0,
+        "in_flight": 1,
+        "valid_products": 0,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 1.88,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 5,
+        "in_flight": 1,
+        "valid_products": 1,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 2.17,
+      "state": "PAUSING",
+      "counts": {
+        "pending": 5,
+        "in_flight": 1,
+        "valid_products": 1,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 2.42,
+      "state": "PAUSING",
+      "counts": {
+        "pending": 5,
+        "in_flight": 1,
+        "valid_products": 1,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 2.68,
+      "state": "PAUSING",
+      "counts": {
+        "pending": 5,
+        "in_flight": 1,
+        "valid_products": 1,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 2.94,
+      "state": "PAUSING",
+      "counts": {
+        "pending": 5,
+        "in_flight": 1,
+        "valid_products": 1,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 3.2,
+      "state": "PAUSING",
+      "counts": {
+        "pending": 5,
+        "in_flight": 1,
+        "valid_products": 1,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 3.46,
+      "state": "PAUSING",
+      "counts": {
+        "pending": 5,
+        "in_flight": 1,
+        "valid_products": 1,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 3.71,
+      "state": "PAUSED",
+      "counts": {
+        "pending": 5,
+        "in_flight": 0,
+        "valid_products": 2,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 5.0,
+      "state": "QUEUED",
+      "counts": {
+        "pending": 5,
+        "in_flight": 0,
+        "valid_products": 2,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 5.25,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 4,
+        "in_flight": 1,
+        "valid_products": 2,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 5.51,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 4,
+        "in_flight": 1,
+        "valid_products": 2,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 5.76,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 4,
+        "in_flight": 1,
+        "valid_products": 2,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 6.05,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 4,
+        "in_flight": 1,
+        "valid_products": 2,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 6.31,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 4,
+        "in_flight": 1,
+        "valid_products": 2,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 6.56,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 4,
+        "in_flight": 1,
+        "valid_products": 2,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 6.84,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 4,
+        "in_flight": 1,
+        "valid_products": 2,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 7.09,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 3,
+        "in_flight": 1,
+        "valid_products": 3,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 7.36,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 3,
+        "in_flight": 1,
+        "valid_products": 3,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 7.62,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 3,
+        "in_flight": 1,
+        "valid_products": 3,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 7.89,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 3,
+        "in_flight": 1,
+        "valid_products": 3,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 8.16,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 3,
+        "in_flight": 1,
+        "valid_products": 3,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 8.44,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 3,
+        "in_flight": 1,
+        "valid_products": 3,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 8.69,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 3,
+        "in_flight": 1,
+        "valid_products": 3,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 8.95,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 3,
+        "in_flight": 1,
+        "valid_products": 3,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 9.21,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 2,
+        "in_flight": 1,
+        "valid_products": 4,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 9.49,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 2,
+        "in_flight": 1,
+        "valid_products": 4,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 9.78,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 2,
+        "in_flight": 1,
+        "valid_products": 4,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 10.07,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 2,
+        "in_flight": 1,
+        "valid_products": 4,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 10.34,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 2,
+        "in_flight": 1,
+        "valid_products": 4,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 10.6,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 2,
+        "in_flight": 1,
+        "valid_products": 4,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 10.86,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 2,
+        "in_flight": 1,
+        "valid_products": 4,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 11.12,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 2,
+        "in_flight": 1,
+        "valid_products": 4,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 11.38,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 1,
+        "in_flight": 1,
+        "valid_products": 5,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 11.64,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 1,
+        "in_flight": 1,
+        "valid_products": 5,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 11.9,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 1,
+        "in_flight": 1,
+        "valid_products": 5,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 12.15,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 1,
+        "in_flight": 1,
+        "valid_products": 5,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 12.43,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 1,
+        "in_flight": 1,
+        "valid_products": 5,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 12.71,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 1,
+        "in_flight": 1,
+        "valid_products": 5,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 12.98,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 1,
+        "in_flight": 1,
+        "valid_products": 5,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 13.26,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 1,
+        "in_flight": 1,
+        "valid_products": 5,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 13.52,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 1,
+        "in_flight": 1,
+        "valid_products": 5,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 13.78,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 1,
+        "in_flight": 0,
+        "valid_products": 6,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 14.05,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 0,
+        "in_flight": 1,
+        "valid_products": 6,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 14.31,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 0,
+        "in_flight": 1,
+        "valid_products": 6,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 14.57,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 0,
+        "in_flight": 1,
+        "valid_products": 6,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 14.82,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 0,
+        "in_flight": 1,
+        "valid_products": 6,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 15.08,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 0,
+        "in_flight": 1,
+        "valid_products": 6,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 15.34,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 0,
+        "in_flight": 1,
+        "valid_products": 6,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 15.62,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 0,
+        "in_flight": 1,
+        "valid_products": 6,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 15.91,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 0,
+        "in_flight": 1,
+        "valid_products": 6,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 16.16,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 0,
+        "in_flight": 1,
+        "valid_products": 6,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 16.42,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 0,
+        "in_flight": 1,
+        "valid_products": 6,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 16.67,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 0,
+        "in_flight": 1,
+        "valid_products": 6,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 16.96,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 0,
+        "in_flight": 1,
+        "valid_products": 6,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 17.23,
+      "state": "RUNNING",
+      "counts": {
+        "pending": 0,
+        "in_flight": 1,
+        "valid_products": 6,
+        "excluded": 0,
+        "failed": 0
+      }
+    },
+    {
+      "t": 17.49,
+      "state": "FINISHED",
+      "counts": {
+        "navigation_urls": 1,
+        "discovered_urls": 7,
+        "product_candidates": 6,
+        "pending_products": 0,
+        "in_flight_products": 0,
+        "processed_products": 6,
+        "valid_products": 6,
+        "excluded_products": 0,
+        "failed_products": 0,
+        "partial_description_products": 0
+      }
+    }
+  ],
+  "final": {
+    "task_id": "web-ce6f2cc5a950",
+    "task_type": "product",
+    "plan_id": "familidoo-fr-d03",
+    "plan_version": "2026.11.21-1",
+    "site_key": "Familidoo",
+    "market": "FR",
+    "state": "FINISHED",
+    "outcome": "COMPLETED",
+    "stop_reason": "NATURAL_END",
+    "counts": {
+      "navigation_urls": 1,
+      "discovered_urls": 7,
+      "product_candidates": 6,
+      "pending_products": 0,
+      "in_flight_products": 0,
+      "processed_products": 6,
+      "valid_products": 6,
+      "excluded_products": 0,
+      "failed_products": 0,
+      "partial_description_products": 0
+    },
+    "coverage": {
+      "status": "PARTIAL",
+      "denominator_source": "declared-source product candidates",
+      "denominator": 6,
+      "covered": 6,
+      "notes": "Bounded sample from one entry page; not full-site coverage."
+    },
+    "quality_exceptions": [
+      {
+        "source_url": "https://www.familidoo.fr/fr/poussette-quadruple/74464-poussette-4-places-lidoo-lite-cosmic-black-0615402035002.html",
+        "description_status": "complete",
+        "partial_reason": null,
+        "missing_reasons": {
+          "brand": "NOT_PROVIDED"
+        }
+      },
+      {
+        "source_url": "https://www.familidoo.fr/fr/poussette-quadruple/8-poussette-4-places-lidoo-star-dj04frl-4712928372676.html",
+        "description_status": "complete",
+        "partial_reason": null,
+        "missing_reasons": {
+          "brand": "NOT_PROVIDED"
+        }
+      },
+      {
+        "source_url": "https://www.familidoo.fr/fr/poussette-quadruple/193-poussette-4-places-lidoo-city-h4e-full-grey-4712928374274.html",
+        "description_status": "complete",
+        "partial_reason": null,
+        "missing_reasons": {
+          "brand": "NOT_PROVIDED"
+        }
+      },
+      {
+        "source_url": "https://www.familidoo.fr/fr/poussette-compacte/183-poussette-compacte-lidoo-one-noire-4712928373475.html",
+        "description_status": "complete",
+        "partial_reason": null,
+        "missing_reasons": {
+          "brand": "NOT_PROVIDED"
+        }
+      },
+      {
+        "source_url": "https://www.familidoo.fr/fr/libeca/316-veilleuse-5-en-1-baby-dream-machine-0617092971653.html",
+        "description_status": "complete",
+        "partial_reason": null,
+        "missing_reasons": {
+          "brand": "NOT_PROVIDED"
+        }
+      },
+      {
+        "source_url": "https://www.familidoo.fr/fr/iglu/74427-bascule-en-mousse-iglu-banane-4751005644831.html",
+        "description_status": "complete",
+        "partial_reason": null,
+        "missing_reasons": {
+          "brand": "NOT_PROVIDED"
+        }
+      }
+    ],
+    "archived_at": null,
+    "created_at": "2026-11-21T01:55:59Z",
+    "updated_at": "2026-11-21T01:56:16Z"
+  },
+  "archive": {
+    "default_contains": false,
+    "archived_contains": true
+  },
+  "items": {
+    "products": 6,
+    "urls": 1
+  },
+  "export_files": [
+    "products.csv",
+    "task-result.json"
+  ]
+}

@@ -3,19 +3,19 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>采集任务 · 只读预览</title>
+    <title>采集任务 · 本地控制台</title>
     <link rel="stylesheet" href="/static/style.css" />
   </head>
   <body>
     <header class="topbar">
       <a class="brand" href="#/tasks">电商采集</a>
-      <span class="badge">只读预览</span>
-      <span class="hint">控制请求需独立的 worker 进程执行</span>
+      <span class="badge">本地控制台</span>
+      <span class="hint">控制请求由托管 worker 执行；页面关闭不停止后台</span>
     </header>
 
     <main id="app">
       <section id="list-view">
-        <div class="page-head">
+        <div class="page-head list-head">
           <h1>任务</h1>
           <button id="refresh-list" type="button">刷新</button>
         </div>
@@ -108,12 +108,12 @@
             <h1 id="detail-title">任务详情</h1>
           </div>
           <div class="actions">
-            <div id="detail-controls" class="control-row"></div>
             <button id="refresh-detail" type="button">刷新</button>
             <a id="export-link" class="button-link" href="#" download>导出 zip</a>
           </div>
         </div>
 
+        <div id="detail-controls" class="control-row detail-controls"></div>
         <div id="detail-status" class="status" role="status"></div>
         <div id="detail-meta" class="meta-grid"></div>
         <div id="detail-counts" class="counts"></div>
