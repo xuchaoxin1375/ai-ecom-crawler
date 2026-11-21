@@ -72,6 +72,9 @@ const COUNT_LABELS = {
   excluded_products: "业务排除",
   failed_products: "失败商品",
   partial_description_products: "部分描述",
+  pending: "待处理",
+  excluded: "业务排除",
+  failed: "失败",
   navigation_urls: "导航页",
   url_candidates: "URL 候选",
   pending_urls: "待处理 URL",
@@ -99,6 +102,9 @@ function countsText(counts) {
     "pending_products",
     "in_flight_products",
     "in_flight",
+    "excluded",
+    "failed",
+    "pending",
     "discovered_urls",
     "valid_urls",
     "excluded_urls",
@@ -108,6 +114,10 @@ function countsText(counts) {
   const parts = [];
   for (const key of order) {
     if (!(key in counts)) continue;
+    if (key === "excluded" && "excluded_products" in counts) continue;
+    if (key === "failed" && "failed_products" in counts) continue;
+    if (key === "pending" && "pending_products" in counts) continue;
+    if (key === "in_flight" && "in_flight_products" in counts) continue;
     const value = counts[key];
     if (value === 0 && !["valid_products", "valid_urls", "discovered_urls"].includes(key)) {
       continue;
@@ -234,20 +244,37 @@ async function createTask(event) {
   };
   submit.disabled = true;
   setStatus(createStatus, "创建中…");
+  let created;
   try {
-    const created = await apiPost("/api/tasks", body);
-    const taskId = created.task.task_id;
+    created = await apiPost("/api/tasks", body);
+  } catch (error) {
+    setStatus(createStatus, `创建失败：${error.message}`, true);
+    submit.disabled = false;
+    return;
+  }
+  const taskId = created.task.task_id;
+  let startFailed = false;
+  try {
     setStatus(createStatus, `已创建 ${taskId}，正在启动…`);
     if (created.task.state === "DRAFT") {
       await apiPost(`/api/tasks/${encodeURIComponent(taskId)}/start`);
     }
     setStatus(createStatus, `任务 ${taskId} 已进入队列；由 worker 执行。`);
-    window.location.hash = `#/tasks/${encodeURIComponent(taskId)}`;
   } catch (error) {
-    setStatus(createStatus, `创建失败：${error.message}`, true);
+    startFailed = true;
+    setStatus(
+      createStatus,
+      `任务 ${taskId} 已创建，但启动失败：${error.message}；请到详情重试启动。`,
+      true,
+    );
   } finally {
     submit.disabled = false;
   }
+  if (startFailed) {
+    loadList();
+    return;
+  }
+  window.location.hash = `#/tasks/${encodeURIComponent(taskId)}`;
 }
 
 function controlActions(task) {
@@ -275,6 +302,11 @@ function actionLabel(action) {
 
 async function controlTask(action) {
   if (!currentTaskId) return;
+  const controls = document.querySelector("#detail-controls");
+  const buttons = controls.querySelectorAll("button");
+  buttons.forEach((button) => {
+    button.disabled = true;
+  });
   setStatus(detailStatus, `已提交${actionLabel(action)}请求，等待后台确认…`);
   try {
     const payload = await apiPost(
@@ -289,6 +321,10 @@ async function controlTask(action) {
     }, 500);
   } catch (error) {
     setStatus(detailStatus, `操作失败：${error.message}`, true);
+  } finally {
+    buttons.forEach((button) => {
+      button.disabled = false;
+    });
   }
 }
 
@@ -313,8 +349,15 @@ function renderControls(task) {
 function renderDetail(task) {
   document.title = `${task.task_id} · 采集任务`;
   document.querySelector("#detail-title").textContent = task.task_id;
-  document.querySelector("#export-link").href = `/api/tasks/${encodeURIComponent(task.task_id)}/export`;
-  document.querySelector("#export-link").hidden = false;
+  const exportLink = document.querySelector("#export-link");
+  const terminal = ["FINISHED", "CANCELLED"].includes(task.state);
+  const exportable = !["DRAFT", "QUEUED"].includes(task.state);
+  exportLink.href = `/api/tasks/${encodeURIComponent(task.task_id)}/export${terminal ? "" : "?partial=true"}`;
+  exportLink.textContent = terminal ? "导出 zip" : "部分导出 zip";
+  exportLink.title = terminal
+    ? "导出完整结果"
+    : "任务未结束，只导出当前快照";
+  exportLink.hidden = !exportable;
   const coverage = task.coverage?.status || "UNKNOWN";
   const stop = task.stop_reason || "-";
   const outcome = task.outcome || "-";
@@ -334,7 +377,16 @@ function renderDetail(task) {
   `;
   renderControls(task);
   const counts = task.counts || {};
-  document.querySelector("#detail-counts").innerHTML = Object.entries(counts)
+  const countEntries = Object.entries(counts).filter(
+    ([key]) =>
+      !(
+        (key === "excluded" && "excluded_products" in counts) ||
+        (key === "failed" && "failed_products" in counts) ||
+        (key === "pending" && "pending_products" in counts) ||
+        (key === "in_flight" && "in_flight_products" in counts)
+      ),
+  );
+  document.querySelector("#detail-counts").innerHTML = countEntries
     .map(([key, value]) => `<div class="count"><span>${escapeHtml(countLabel(key))}</span><strong>${escapeHtml(value)}</strong></div>`)
     .join("");
 
@@ -399,7 +451,9 @@ async function loadDetail(taskId) {
     clearDetail(taskId);
   }
   currentTaskId = taskId;
-  setStatus(detailStatus, "加载中…");
+  if (changed) {
+    setStatus(detailStatus, "加载中…");
+  }
   try {
     const task = await api(`/api/tasks/${encodeURIComponent(taskId)}`);
     if (currentTaskId !== taskId) return;
