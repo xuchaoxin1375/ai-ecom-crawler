@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import signal
 import sys
@@ -147,6 +148,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="filter by state; repeat for multiple states",
     )
     task_list.add_argument("--json", action="store_true", help="print JSON")
+
+    serve = subparsers.add_parser(
+        "serve",
+        help="serve the read-only local web UI and API",
+    )
+    serve.add_argument("--db", required=True, type=Path, help="SQLite task ledger")
+    serve.add_argument("--out-root", required=True, type=Path, help="task output root")
+    serve.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="loopback address (default: 127.0.0.1)",
+    )
+    serve.add_argument("--port", type=int, default=8765, help="HTTP port (default: 8765)")
     return parser
 
 
@@ -179,6 +193,29 @@ def _run_worker(args: argparse.Namespace) -> int:
             for sig, handler in previous.items():
                 signal.signal(sig, handler)
     print(f"worker stopped; started {started} task(s)")
+    return 0
+
+
+def _serve(args: argparse.Namespace) -> int:
+    host = str(args.host)
+    if host != "localhost":
+        try:
+            address = ipaddress.ip_address(host)
+        except ValueError as exc:
+            raise ContractError("--host must be localhost or a loopback address") from exc
+        if not address.is_loopback:
+            raise ContractError("--host must be a loopback address")
+    import uvicorn
+
+    from .web.app import create_app
+
+    print(f"serving http://{host}:{args.port} (read-only)")
+    uvicorn.run(
+        create_app(args.db, args.out_root),
+        host=host,
+        port=args.port,
+        log_level="info",
+    )
     return 0
 
 
@@ -311,6 +348,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         if args.command == "worker":
             return _run_worker(args)
+        if args.command == "serve":
+            return _serve(args)
         if args.command in {"pause", "resume", "cancel"}:
             store = TaskStore(args.db)
             task = getattr(store, f"request_{args.command}")(args.task_id)
