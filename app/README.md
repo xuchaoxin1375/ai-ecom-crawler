@@ -56,7 +56,7 @@ python -m uv run --project app --extra dev python -m unittest discover -s app/te
 python -m uv run ruff check app
 ```
 
-`jsonschema` 和 `httpx` 是测试依赖；缺失时测试会失败，不会 skip。应用运行依赖包括 `lxml`、`pyyaml`、`scrapling`、`curl_cffi`、`patchright`、`browserforge`、`protego`、`fastapi` 和 `uvicorn`。
+`jsonschema`、`httpx` 和 `ruff` 是开发依赖；`jsonschema`／`httpx` 缺失时测试会失败，不会 skip。应用运行依赖包括 `lxml`、`pyyaml`、`scrapling`、`curl_cffi`、`patchright`、`browserforge`、`protego`、`fastapi` 和 `uvicorn`。
 
 ## CLI
 
