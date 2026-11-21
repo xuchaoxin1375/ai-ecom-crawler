@@ -137,8 +137,14 @@ ADAPTER_OK = """\
 import json
 import sys
 
+from pathlib import Path
+
 context_path = sys.argv[sys.argv.index("--context") + 1]
 context = json.load(open(context_path, encoding="utf-8"))
+profile = context.get("browser", {}).get("profile_dir")
+if profile:
+    Path(profile).mkdir(parents=True, exist_ok=True)
+    (Path(profile) / "lock").write_text("x", encoding="utf-8")
 base = context["entry_url"].rsplit("/", 1)[0]
 urls = [f"{base}/product/p{index}.html" for index in (1, 2, 3)]
 print(json.dumps({"event": "start", "adapter_id": "fake-adapter"}), flush=True)
@@ -163,8 +169,16 @@ raise SystemExit(3)
 
 ADAPTER_HANG = """\
 import json
+import sys
 import time
+from pathlib import Path
 
+context_path = sys.argv[sys.argv.index("--context") + 1]
+context = json.load(open(context_path, encoding="utf-8"))
+profile = context.get("browser", {}).get("profile_dir")
+if profile:
+    Path(profile).mkdir(parents=True, exist_ok=True)
+    (Path(profile) / "lock").write_text("x", encoding="utf-8")
 print(json.dumps({"event": "start", "adapter_id": "hang-adapter"}), flush=True)
 time.sleep(60)
 """
@@ -258,6 +272,7 @@ class HybridRuntimeTests(unittest.TestCase):
             self.assertEqual(adapter["stop"], "MAX_ITEMS")
             self.assertTrue((result.out_dir / "adapter-context.json").is_file())
             self.assertTrue((result.out_dir / "adapter.ndjson").is_file())
+            self.assertFalse((result.out_dir / "adapter-browser-profile").exists())
             self.assertIsNotNone(result.app_export)
             rows = (result.out_dir / "export" / "products.csv").read_text(
                 encoding="utf-8"
@@ -332,6 +347,7 @@ class HybridRuntimeTests(unittest.TestCase):
             self.assertEqual(result["stop_reason"], "ADAPTER_FAILED")
             self.assertIn("adapter_timeout", result["stop_detail"])
             self.assertTrue((task_dir / "adapter.ndjson").is_file())
+            self.assertFalse((task_dir / "adapter-browser-profile").exists())
 
     def test_hybrid_requires_runtime_and_safe_entrypoint(self) -> None:
         with tempfile.TemporaryDirectory() as temporary, fixture_server() as base:

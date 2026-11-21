@@ -189,6 +189,9 @@ def run(context: dict[str, Any]) -> int:
     wait_state = str(browser_options.get("wait_state") or "attached").strip().lower()
     if wait_state not in {"attached", "visible", "hidden", "detached"}:
         raise ContextError(f"unsupported browser.wait_state {wait_state!r}")
+    profile_dir = str(browser_options.get("profile_dir") or "").strip()
+    if profile_dir:
+        Path(profile_dir).mkdir(parents=True, exist_ok=True)
     includes = compile_patterns(scope.get("include"), "include")
     excludes = compile_patterns(scope.get("exclude"), "exclude")
     script = collect_script(selector, id_attribute)
@@ -200,6 +203,7 @@ def run(context: dict[str, Any]) -> int:
         plan_id=context.get("plan_id"),
         task_id=context.get("task_id"),
         entry_url=entry_url,
+        profile_dir=profile_dir or None,
         limits={
             "max_items": max_items,
             "max_batches": max_batches,
@@ -212,6 +216,7 @@ def run(context: dict[str, Any]) -> int:
     started = time.monotonic()
     playwright = sync_playwright().start()
     browser = None
+    browser_context = None
     seen: dict[str, dict[str, str]] = {}
     order: list[str] = []
     batches = 0
@@ -250,11 +255,21 @@ def run(context: dict[str, Any]) -> int:
         return added
 
     try:
-        browser = playwright.chromium.launch(headless=headless)
-        browser_context = browser.new_context(
-            locale=str(browser_options.get("locale") or "fr-FR"),
-            timezone_id=str(browser_options.get("timezone") or "Europe/Paris"),
-        )
+        locale = str(browser_options.get("locale") or "fr-FR")
+        timezone = str(browser_options.get("timezone") or "Europe/Paris")
+        if profile_dir:
+            browser_context = playwright.chromium.launch_persistent_context(
+                user_data_dir=profile_dir,
+                headless=headless,
+                locale=locale,
+                timezone_id=timezone,
+            )
+        else:
+            browser = playwright.chromium.launch(headless=headless)
+            browser_context = browser.new_context(
+                locale=locale,
+                timezone_id=timezone,
+            )
         page = browser_context.new_page()
         page.goto(entry_url, wait_until="domcontentloaded", timeout=timeout_ms)
         page.wait_for_selector(selector, state=wait_state, timeout=timeout_ms)
@@ -299,6 +314,11 @@ def run(context: dict[str, Any]) -> int:
         )
         return 0
     finally:
+        try:
+            if browser_context is not None:
+                browser_context.close()
+        except Exception as exc:  # noqa: BLE001 - best-effort cleanup
+            print(f"cleanup warning: {type(exc).__name__}: {exc}", file=sys.stderr)
         try:
             if browser is not None:
                 browser.close()

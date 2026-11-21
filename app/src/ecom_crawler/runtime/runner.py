@@ -9,6 +9,7 @@ import io
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -27,6 +28,7 @@ from ecom_crawler.executor.runner import CSV_COLUMNS, build_record, discover_url
 from .atomic import append_jsonl, write_json, write_text
 from .fetcher import UnsupportedAdvanceError
 from .models import Lease, Task, WorkItem, utc_now
+from .resources import register_path, register_process
 from .rule import RulePackage
 from .store import LeaseLostError, TaskStore
 
@@ -72,6 +74,7 @@ class TaskRunner:
         self.items_path = self.out_dir / "items.jsonl"
         self.adapter_context_path = (self.out_dir / "adapter-context.json").resolve()
         self.adapter_ndjson_path = (self.out_dir / "adapter.ndjson").resolve()
+        self.adapter_profile_dir = (self.out_dir / "adapter-browser-profile").resolve()
         self._adapter_stats: dict[str, Any] = {}
         self.urls_path = self.out_dir / "urls.csv"
         self.products_csv_path = self.out_dir / "products.csv"
@@ -884,6 +887,16 @@ class TaskRunner:
         )
         browser = dict(browser_config) if isinstance(browser_config, dict) else {}
         browser.setdefault("headless", True)
+        if self.adapter_profile_dir.exists():
+            self._cleanup_adapter_profile()
+        browser["profile_dir"] = str(self.adapter_profile_dir)
+        register_path(
+            self.store,
+            self.task.task_id,
+            self.adapter_profile_dir,
+            resource_id="adapter-profile",
+            lease_token=self.lease.token,
+        )
         context = {
             "plan_id": self.rule.rule_id,
             "plan_version": self.rule.rule_version,
@@ -934,9 +947,17 @@ class TaskRunner:
                 **popen_kwargs,
             )
         except OSError as exc:
+            self._cleanup_adapter_profile()
             raise AdapterError(
                 "adapter_start", f"{type(exc).__name__}: {exc}", "transient"
             ) from exc
+        register_process(
+            self.store,
+            self.task.task_id,
+            process,
+            resource_id="adapter-process",
+            lease_token=self.lease.token,
+        )
         try:
             stdout, stderr = process.communicate(timeout=max_seconds + 5)
         except subprocess.TimeoutExpired as exc:
@@ -952,6 +973,9 @@ class TaskRunner:
                 f"adapter exceeded {max_seconds} seconds",
                 "transient",
             ) from exc
+        finally:
+            self.store.remove_resource(self.task.task_id, "adapter-process")
+            self._cleanup_adapter_profile()
         stdout = stdout or ""
         stderr = stderr or ""
         write_text(self.adapter_ndjson_path, stdout)
@@ -1014,6 +1038,8 @@ class TaskRunner:
             "skipped": skipped,
             "context_path": str(self.adapter_context_path),
             "ndjson_path": str(self.adapter_ndjson_path),
+            "profile_dir": str(self.adapter_profile_dir),
+            "profile_removed": not self.adapter_profile_dir.exists(),
         }
         self._adapter_stats = stats
         self._event("adapter_finished", **stats)
@@ -1021,6 +1047,97 @@ class TaskRunner:
             raise AdapterError(
                 "adapter_empty", "adapter returned no usable product URLs"
             )
+
+    def _cleanup_adapter_profile(self) -> bool:
+        path = self.adapter_profile_dir
+        if not path.exists():
+            self.store.remove_resource(self.task.task_id, "adapter-profile")
+            return True
+        for attempt in range(2):
+            try:
+                shutil.rmtree(path)
+                break
+            except OSError:
+                if attempt == 0:
+                    self._kill_processes_using_path(path)
+                    time.sleep(0.2)
+        if path.exists():
+            self._event("adapter_profile_left", path=str(path))
+            return False
+        self.store.remove_resource(self.task.task_id, "adapter-profile")
+        return True
+
+    @staticmethod
+    def _kill_processes_using_path(path: Path) -> None:
+        """Best-effort cleanup of Chromium processes holding an adapter profile."""
+        target = str(path)
+        if os.name == "nt":
+            script = (
+                "Get-CimInstance Win32_Process | "
+                "Where-Object { $_.CommandLine -and "
+                "$_.CommandLine.Contains($env:ECOM_ADAPTER_PROFILE) } | "
+                "ForEach-Object { Stop-Process -Id $_.ProcessId -Force "
+                "-ErrorAction SilentlyContinue }"
+            )
+            env = dict(os.environ)
+            env["ECOM_ADAPTER_PROFILE"] = target
+            try:
+                subprocess.run(
+                    [
+                        "powershell",
+                        "-NoProfile",
+                        "-NonInteractive",
+                        "-Command",
+                        script,
+                    ],
+                    check=False,
+                    capture_output=True,
+                    timeout=10,
+                    env=env,
+                )
+            except OSError:
+                return
+            return
+        proc_root = Path("/proc")
+        if proc_root.is_dir():
+            for entry in proc_root.iterdir():
+                if not entry.name.isdigit():
+                    continue
+                pid = int(entry.name)
+                if pid in {os.getpid(), os.getppid()}:
+                    continue
+                try:
+                    command = (entry / "cmdline").read_bytes()
+                except OSError:
+                    continue
+                if target.encode() not in command:
+                    continue
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    continue
+            return
+        try:
+            listing = subprocess.run(
+                ["ps", "-eo", "pid=,args="],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            ).stdout
+        except OSError:
+            return
+        for line in listing.splitlines():
+            pid_text, _, command = line.strip().partition(" ")
+            if not pid_text.isdigit() or target not in command:
+                continue
+            pid = int(pid_text)
+            if pid in {os.getpid(), os.getppid()}:
+                continue
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                continue
 
     @staticmethod
     def _kill_adapter_tree(process: subprocess.Popen[str]) -> None:
