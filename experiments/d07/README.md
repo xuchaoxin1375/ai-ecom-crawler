@@ -8,12 +8,12 @@
 
 | 领域 | 已有证据 | 状态 | 缺口 |
 | --- | --- | --- | --- |
-| A12 访问与重试 | R06 `RetryTests`（transient 重试、耗尽、blocked 分类）、`RobotsTests`；D01 S6 挑战页；A08 429／Chrome 指纹；D06 JSON／HTML 路径；`app/tests/test_browser.py` 本地 JS fixture；`experiments/d07/browser-mercerine/` 真实站点 503 壳渲染与 3／3 | 部分 | 无统一 429 `Retry-After` 处理；无代理／出口资源登记；浏览器实例配额未验证 |
+| A12 访问与重试 | R06 `RetryTests`（transient 重试、耗尽、blocked 分类）、`RobotsTests`；D01 S6 挑战页；A08 429／Chrome 指纹；D06 JSON／HTML 路径；`app/tests/test_browser.py` 本地 JS fixture；`experiments/d07/browser-mercerine/` 真实站点 503 壳渲染与 3／3 | 部分 | 无统一 429 `Retry-After` 处理；无代理／出口资源登记；单进程 browser／hybrid 槽位已补，跨进程配额未验证 |
 | A13 暂停／取消／恢复 | R06 `ControlTests`（暂停恢复、取消拒收迟到结果）、`RecoveryTests`（在途重置、尝试耗尽、孤儿状态、plan 版本不匹配）；Tognar 真实暂停／取消／强杀恢复；`app/tests/test_control.py`（状态转移、恢复对账、worker 单实例锁）、`test_control_flow.py`（暂停结清、恢复、取消拒收迟到结果、心跳续约、双 worker 单任务、过期接管）、`test_lease.py`（跨进程领取、旧写拒绝）；`experiments/d07/browser-mercerine/crash_test.py` 真实浏览器强杀接管 | 原型 + `app` 单机跨进程租约 + 浏览器接管通过 | 真实浏览器会话恢复（内存／页面状态）和跨机租约 |
 | A15 漂移与修复 | A08 两轮方案修订（入口前缀、正文／分类／选项）；D03／D04 同方案复跑；R06 提取缺失值测试 | 部分 | 没有自动化漂移检测／修复；没有旧结果失效标记；分类问题本轮修正 |
-| A20 多任务并行 | R06 `ParallelTests`；`app/tests/test_control_flow.py` 的 `test_a20_pause_*`／`test_a20_cancel_*`：同域两任务并行，暂停／取消一个，另一个继续并输出独立；`test_two_workers_process_one_task_once` 验证两个 worker 不重复领取；`test_same_domain_limiter_serializes` 验证同域限速 | 通过（同进程 + 单机双进程） | 无跨进程资源配额和浏览器实例配额；同域限速仍是进程内 |
+| A20 多任务并行 | R06 `ParallelTests`；`app/tests/test_control_flow.py` 的 `test_a20_pause_*`／`test_a20_cancel_*`：同域两任务并行，暂停／取消一个，另一个继续并输出独立；`test_two_workers_process_one_task_once` 验证两个 worker 不重复领取；`test_same_domain_limiter_serializes` 验证同域限速 | 通过（同进程 + 单机双进程） | 单进程 browser／hybrid 槽位已补；无跨进程资源配额；同域限速仍是进程内 |
 | 原子写与幂等 | R06 `AtomicTests`、`StoreTests`；D02 app 原子写和幂等键；租约接管时丢弃未确认的商品输出尾行 | 通过（单机多进程） | 跨机幂等和真实浏览器输出未验证 |
-| 资源回收 | R06 `resources` 字段、无浏览器路径；D02 无外部资源；`app` 取消后无 `IN_FLIGHT`、无临时文件残留，`run_forever` 停止时 join 运行线程；`task_resources` 登记进程／目录并按租约令牌回收；浏览器 fetcher 登记 Chromium PID 和 `browser-profile`，正常结束与强杀接管均回收 | 通过（本机静态 + 浏览器） | 浏览器实例配额、跨机回收和异步残留回收 |
+| 资源回收 | R06 `resources` 字段、无浏览器路径；D02 无外部资源；`app` 取消后无 `IN_FLIGHT`、无临时文件残留，`run_forever` 停止时 join 运行线程；`task_resources` 登记进程／目录并按租约令牌回收；浏览器 fetcher 登记 Chromium PID 和 `browser-profile`，正常结束与强杀接管均回收 | 通过（本机静态 + 浏览器） | 跨进程浏览器配额、跨机回收和异步残留回收 |
 
 ## 本轮修正：字段错误不再被当成业务排除
 
@@ -100,19 +100,19 @@ python -m uv run --project experiments/framework-compare/scrapling `
   python -m unittest discover -s experiments/r06/tests -v
 ```
 
-结果：**83 个测试通过**，无 skip。覆盖原子写、契约、提取、运行时、重试、恢复、控制、并行、Schema 和新的字段分类。`app` 当前 **146 个测试通过**（含 8 个浏览器配置／路由／fixture 用例、5 个 load_more／infinite_scroll 用例（含内部容器）、6 个 hybrid adapter 用例、4 个桥接状态用例和 1 个原子写用例），`ruff check app` 通过；真实浏览器用例在缺少 Chromium 的环境中会跳过，本机运行结果为通过。
+结果：**83 个测试通过**，无 skip。覆盖原子写、契约、提取、运行时、重试、恢复、控制、并行、Schema 和新的字段分类。`app` 当前 **148 个测试通过**（含 8 个浏览器配置／路由／fixture 用例、5 个 load_more／infinite_scroll 用例（含内部容器）、6 个 hybrid adapter 用例、2 个 worker 浏览器配额用例、4 个桥接状态用例和 1 个原子写用例），`ruff check app` 通过；真实浏览器用例在缺少 Chromium 的环境中会跳过，本机运行结果为通过。
 
 ## D07 结论
 
-- **不是 D07 完成**：生产 `app` 执行器、任务账本、控制面、单实例锁、同进程 A20、单机跨进程租约、进程／目录资源回收、真实浏览器进程／profile 回收、两种有界浏览器推进（含内部容器追加型）和虚拟列表 hybrid adapter（含 `app run` 端到端）已落地；跨进程资源配额、浏览器实例配额、真实虚拟列表、更复杂的内部滚动、跨机租约和自动化漂移修复仍未实现；adapter profile 已登记并在正常退出后删除，孤儿扫描为 best-effort。
+- **不是 D07 完成**：生产 `app` 执行器、任务账本、控制面、单实例锁、同进程 A20、单机跨进程租约、进程／目录资源回收、真实浏览器进程／profile 回收、两种有界浏览器推进（含内部容器追加型）和虚拟列表 hybrid adapter（含 `app run` 端到端）已落地；跨进程资源配额、真实虚拟列表、更复杂的内部滚动、跨机租约和自动化漂移修复仍未实现；单进程 browser／hybrid 槽位已补，adapter profile 已登记并在正常退出后删除，孤儿扫描为 best-effort。
 - **可复用的改进**：字段错误与业务排除的分类已修正，并进入 R06 回归测试；`app` 控制面复用同一状态语义；租约和资源登记不改变对外任务状态；浏览器挑战壳要按渲染后的最终状态判断，不能只看首个 HTTP 响应。
-- **下一步优先级**：URL 可寻址检查已覆盖 `ecolaines` 与 5 个法国基准站；虚拟列表 hybrid adapter 已接入 `app run` 并本地端到端 12／12，接下来补真实虚拟列表、浏览器实例配额、更复杂的内部滚动和跨进程资源配额；`tissus.net` 的 JS 渲染列表已由 adapter 验证 10／10。D08 控制界面不得早于这些结论。
+- **下一步优先级**：URL 可寻址检查已覆盖 `ecolaines` 与 5 个法国基准站；虚拟列表 hybrid adapter 已接入 `app run` 并本地端到端 12／12，接下来补真实虚拟列表、更复杂的内部滚动和跨进程资源配额；单进程 browser／hybrid 槽位已补；`tissus.net` 的 JS 渲染列表已由 adapter 验证 10／10。D08 控制界面不得早于这些结论。
 
 ## 限制
 
 - 现有真实站点控制证据来自 Tognar（静态）和 mercerine（浏览器），仍是单 worker、单机；不能代表多进程或浏览器池。
 - 浏览器证据是首页 3 个商品的有界样本，不是全站；headless 通过不代表挑战站长期稳定。
-- 浏览器 adapter 已支持渲染、任务级回收和追加型 `load_more`／`infinite_scroll`（含 `container` 内部滚动，本地 fixture 6／6）；虚拟列表有 hybrid adapter 并接入 `app run`（本地端到端 12／12，但 adapter Chromium 未纳入 `task_resources`），更复杂的内部滚动、浏览器实例配额和跨机回收未验证。
+- 浏览器 adapter 已支持渲染、任务级回收和追加型 `load_more`／`infinite_scroll`（含 `container` 内部滚动，本地 fixture 6／6）；虚拟列表有 hybrid adapter 并接入 `app run`（本地端到端 12／12，但 adapter Chromium 未纳入 `task_resources`），更复杂的内部滚动、跨进程浏览器配额和跨机回收未验证。
 - 浏览器交互证据来自公开练习页和本地 fixture，不是基准站或生产店铺；只有首页列表的有界样本。
 - R06 的 `RetryTests` 是 fixture 级，不覆盖真实 429 `Retry-After`、代理切换和会话复用。
 - A20 只验证了并行启动，没有验证一个任务暂停／取消时另一个任务的计数和输出不受影响。

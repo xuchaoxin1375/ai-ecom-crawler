@@ -137,6 +137,7 @@ class Worker:
         *,
         out_root: str | Path,
         max_tasks: int = 2,
+        max_browser_tasks: int = 1,
         per_domain_rps: float = 1.0,
         fetcher_factory: FetcherFactory = default_fetcher,
         lease_ttl_seconds: float = 30.0,
@@ -146,6 +147,12 @@ class Worker:
         self.store = store
         self.out_root = Path(out_root)
         self.max_tasks = max(1, max_tasks)
+        self.max_browser_tasks = max(0, max_browser_tasks)
+        self._browser_semaphore = (
+            threading.BoundedSemaphore(self.max_browser_tasks)
+            if self.max_browser_tasks > 0
+            else None
+        )
         self.limiter = DomainLimiter(per_domain_rps)
         self.fetcher_factory = fetcher_factory
         self.lease_ttl_seconds = max(float(lease_ttl_seconds), 0.5)
@@ -327,7 +334,22 @@ class Worker:
             thread.join()
         return started
 
+    @staticmethod
+    def _needs_browser(rule: RulePackage) -> bool:
+        if rule.kind == "hybrid":
+            return True
+        fetch = rule.fetch
+        if fetch.get("default_engine") == "browser":
+            return True
+        per_type = fetch.get("per_url_type")
+        if isinstance(per_type, dict):
+            for settings in per_type.values():
+                if isinstance(settings, dict) and settings.get("engine") == "browser":
+                    return True
+        return False
+
     def _run_task(self, task: Task, lease: Lease) -> None:
+        browser_slot = False
         try:
             rule_path = task.input.get("rule_path")
             if not rule_path:
@@ -349,6 +371,9 @@ class Worker:
                     f"rule={rule.rule_id}@{rule.rule_version}",
                 )
                 return
+            if self._browser_semaphore is not None and self._needs_browser(rule):
+                self._browser_semaphore.acquire()
+                browser_slot = True
             try:
                 context = FetcherContext(
                     rule=rule,
@@ -376,6 +401,8 @@ class Worker:
             except Exception as exc:  # noqa: BLE001 - task boundary
                 self._fail(task, lease, "ENVIRONMENT_ERROR", f"{type(exc).__name__}: {exc}")
         finally:
+            if browser_slot and self._browser_semaphore is not None:
+                self._browser_semaphore.release()
             self._release_lease(lease)
             try:
                 cleanup_task_resources(

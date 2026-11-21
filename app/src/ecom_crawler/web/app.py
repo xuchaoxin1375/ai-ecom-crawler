@@ -259,6 +259,7 @@ def create_app(
     *,
     manage_worker: bool = False,
     max_tasks: int = 1,
+    max_browser_tasks: int = 1,
     per_domain_rps: float = 1.0,
     lease_ttl_seconds: float = 30.0,
     heartbeat_interval: float | None = None,
@@ -277,6 +278,7 @@ def create_app(
                 store,
                 out_root=root,
                 max_tasks=max_tasks,
+                max_browser_tasks=max_browser_tasks,
                 per_domain_rps=per_domain_rps,
                 lease_ttl_seconds=lease_ttl_seconds,
                 heartbeat_interval=heartbeat_interval,
@@ -371,6 +373,7 @@ def create_app(
             "tasks": len(store.list_tasks()),
             "worker": "managed" if manage_worker else "external",
             "max_tasks": max_tasks if manage_worker else None,
+            "max_browser_tasks": max_browser_tasks if manage_worker else None,
             "rules_configured": rules is not None and rules.is_dir(),
         }
 

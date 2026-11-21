@@ -115,6 +115,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=1,
         help="concurrent task slots (default: 1)",
     )
+    worker.add_argument(
+        "--max-browser-tasks",
+        type=int,
+        default=1,
+        help="concurrent browser/hybrid task slots per worker; 0 disables the cap (default: 1)",
+    )
     worker.add_argument("--per-domain-rps", type=float, default=1.0)
     worker.add_argument("--poll-interval", type=float, default=0.5)
     worker.add_argument(
@@ -196,6 +202,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=1,
         help="managed worker task slots (default: 1)",
     )
+    serve.add_argument(
+        "--max-browser-tasks",
+        type=int,
+        default=1,
+        help="managed worker browser/hybrid slots; 0 disables the cap (default: 1)",
+    )
     serve.add_argument("--per-domain-rps", type=float, default=1.0)
     serve.add_argument(
         "--lease-ttl",
@@ -225,6 +237,7 @@ def _run_worker(args: argparse.Namespace) -> int:
             store,
             out_root=args.out_root,
             max_tasks=args.max_tasks,
+            max_browser_tasks=args.max_browser_tasks,
             per_domain_rps=args.per_domain_rps,
             lease_ttl_seconds=args.lease_ttl,
             heartbeat_interval=args.heartbeat_interval,
@@ -271,6 +284,7 @@ def _serve(args: argparse.Namespace) -> int:
         args.rules_dir,
         manage_worker=not args.no_worker,
         max_tasks=args.max_tasks,
+        max_browser_tasks=args.max_browser_tasks,
         per_domain_rps=args.per_domain_rps,
         lease_ttl_seconds=args.lease_ttl,
         heartbeat_interval=args.heartbeat_interval,
