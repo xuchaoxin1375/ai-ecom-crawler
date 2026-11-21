@@ -27,6 +27,7 @@
 - 单 worker 控制面：`submit` 入队，`worker` 常驻执行，`pause`／`resume`／`cancel` 从另一个进程改账本，runner 在检查点响应并拒收迟到结果。
 - 跨进程任务租约：`tasks` 表保存 `lease_owner`、单调递增的 `lease_token`、到期时间和心跳；`claim_tasks` 原子领取，心跳线程续约，过期任务由任意 worker 对账回收，旧持有者的写入按租约条件拒绝。
 - `task_resources` 资源登记：登记子进程 PID 和 profile／临时目录；任务结束、取消或过期接管时按租约令牌回收，避免误删新持有者的资源。
+- 构建 harness 适配器：`harness/` 提供 `HarnessAdapter`、`OpenCodeHttpAdapter`、`OpenCodeServer`、构建工作区、HTTP/SSE 客户端和事件归一化；真实 `opencode serve` 的 session／事件／权限探针已跑通。
 - FastAPI API：健康、规则目录、任务列表／详情、创建／启动／暂停／恢复／取消／归档／还原、URL／商品分页、SSE 和 zip 导出。
 - 本地静态页面：任务列表、创建、详情、控制按钮、计数、质量异常、items 和导出入口。
 - 账本增加 `site_key`、`domain_key`、`market`、`rule_path`、`archived_at` 和创建幂等键；旧库自动加列。
@@ -35,7 +36,7 @@
 
 - 浏览器／动态渲染、挑战页会话复用；浏览器 adapter 接入时应通过 `runtime.resources` 登记子进程和 profile 目录。
 - 跨进程 A20 的真实资源配额、浏览器实例配额和跨机租约；当前租约在单机 SQLite 上验证。
-- 永久移除、异步残留回收、构建会话和完整前端原型评审。
+- 永久移除、异步残留回收、BuildService／构建会话 UI、pause-gate 插件、依赖安装和完整前端原型评审。
 - 生产级浏览器孤儿回收；静态 worker 的进程／目录登记与回收已落地，但没有真实浏览器路径可验证。
 
 ## 布局
@@ -119,6 +120,16 @@ python -m uv run --project app ecom-crawler validate --task-result /path/to/task
 - `TaskRunner` 在每个循环、领取工作项、写结果和收尾前校验租约；写入层再用同一事务的条件更新做二次拒绝，避免旧持有者在新持有者接管后继续写账本。
 - `runtime.resources` 提供 `register_process`、`register_path` 和 `cleanup_task_resources`：浏览器 adapter 应登记子进程 PID 和 profile 目录，并带当前 `lease_token`；回收时不会碰更新令牌的资源。
 - 资源记录存在 SQLite 的 `task_resources` 表，任务结束、取消和过期接管都会触发回收；静态运行时没有自带浏览器资源，因此实际浏览器回收仍未验证。
+
+## 构建 harness 适配器
+
+- `harness/` 只服务构建期，不进入采集运行时；执行期仍零 LLM。
+- `OpenCodeServer` 在回环地址用随机端口和随机 `OPENCODE_PASSWORD` 启动 `opencode serve`，记录版本并在关闭时回收进程树；`OPENCODE_BIN` 可覆盖可执行文件。server 使用当前 OpenCode 的 provider 配置；构建工作区隔离，但 OpenCode 自身的数据目录尚未按构建强制隔离，当前每次冒烟会删除 session。
+- `OpenCodeClient` 封装 ADR 0006 的最小端点：session 创建／查询／删除、prompt、permission 列表／创建／回复、model、interrupt、message、export 和 `/api/event` SSE。
+- `OpenCodeHttpAdapter` 实现 `start_build`、`send_prompt`、`stream_events`、`reply_permission`、`pause`／`resume`、`cancel`、`collect_artifacts` 和 `close`；构建会话状态独立于采集任务状态。
+- 每次构建在 `sessions/<build_id>/` 下创建 `input/`、`work/`、`out/`、`logs/` 和 `control/`；`control/pause.json` 是 pause-gate 的控制文件，读取失败按暂停处理（fail closed）。
+- 事件归一化把 OpenCode 事件映射为 `phase_changed`、`tool_started`、`tool_finished`、`permission_requested`、`permission_replied`、`message_delta`、`finished`、`error` 等；推理事件只记录 `redacted`，不保存私有推理。
+- 真实、无模型的冒烟与结果见 `experiments/harness/README.md`。`request_dependency`、pause-gate 插件、BuildService 和构建会话 UI 仍未接入；真实 prompt 和真实执行中中断尚未验证。
 
 ## Web 服务（serve）
 
