@@ -197,6 +197,35 @@ window.addEventListener('scroll', function () {
 </body></html>
 """
 
+LISTING_CONTAINER_HTML = """\
+<html><body>
+<div id="feed" style="height: 220px; overflow: auto; border: 1px solid #ccc">
+  <div id="items">
+    <a class="product" href="/p1.html">One</a>
+    <a class="product" href="/p2.html">Two</a>
+  </div>
+  <div id="spacer" style="height: 1200px"></div>
+</div>
+<script>
+let loaded = 1;
+const feed = document.getElementById('feed');
+feed.addEventListener('scroll', function () {
+  if (loaded >= 3) { return; }
+  if (feed.scrollTop + feed.clientHeight < feed.scrollHeight - 20) { return; }
+  loaded += 1;
+  for (const index of [(loaded - 1) * 2 + 1, (loaded - 1) * 2 + 2]) {
+    const link = document.createElement('a');
+    link.className = 'product';
+    link.href = '/p' + index + '.html';
+    link.textContent = 'Item ' + index;
+    document.getElementById('items').appendChild(link);
+  }
+  document.getElementById('spacer').style.height = (1200 + loaded * 600) + 'px';
+});
+</script>
+</body></html>
+"""
+
 
 def product_html(index: int) -> str:
     return (
@@ -229,6 +258,8 @@ def fixture_server() -> Iterator[str]:
                 body = LISTING_MORE_HTML.encode("utf-8")
             elif self.path == "/listing-scroll.html":
                 body = LISTING_SCROLL_HTML.encode("utf-8")
+            elif self.path == "/listing-container.html":
+                body = LISTING_CONTAINER_HTML.encode("utf-8")
             elif self.path.startswith("/p") and self.path.endswith(".html"):
                 try:
                     index = int(self.path[2:-5])
@@ -353,6 +384,30 @@ class BrowserListingActionTests(unittest.TestCase):
             self.assertGreaterEqual(advance["url_changes"], 1)
             self.assertIn("?page=", advance["final_url"])
             self.assertTrue(advance["urls"])
+
+    def test_infinite_scroll_container_appends_products(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary, fixture_server() as base:
+            root = Path(temporary)
+            result = self._run(
+                root,
+                base,
+                "listing-container.html",
+                "type: infinite_scroll\n        mode: \"scroll\"\n        container: \"#feed\"\n        max_scrolls: 5\n        settle_ms: 100\n        no_new_stop: 1",
+            )
+            self.assertEqual(result.task_result["counts"]["valid_products"], 6)
+            listing = next(
+                item
+                for item in TaskStore(root / "tasks.db").items(
+                    "browser-listing", "navigation"
+                )
+                if item.discovered_from == "listing"
+            )
+            advance = listing.result["advance"]
+            self.assertEqual(advance["type"], "infinite_scroll")
+            self.assertGreaterEqual(advance["items"], 6)
+            self.assertIn(advance["stop"], {"NO_NEW_ITEMS", "MAX_STEPS"})
+            self.assertGreaterEqual(advance["steps"], 2)
+            self.assertEqual(advance["url_changes"], 0)
 
 
 class BrowserAdvanceValidationTests(unittest.TestCase):
