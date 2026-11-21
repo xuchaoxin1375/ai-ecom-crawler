@@ -7,7 +7,9 @@ import gzip
 import hashlib
 import io
 import json
+import os
 import re
+import signal
 import subprocess
 import sys
 import threading
@@ -915,25 +917,45 @@ class TaskRunner:
             max_batches=max_batches,
             max_seconds=max_seconds,
         )
+        popen_kwargs: dict[str, Any] = {}
+        if os.name == "nt":
+            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            popen_kwargs["start_new_session"] = True
         try:
-            completed = subprocess.run(
+            process = subprocess.Popen(
                 command,
-                check=False,
                 cwd=str(self.rule.path.parent),
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                timeout=max_seconds + 5,
+                **popen_kwargs,
             )
+        except OSError as exc:
+            raise AdapterError(
+                "adapter_start", f"{type(exc).__name__}: {exc}", "transient"
+            ) from exc
+        try:
+            stdout, stderr = process.communicate(timeout=max_seconds + 5)
         except subprocess.TimeoutExpired as exc:
+            self._kill_adapter_tree(process)
+            try:
+                partial_stdout, _ = process.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                partial_stdout = ""
+            write_text(self.adapter_ndjson_path, partial_stdout or "")
             raise AdapterError(
                 "adapter_timeout",
                 f"adapter exceeded {max_seconds} seconds",
                 "transient",
             ) from exc
-        write_text(self.adapter_ndjson_path, completed.stdout or "")
-        events = self._parse_adapter_events(completed.stdout)
+        stdout = stdout or ""
+        stderr = stderr or ""
+        write_text(self.adapter_ndjson_path, stdout)
+        events = self._parse_adapter_events(stdout)
         errors = [event for event in events if event.get("event") == "error"]
         if errors:
             error = errors[0]
@@ -942,8 +964,8 @@ class TaskRunner:
                 str(error.get("detail") or error),
                 str(error.get("failure_class") or "permanent"),
             )
-        if completed.returncode != 0:
-            detail = completed.stderr.strip() or f"adapter exited with {completed.returncode}"
+        if process.returncode != 0:
+            detail = stderr.strip() or f"adapter exited with {process.returncode}"
             raise AdapterError("adapter_exit", detail, "transient")
         discovered = next(
             (event for event in events if event.get("event") == "discovered"), None
@@ -980,7 +1002,7 @@ class TaskRunner:
             "entrypoint": entrypoint_value,
             "protocol": runtime.get("protocol"),
             "entry_url": entry_url,
-            "returncode": completed.returncode,
+            "returncode": process.returncode,
             "stop": done.get("stop"),
             "batches": done.get("batches"),
             "items": done.get("items"),
@@ -999,6 +1021,22 @@ class TaskRunner:
             raise AdapterError(
                 "adapter_empty", "adapter returned no usable product URLs"
             )
+
+    @staticmethod
+    def _kill_adapter_tree(process: subprocess.Popen[str]) -> None:
+        if process.poll() is not None:
+            return
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+                check=False,
+                capture_output=True,
+            )
+            return
+        try:
+            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            process.kill()
 
     @staticmethod
     def _parse_adapter_events(raw: str) -> list[dict[str, Any]]:

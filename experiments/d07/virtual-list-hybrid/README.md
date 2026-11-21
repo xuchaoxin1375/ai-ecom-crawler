@@ -75,7 +75,7 @@ python adapter.py --context /path/to/context.json
 - 退出码：`0` 成功并已输出 `done`；`2` 上下文无效；`3` 浏览器或运行期失败。
 - 失败时输出 `error` 事件，不输出 `done`；调用方丢弃该任务的半成品结果。
 - adapter 不拥有任务状态、计数、暂停／取消和最终验收；不绕过登录、付费、401／403、验证码或挑战页。
-- `app run` 设置子进程超时并保存 `adapter-context.json`／`adapter.ndjson`；adapter 当前自己关闭 browser，尚未把 Chromium 纳入 `task_resources`。
+- `app run` 设置子进程超时并保存 `adapter-context.json`／`adapter.ndjson`；超时按进程组终止（Windows `taskkill /T`，POSIX `killpg`）。adapter 正常结束时自己关闭 browser，但尚未把 Chromium 纳入 `task_resources`。
 
 ### 输入上下文
 
@@ -130,7 +130,7 @@ python -m uv run --project app --extra dev python -m unittest app.tests.test_hyb
 
 ## 缺口
 
-- `app run` 已支持 adapter discovery，但 adapter 的浏览器实例和临时目录尚未登记到 `task_resources`，超时强杀后可能留下 Chromium 子进程；需要补进程组／资源回收。
+- `app run` 已支持 adapter discovery，超时按进程组终止；但 adapter 的浏览器实例和临时目录尚未登记到 `task_resources`，正常退出后的孤儿扫描仍需补。
 - 未在真实基准站验证；虚拟列表的稳定 ID 属性、滚动容器和终止文案因站而异，需要逐站配置。
 - 未实现浏览器实例配额、跨进程资源配额和跨机租约。
 - 未处理登录、挑战页、私有 XHR、网络重放或多步状态；`app run` 目前只支持 adapter 返回 URL 后由声明式 `fetch`／`extract` 处理商品页。

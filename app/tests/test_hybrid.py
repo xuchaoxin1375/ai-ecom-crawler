@@ -161,6 +161,15 @@ raise SystemExit(3)
 """
 
 
+ADAPTER_HANG = """\
+import json
+import time
+
+print(json.dumps({"event": "start", "adapter_id": "hang-adapter"}), flush=True)
+time.sleep(60)
+"""
+
+
 def product_html(index: int) -> str:
     return f"""<!doctype html>
 <html><head><meta charset="utf-8"><title>Product {index}</title>
@@ -296,6 +305,32 @@ class HybridRuntimeTests(unittest.TestCase):
             self.assertEqual(result["stop_reason"], "ADAPTER_FAILED")
             self.assertIn("fixture_failure", result["stop_detail"])
             self.assertEqual(result["counts"]["valid_products"], 0)
+            self.assertTrue((task_dir / "adapter.ndjson").is_file())
+
+    def test_adapter_timeout_is_bounded(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary, fixture_server() as base:
+            root = Path(temporary)
+            rule = write_package(root, base, ADAPTER_HANG)
+            rule.write_text(
+                rule.read_text(encoding="utf-8").replace(
+                    "max_seconds: 20", "max_seconds: 1"
+                ),
+                encoding="utf-8",
+            )
+            result, task_dir = run_task(
+                rule_path=rule,
+                db_path=root / "tasks.db",
+                out_root=root / "tasks",
+                task_id="hybrid-timeout-001",
+                task_type="product",
+                max_products=10,
+                max_seconds=30,
+                max_attempts=1,
+                per_domain_rps=50,
+            )
+            self.assertEqual(result["outcome"], "FAILED")
+            self.assertEqual(result["stop_reason"], "ADAPTER_FAILED")
+            self.assertIn("adapter_timeout", result["stop_detail"])
             self.assertTrue((task_dir / "adapter.ndjson").is_file())
 
     def test_hybrid_requires_runtime_and_safe_entrypoint(self) -> None:
