@@ -42,7 +42,7 @@ python -m uv run --project app ecom-crawler run `
 - `tasks/d04-prod-001/products.jsonl`：提取后的商品记录。
 - `tasks/d04-prod-001/app-run/`：转换后的 D02 输入。
 - `tasks/d04-prod-001/export/`：9 列 CSV、任务结果、内部记录和诊断。
-- `tasks.db`：任务账本。
+- `tasks.db`：本机任务账本，不随仓库分发；结果和计数以 `task-result.json`、`products.csv` 为准。
 
 ## 实现边界
 
