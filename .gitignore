@@ -9,7 +9,8 @@ serviceAccountKey.json
 
 # 运行与临时产物
 *.log
-*.tmp
+*.tmp.*
+*.temp.*
 Thumbs.db
 .DS_Store
 dist/
