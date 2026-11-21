@@ -63,12 +63,31 @@ class Task:
     market: str | None = None
     rule_path: str | None = None
     archived_at: str | None = None
+    lease_owner: str | None = None
+    lease_token: int = 0
+    lease_expires_at: float | None = None
+    lease_heartbeat_at: float | None = None
 
     def __post_init__(self) -> None:
         if self.task_type not in TASK_TYPES:
             raise ValueError(f"unsupported task_type: {self.task_type!r}")
         if self.state not in TASK_STATES:
             raise ValueError(f"unsupported task state: {self.state!r}")
+
+
+@dataclass(frozen=True)
+class Lease:
+    """A time-boxed task ownership token used to fence stale writers.
+
+    ``token`` is monotonically increasing per task.  A worker must present the
+    same owner and token for every write and renew before ``expires_at``; after
+    a takeover both checks fail for the previous holder.
+    """
+
+    task_id: str
+    owner: str
+    token: int
+    expires_at: float
 
 
 @dataclass

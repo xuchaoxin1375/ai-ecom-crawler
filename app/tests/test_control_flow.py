@@ -14,7 +14,7 @@ from ecom_crawler.cli import main
 from ecom_crawler.execution import submit_task
 from ecom_crawler.runtime.fetcher import DomainLimiter
 from ecom_crawler.runtime.lock import worker_lock
-from ecom_crawler.runtime.models import FetchResult
+from ecom_crawler.runtime.models import FetchResult, WorkItem
 from ecom_crawler.runtime.store import TaskStore
 from ecom_crawler.runtime.worker import Worker
 
@@ -477,6 +477,131 @@ class ControlFlowTests(unittest.TestCase):
             (self.out_root / task.task_id / "task-result.json").read_text(encoding="utf-8")
         )
         self.assertEqual(result["counts"]["valid_products"], 1)
+
+    def test_worker_heartbeat_keeps_lease_alive(self) -> None:
+        task = self._submit("heartbeat-flow")
+        started = threading.Event()
+        release = threading.Event()
+        store = TaskStore(self.db_path)
+        worker = Worker(
+            store,
+            out_root=self.out_root,
+            max_tasks=1,
+            per_domain_rps=50,
+            fetcher_factory=lambda rule, limiter: StaticFetcher(started, release),
+            lease_ttl_seconds=1.0,
+            heartbeat_interval=0.1,
+        )
+        thread = threading.Thread(target=worker.run_once, daemon=True)
+        thread.start()
+        self.assertTrue(started.wait(5), "product request did not start")
+        time.sleep(1.5)
+        running = store.get_task(task.task_id)
+        assert running is not None
+        self.assertEqual(running.state, "RUNNING")
+        lease = store.lease_info(task.task_id)
+        assert lease is not None
+        self.assertIsNotNone(lease["owner"])
+        self.assertGreater(lease["token"], 0)
+
+        release.set()
+        thread.join(10)
+        self.assertFalse(thread.is_alive(), "worker did not stop")
+        finished = store.get_task(task.task_id)
+        assert finished is not None
+        self.assertEqual(finished.state, "FINISHED")
+
+    def test_two_workers_process_one_task_once(self) -> None:
+        task = self._submit("two-workers")
+        workers = [
+            Worker(
+                TaskStore(self.db_path),
+                out_root=self.out_root,
+                max_tasks=1,
+                per_domain_rps=50,
+                fetcher_factory=lambda rule, limiter: StaticFetcher(),
+            )
+            for _ in range(2)
+        ]
+        started: list[int] = []
+        lock = threading.Lock()
+
+        def run(worker: Worker) -> None:
+            count = worker.run_once()
+            with lock:
+                started.append(count)
+
+        threads = [
+            threading.Thread(target=run, args=(worker,), daemon=True)
+            for worker in workers
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(15)
+
+        self.assertFalse(any(thread.is_alive() for thread in threads))
+        self.assertEqual(sorted(started), [0, 1])
+        stored = TaskStore(self.db_path).get_task(task.task_id)
+        assert stored is not None
+        self.assertEqual(stored.state, "FINISHED")
+        lines = (self.out_root / task.task_id / "products.jsonl").read_text(
+            encoding="utf-8"
+        ).splitlines()
+        self.assertEqual(len(lines), 1)
+
+    def test_worker_takes_over_expired_task(self) -> None:
+        task = self._submit("takeover-flow")
+        dead = TaskStore(self.db_path)
+        claimed = dead.claim_tasks("dead-worker", 1, 0.05)
+        self.assertEqual(len(claimed), 1)
+        dead.add_item(
+            WorkItem(
+                task_id=task.task_id,
+                item_id="crashed-product",
+                item_type="product",
+                url="https://fixture.test/p1.html",
+                normalized_url="https://fixture.test/p1.html",
+                stage="product",
+                state="IN_FLIGHT",
+                attempts=0,
+            )
+        )
+        task_dir = self.out_root / task.task_id
+        task_dir.mkdir(parents=True, exist_ok=True)
+        (task_dir / "products.jsonl").write_text(
+            json.dumps(
+                {
+                    "name": "Stale product",
+                    "source_url": "https://fixture.test/p1.html",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        time.sleep(0.2)
+
+        worker = Worker(
+            TaskStore(self.db_path),
+            out_root=self.out_root,
+            max_tasks=1,
+            per_domain_rps=50,
+            fetcher_factory=lambda rule, limiter: StaticFetcher(),
+        )
+        self.assertEqual(worker.run_once(), 1)
+        stored = TaskStore(self.db_path).get_task(task.task_id)
+        assert stored is not None
+        self.assertEqual(stored.state, "FINISHED")
+        self.assertEqual(stored.outcome, "COMPLETED")
+        self.assertEqual(
+            TaskStore(self.db_path).item_counts(task.task_id, "product").get("DONE"),
+            1,
+        )
+        lines = (self.out_root / task.task_id / "products.jsonl").read_text(
+            encoding="utf-8"
+        ).splitlines()
+        self.assertEqual(len(lines), 1)
+        self.assertNotIn("Stale product", lines[0])
 
     def _run_cli(self, argv: list[str]) -> tuple[int, str, str]:
         stdout = io.StringIO()

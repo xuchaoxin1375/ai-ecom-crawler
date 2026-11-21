@@ -21,9 +21,9 @@ from ecom_crawler.executor.normalize import csv_safe, format_price
 from ecom_crawler.executor.runner import CSV_COLUMNS, build_record, discover_urls, validate_product
 
 from .atomic import append_jsonl, write_json, write_text
-from .models import Task, WorkItem, utc_now
+from .models import Lease, Task, WorkItem, utc_now
 from .rule import RulePackage
-from .store import TaskStore
+from .store import LeaseLostError, TaskStore
 
 RUNTIME_VERSION = "r06-runtime/0.2"
 
@@ -44,12 +44,14 @@ class TaskRunner:
         *,
         fetcher: Any,
         out_root: str | Path,
+        lease: Lease,
         poll_interval: float = 0.1,
     ) -> None:
         self.store = store
         self.rule = rule
         self.task = task
         self.fetcher = fetcher
+        self.lease = lease
         self.out_dir = Path(out_root) / task.task_id
         self.poll_interval = max(poll_interval, 0.02)
         self.products_path = self.out_dir / "products.jsonl"
@@ -71,6 +73,7 @@ class TaskRunner:
         self._write_lock = threading.Lock()
         self._recovery: dict[str, Any] = {}
         self._corrupt_products = 0
+        self._uncommitted_products = 0
         self._includes = [re.compile(pattern) for pattern in rule.scope.get("include", [])]
         self._excludes = [re.compile(pattern) for pattern in rule.scope.get("exclude", [])]
         self._product_patterns = [
@@ -100,16 +103,19 @@ class TaskRunner:
 
     def run(self) -> str:
         self.out_dir.mkdir(parents=True, exist_ok=True)
+        self.store.assert_lease(self.lease)
         self._recovery = self.store.reconcile_task(
-            self.task.task_id, self._max_attempts()
+            self.task.task_id, self._max_attempts(), lease=self.lease
         )
         self._recovery["orphan_files_removed"] = self._cleanup_orphans()
         self._recovery["stale_result"] = self._quarantine_stale_result()
         self._recovery["corrupt_product_lines"] = self._load_products()
+        self._recovery["uncommitted_product_lines"] = self._uncommitted_products
         started_at = self.task.started_at or utc_now()
         self.task.started_at = started_at
         self.store.update_task(
             self.task.task_id,
+            lease=self.lease,
             state="RUNNING",
             started_at=started_at,
         )
@@ -126,6 +132,8 @@ class TaskRunner:
             self._stop_reason = exc.reason
             self._stop_detail = exc.detail
             self._event("task_stopping", reason=exc.reason, detail=exc.detail)
+        except LeaseLostError:
+            raise
         except Exception as exc:  # noqa: BLE001 - task boundary
             self._stop_reason = "ENVIRONMENT_ERROR"
             self._stop_detail = f"{type(exc).__name__}: {exc}"
@@ -138,6 +146,7 @@ class TaskRunner:
         with ThreadPoolExecutor(max_workers=concurrency) as pool:
             futures: dict[Future[tuple[str, dict[str, Any]]], WorkItem] = {}
             while True:
+                self.store.assert_lease(self.lease)
                 if futures:
                     done, _ = wait(
                         futures, timeout=self.poll_interval, return_when=FIRST_COMPLETED
@@ -160,6 +169,8 @@ class TaskRunner:
                             self._stop_detail = exc.detail
                             self._drain(futures)
                             return "FINISHED"
+                        except LeaseLostError:
+                            raise
                         except Exception as exc:  # noqa: BLE001 - item boundary
                             state = "FAILED"
                             result = {
@@ -193,7 +204,9 @@ class TaskRunner:
 
                 free = concurrency - len(futures)
                 if free > 0:
-                    for item in self.store.claim_items(self.task.task_id, free):
+                    for item in self.store.claim_items(
+                        self.task.task_id, free, lease=self.lease
+                    ):
                         futures[pool.submit(self._process_item, item)] = item
 
                 if not futures:
@@ -223,6 +236,8 @@ class TaskRunner:
                     },
                     accept=not reject,
                 )
+            except LeaseLostError:
+                raise
             except Exception as exc:  # noqa: BLE001 - item boundary
                 self._finish_item(
                     item,
@@ -763,7 +778,8 @@ class TaskRunner:
                 parent_url=parent,
                 discovered_from=source,
                 result=result or {},
-            )
+            ),
+            lease=self.lease,
         )
 
     def _add_product_item(
@@ -788,7 +804,7 @@ class TaskRunner:
             discovered_from=source,
             result=result,
         )
-        added = self.store.add_item(item)
+        added = self.store.add_item(item, lease=self.lease)
         if added and discovery:
             self._append_jsonl(
                 self.items_path,
@@ -812,6 +828,7 @@ class TaskRunner:
         *,
         accept: bool = True,
     ) -> None:
+        self.store.assert_lease(self.lease)
         current = self.store.get_task(self.task.task_id)
         if accept and current is not None and current.state in {"CANCELLING", "CANCELLED"}:
             accept = False
@@ -820,6 +837,7 @@ class TaskRunner:
             result = {"reason": "task_cancelled", "failure_class": "blocked"}
         product = result.pop("product", None) if state == "DONE" and accept else None
         if product is not None:
+            result["source_url"] = product.get("source_url")
             self._append_product(product)
         failure_class = result.get("failure_class")
         self.store.mark_item(
@@ -828,6 +846,7 @@ class TaskRunner:
             state,
             result,
             failure_class=failure_class,
+            lease=self.lease,
         )
         self._append_jsonl(
             self.items_path,
@@ -963,8 +982,11 @@ class TaskRunner:
         return False
 
     def _settle(self, control: str) -> None:
+        self.store.assert_lease(self.lease)
         if control == "PAUSED":
-            self.store.update_task(self.task.task_id, state="PAUSED")
+            self.store.update_task(
+                self.task.task_id, lease=self.lease, state="PAUSED"
+            )
             self._write_progress()
             self._event("task_paused")
             return
@@ -999,6 +1021,7 @@ class TaskRunner:
         stop_reason: str,
         stop_detail: str,
     ) -> None:
+        self.store.assert_lease(self.lease)
         finished_at = utc_now()
         task_result = self._task_result(state, outcome, stop_reason, stop_detail, finished_at)
         self.out_dir.mkdir(parents=True, exist_ok=True)
@@ -1007,6 +1030,7 @@ class TaskRunner:
         self._write_products_csv()
         self.store.update_task(
             self.task.task_id,
+            lease=self.lease,
             state=state,
             outcome=outcome,
             stop_reason=stop_reason,
@@ -1190,8 +1214,17 @@ class TaskRunner:
     def _load_products(self) -> int:
         if not self.products_path.is_file():
             return 0
+        done_urls: set[str] = set()
+        for item in self.store.items(self.task.task_id, "product"):
+            if item.state != "DONE":
+                continue
+            done_urls.add(_normalize_url(item.normalized_url))
+            committed = str(item.result.get("source_url") or "")
+            if committed:
+                done_urls.add(_normalize_url(committed))
         valid_lines: list[str] = []
         corrupt = 0
+        uncommitted = 0
         for line in self.products_path.read_text(encoding="utf-8").splitlines():
             if not line.strip():
                 continue
@@ -1200,11 +1233,15 @@ class TaskRunner:
             except json.JSONDecodeError:
                 corrupt += 1
                 continue
+            source_url = str(product.get("source_url") or "")
+            if source_url and _normalize_url(source_url) not in done_urls:
+                uncommitted += 1
+                continue
             valid_lines.append(line)
             self._products.append(product)
-            if product.get("source_url"):
-                self._seen_canonical.add(product["source_url"])
-        if corrupt:
+            if source_url:
+                self._seen_canonical.add(source_url)
+        if corrupt or uncommitted:
             payload = "\n".join(valid_lines)
             write_text(
                 self.products_path,
@@ -1212,6 +1249,7 @@ class TaskRunner:
                 lock=self._write_lock,
             )
         self._corrupt_products = corrupt
+        self._uncommitted_products = uncommitted
         return corrupt
 
     def _append_product(self, product: dict[str, Any]) -> None:

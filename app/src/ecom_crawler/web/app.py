@@ -260,6 +260,8 @@ def create_app(
     manage_worker: bool = False,
     max_tasks: int = 1,
     per_domain_rps: float = 1.0,
+    lease_ttl_seconds: float = 30.0,
+    heartbeat_interval: float | None = None,
 ) -> FastAPI:
     store = TaskStore(db_path)
     root = Path(out_root)
@@ -276,6 +278,8 @@ def create_app(
                 out_root=root,
                 max_tasks=max_tasks,
                 per_domain_rps=per_domain_rps,
+                lease_ttl_seconds=lease_ttl_seconds,
+                heartbeat_interval=heartbeat_interval,
             )
             thread = threading.Thread(
                 target=worker.run_forever,

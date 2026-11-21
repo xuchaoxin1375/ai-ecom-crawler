@@ -115,7 +115,14 @@ class ControlTransitionTests(unittest.TestCase):
         self.store.create_task(make_task("recover-cancelling", state="CANCELLING"))
 
         report = self.store.recover_orphaned_tasks()
-        self.assertEqual(report, {"recovered": 3, "requeued": 1, "paused": 1, "cancelled": 1})
+        self.assertEqual(
+            {key: report[key] for key in ("recovered", "requeued", "paused", "cancelled")},
+            {"recovered": 3, "requeued": 1, "paused": 1, "cancelled": 1},
+        )
+        self.assertEqual(
+            sorted(report["task_ids"]),
+            ["recover-cancelling", "recover-pausing", "recover-running"],
+        )
         running = self.store.get_task("recover-running")
         pausing = self.store.get_task("recover-pausing")
         cancelling = self.store.get_task("recover-cancelling")
@@ -124,10 +131,10 @@ class ControlTransitionTests(unittest.TestCase):
         self.assertEqual(pausing.state, "PAUSED")
         self.assertEqual(cancelling.state, "CANCELLED")
 
-        reconciled = self.store.reconcile_task("recover-running", max_attempts=2)
-        self.assertEqual(reconciled, {"in_flight": 1, "reset": 1, "failed": 0})
         item = self.store.items("recover-running", "product")[0]
         self.assertEqual(item.state, "PENDING")
+        reconciled = self.store.reconcile_task("recover-running", max_attempts=2)
+        self.assertEqual(reconciled, {"in_flight": 0, "reset": 0, "failed": 0})
 
 
 if __name__ == "__main__":
