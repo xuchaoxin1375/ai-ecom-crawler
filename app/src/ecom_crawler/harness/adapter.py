@@ -86,6 +86,10 @@ class HarnessAdapter(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def list_permissions(self, build_id: str) -> list[dict[str, Any]]:
+        raise NotImplementedError
+
+    @abstractmethod
     def request_dependency(
         self, build_id: str, request: dict[str, Any]
     ) -> dict[str, Any]:
@@ -306,6 +310,12 @@ class OpenCodeHttpAdapter(HarnessAdapter):
                 request_id=request_id,
                 decision=decision,
             )
+
+    def list_permissions(self, build_id: str) -> list[dict[str, Any]]:
+        session = self._require(build_id)
+        if session.session_id is None:
+            return []
+        return self._ensure_client().list_permissions(session.session_id)
 
     def request_dependency(
         self, build_id: str, request: dict[str, Any]
