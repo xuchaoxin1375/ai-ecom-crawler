@@ -14,8 +14,13 @@ serviceAccountKey.json
 *.db
 *.db-wal
 *.db-shm
+*.db-journal
 *.sqlite
+*.sqlite-wal
+*.sqlite-shm
 *.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
 Thumbs.db
 .DS_Store
 dist/
