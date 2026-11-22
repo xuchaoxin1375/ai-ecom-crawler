@@ -87,6 +87,7 @@ python -m uv run --project app python experiments/harness/dependency_install_smo
 - **服务边界**：`BuildService` 为每个构建启动 `DependencyBridge`；`pending_dependency_ids` 和 `reply_dependency` 提供一次性审批入口。构建会话 UI 仍未实现，审批目前由服务 API／测试调用，不是页面按钮。
 - **自动化证据**：`test_dependency_bridge.py` 覆盖请求应答、审批挂起／批准／拒绝／超时、暂停保留、非法请求、停止取消，以及用假 `@opencode/plugin` 模块加载真实 `index.js` 并执行工具的往返；`test_service.py` 覆盖服务层桥和取消；`test_dependencies.py` 覆盖字段别名、系统级审批、一次性审批和验证失败。全量 `app/tests` 180 个用例通过。
 - **真实安装（2026-11-22）**：临时 venv 中通过文件桥安装 `six==1.17.0` 并验证 `1.17.0`，uv 与 pip 两条路径均返回 `installed`／`installed and verified`，事件为 `dependency_installed`。uv 0.13.9、Python 3.13.13；pip 路径使用本机配置的 `mirrors.aliyun.com` 索引。命令见上文；证据是本次运行的 `dependency_install_smoke.py` 输出，不含包索引凭据。
+- **跨环境（2026-11-22）**：WSL2 Ubuntu、Python 3.12.3、`PYTHONPATH=app/src` 下同一组 harness／依赖／服务／依赖桥测试 37 个：34 个通过，3 个 Node 用例因 WSL 未安装 Node 跳过；Linux 上的文件桥、暂停、审批、取消和超时行为与 Windows 一致。
 - **未覆盖**：真实 OpenCode 模型循环中调用 `request_dependency`（需要一次付费 prompt），以及构建自然完成。无模型的 `opencode serve` 探针不能确认工具注册：OpenCode 工作区插件按执行路径懒加载，创建 session 不会触发插件 `setup`；插件注册与 execute 由假 `@opencode/plugin` 上下文验证，真实加载仍以一次 prompt 冒烟为准。
 
 `BuildService` 服务边界现有 6 个用例：单活动构建、事件泵、暂停期间 held 权限、恢复时回复 `once`、finished 事件、桥请求和审批；`test_harness.py` 8 个用例覆盖 fake server、适配器生命周期、依赖事件和插件文件。
