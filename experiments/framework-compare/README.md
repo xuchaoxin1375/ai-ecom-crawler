@@ -7,7 +7,7 @@
 - 共享任务规格与评分表：已建立。
 - 三个框架的独立环境：已建立并完成导入与浏览器启动验证。
 - 站点范围、执行顺序与运行：第 1、2 轮（`javaestate.com`、`skatepro.es`）三臂已执行；`sixmoondesigns.com`、`campsaver.com` 只完成补充探针（campsaver 另有有头可达性复核），见 [`probes/`](probes/README.md)，未做正式 D01 轮次。
-- 2026-11-22 同条件运行时对照：`skatepro.es` 固定 10 个 URL、10 个商品／300 秒；Crawlee 10／10、104 秒、11 请求，Scrapy 10／10、123 秒、13 请求，两臂选中 URL 集合一致。见 [`same-window-2026-11-22/`](same-window-2026-11-22/README.md)。这是运行时对照，不是新的 AI 构建轮次；严格同窗的构建会话对照仍未做。
+- 2026-11-22 同条件运行时对照：`skatepro.es` 缩小预算 10 个 URL、10 个商品／300 秒，两臂 10／10；完整预算 30 个 URL、30 个商品／600 秒，Crawlee 29／30、304.0 秒、31 请求，Scrapy 29／30、323.0 秒、33 请求。两臂选中 URL 集合一致，并排除同一商品 `250-21059.htm` 但原因不同（`NO_PRICE` 对 `currency_unproven`）。见 [`same-window-2026-11-22/`](same-window-2026-11-22/README.md) 与 [`same-window-30-2026-11-22/`](same-window-30-2026-11-22/README.md)。这是运行时对照，不是新的 AI 构建轮次；严格同窗的构建会话对照仍未做。
 - 合同变更：2026-11-19 起 `docs/02` 的最终业务CSV为9列；本目录已完成的运行按当时的22列合同记录，保留为旧合同证据，不追溯改写。
 
 ## 版本记录
@@ -34,7 +34,8 @@
 | `crawlee/` | Crawlee for Python 独立环境与实现 |
 | `scrapy/` | Scrapy 独立环境与实现 |
 | `probes/` | 有界补充探针：公开 JSON 与挑战页；不替代正式轮次 |
-| `same-window-2026-11-22/` | 固定 URL 样本的 Crawlee／Scrapy 同条件运行时对照与复跑脚本 |
+| `same-window-2026-11-22/` | 10 商品／300 秒缩小预算的 Crawlee／Scrapy 同条件运行时对照 |
+| `same-window-30-2026-11-22/` | 30 商品／600 秒完整预算的 Crawlee／Scrapy 同条件运行时对照与失败样本 |
 | `results/` | 原始指标、日志摘要和结果表；不保存整页原文 |
 
 每个框架目录使用独立虚拟环境和锁文件，不共享实现代码；禁止把某个框架的选择器或脚本复制到另一个目录。
