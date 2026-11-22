@@ -106,6 +106,28 @@ class TraceTests(unittest.TestCase):
         self.assertIn("Reasoning (local review only)", markdown)
         self.assertIn("build-1", markdown)
 
+    def test_trace_records_repair_rounds(self) -> None:
+        trace = build_trace(
+            export_payload(),
+            build_id="build-1",
+            model=None,
+            repairs=[
+                {
+                    "round": 1,
+                    "error": "BuildError: invalid CSS selector",
+                    "resolved": True,
+                    "started_at": "2026-11-23T04:00:00Z",
+                    "finished_at": "2026-11-23T04:01:00Z",
+                }
+            ],
+            repair_limit=1,
+        )
+        self.assertEqual(trace["repair_limit"], 1)
+        self.assertEqual(trace["repairs"][0]["round"], 1)
+        markdown = render_trace_markdown(trace)
+        self.assertIn("Automatic repair rounds", markdown)
+        self.assertIn("Round 1 (resolved", markdown)
+
 
 if __name__ == "__main__":
     unittest.main()

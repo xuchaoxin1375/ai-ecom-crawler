@@ -83,28 +83,33 @@ class BuildService:
             self.held_permissions[task.build_id] = set()
             self.pending_permissions[task.build_id] = set()
             self._active_id = task.build_id
-            thread = threading.Thread(
-                target=self._pump,
-                args=(task.build_id,),
-                name=f"build-events-{task.build_id}",
-                daemon=True,
-            )
-            self._pumps[task.build_id] = thread
-            thread.start()
-            bridge = DependencyBridge(
-                session,
-                self.adapter,
-                is_paused=lambda: self._build_state(task.build_id)
-                in {"PAUSING", "PAUSED"},
-                is_active=lambda: self._build_state(task.build_id)
-                not in TERMINAL_STATES,
-                on_event=lambda event: self._record_event(
-                    task.build_id, event
-                ),
-            )
-            self.bridges[task.build_id] = bridge
-            bridge.start()
+            self._start_pump(task.build_id)
+            self._start_bridge(task.build_id)
             return session
+
+    def _start_pump(self, build_id: str) -> None:
+        thread = threading.Thread(
+            target=self._pump,
+            args=(build_id,),
+            name=f"build-events-{build_id}",
+            daemon=True,
+        )
+        self._pumps[build_id] = thread
+        thread.start()
+
+    def _start_bridge(self, build_id: str) -> None:
+        session = self._require(build_id)
+        bridge = DependencyBridge(
+            session,
+            self.adapter,
+            is_paused=lambda: self._build_state(build_id)
+            in {"PAUSING", "PAUSED"},
+            is_active=lambda: self._build_state(build_id)
+            not in TERMINAL_STATES,
+            on_event=lambda event: self._record_event(build_id, event),
+        )
+        self.bridges[build_id] = bridge
+        bridge.start()
 
     def _build_state(self, build_id: str) -> str:
         with self._lock:
@@ -143,6 +148,9 @@ class BuildService:
                         status="cancelled",
                         detail="build finished before the dependency request was resolved",
                     )
+                    # The session is terminal; keeping the SSE subscription open
+                    # would block the next repair prompt or build on this adapter.
+                    break
         except Exception as exc:  # noqa: BLE001 - event boundary
             with self._lock:
                 self.events[build_id].append(
@@ -213,6 +221,38 @@ class BuildService:
                 )
             result = self.adapter.send_prompt(build_id, text)
             self._set_state(session, "RUNNING")
+            return result
+
+    def continue_after_finish(self, build_id: str, text: str) -> dict[str, Any]:
+        """Prompt a finished session again for a host-side repair round."""
+        with self._lock:
+            session = self._require(build_id)
+            if session.state != "FINISHED":
+                raise HarnessStateError(
+                    f"cannot continue build {build_id} in state {session.state}"
+                )
+            self._stop_bridge(
+                build_id,
+                status="cancelled",
+                detail="build continued for a repair round",
+            )
+            session.outcome = None
+            session.error = None
+            self._set_state(session, "RUNNING")
+            self._active_id = build_id
+            self._start_pump(build_id)
+            self._start_bridge(build_id)
+            try:
+                result = self.adapter.continue_prompt(build_id, text)
+            except Exception as exc:
+                self._set_state(
+                    session,
+                    "FINISHED",
+                    outcome="failed",
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+                self._active_id = None
+                raise
             return result
 
     def pause(self, build_id: str) -> BuildSession:

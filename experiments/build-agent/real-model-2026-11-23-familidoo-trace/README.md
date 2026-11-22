@@ -13,3 +13,5 @@
 - tokens：输入 99,549／输出 5,718／推理 5,888
 
 本目录保留构建摘要、trace（默认不含 reasoning）、工具调用/消息、会话事件和站点详情截图 `ui-build-failed-1280.png`、`ui-build-output-1280.png`（模型输出展开，reasoning 收起）；不保存原始 OpenCode 导出、整页 HTML 或完整文件内容。单次运行不等于全站或长期稳定性结论。
+
+> 2026-11-23 补充：该失败已被构建期静态预检覆盖；`nav.breadcrumb_nav a:not(:first-of-type)` 现在会在联网验证前报出，并默认触发同一会话的自动修复 1 轮。本目录保留原始失败证据，不作为当前行为描述。

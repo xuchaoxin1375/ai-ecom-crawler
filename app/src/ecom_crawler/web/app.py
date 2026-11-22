@@ -105,6 +105,7 @@ class BuildStartRequest(BaseModel):
     max_seconds: int = Field(default=600, ge=60, le=3600)
     proxy: str | None = Field(default=None, max_length=500)
     capture_reasoning: bool = False
+    repair_rounds: int | None = Field(default=None, ge=0, le=10)
 
 
 class BuildPermissionRequest(BaseModel):
@@ -1453,12 +1454,27 @@ def create_app(
                 max_seconds=request.max_seconds,
                 proxy=request.proxy,
                 capture_reasoning=request.capture_reasoning,
+                repair_rounds=request.repair_rounds,
             )
         except BuildError as exc:
             raise _error("BUILD_CONFLICT", str(exc), 409) from exc
         return {
             "accepted": True,
             "build": build_manager.describe(record.build_id),
+        }
+
+    @app.get("/api/builds/config")
+    def get_build_config() -> dict[str, Any]:
+        if build_manager is None:
+            return {
+                "available": False,
+                "reasoning_capture_enabled": False,
+                "max_repair_rounds": 0,
+            }
+        return {
+            "available": True,
+            "reasoning_capture_enabled": build_manager.reasoning_capture_enabled,
+            "max_repair_rounds": build_manager.max_repair_rounds,
         }
 
     @app.get("/api/builds/{build_id}")

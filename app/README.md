@@ -32,8 +32,8 @@
 - 构建 harness 适配器：`harness/` 提供 `HarnessAdapter`、`OpenCodeHttpAdapter`、`OpenCodeServer`、构建工作区、HTTP/SSE 客户端和事件归一化；真实 `opencode serve` 的 session／事件／权限探针已跑通。
 - 构建期依赖请求桥：每个工作区写入 `request-dependency` 插件，Agent 调用 `request_dependency` 后写 `control/dependencies/requests/<id>.json`；`DependencyBridge` 在 host 侧按 `DependencyPolicy` 返回基线／allowlist 结果、安装 allowlist 包、挂起一次性审批或取消未决请求，再写 `responses/<id>.json`。安装支持 build 解释器的 `pip` 和 `uv pip --python`，安装后用 `importlib.metadata` 验证版本。
 - 批次工作台阶段 1：`frontend/` 是 Vue 3 + TypeScript + Vite 应用；构建产物存在时 FastAPI 在 `/batch/` 托管，`/batches` 列表／新建／详情、`/batches/{id}/sites/{site_key}` 站点详情和 `/tasks` 任务控制台共用同一外壳。批次／站点对象、导入解析／去重／规则匹配、部分启动、批次级暂停／取消／归档、批次导出和站点下钻已实现；真实批次 `b-586052683409` 两站 14 条有效商品、0 失败，证据在 `experiments/d08/batch-workbench-e2e/`。
-- 站点构建入口：`needs_onboarding` 站点可在站点详情启动构建 Agent；站点进入 `building`，主机验证通过后规则以 `candidate` 安装、站点变为 `ready`，失败则回到 `needs_onboarding`。构建记录、事件、暂停／恢复／取消和依赖审批已有 API；完整构建会话 UI 后置。
-- 构建 trace：每次构建在 `out/trace.json`／`out/trace.md` 记录阶段、工具调用、输入摘要、截断输出、可见消息、tokens／费用和主机验证结果；默认不保存 reasoning，`ECOM_BUILD_CAPTURE_REASONING=1` 时才保留并截断。模型、provider 和 variant（思考等级）在构建状态和 trace 中标出。
+- 站点构建入口：`needs_onboarding` 站点可在站点详情启动构建 Agent；站点进入 `building`，主机验证通过后规则以 `candidate` 安装、站点变为 `ready`，失败则回到 `needs_onboarding`。站点详情提供“详细模式”时间线（思考、工具调用、可见文本按时间合并）和“验证失败后自动修复 1 轮”；完整多轮会话 UI 后置。
+- 构建 trace：每次构建在 `out/trace.json`／`out/trace.md` 记录阶段、工具调用、输入摘要、截断输出、可见消息、tokens／费用、主机验证结果和自动修复轮次；默认不保存 reasoning，`ECOM_BUILD_CAPTURE_REASONING=1` 时才保留并截断。模型、provider 和 variant（思考等级）在构建状态和 trace 中标出。验证前先静态编译规则里的 CSS 选择器，避免把 `plan_error` 拖到真实抓取阶段。
 - 出口代理：`ECOM_FETCH_PROXY`／`ECOM_BUILD_PROXY`、`--proxy` 和构建 API `proxy` 支持静态／浏览器出口；构建、验证和批次任务沿用同一出口，规则包不写代理 URL。2026-11-23 用 mihomo US 出口将 `sixmoondesigns.com` 的 CNY 样本修正为 USD 3／3。
 - FastAPI API：健康、规则目录、任务列表／详情、创建／启动／暂停／恢复／取消／归档／还原、URL／商品分页、SSE 和 zip 导出。
 - 本地静态页面：页首标注“内部技术控制台／非业务工作台”及用途边界；任务列表、创建、详情、控制按钮、计数（7 张主卡 + 完整计数行）、覆盖、质量异常数、商品预览（价格／币种／正文状态／缺失字段／字段来源）、URL 明细和导出入口。
@@ -43,7 +43,7 @@
 
 - 虚拟列表、任意点击序列和 POST／GraphQL；当前 `load_more`／`infinite_scroll` 只支持追加型列表，内部滚动容器（`container`）的追加型列表已有本地 fixture。
 - 跨进程 A20 的真实资源配额和浏览器实例配额；跨机租约为 v1 外，当前租约在单机 SQLite 上验证。
-- 永久移除、异步残留回收、完整构建会话 UI（多轮对话、权限／依赖审批页面）和自动修复轮次；站点级构建入口已接入。真实 OpenCode 模型循环中的 `request_dependency` 工具调用仍未验证。A16 1280 已于 2026-11-23 验收，跨浏览器／读屏未测。
+- 永久移除、异步残留回收、完整构建会话 UI（多轮对话、权限／依赖审批页面）；站点级构建入口和验证失败自动修复 1 轮已接入。真实 OpenCode 模型循环中的 `request_dependency` 工具调用仍未验证。A16 1280 已于 2026-11-23 验收，跨浏览器／读屏未测。
 - 跨机浏览器孤儿回收为 v1 外；本机强杀 worker 后的租约接管已演练，浏览器进程和 profile 会被回收。
 
 ## 布局
@@ -98,7 +98,9 @@ python -m uv run --project app ecom-crawler validate --task-result /path/to/task
 - `serve` 只绑定回环地址，默认启动托管 worker（持有 worker 单实例锁）；`--no-worker` 只提供 API／页面，执行由独立 `worker` 进程负责。页面关闭不会停止后台。
 - 出口代理按任务或进程传入：`--proxy`、`ECOM_FETCH_PROXY`、`ECOM_BUILD_PROXY`；构建 API 的 `proxy` 会写入构建记录和站点，后续批次任务沿用。代理 URL 不接受凭据，API 展示会遮蔽 userinfo。
 - 构建 trace 默认不保存 reasoning；需要本地复盘时用 `ECOM_BUILD_CAPTURE_REASONING=1` 启动服务，或在构建 API 传 `capture_reasoning=true`。trace 会截断工具输出、消息和 reasoning，不保存原始导出或整页 HTML。
-- 站点详情的“模型输出（阶段性）”读取 `/api/builds/{id}/messages`：构建中显示流式片段，结束后显示完整可见消息；reasoning 仅在显式保留时出现在可折叠区域。
+- 站点详情的“模型输出”读取 `/api/builds/{id}/messages`：构建中显示流式时间线，结束后显示完整可见消息；`timeline` 按时间合并思考、工具调用和文本。reasoning 仅在显式保留时出现；未保留时页面会提示服务端开关和单次勾选条件。
+- 自动修复：默认允许 1 轮，`ECOM_BUILD_MAX_REPAIR_ROUNDS` 可调整（0 关闭），`ECOM_BUILD_REPAIR_SECONDS` 控制每轮额外时间（默认 240 秒）。构建 API 可传 `repair_rounds` 单次覆盖；验证失败时用同一 OpenCode 会话继续提示，并重跑静态预检与主机验证。轮次、错误和是否解决写入构建状态与 trace。
+- 构建预检：`executor/preflight.py` 在联网验证前编译规则里的所有 lxml CSS 选择器；`:not(:first-of-type)` 这类 lxml 不支持的写法会在预检阶段直接报出，而不是等到商品页全部 `plan_error`。
 - `worker` 默认 `--max-tasks 1`，按 `QUEUED` 取任务；Ctrl+C 停止领取新任务并等待已启动任务结束，已取消任务用 `cancel` 处理。
 - `pause` 只接受 `RUNNING`，`resume` 只接受 `PAUSED`；重复请求按当前状态幂等返回，非法转移返回 2。
 - `status` 和 `list` 是只读入口；`--json` 输出可直接给脚本消费。任务计数仍以 `task-result.json` 和 `docs/09` 为准。
@@ -223,20 +225,20 @@ runtime:
 - `harness/` 只服务构建期，不进入采集运行时；执行期仍零 LLM。
 - `OpenCodeServer` 在回环地址用随机端口和随机 `OPENCODE_PASSWORD` 启动 `opencode serve`，记录版本并在关闭时回收进程树；`OPENCODE_BIN` 可覆盖可执行文件。构建 server 的 cwd 指向 `work/`，使工作区内的 `.opencode/plugins/` 被发现。server 使用当前 OpenCode 的 provider 配置；构建工作区隔离，但 OpenCode 自身的数据目录尚未按构建强制隔离，当前每次冒烟会删除 session。
 - `OpenCodeClient` 封装 ADR 0006 的最小端点：session 创建／查询／删除、prompt、permission 列表／创建／回复、model、interrupt、message、export 和 `/api/event` SSE。
-- `OpenCodeHttpAdapter` 实现 `start_build`、`send_prompt`、`stream_events`、`reply_permission`、`pause`／`resume`、`cancel`、`collect_artifacts` 和 `close`；构建会话状态独立于采集任务状态。
+- `OpenCodeHttpAdapter` 实现 `start_build`、`send_prompt`、`continue_prompt`、`stream_events`、`reply_permission`、`pause`／`resume`、`cancel`、`collect_artifacts` 和 `close`；构建会话状态独立于采集任务状态。`continue_prompt` 只用于同一会话的验证修复轮次。
 - `BuildService` 管理 v1 单个活动构建：后台事件泵、事件日志、pending／held 权限、暂停后恢复时自动回复 held 权限、取消／关闭和依赖请求委托；这是服务边界，不是构建会话 UI。
 - 每次构建在 `sessions/<build_id>/` 下创建 `input/`、`work/`、`out/`、`logs/` 和 `control/`；`control/pause.json` 是 pause-gate 的控制文件，读取失败按暂停处理（fail closed）。`BuildWorkspace.create` 会把 `pause-gate` 插件写入 `work/.opencode/plugins/pause-gate/`；插件在权限 hook 中把暂停期间原本 `allow` 的工具动作提升为 `ask`，并把动作和效果写入 `control/pause-gate.log`。真实 shell 工具冒烟已看到 `shell allow -> ask`。
 - 事件归一化把 OpenCode 事件映射为 `phase_changed`、`tool_started`、`tool_finished`、`permission_requested`、`permission_replied`、`message_delta`、`finished`、`error` 等；推理事件只记录 `redacted`，不保存私有推理。
 - `DependencyPolicy` 提供基线／allowlist 判定、一次性审批和隔离安装边界：包名、版本和 manager 先校验；`package`／`manager`／`version`／`reason`／`source`／`license`／`scope`／`fallback` 字段原样记录；系统级或未知 manager 返回 `approval_required`，`approved=True` 只放行已显式批准的 build 包。安装只调用显式 build interpreter 的 `pip` 或 `uv pip --python`，不经 shell，并在安装后用 `importlib.metadata` 验证；失败返回 stderr 摘要。
 - `DependencyBridge` 是文件桥的 host 侧：轮询 `control/dependencies/requests/`，调用 `request_dependency`，写 `responses/`；暂停时保留请求，取消／关闭时写取消响应，审批超时写拒绝。`BuildService` 为每个构建启动桥，并提供 `pending_dependency_ids`／`reply_dependency` 一次性审批入口；构建会话 UI 仍未实现，审批目前由服务 API 调用。
 - `OpenCodeHttpAdapter.request_dependency` 会写 `dependency_available`／`dependency_installed`／`dependency_approval_required`／`dependency_denied`／`dependency_failed` 事件；插件注册和 execute 往返由 `test_dependency_bridge.py` 用假 `@opencode/plugin` 模块验证，真实模型循环中的 `request_dependency` 调用仍待冒烟。
-- 真实、无模型的冒烟与结果见 `experiments/harness/README.md`。`BuildService` 已接入 fake adapter 和依赖桥测试；真实模型工具调用／自然完成、站点级构建和 trace 已验证；完整构建会话 UI 和自动修复尚未实现。
+- 真实、无模型的冒烟与结果见 `experiments/harness/README.md`。`BuildService` 已接入 fake adapter 和依赖桥测试；真实模型工具调用／自然完成、站点级构建和 trace 已验证；站点详情已提供详细时间线和验证失败自动修复 1 轮，完整多轮会话 UI 仍未实现。
 
 ## Web 服务（serve）
 
 - `serve` 用 FastAPI 托管 `/api/*` 和 `static/`，默认 `127.0.0.1:8765`，拒绝非回环地址；`--rules-dir` 指向受管规则包目录。
 - 默认启动托管 worker（`--max-tasks` 默认 1），持有 `<db>.worker.lock`；`--no-worker` 可只读启动，便于另跑 `worker`。
-- 只读 API：`GET /api/health`、`GET /api/rules`、`GET /api/tasks`、`GET /api/tasks/{id}`、`GET /api/tasks/{id}/items?kind=url|product`、`GET /api/tasks/{id}/export`；批次与构建：`GET /api/batches`、`/api/batches/{id}`、`/api/builds`、`/api/builds/{id}`、`/api/builds/{id}/messages`、`/api/builds/{id}/trace`。
+- 只读 API：`GET /api/health`、`GET /api/rules`、`GET /api/tasks`、`GET /api/tasks/{id}`、`GET /api/tasks/{id}/items?kind=url|product`、`GET /api/tasks/{id}/export`；批次与构建：`GET /api/batches`、`/api/batches/{id}`、`/api/builds`、`/api/builds/config`、`/api/builds/{id}`、`/api/builds/{id}/messages`、`/api/builds/{id}/trace`。
 - 写 API：`POST /api/tasks`（`DRAFT` + `request_id` 幂等）、`start`、`pause`、`resume`、`cancel`、`archive`、`restore`；批次与构建：`POST /api/batches`、`/api/batches/{id}/import|start|pause|cancel|archive|restore`、`/api/batches/{id}/sites/{site_key}/build`、`/api/builds/{id}/pause|resume|cancel`、`/api/builds/{id}/permissions|dependencies/{request_id}`。
 - `GET /api/tasks/{id}/events` 是 SSE：连接先发 `snapshot`，再转发 `events.ndjson` 增量，终态发 `end`；断线重连以快照为准。
 - 导出 zip 只允许 `products.csv`、`task-result.json`、`records.jsonl` 和 `diagnostics/` 下的排除／失败文件；`partial=true` 才允许导出未结束任务。
@@ -367,4 +369,4 @@ CSV 对以 `=`、`+`、`-`、`@` 开头的文本单元格加单引号，防止�
 - `discovered_urls`、待处理数和导航数由调用方或运行时提供；导出层不构造全站分母。
 - `outcome` 是推导值，不接受调用方直接覆盖。
 - `schemas/` 目前随仓库分发，尚未打进 wheel；安装包与 schema 分发在 R14 处理。
-- 批次工作台阶段 1 已实现并验收；阶段 2／3（批次自动构建、完整构建会话 UI、自动修复、整批合并 CSV 等）未实现。构建 Agent 已接入批次站点详情，但仍是一次一个构建、失败后需人工重试；trace 默认不含 reasoning，只有显式开启才保留。`frontend/dist/` 不提交，部署前需 `npm run build`；Node 建议 24.15+（本机 24.14.1 有 EBADENGINE 警告但构建通过）。
+- 批次工作台阶段 1 已实现并验收；阶段 2／3（批次自动构建、完整构建会话 UI、整批合并 CSV 等）未实现。构建 Agent 已接入批次站点详情，一次一个构建；验证失败默认自动修复 1 轮，仍失败后再人工重试。站点详情已提供思考／工具／文本合并的详细时间线；trace 默认不含 reasoning，只有显式开启才保留。`frontend/dist/` 不提交，部署前需 `npm run build`；Node 建议 24.15+（本机 24.14.1 有 EBADENGINE 警告但构建通过）。

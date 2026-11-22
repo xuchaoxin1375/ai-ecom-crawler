@@ -1543,6 +1543,77 @@ tr:last-child td {
   font-weight: 600;
 }
 
+.build-output-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.build-output-head .check {
+  min-height: auto;
+  font-size: 12px;
+}
+
+.build-timeline {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.trace-entry {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel);
+}
+
+.trace-entry > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.trace-entry.reasoning {
+  border-style: dashed;
+  background: var(--panel-alt);
+}
+
+.trace-entry.reasoning > summary {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.trace-entry.tool > summary {
+  overflow-wrap: anywhere;
+}
+
+.trace-entry.text .trace-entry-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
+.trace-detail {
+  margin-top: 8px;
+}
+
+.trace-label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .build-output-text {
   max-height: 360px;
   overflow: auto;

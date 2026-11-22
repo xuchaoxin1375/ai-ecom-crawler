@@ -140,6 +140,8 @@ def build_trace(
     model: dict[str, Any] | None,
     events: list[dict[str, Any]] | None = None,
     validation: dict[str, Any] | None = None,
+    repairs: list[dict[str, Any]] | None = None,
+    repair_limit: int = 0,
     error: str | None = None,
     capture_reasoning: bool = False,
 ) -> dict[str, Any]:
@@ -244,6 +246,8 @@ def build_trace(
         "reasoning": reasoning,
         "reasoning_retained": bool(reasoning),
         "validation": validation,
+        "repairs": repairs or [],
+        "repair_limit": int(repair_limit or 0),
         "limitations": [
             (
                 "Trace is sanitized and truncated; reasoning is retained only "
@@ -302,6 +306,20 @@ def render_trace_markdown(trace: dict[str, Any]) -> str:
                 "```",
             ]
         )
+    if trace.get("repairs"):
+        lines.extend(
+            [
+                "",
+                f"## Automatic repair rounds ({trace.get('repair_limit', 0)} allowed)",
+                "",
+            ]
+        )
+        for repair in trace["repairs"]:
+            status = "resolved" if repair.get("resolved") else "not resolved"
+            lines.append(
+                f"- Round {repair.get('round')} ({status}, "
+                f"{repair.get('started_at') or '-'}): {repair.get('error')}"
+            )
     if trace.get("messages"):
         lines.extend(["", "## Visible messages", ""])
         for message in trace["messages"]:

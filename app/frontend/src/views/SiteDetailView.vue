@@ -6,6 +6,7 @@ import {
   cancelTask,
   getBatch,
   getBuild,
+  getBuildConfig,
   getBuildMessages,
   getTaskItems,
   pauseBuild,
@@ -18,9 +19,11 @@ import {
   taskExportUrl,
   type BatchSite,
   type BatchSummary,
+  type BuildConfig,
   type BuildEvent,
   type BuildMessages,
   type BuildStatus,
+  type BuildTimelineItem,
   type TaskItem,
 } from "../api";
 import {
@@ -59,6 +62,9 @@ const buildError = ref("");
 const buildBusy = ref("");
 const buildProxy = ref("");
 const captureReasoning = ref(false);
+const detailMode = ref(true);
+const autoRepair = ref(true);
+const buildConfig = ref<BuildConfig | null>(null);
 const buildOutput = ref<BuildMessages | null>(null);
 let buildTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -163,6 +169,14 @@ async function loadBuildOutput(buildId: string) {
   }
 }
 
+async function loadBuildConfig() {
+  try {
+    buildConfig.value = await getBuildConfig();
+  } catch {
+    buildConfig.value = null;
+  }
+}
+
 const outputText = computed(() => {
   if (!buildOutput.value) return "";
   const separator = buildOutput.value.live ? "" : "\n\n";
@@ -172,6 +186,17 @@ const outputText = computed(() => {
 const reasoningText = computed(() =>
   (buildOutput.value?.reasoning || []).map((item) => item.text).join("\n\n"),
 );
+
+const timeline = computed<BuildTimelineItem[]>(
+  () => buildOutput.value?.timeline || [],
+);
+
+const activeRepair = computed(() => {
+  if (!buildActive.value) return null;
+  const rounds = build.value?.repairs || [];
+  const last = rounds[rounds.length - 1];
+  return last && !last.finished_at ? last : null;
+});
 
 async function refreshBuild() {
   const buildId = build.value?.build_id;
@@ -201,6 +226,7 @@ async function startBuild() {
       max_seconds: 600,
       proxy: buildProxy.value.trim() || undefined,
       capture_reasoning: captureReasoning.value,
+      repair_rounds: autoRepair.value ? 1 : 0,
     });
     build.value = payload.build;
     await load();
@@ -319,6 +345,41 @@ function buildEventTone(event: BuildEvent): string {
   return "muted";
 }
 
+function toolStatusLabel(status: string | undefined): string {
+  if (!status) return "未知";
+  if (status === "completed" || status === "success") return "完成";
+  if (status === "failed" || status === "error") return "失败";
+  if (status === "running") return "运行中";
+  return status;
+}
+
+function toolStatusTone(status: string | undefined): string {
+  if (status === "completed" || status === "success") return "success";
+  if (status === "failed" || status === "error") return "danger";
+  if (status === "running") return "warning";
+  return "muted";
+}
+
+function timelineTime(item: BuildTimelineItem): string {
+  return item.created_at ? formatTime(item.created_at) : "";
+}
+
+function formatTimelineValue(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function reasoningSummary(item: BuildTimelineItem): string {
+  const length = item.text?.length || 0;
+  const time = timelineTime(item);
+  return `思考${time ? ` · ${time}` : ""} · ${length} 字`;
+}
+
 function permissionItems(): Array<Record<string, unknown>> {
   return (build.value?.pending_permissions || []).filter(
     (item) => item && typeof item.id === "string",
@@ -432,8 +493,7 @@ function detailRows(exception: Record<string, unknown>): Array<[string, string]>
 watch(tab, loadItems);
 
 onMounted(async () => {
-  await load();
-  await loadItems();
+  await Promise.all([load(), loadItems(), loadBuildConfig()]);
 });
 </script>
 
@@ -604,12 +664,38 @@ onMounted(async () => {
 
       <div class="build-trace-options">
         <label class="check">
-          <input v-model="captureReasoning" type="checkbox" />
+          <input
+            v-model="captureReasoning"
+            type="checkbox"
+            :disabled="Boolean(buildConfig && !buildConfig.reasoning_capture_enabled)"
+          />
           保留思考过程（仅本地复盘，默认关闭）
         </label>
         <small class="muted">
           需服务端以 <code>ECOM_BUILD_CAPTURE_REASONING=1</code> 启动；保留内容会截断并跳过私有推理之外的页面全文。
         </small>
+        <small v-if="buildConfig && !buildConfig.reasoning_capture_enabled" class="muted">
+          当前服务端未开启思考保留，勾选不会生效。
+        </small>
+        <label class="check">
+          <input
+            v-model="autoRepair"
+            type="checkbox"
+            :disabled="Boolean(buildConfig && buildConfig.max_repair_rounds < 1)"
+          />
+          验证失败后自动修复 1 轮
+        </label>
+        <small class="muted">
+          预检规则选择器；验证失败时把精确错误回给同一模型会话修复一次，再重新验证。
+          会多一次模型调用。
+        </small>
+        <small v-if="buildConfig && buildConfig.max_repair_rounds < 1" class="muted">
+          当前服务端未启用自动修复（<code>ECOM_BUILD_MAX_REPAIR_ROUNDS=0</code>）。
+        </small>
+        <label class="check">
+          <input v-model="detailMode" type="checkbox" />
+          详细模式（时间线，显示思考与工具调用）
+        </label>
       </div>
 
       <p v-if="buildError" class="notice danger" role="alert">{{ buildError }}</p>
@@ -636,6 +722,13 @@ onMounted(async () => {
         <span v-if="build.rule" class="muted">
           规则 {{ build.rule.rule_id }}@{{ build.rule.rule_version }}
         </span>
+        <span
+          v-if="build.repair_round"
+          class="badge"
+          :class="build.repairs.some((item) => item.resolved) ? 'success' : 'muted'"
+        >
+          自动修复 {{ build.repair_round }}/{{ build.repair_limit }}
+        </span>
         <a
           v-if="build.trace_available"
           class="button button-sm"
@@ -658,6 +751,13 @@ onMounted(async () => {
       </p>
 
       <p v-if="build?.error" class="notice danger">{{ build.error }}</p>
+
+      <div v-if="activeRepair" class="notice warning">
+        <strong>
+          自动修复第 {{ activeRepair.round }}/{{ build?.repair_limit }} 轮
+        </strong>
+        <p class="muted">上次验证失败：{{ activeRepair.error }}</p>
+      </div>
 
       <div v-if="build?.pending_dependencies?.length" class="notice warning">
         <strong>依赖审批</strong>
@@ -730,23 +830,81 @@ onMounted(async () => {
         </li>
       </ol>
 
-      <details
-        v-if="buildOutput && (outputText || reasoningText)"
+      <section
+        v-if="buildOutput && (outputText || reasoningText || timeline.length)"
         class="build-output"
       >
-        <summary>
-          模型输出（{{ buildOutput.live ? "流式片段" : "阶段性" }}）
-        </summary>
-        <p v-if="buildOutput.live" class="muted">
-          模型正在输出，片段会随轮询追加；构建结束后显示完整可见消息。
-        </p>
-        <pre v-if="outputText" class="build-output-text">{{ outputText }}</pre>
-        <p v-else class="muted">还没有可见模型输出。</p>
-        <details v-if="reasoningText" class="build-reasoning">
-          <summary>思考过程（已保留，仅本地复盘）</summary>
-          <pre class="build-output-text">{{ reasoningText }}</pre>
-        </details>
-      </details>
+        <header class="build-output-head">
+          <strong>模型输出（{{ buildOutput.live ? "流式" : "阶段性" }}）</strong>
+        </header>
+        <template v-if="detailMode">
+          <p v-if="buildOutput.live" class="muted">
+            模型正在输出，时间线会随轮询追加；构建结束后补全工具入参和输出。
+          </p>
+          <p v-if="!buildOutput.reasoning_retained" class="muted">
+            本次构建未保留思考过程；构建前勾选“保留思考过程”且服务端开启
+            <code>ECOM_BUILD_CAPTURE_REASONING=1</code> 才会显示。
+          </p>
+          <p v-if="!timeline.length" class="muted">还没有可见模型输出。</p>
+          <div v-else class="build-timeline">
+            <template
+              v-for="(item, index) in timeline"
+              :key="`${item.kind}-${index}-${item.created_at || ''}`"
+            >
+              <details v-if="item.kind === 'reasoning'" class="trace-entry reasoning">
+                <summary>{{ reasoningSummary(item) }}</summary>
+                <pre class="build-output-text">{{ item.text }}</pre>
+              </details>
+              <details v-else-if="item.kind === 'tool'" class="trace-entry tool">
+                <summary>
+                  工具 {{ item.name || "unknown" }}
+                  <span class="badge" :class="toolStatusTone(item.status)">
+                    {{ toolStatusLabel(item.status) }}
+                  </span>
+                  <span class="muted">{{ timelineTime(item) }}</span>
+                  <span v-if="item.duration_ms != null" class="muted">
+                    {{ item.duration_ms }} ms
+                  </span>
+                </summary>
+                <div v-if="formatTimelineValue(item.input)" class="trace-detail">
+                  <span class="trace-label">入参</span>
+                  <pre class="build-output-text">{{ formatTimelineValue(item.input) }}</pre>
+                </div>
+                <div v-if="item.output" class="trace-detail">
+                  <span class="trace-label">输出</span>
+                  <pre class="build-output-text">{{ item.output }}</pre>
+                </div>
+                <p
+                  v-if="!formatTimelineValue(item.input) && !item.output"
+                  class="muted"
+                >
+                  工具完成后可在 trace 查看输出。
+                </p>
+              </details>
+              <div v-else class="trace-entry text">
+                <div class="trace-entry-head">
+                  <span class="badge muted">
+                    {{ item.role === "user" ? "用户" : "模型" }}
+                  </span>
+                  <span class="muted">{{ timelineTime(item) }}</span>
+                </div>
+                <pre class="build-output-text">{{ item.text }}</pre>
+              </div>
+            </template>
+          </div>
+          <p v-if="buildOutput.timeline_truncated" class="muted">
+            时间线只显示最近 200 条记录；完整内容请下载 trace。
+          </p>
+        </template>
+        <template v-else>
+          <pre v-if="outputText" class="build-output-text">{{ outputText }}</pre>
+          <p v-else class="muted">还没有可见模型输出。</p>
+          <details v-if="reasoningText" class="build-reasoning">
+            <summary>思考过程（已保留，仅本地复盘）</summary>
+            <pre class="build-output-text">{{ reasoningText }}</pre>
+          </details>
+        </template>
+      </section>
       <p v-else-if="build && !buildActive" class="muted">
         本次构建没有可见模型输出；可下载 trace 查看工具调用和错误。
       </p>

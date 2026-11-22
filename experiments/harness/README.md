@@ -103,6 +103,6 @@ python -m uv run --project app python experiments/harness/dependency_install_smo
 
 WSL2 Ubuntu + Python 3.12.3、`PYTHONPATH=app/src` 下，`test_harness.py`、`test_dependencies.py` 和 `test_service.py` 曾通过；WSL 没有安装真实 `opencode`，这里只验证 fake server、策略层和服务层。2026-11-22 的依赖桥新增用例只在 Windows 本机执行。
 
-未覆盖：完整构建会话 UI、自动修复轮次、真实模型循环中的 `request_dependency` 调用和跨物理设备。
+未覆盖：完整构建会话 UI、真实模型自动修复轮次、真实模型循环中的 `request_dependency` 调用和跨物理设备。
 
 server 使用当前 OpenCode 的 provider 配置；构建工作区隔离，但 OpenCode 自身的数据目录尚未按构建强制隔离。每次冒烟会删除 session，不保留模型对话。

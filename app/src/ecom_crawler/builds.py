@@ -31,6 +31,7 @@ from urllib.parse import urlsplit, urlunsplit
 import yaml
 
 from .execution import run_task
+from .executor.preflight import check_rule_selectors, format_selector_errors
 from .harness import BuildService, BuildTask, OpenCodeHttpAdapter
 from .harness.adapter import BuildSession
 from .harness.dependencies import DependencyPolicy
@@ -75,6 +76,7 @@ MARKET_CURRENCY = {
     "CN": "CNY",
 }
 RULE_NAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
+TIMELINE_LIMIT = 200
 logger = logging.getLogger(__name__)
 
 
@@ -114,7 +116,7 @@ def default_validator(
     """Run the bounded validation task in an isolated ledger/output tree."""
     work_dir.mkdir(parents=True, exist_ok=True)
     task_id = f"validate-{uuid.uuid4().hex[:10]}"
-    result, _ = run_task(
+    result, task_dir = run_task(
         rule_path=rule_path,
         db_path=work_dir / "validation.db",
         out_root=work_dir / "out",
@@ -127,8 +129,9 @@ def default_validator(
         per_domain_rps=1.0,
         proxy=proxy,
     )
+    result["failure_samples"] = _validation_failure_samples(work_dir, task_id)
     currencies: dict[str, int] = {}
-    products_path = work_dir / "out" / task_id / "export" / "products.csv"
+    products_path = task_dir / "export" / "products.csv"
     if products_path.is_file():
         with products_path.open(encoding="utf-8", newline="") as handle:
             for row in csv.DictReader(handle):
@@ -144,14 +147,21 @@ def _safe_filename(value: str) -> str:
     return cleaned or "rule"
 
 
-def _seconds_since(value: str | None) -> float | None:
+def _seconds_since(value: str | None, *, end: str | None = None) -> float | None:
     if not value:
         return None
     try:
         parsed = datetime.fromisoformat(value)
     except ValueError:
         return None
-    return max(0.0, (datetime.now(UTC) - parsed).total_seconds())
+    if end:
+        try:
+            finished = datetime.fromisoformat(end)
+        except ValueError:
+            finished = datetime.now(UTC)
+    else:
+        finished = datetime.now(UTC)
+    return max(0.0, (finished - parsed).total_seconds())
 
 
 def _validate_proxy(value: str) -> None:
@@ -189,6 +199,198 @@ def _origin(entry_url: str) -> str:
     return f"{parts.scheme}://{parts.netloc}"
 
 
+def _validation_failure_samples(
+    work_dir: Path, task_id: str, *, limit: int = 5
+) -> list[dict[str, str]]:
+    """Read failed product items from the bounded validation ledger."""
+    db_path = work_dir / "validation.db"
+    if not db_path.is_file():
+        return []
+    try:
+        store = TaskStore(db_path)
+        items = store.items(task_id, "product")
+    except Exception:
+        logger.debug("validation failure samples unavailable", exc_info=True)
+        return []
+    samples: list[dict[str, str]] = []
+    for item in items:
+        if item.state != "FAILED":
+            continue
+        reason = str(item.result.get("reason") or item.failure_class or "failed")
+        detail = str(item.result.get("detail") or "")
+        samples.append({"url": item.url, "reason": reason, "detail": detail})
+        if len(samples) >= limit:
+            break
+    return samples
+
+
+def _validation_error_message(
+    task_result: dict[str, Any], *, valid: int, failed: int
+) -> str:
+    parts = [
+        f"host validation produced no valid products: valid={valid}, failed={failed}",
+        f"stop_reason={task_result.get('stop_reason')}",
+    ]
+    detail = str(task_result.get("stop_detail") or "").strip()
+    if detail:
+        parts.append(f"detail: {detail}")
+    samples = task_result.get("failure_samples") or []
+    if isinstance(samples, list) and samples:
+        sample_text = "; ".join(
+            f"{sample.get('url')} -> {sample.get('reason')}"
+            for sample in samples[:3]
+            if isinstance(sample, dict)
+        )
+        if sample_text:
+            parts.append(f"samples: {sample_text}")
+    return ", ".join(parts)
+
+
+def _trace_timeline(
+    trace: dict[str, Any], *, limit: int = TIMELINE_LIMIT
+) -> tuple[list[dict[str, Any]], bool]:
+    """Merge visible messages, reasoning and tools into chronological entries."""
+    entries: list[dict[str, Any]] = []
+    for item in trace.get("messages") or []:
+        if not isinstance(item, dict) or not item.get("text"):
+            continue
+        entries.append(
+            {
+                "kind": "text",
+                "role": str(item.get("role") or "assistant"),
+                "created_at": item.get("created_at"),
+                "text": str(item.get("text") or ""),
+            }
+        )
+    for item in trace.get("reasoning") or []:
+        if not isinstance(item, dict) or not item.get("text"):
+            continue
+        entries.append(
+            {
+                "kind": "reasoning",
+                "created_at": item.get("created_at"),
+                "text": str(item.get("text") or ""),
+            }
+        )
+    for item in trace.get("tools") or []:
+        if not isinstance(item, dict):
+            continue
+        entries.append(
+            {
+                "kind": "tool",
+                "created_at": item.get("created_at"),
+                "name": str(item.get("name") or "unknown"),
+                "status": str(item.get("status") or ""),
+                "input": item.get("input"),
+                "output": item.get("output"),
+                "duration_ms": item.get("duration_ms"),
+            }
+        )
+    entries.sort(
+        key=lambda item: (
+            item.get("created_at") is None,
+            item.get("created_at") or "",
+        )
+    )
+    truncated = len(entries) > limit
+    return entries[-limit:], truncated
+
+
+def _live_timeline(
+    events: list[Any], *, limit: int = TIMELINE_LIMIT
+) -> tuple[list[dict[str, Any]], bool]:
+    """Build the same timeline shape from the in-memory event stream."""
+    entries: list[dict[str, Any]] = []
+    text_buffer: list[str] = []
+    reasoning_buffer: list[str] = []
+    text_started: str | None = None
+    reasoning_started: str | None = None
+
+    def flush_text() -> None:
+        nonlocal text_started
+        if text_buffer:
+            entries.append(
+                {
+                    "kind": "text",
+                    "role": "assistant",
+                    "created_at": text_started,
+                    "text": "".join(text_buffer),
+                }
+            )
+            text_buffer.clear()
+        text_started = None
+
+    def flush_reasoning() -> None:
+        nonlocal reasoning_started
+        if reasoning_buffer:
+            entries.append(
+                {
+                    "kind": "reasoning",
+                    "created_at": reasoning_started,
+                    "text": "".join(reasoning_buffer),
+                }
+            )
+            reasoning_buffer.clear()
+        reasoning_started = None
+
+    def append_bounded(buffer: list[str], value: str, *, cap: int = 8000) -> None:
+        current = sum(len(part) for part in buffer)
+        if current >= cap:
+            return
+        buffer.append(value[: cap - current])
+
+    for event in events:
+        event_type = getattr(event, "type", "")
+        data = getattr(event, "data", {}) or {}
+        if event_type == "message_delta":
+            flush_reasoning()
+            if text_started is None:
+                text_started = getattr(event, "created_at", None)
+            append_bounded(text_buffer, str(data.get("delta") or ""))
+        elif event_type == "reasoning":
+            flush_text()
+            if reasoning_started is None:
+                reasoning_started = getattr(event, "created_at", None)
+            append_bounded(reasoning_buffer, str(data.get("delta") or ""))
+        elif event_type == "tool_started":
+            flush_text()
+            flush_reasoning()
+            entries.append(
+                {
+                    "kind": "tool",
+                    "created_at": getattr(event, "created_at", None),
+                    "name": str(data.get("tool") or "unknown"),
+                    "status": "running",
+                    "call_id": data.get("call_id"),
+                }
+            )
+        elif event_type == "tool_finished":
+            flush_text()
+            flush_reasoning()
+            call_id = data.get("call_id")
+            target = None
+            for entry in reversed(entries):
+                if entry.get("kind") != "tool" or entry.get("status") != "running":
+                    continue
+                if call_id and entry.get("call_id") not in {None, call_id}:
+                    continue
+                target = entry
+                break
+            if target is None:
+                target = {
+                    "kind": "tool",
+                    "created_at": getattr(event, "created_at", None),
+                    "name": str(data.get("tool") or "unknown"),
+                }
+                entries.append(target)
+            target["status"] = str(data.get("status") or "finished")
+    flush_text()
+    flush_reasoning()
+    truncated = len(entries) > limit
+    return entries[-limit:], truncated
+
+
+
 class BuildManager:
     """Own build records, harness sessions and host-side rule installation."""
 
@@ -207,6 +409,8 @@ class BuildManager:
         event_timeout: float | None = None,
         default_proxy: str | None = None,
         capture_reasoning: bool | None = None,
+        max_repair_rounds: int | None = None,
+        repair_seconds: int | None = None,
     ) -> None:
         self.store = store
         self.out_root = Path(out_root)
@@ -225,6 +429,25 @@ class BuildManager:
             else os.environ.get("ECOM_BUILD_CAPTURE_REASONING") == "1"
         )
         self._trace_reasoning: dict[str, bool] = {}
+        self.max_repair_rounds = max(
+            0,
+            int(
+                max_repair_rounds
+                if max_repair_rounds is not None
+                else os.environ.get("ECOM_BUILD_MAX_REPAIR_ROUNDS", "1")
+            ),
+        )
+        self.repair_seconds = max(
+            0,
+            int(
+                repair_seconds
+                if repair_seconds is not None
+                else os.environ.get("ECOM_BUILD_REPAIR_SECONDS", "240")
+            ),
+        )
+        self._repair_limits: dict[str, int] = {}
+        self._repairs: dict[str, list[dict[str, Any]]] = {}
+        self._trace_meta_cache: dict[str, dict[str, Any]] = {}
         self.validator = validator or default_validator
         self.max_seconds = int(
             max_seconds
@@ -268,6 +491,7 @@ class BuildManager:
         max_seconds: int | None = None,
         proxy: str | None = None,
         capture_reasoning: bool | None = None,
+        repair_rounds: int | None = None,
     ) -> BuildRecord:
         if site.readiness in {"invalid", "duplicate"}:
             raise BuildError("invalid or duplicate sites cannot be built")
@@ -293,6 +517,13 @@ class BuildManager:
             self._trace_reasoning[build_id] = bool(
                 capture_reasoning and self.reasoning_capture_enabled
             )
+            requested_repairs = (
+                self.max_repair_rounds
+                if repair_rounds is None
+                else max(0, min(int(repair_rounds), self.max_repair_rounds))
+            )
+            self._repair_limits[build_id] = requested_repairs
+            self._repairs[build_id] = []
             task = BuildTask(
                 build_id=build_id,
                 site={
@@ -535,7 +766,11 @@ domain-mismatched, or produces no valid product.
                 if session.state in TERMINAL_BUILD_STATES:
                     if session.state == "FINISHED" and record.state not in TERMINAL_BUILD_STATES:
                         self.store.update_build(build_id, state="VALIDATING")
-                    self._finalize(build_id)
+                    result = self._finalize(build_id)
+                    if result == "repairing":
+                        deadline = time.monotonic() + self.repair_seconds
+                        time.sleep(0.5)
+                        continue
                     return
                 if time.monotonic() >= deadline:
                     try:
@@ -586,18 +821,26 @@ domain-mismatched, or produces no valid product.
                 continue
 
     # --------------------------------------------------------------- finalize
-    def _finalize(self, build_id: str, *, error: str | None = None) -> None:
+    def _finalize(
+        self, build_id: str, *, error: str | None = None
+    ) -> str | None:
+        """Validate and install one finished agent run.
+
+        Returns ``"repairing"`` when a failed validation was handed back to the
+        same harness session; the watcher must keep waiting in that case.
+        """
         with self._lock:
             if build_id in self._finalizing:
-                return
+                return None
             self._finalizing.add(build_id)
         try:
             record = self.store.get_build(build_id)
             if record is None:
-                return
+                return None
             session = self._session(build_id)
             if session is None:
                 message = error or "build session disappeared"
+                self._mark_repair_finished(build_id, resolved=False)
                 self._release_site(
                     record.batch_id,
                     record.site_key,
@@ -605,7 +848,7 @@ domain-mismatched, or produces no valid product.
                     f"构建失败：{message}",
                 )
                 self._record_failure(build_id, message)
-                return
+                return None
             try:
                 self.service.adapter.collect_artifacts(build_id)
             except Exception:
@@ -618,6 +861,7 @@ domain-mismatched, or produces no valid product.
                 error = session.error or f"build ended with {session.state}/{session.outcome}"
 
             if error is not None:
+                self._mark_repair_finished(build_id, resolved=False)
                 self._write_trace(build_id, session, error=error)
                 self._release_site(
                     record.batch_id,
@@ -627,11 +871,15 @@ domain-mismatched, or produces no valid product.
                 )
                 self._record_failure(build_id, error)
                 self._close_session(build_id)
-                return
+                return None
 
+            validation: dict[str, Any] | None = None
             try:
                 rule_path = self._find_rule(session)
                 rule = load_rule(rule_path)
+                selector_errors = check_rule_selectors(rule.raw)
+                if selector_errors:
+                    raise BuildError(format_selector_errors(selector_errors))
                 domains = rule_domains(rule.site)
                 if record.site_key not in domains:
                     raise BuildError(
@@ -651,11 +899,25 @@ domain-mismatched, or produces no valid product.
                 counts = counts if isinstance(counts, dict) else {}
                 valid = int(counts.get("valid_products") or 0)
                 failed = int(counts.get("failed_products") or 0)
+                validation = {
+                    "valid_products": valid,
+                    "failed_products": failed,
+                    "stop_reason": task_result.get("stop_reason")
+                    if isinstance(task_result, dict)
+                    else None,
+                    "stop_detail": task_result.get("stop_detail")
+                    if isinstance(task_result, dict)
+                    else None,
+                    "failure_samples": task_result.get("failure_samples") or [],
+                    "currencies": task_result.get("currencies") or {},
+                }
                 if valid < 1:
                     raise BuildError(
-                        "host validation produced no valid products: "
-                        f"valid={valid}, failed={failed}, "
-                        f"stop_reason={task_result.get('stop_reason') if isinstance(task_result, dict) else None}"
+                        _validation_error_message(
+                            task_result if isinstance(task_result, dict) else {},
+                            valid=valid,
+                            failed=failed,
+                        )
                     )
                 batch = self.store.get_batch(record.batch_id)
                 batch_market = (batch.market or "").strip().upper() if batch else ""
@@ -678,6 +940,7 @@ domain-mismatched, or produces no valid product.
                     for key, value in currencies.items()
                     if key and int(value) > 0
                 }
+                validation["currencies"] = currencies
                 if rule_currency and currencies and rule_currency not in currencies:
                     raise BuildError(
                         f"currency mismatch: rule declares {rule_currency}, "
@@ -692,7 +955,12 @@ domain-mismatched, or produces no valid product.
                 )
             except Exception as exc:  # noqa: BLE001 - rule/validation boundary
                 message = f"{type(exc).__name__}: {exc}"
-                self._write_trace(build_id, session, error=message)
+                if self._start_repair(build_id, message, validation):
+                    return "repairing"
+                self._mark_repair_finished(build_id, resolved=False)
+                self._write_trace(
+                    build_id, session, validation=validation, error=message
+                )
                 self._release_site(
                     record.batch_id,
                     record.site_key,
@@ -701,8 +969,16 @@ domain-mismatched, or produces no valid product.
                 )
                 self._record_failure(build_id, message)
                 self._close_session(build_id)
-                return
+                return None
 
+            validation.update(
+                {
+                    "rule_id": rule_id,
+                    "rule_version": rule_version,
+                    "rule_path": rule_name,
+                    "batch_market": batch_market or None,
+                }
+            )
             note = (
                 f"候选方案：{rule_id}@{rule_version}，"
                 f"有界验证 {valid} 条有效、{failed} 失败；待人工签字"
@@ -719,18 +995,11 @@ domain-mismatched, or produces no valid product.
                     proxy=record.proxy,
                     note=note,
                 )
+            self._mark_repair_finished(build_id, resolved=True)
             self._write_trace(
                 build_id,
                 session,
-                validation={
-                    "valid_products": valid,
-                    "failed_products": failed,
-                    "currencies": currencies,
-                    "rule_id": rule_id,
-                    "rule_version": rule_version,
-                    "rule_path": rule_name,
-                    "batch_market": batch_market or None,
-                },
+                validation=validation,
             )
             self.store.update_build(
                 build_id,
@@ -743,10 +1012,134 @@ domain-mismatched, or produces no valid product.
                 error=None,
             )
             self._close_session(build_id)
+            return None
         finally:
             with self._lock:
                 self._finalizing.discard(build_id)
                 self._handled_permissions.pop(build_id, None)
+
+    def _start_repair(
+        self,
+        build_id: str,
+        message: str,
+        validation: dict[str, Any] | None,
+    ) -> bool:
+        """Hand one validation failure back to the same harness session."""
+        rounds = self._repairs.setdefault(build_id, [])
+        limit = self._repair_limits.get(build_id, 0)
+        if len(rounds) >= limit:
+            return False
+        if rounds:
+            rounds[-1].setdefault("finished_at", utc_now())
+            rounds[-1].setdefault("resolved", False)
+        round_number = len(rounds) + 1
+        entry: dict[str, Any] = {
+            "round": round_number,
+            "error": message,
+            "validation": validation,
+            "started_at": utc_now(),
+        }
+        rounds.append(entry)
+        prompt = self._repair_prompt(round_number, limit, message, validation)
+        try:
+            self.service.continue_after_finish(build_id, prompt)
+        except Exception as exc:  # noqa: BLE001 - continuation boundary
+            entry.update(
+                {
+                    "finished_at": utc_now(),
+                    "resolved": False,
+                    "start_error": f"{type(exc).__name__}: {exc}",
+                }
+            )
+            return False
+        self.store.update_build(build_id, state="RUNNING", error=None)
+        return True
+
+    def _repair_prompt(
+        self,
+        round_number: int,
+        limit: int,
+        message: str,
+        validation: dict[str, Any] | None,
+    ) -> str:
+        lines = [
+            (
+                "Host validation rejected the rule. Repair the existing rule instead "
+                "of repeating the whole site investigation."
+            ),
+            f"This is automatic repair round {round_number} of {limit}.",
+            "",
+            "Exact failure:",
+            message,
+        ]
+        if validation:
+            detail = str(validation.get("stop_detail") or "").strip()
+            if detail and detail not in message:
+                lines.extend(["", f"Validation detail: {detail}"])
+            samples = validation.get("failure_samples") or []
+            if isinstance(samples, list) and samples:
+                lines.extend(["", "Failed sample URLs:"])
+                for sample in samples[:5]:
+                    if not isinstance(sample, dict):
+                        continue
+                    lines.append(
+                        f"- {sample.get('url')}: {sample.get('reason')}"
+                        + (
+                            f" ({sample.get('detail')})"
+                            if sample.get("detail")
+                            else ""
+                        )
+                    )
+        lines.extend(
+            [
+                "",
+                "Required work:",
+                "- Edit ../out/plan/rule.yaml only, plus evidence notes if needed.",
+                "- Keep the same site, market, currency, scope and five core fields.",
+                (
+                    "- Every CSS selector must compile under lxml/cssselect. In particular, "
+                    "`:not(:first-of-type)` fails in lxml with `*:first-of-type is not "
+                    "implemented`; use `:nth-of-type(n+2)`, a class, or an attribute "
+                    "selector instead."
+                ),
+                (
+                    "- Inspect at most one product page for the fix; do not expand the "
+                    "request budget. Reply briefly when the rule is updated."
+                ),
+            ]
+        )
+        return "\n".join(lines)
+
+    def _mark_repair_finished(self, build_id: str, *, resolved: bool) -> None:
+        rounds = self._repairs.get(build_id) or []
+        if not rounds:
+            return
+        last = rounds[-1]
+        last.setdefault("finished_at", utc_now())
+        last["resolved"] = resolved
+
+
+    def _trace_meta(self, build_id: str, workspace: str | None) -> dict[str, Any]:
+        cached = self._trace_meta_cache.get(build_id)
+        if cached is not None:
+            return cached
+        meta: dict[str, Any] = {}
+        if workspace:
+            path = Path(workspace) / "out" / "trace.json"
+            if path.is_file():
+                try:
+                    trace = json.loads(path.read_text(encoding="utf-8"))
+                    meta = {
+                        "repairs": trace.get("repairs") or [],
+                        "repair_limit": int(trace.get("repair_limit") or 0),
+                        "reasoning_retained": bool(
+                            trace.get("reasoning_retained")
+                        ),
+                    }
+                except (OSError, json.JSONDecodeError):
+                    meta = {}
+        self._trace_meta_cache[build_id] = meta
+        return meta
 
     def _write_trace(
         self,
@@ -756,6 +1149,7 @@ domain-mismatched, or produces no valid product.
         validation: dict[str, Any] | None = None,
         error: str | None = None,
     ) -> None:
+        self._trace_meta_cache.pop(build_id, None)
         export: dict[str, Any] | None = None
         client = getattr(self.service.adapter, "client", None)
         if client is not None and session.session_id:
@@ -774,6 +1168,8 @@ domain-mismatched, or produces no valid product.
             model=session.model,
             events=events,
             validation=validation,
+            repairs=list(self._repairs.get(build_id, [])),
+            repair_limit=self._repair_limits.get(build_id, 0),
             error=error,
             capture_reasoning=self._trace_reasoning.get(build_id, False),
         )
@@ -926,6 +1322,14 @@ domain-mismatched, or produces no valid product.
                 pending_dependencies = []
         else:
             events = self._read_events(record.workspace, limit=max(1, event_limit))
+        repair_limit = self._repair_limits.get(build_id)
+        repairs = list(self._repairs.get(build_id, []))
+        trace_meta: dict[str, Any] = {}
+        if repair_limit is None:
+            trace_meta = self._trace_meta(build_id, record.workspace)
+            repair_limit = int(trace_meta.get("repair_limit") or 0)
+        if not repairs:
+            repairs = list(trace_meta.get("repairs") or [])
         return {
             "build_id": record.build_id,
             "batch_id": record.batch_id,
@@ -951,7 +1355,10 @@ domain-mismatched, or produces no valid product.
             "updated_at": record.updated_at,
             "started_at": record.started_at,
             "finished_at": record.finished_at,
-            "elapsed_seconds": _seconds_since(record.started_at),
+            "elapsed_seconds": _seconds_since(
+                record.started_at,
+                end=record.finished_at if record.state in TERMINAL_BUILD_STATES else None,
+            ),
             "events": events,
             "pending_permissions": pending_permissions,
             "pending_dependencies": pending_dependencies,
@@ -960,7 +1367,11 @@ domain-mismatched, or produces no valid product.
                 and (Path(record.workspace) / "out" / "trace.json").is_file()
             ),
             "reasoning_capture_enabled": self.reasoning_capture_enabled,
-            "reasoning_retained": self._trace_reasoning.get(build_id, False),
+            "reasoning_retained": self._trace_reasoning.get(build_id, False)
+            or bool(trace_meta.get("reasoning_retained")),
+            "repair_limit": repair_limit,
+            "repair_round": len(repairs),
+            "repairs": repairs,
         }
 
     def messages(self, build_id: str, *, limit: int = 80) -> dict[str, Any]:
@@ -983,6 +1394,7 @@ domain-mismatched, or produces no valid product.
                 trace = json.loads(trace_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 trace = {}
+            timeline, timeline_truncated = _trace_timeline(trace)
             return {
                 "build_id": build_id,
                 "state": record.state,
@@ -990,6 +1402,8 @@ domain-mismatched, or produces no valid product.
                 "messages": (trace.get("messages") or [])[-limit:],
                 "reasoning": (trace.get("reasoning") or [])[-limit:],
                 "reasoning_retained": bool(trace.get("reasoning_retained")),
+                "timeline": timeline,
+                "timeline_truncated": timeline_truncated,
                 "truncated": False,
             }
         events: list[Any] = []
@@ -1008,6 +1422,7 @@ domain-mismatched, or produces no valid product.
                 text = str(event.data.get("delta") or "")
                 if text:
                     reasoning.append({"created_at": event.created_at, "text": text})
+        timeline, timeline_truncated = _live_timeline(events)
         return {
             "build_id": build_id,
             "state": record.state,
@@ -1015,6 +1430,8 @@ domain-mismatched, or produces no valid product.
             "messages": messages[-limit:],
             "reasoning": reasoning[-limit:],
             "reasoning_retained": bool(reasoning),
+            "timeline": timeline,
+            "timeline_truncated": timeline_truncated,
             "truncated": any(
                 bool((event.data or {}).get("truncated")) for event in events
             ),

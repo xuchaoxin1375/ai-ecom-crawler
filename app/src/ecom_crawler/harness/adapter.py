@@ -70,6 +70,12 @@ class HarnessAdapter(ABC):
     def send_prompt(self, build_id: str, text: str) -> dict[str, Any]:
         raise NotImplementedError
 
+    def continue_prompt(self, build_id: str, text: str) -> dict[str, Any]:
+        """Send another prompt to a finished session when the adapter supports it."""
+        raise HarnessUnsupportedError(
+            "this adapter cannot continue a finished build session"
+        )
+
     @abstractmethod
     def stream_events(self, build_id: str) -> Iterator[HarnessEvent]:
         raise NotImplementedError
@@ -276,6 +282,30 @@ class OpenCodeHttpAdapter(HarnessAdapter):
             result = client.send_prompt(session.session_id, text)
             self._append_adapter_event(
                 session, "prompt_sent", characters=len(text)
+            )
+            self._set_state(session, "RUNNING")
+            return result
+
+    def continue_prompt(self, build_id: str, text: str) -> dict[str, Any]:
+        """Prompt a session again after it finished, keeping its conversation."""
+        with self._lock:
+            session = self._require(build_id)
+            # BuildService flips the state to RUNNING before restarting the
+            # event pump, so both states are valid at this boundary.
+            if session.state not in {"FINISHED", "RUNNING"}:
+                raise HarnessStateError(
+                    f"cannot continue build {build_id} in state {session.state}"
+                )
+            if session.workspace.is_paused():
+                raise HarnessStateError(f"build {build_id} is paused")
+            client = self._ensure_client()
+            if session.session_id is None:
+                raise HarnessStateError(f"build {build_id} has no session")
+            result = client.send_prompt(session.session_id, text)
+            session.outcome = None
+            session.error = None
+            self._append_adapter_event(
+                session, "prompt_sent", characters=len(text), repair=True
             )
             self._set_state(session, "RUNNING")
             return result

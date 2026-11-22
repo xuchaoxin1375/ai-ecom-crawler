@@ -197,6 +197,25 @@ export interface BuildStatus {
   trace_available: boolean;
   reasoning_capture_enabled: boolean;
   reasoning_retained: boolean;
+  repair_limit: number;
+  repair_round: number;
+  repairs: BuildRepair[];
+}
+
+export interface BuildRepair {
+  round: number;
+  error: string;
+  validation?: Record<string, unknown> | null;
+  started_at?: string;
+  finished_at?: string;
+  resolved?: boolean;
+  start_error?: string;
+}
+
+export interface BuildConfig {
+  available: boolean;
+  reasoning_capture_enabled: boolean;
+  max_repair_rounds: number;
 }
 
 export interface BuildResponse {
@@ -207,6 +226,19 @@ export interface BuildResponse {
 export interface BuildMessage {
   created_at: string;
   text: string;
+  role?: string;
+}
+
+export interface BuildTimelineItem {
+  kind: "text" | "reasoning" | "tool";
+  created_at: string | null;
+  role?: string;
+  text?: string;
+  name?: string;
+  status?: string;
+  input?: unknown;
+  output?: string | null;
+  duration_ms?: number | null;
 }
 
 export interface BuildMessages {
@@ -216,6 +248,8 @@ export interface BuildMessages {
   messages: BuildMessage[];
   reasoning: BuildMessage[];
   reasoning_retained: boolean;
+  timeline: BuildTimelineItem[];
+  timeline_truncated: boolean;
   truncated: boolean;
 }
 
@@ -546,6 +580,7 @@ export function startSiteBuild(
     max_seconds?: number;
     proxy?: string;
     capture_reasoning?: boolean;
+    repair_rounds?: number;
   } = {},
 ): Promise<BuildResponse> {
   return sendJson<BuildResponse>(
@@ -553,6 +588,10 @@ export function startSiteBuild(
     "POST",
     body,
   );
+}
+
+export function getBuildConfig(): Promise<BuildConfig> {
+  return getJson<BuildConfig>("/api/builds/config");
 }
 
 export function getBuild(buildId: string): Promise<BuildResponse> {

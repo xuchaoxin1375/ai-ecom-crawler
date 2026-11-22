@@ -12,7 +12,7 @@ from typing import Any
 import yaml
 from fastapi.testclient import TestClient
 
-from ecom_crawler.builds import BuildManager
+from ecom_crawler.builds import BuildManager, _live_timeline, _trace_timeline
 from ecom_crawler.harness.adapter import BuildSession
 from ecom_crawler.harness.models import BuildTask, HarnessEvent, utc_now
 from ecom_crawler.harness.workspace import BuildWorkspace
@@ -136,6 +136,12 @@ def rule_payload(site_key: str = "example.fr") -> dict[str, Any]:
     }
 
 
+def invalid_selector_payload(site_key: str = "example.fr") -> dict[str, Any]:
+    payload = rule_payload(site_key)
+    payload["discovery"]["link_selector"] = "a.product:not(:first-of-type)"
+    return payload
+
+
 class FakeBuildAdapter:
     def __init__(
         self,
@@ -143,13 +149,16 @@ class FakeBuildAdapter:
         *,
         write_rule: bool = True,
         finish: bool = True,
+        rule_payloads: list[dict[str, Any]] | None = None,
     ) -> None:
         self.root = root
         self.write_rule = write_rule
         self.finish = finish
+        self.rule_payloads = rule_payloads or []
         self.queue: queue.Queue[HarnessEvent | None] = queue.Queue()
         self.sessions: dict[str, BuildSession] = {}
         self.prompts: list[tuple[str, str]] = []
+        self.continued: list[tuple[str, str]] = []
         self.closed: list[str] = []
         self.canceled: list[str] = []
 
@@ -168,7 +177,20 @@ class FakeBuildAdapter:
         return session
 
     def send_prompt(self, build_id: str, text: str) -> dict[str, Any]:
+        index = len(self.prompts)
         self.prompts.append((build_id, text))
+        self._complete_async(build_id, index)
+        return {"id": "msg_fake"}
+
+    def continue_prompt(self, build_id: str, text: str) -> dict[str, Any]:
+        index = len(self.prompts)
+        self.continued.append((build_id, text))
+        self.prompts.append((build_id, text))
+        self.sessions[build_id].state = "RUNNING"
+        self._complete_async(build_id, index)
+        return {"id": f"msg_fake_repair_{len(self.continued)}"}
+
+    def _complete_async(self, build_id: str, index: int) -> None:
         self.sessions[build_id].state = "RUNNING"
 
         def complete() -> None:
@@ -177,8 +199,13 @@ class FakeBuildAdapter:
             if self.write_rule:
                 plan = session.workspace.out_dir / "plan"
                 plan.mkdir(parents=True, exist_ok=True)
+                payload = (
+                    self.rule_payloads[min(index, len(self.rule_payloads) - 1)]
+                    if self.rule_payloads
+                    else rule_payload()
+                )
                 (plan / "rule.yaml").write_text(
-                    yaml.safe_dump(rule_payload(), allow_unicode=True, sort_keys=False),
+                    yaml.safe_dump(payload, allow_unicode=True, sort_keys=False),
                     encoding="utf-8",
                 )
             if self.finish:
@@ -189,7 +216,6 @@ class FakeBuildAdapter:
                 )
 
         threading.Thread(target=complete, daemon=True).start()
-        return {"id": "msg_fake"}
 
     def stream_events(self, build_id: str) -> Iterator[HarnessEvent]:
         while True:
@@ -288,20 +314,24 @@ class BuildWorkflowTests(unittest.TestCase):
         adapter: FakeBuildAdapter,
         *,
         currencies: dict[str, int] | None = None,
+        validator: Any | None = None,
+        max_repair_rounds: int = 0,
     ) -> BuildManager:
-        def validator(
-            rule_path: Path,
-            work_dir: Path,
-            max_products: int,
-            max_seconds: int,
-            proxy: str | None = None,
-        ) -> dict[str, Any]:
-            return {
-                "counts": {"valid_products": 2, "failed_products": 0},
-                "outcome": "COMPLETED",
-                "stop_reason": "NATURAL_END",
-                "currencies": currencies or {"EUR": 2},
-            }
+        if validator is None:
+
+            def validator(
+                rule_path: Path,
+                work_dir: Path,
+                max_products: int,
+                max_seconds: int,
+                proxy: str | None = None,
+            ) -> dict[str, Any]:
+                return {
+                    "counts": {"valid_products": 2, "failed_products": 0},
+                    "outcome": "COMPLETED",
+                    "stop_reason": "NATURAL_END",
+                    "currencies": currencies or {"EUR": 2},
+                }
 
         return BuildManager(
             self.store,
@@ -312,6 +342,8 @@ class BuildWorkflowTests(unittest.TestCase):
             max_seconds=10,
             validation_seconds=5,
             max_products=2,
+            max_repair_rounds=max_repair_rounds,
+            repair_seconds=5,
         )
 
     def _client(self, manager: BuildManager) -> TestClient:
@@ -442,6 +474,213 @@ class BuildWorkflowTests(unittest.TestCase):
             batch = client.get("/api/batches/b-1").json()
             self.assertEqual(batch["sites"][0]["readiness"], "needs_onboarding")
             self.assertEqual(list(self.rules.glob("*.yaml")), [])
+
+    def test_preflight_failure_repairs_in_same_session(self) -> None:
+        validator_calls = {"count": 0}
+
+        def validator(
+            rule_path: Path,
+            work_dir: Path,
+            max_products: int,
+            max_seconds: int,
+            proxy: str | None = None,
+        ) -> dict[str, Any]:
+            validator_calls["count"] += 1
+            return {
+                "counts": {"valid_products": 2, "failed_products": 0},
+                "outcome": "COMPLETED",
+                "stop_reason": "NATURAL_END",
+                "currencies": {"EUR": 2},
+            }
+
+        adapter = FakeBuildAdapter(
+            self.root,
+            rule_payloads=[invalid_selector_payload(), rule_payload()],
+        )
+        manager = self._manager(
+            adapter, validator=validator, max_repair_rounds=1
+        )
+        with self._client(manager) as client:
+            response = client.post(
+                "/api/batches/b-1/sites/example.fr/build",
+                json={"repair_rounds": 1},
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(response.status_code, 202, response.text)
+            build_id = response.json()["build"]["build_id"]
+            result = self._wait_ready(client, build_id)
+            self.assertEqual(result["outcome"], "succeeded", result["error"])
+            self.assertEqual(result["repair_limit"], 1)
+            self.assertEqual(result["repair_round"], 1)
+            self.assertTrue(result["repairs"][0]["resolved"])
+            self.assertEqual(validator_calls["count"], 1)
+            self.assertEqual(len(adapter.continued), 1)
+            prompt = adapter.continued[0][1]
+            self.assertIn("automatic repair round 1", prompt)
+            self.assertIn(":not(:first-of-type)", prompt)
+            self.assertIn("invalid CSS selector", prompt)
+
+            trace = client.get(f"/api/builds/{build_id}/trace?format=json").json()
+            self.assertEqual(len(trace["repairs"]), 1)
+            self.assertTrue(trace["repairs"][0]["resolved"])
+            self.assertEqual(trace["repair_limit"], 1)
+
+    def test_repair_metadata_survives_manager_restart(self) -> None:
+        def validator(
+            rule_path: Path,
+            work_dir: Path,
+            max_products: int,
+            max_seconds: int,
+            proxy: str | None = None,
+        ) -> dict[str, Any]:
+            return {
+                "counts": {"valid_products": 2, "failed_products": 0},
+                "outcome": "COMPLETED",
+                "stop_reason": "NATURAL_END",
+                "currencies": {"EUR": 2},
+            }
+
+        adapter = FakeBuildAdapter(
+            self.root,
+            rule_payloads=[invalid_selector_payload(), rule_payload()],
+        )
+        manager = self._manager(adapter, validator=validator, max_repair_rounds=1)
+        with self._client(manager) as client:
+            response = client.post(
+                "/api/batches/b-1/sites/example.fr/build",
+                json={"repair_rounds": 1},
+                headers=CLIENT_HEADERS,
+            )
+            build_id = response.json()["build"]["build_id"]
+            self.assertEqual(self._wait_ready(client, build_id)["outcome"], "succeeded")
+            manager._repair_limits.clear()
+            manager._repairs.clear()
+            manager._trace_meta_cache.clear()
+            restored = manager.describe(build_id)
+            self.assertEqual(restored["repair_limit"], 1)
+            self.assertEqual(restored["repair_round"], 1)
+            self.assertTrue(restored["repairs"][0]["resolved"])
+
+    def test_preflight_failure_without_repair_fails_fast(self) -> None:
+        adapter = FakeBuildAdapter(
+            self.root, rule_payloads=[invalid_selector_payload()]
+        )
+        manager = self._manager(adapter, max_repair_rounds=1)
+        with self._client(manager) as client:
+            response = client.post(
+                "/api/batches/b-1/sites/example.fr/build",
+                json={"repair_rounds": 0},
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(response.status_code, 202, response.text)
+            build_id = response.json()["build"]["build_id"]
+            result = self._wait_ready(client, build_id)
+            self.assertEqual(result["outcome"], "failed")
+            self.assertIn("invalid CSS selector", result["error"] or "")
+            self.assertEqual(result["repair_round"], 0)
+            self.assertEqual(adapter.continued, [])
+            self.assertEqual(list(self.rules.glob("*.yaml")), [])
+
+    def test_host_validation_error_includes_stop_detail_and_samples(self) -> None:
+        def validator(
+            rule_path: Path,
+            work_dir: Path,
+            max_products: int,
+            max_seconds: int,
+            proxy: str | None = None,
+        ) -> dict[str, Any]:
+            return {
+                "counts": {"valid_products": 0, "failed_products": 3},
+                "outcome": "FAILED",
+                "stop_reason": "PLAN_ERROR",
+                "stop_detail": "PlanError: invalid CSS selector 'a:not(:first-of-type)'",
+                "failure_samples": [
+                    {
+                        "url": "https://example.fr/products/1",
+                        "reason": "plan_error",
+                        "detail": "invalid selector",
+                    }
+                ],
+            }
+
+        adapter = FakeBuildAdapter(self.root)
+        manager = self._manager(adapter, validator=validator)
+        with self._client(manager) as client:
+            response = client.post(
+                "/api/batches/b-1/sites/example.fr/build",
+                json={"repair_rounds": 0},
+                headers=CLIENT_HEADERS,
+            )
+            build_id = response.json()["build"]["build_id"]
+            result = self._wait_ready(client, build_id)
+            self.assertEqual(result["outcome"], "failed")
+            error = result["error"] or ""
+            self.assertIn("detail:", error)
+            self.assertIn("first-of-type", error)
+            self.assertIn("https://example.fr/products/1", error)
+
+    def test_build_timeline_merges_trace_parts(self) -> None:
+        trace = {
+            "messages": [
+                {"created_at": "2026-11-23T04:00:03Z", "text": "written"},
+            ],
+            "reasoning": [
+                {"created_at": "2026-11-23T04:00:01Z", "text": "inspect"},
+            ],
+            "tools": [
+                {
+                    "created_at": "2026-11-23T04:00:02Z",
+                    "name": "read",
+                    "status": "completed",
+                    "input": {"path": "brief.md"},
+                    "output": "ok",
+                    "duration_ms": 12,
+                }
+            ],
+        }
+        timeline, truncated = _trace_timeline(trace)
+        self.assertFalse(truncated)
+        self.assertEqual(
+            [item["kind"] for item in timeline],
+            ["reasoning", "tool", "text"],
+        )
+
+    def test_build_timeline_groups_live_deltas(self) -> None:
+        from types import SimpleNamespace
+
+        events = [
+            SimpleNamespace(
+                type="reasoning",
+                data={"delta": "first "},
+                created_at="2026-11-23T04:00:01Z",
+            ),
+            SimpleNamespace(
+                type="reasoning",
+                data={"delta": "second"},
+                created_at="2026-11-23T04:00:02Z",
+            ),
+            SimpleNamespace(
+                type="tool_started",
+                data={"tool": "read"},
+                created_at="2026-11-23T04:00:03Z",
+            ),
+            SimpleNamespace(
+                type="tool_finished",
+                data={"status": "success"},
+                created_at="2026-11-23T04:00:04Z",
+            ),
+            SimpleNamespace(
+                type="message_delta",
+                data={"delta": "done"},
+                created_at="2026-11-23T04:00:05Z",
+            ),
+        ]
+        timeline, truncated = _live_timeline(events)
+        self.assertFalse(truncated)
+        self.assertEqual([item["kind"] for item in timeline], ["reasoning", "tool", "text"])
+        self.assertEqual(timeline[0]["text"], "first second")
+        self.assertEqual(timeline[1]["status"], "success")
+        self.assertEqual(timeline[2]["text"], "done")
 
     def test_reconcile_interrupts_stale_build(self) -> None:
         self.store.create_build(
