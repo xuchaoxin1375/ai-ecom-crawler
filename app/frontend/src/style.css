@@ -560,6 +560,11 @@ code {
   flex-wrap: wrap;
 }
 
+.batch-full-catalog {
+  margin-top: 10px;
+  font-size: 12px;
+}
+
 .panel-head {
   display: flex;
   align-items: flex-start;
@@ -1164,6 +1169,234 @@ tr:last-child td {
   background: var(--panel-alt);
   border: 1px dashed var(--line-strong);
   border-radius: var(--radius);
+}
+
+.preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+}
+
+.preview-card {
+  display: flex;
+  gap: 12px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+}
+
+.preview-card img {
+  flex: 0 0 64px;
+  width: 64px;
+  height: 64px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  object-fit: cover;
+  background: var(--panel-alt);
+}
+
+.preview-image-button {
+  flex: 0 0 64px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+}
+
+.preview-body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.preview-body strong {
+  overflow-wrap: anywhere;
+}
+
+.preview-price {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.preview-body a {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.csv-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.csv-preview-head p {
+  margin: 0;
+}
+
+.csv-table {
+  min-width: 1100px;
+}
+
+.csv-cell {
+  display: block;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.csv-cell-wide {
+  max-width: 340px;
+}
+
+.csv-image-button {
+  display: inline-flex;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  cursor: zoom-in;
+}
+
+.csv-image-button img {
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  object-fit: cover;
+  background: var(--panel-alt);
+}
+
+.csv-description {
+  display: grid;
+  gap: 2px;
+  max-width: 340px;
+}
+
+.csv-description .csv-cell {
+  max-width: 340px;
+}
+
+.csv-link-button {
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.media-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgb(15 23 42 / 62%);
+}
+
+.media-modal {
+  display: flex;
+  flex-direction: column;
+  width: min(960px, 100%);
+  max-height: min(88vh, 900px);
+  overflow: auto;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 24px 80px rgb(15 23 42 / 30%);
+}
+
+.media-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.media-modal-head h2 {
+  margin: 0;
+}
+
+.media-modal-head p {
+  margin: 4px 0 0;
+}
+
+.media-modal-tabs {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.media-modal-body {
+  display: grid;
+  gap: 12px;
+  min-height: 0;
+}
+
+.media-image-stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 240px;
+  max-height: 58vh;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-alt);
+}
+
+.media-image-stage img {
+  max-width: 100%;
+  max-height: 56vh;
+  object-fit: contain;
+  transition: transform 120ms ease;
+  transform-origin: center center;
+}
+
+.media-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.media-description {
+  max-height: 56vh;
+  overflow: auto;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-alt);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.media-modal-foot {
+  margin-top: 10px;
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .quality-list {

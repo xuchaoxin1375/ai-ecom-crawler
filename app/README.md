@@ -32,8 +32,9 @@
 - 构建 harness 适配器：`harness/` 提供 `HarnessAdapter`、`OpenCodeHttpAdapter`、`OpenCodeServer`、构建工作区、HTTP/SSE 客户端和事件归一化；真实 `opencode serve` 的 session／事件／权限探针已跑通。
 - 构建期依赖请求桥：每个工作区写入 `request-dependency` 插件，Agent 调用 `request_dependency` 后写 `control/dependencies/requests/<id>.json`；`DependencyBridge` 在 host 侧按 `DependencyPolicy` 返回基线／allowlist 结果、安装 allowlist 包、挂起一次性审批或取消未决请求，再写 `responses/<id>.json`。安装支持 build 解释器的 `pip` 和 `uv pip --python`，安装后用 `importlib.metadata` 验证版本。
 - 批次工作台阶段 1：`frontend/` 是 Vue 3 + TypeScript + Vite 应用；构建产物存在时 FastAPI 在 `/batch/` 托管，`/batches` 列表／新建／详情、`/batches/{id}/sites/{site_key}` 站点详情和 `/tasks` 任务控制台共用同一外壳。批次／站点对象、导入解析／去重／规则匹配、部分启动、批次级暂停／取消／归档、批次导出和站点下钻已实现；真实批次 `b-586052683409` 两站 14 条有效商品、0 失败，证据在 `experiments/d08/batch-workbench-e2e/`。
-- 站点构建入口：`needs_onboarding` 站点可在站点详情启动构建 Agent；站点进入 `building`，主机验证通过后规则以 `candidate` 安装、站点变为 `ready`，失败则回到 `needs_onboarding`。站点详情提供“详细模式”时间线（思考、工具调用、可见文本按时间合并）和“验证失败后自动修复 1 轮”；完整多轮会话 UI 后置。
-- 构建 trace：每次构建在 `out/trace.json`／`out/trace.md` 记录阶段、工具调用、输入摘要、截断输出、可见消息、tokens／费用、主机验证结果和自动修复轮次；默认不保存 reasoning，`ECOM_BUILD_CAPTURE_REASONING=1` 时才保留并截断。模型、provider 和 variant（思考等级）在构建状态和 trace 中标出。验证前先静态编译规则里的 CSS 选择器，避免把 `plan_error` 拖到真实抓取阶段。
+- 站点构建入口：`needs_onboarding` 站点可在站点详情启动构建 Agent；站点进入 `building`，主机验证通过后规则以 `candidate` 安装、站点变为 `ready`，失败则回到 `needs_onboarding`。站点详情提供“详细模式”时间线（思考、工具调用、可见文本按时间合并）、“验证失败后自动修复 1 轮”、“全量目录”和“归档样例页面”；全量目录只提高规则目标商品数，验证仍用少量商品，通过后从批次详情用全量预算启动任务。
+- 已采数据预览：站点详情在任务运行中每 3 秒刷新最近有效商品，展示图片、名称、价格、品牌／分类和来源链接；任务结束后保留最近 10 条预览。下方“CSV 表格预览”按导出 9 列结构分页展示（运行中读 `products.jsonl`，结束后读 `products.csv`）；点击主图在弹窗内查看大图并支持缩放、复制 URL、下载和打开原图，点击“查看全文”在弹窗内查看完整描述并支持复制文本／HTML 和打开来源页。
+- 构建 trace：每次构建在 `out/trace.json`／`out/trace.md` 记录阶段、工具调用、输入摘要、截断输出、可见消息、tokens／费用、主机验证结果、自动修复轮次和样例存档统计；默认不保存 reasoning，`ECOM_BUILD_CAPTURE_REASONING=1` 时才保留并截断。模型、provider 和 variant（思考等级）在构建状态和 trace 中标出。验证前先静态编译规则里的 CSS 选择器，避免把 `plan_error` 拖到真实抓取阶段。
 - 出口代理：`ECOM_FETCH_PROXY`／`ECOM_BUILD_PROXY`、`--proxy` 和构建 API `proxy` 支持静态／浏览器出口；构建、验证和批次任务沿用同一出口，规则包不写代理 URL。2026-11-23 用 mihomo US 出口将 `sixmoondesigns.com` 的 CNY 样本修正为 USD 3／3。
 - FastAPI API：健康、规则目录、任务列表／详情、创建／启动／暂停／恢复／取消／归档／还原、URL／商品分页、SSE 和 zip 导出。
 - 本地静态页面：页首标注“内部技术控制台／非业务工作台”及用途边界；任务列表、创建、详情、控制按钮、计数（7 张主卡 + 完整计数行）、覆盖、质量异常数、商品预览（价格／币种／正文状态／缺失字段／字段来源）、URL 明细和导出入口。
@@ -101,6 +102,8 @@ python -m uv run --project app ecom-crawler validate --task-result /path/to/task
 - 站点详情的“模型输出”读取 `/api/builds/{id}/messages`：构建中显示流式时间线，结束后显示完整可见消息；`timeline` 按时间合并思考、工具调用和文本。reasoning 仅在显式保留时出现；未保留时页面会提示服务端开关和单次勾选条件。
 - 自动修复：默认允许 1 轮，`ECOM_BUILD_MAX_REPAIR_ROUNDS` 可调整（0 关闭），`ECOM_BUILD_REPAIR_SECONDS` 控制每轮额外时间（默认 240 秒）。构建 API 可传 `repair_rounds` 单次覆盖；验证失败时用同一 OpenCode 会话继续提示，并重跑静态预检与主机验证。轮次、错误和是否解决写入构建状态与 trace。
 - 构建预检：`executor/preflight.py` 在联网验证前编译规则里的所有 lxml CSS 选择器；`:not(:first-of-type)` 这类 lxml 不支持的写法会在预检阶段直接报出，而不是等到商品页全部 `plan_error`。
+- 页面存档：`--archive-mode off|sample|full`、`--archive-root`、`--archive-sample-limit`、`--archive-max-bytes`、`--archive-reuse` 和 `--offline`；批次启动 API/UI 也支持同名参数。`sample` 默认只存有限页数，用于规则复验；`full` 保存所有响应，`--offline` 仅对 `full` 有效。存档为 `<archive-root>/<host>/<url-hash>.html.gz` + `.json` 元数据和 `index.jsonl`，不保存图片／字体资源。
+- 构建样例存档：构建面板勾选后，主机抓取 `evidence.sample_urls` 和入口／分类页到 archive；验证时优先复用。真实 bennytex 构建中预取 18 页、验证复用 14 次、只补抓 7 页。
 - `worker` 默认 `--max-tasks 1`，按 `QUEUED` 取任务；Ctrl+C 停止领取新任务并等待已启动任务结束，已取消任务用 `cancel` 处理。
 - `pause` 只接受 `RUNNING`，`resume` 只接受 `PAUSED`；重复请求按当前状态幂等返回，非法转移返回 2。
 - `status` 和 `list` 是只读入口；`--json` 输出可直接给脚本消费。任务计数仍以 `task-result.json` 和 `docs/09` 为准。

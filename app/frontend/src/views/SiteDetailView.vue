@@ -44,6 +44,8 @@ import {
   taskStateLabel,
   taskStateTone,
 } from "../ui";
+import ProductCsvPreview from "../components/ProductCsvPreview.vue";
+import PreviewMediaModal from "../components/PreviewMediaModal.vue";
 
 const props = defineProps<{ id: string; siteKey: string }>();
 
@@ -64,14 +66,28 @@ const buildProxy = ref("");
 const captureReasoning = ref(false);
 const detailMode = ref(true);
 const autoRepair = ref(true);
+const catalogFull = ref(false);
+const archiveSample = ref(true);
 const buildConfig = ref<BuildConfig | null>(null);
 const buildOutput = ref<BuildMessages | null>(null);
+const previewItems = ref<TaskItem[]>([]);
+const previewLoading = ref(false);
+const previewError = ref("");
+const cardModalOpen = ref(false);
+const cardModalTab = ref<"image" | "description">("image");
+const cardModalItem = ref<TaskItem | null>(null);
 let buildTimer: ReturnType<typeof setInterval> | null = null;
+let taskTimer: ReturnType<typeof setInterval> | null = null;
 
 const site = computed<BatchSite | null>(
   () => batch.value?.sites?.find((item) => item.site_key === props.siteKey) || null,
 );
 const task = computed(() => site.value?.task || null);
+const taskActive = computed(() =>
+  ["DRAFT", "QUEUED", "RUNNING", "PAUSING", "PAUSED"].includes(
+    task.value?.state || "",
+  ),
+);
 const canPause = computed(() => task.value?.state === "RUNNING");
 const canResume = computed(() => task.value?.state === "PAUSED");
 const canCancel = computed(() =>
@@ -126,6 +142,8 @@ async function load() {
     if (current?.build_id && current.build_id !== build.value?.build_id) {
       await loadBuild(current.build_id);
     }
+    ensureTaskPolling();
+    await Promise.all([loadItems(), loadPreview()]);
   } catch (exc) {
     error.value = exc instanceof Error ? exc.message : String(exc);
   } finally {
@@ -223,10 +241,14 @@ async function startBuild() {
   try {
     const payload = await startSiteBuild(props.id, props.siteKey, {
       max_products: 6,
-      max_seconds: 600,
+      max_seconds: catalogFull.value ? 900 : 600,
       proxy: buildProxy.value.trim() || undefined,
       capture_reasoning: captureReasoning.value,
       repair_rounds: autoRepair.value ? 1 : 0,
+      catalog_scope: catalogFull.value ? "full" : "sample",
+      catalog_products: 3000,
+      archive_mode: archiveSample.value ? "sample" : "off",
+      archive_sample_limit: 20,
     });
     build.value = payload.build;
     await load();
@@ -364,6 +386,13 @@ function timelineTime(item: BuildTimelineItem): string {
   return item.created_at ? formatTime(item.created_at) : "";
 }
 
+function formatBytes(value: number | null | undefined): string {
+  const bytes = Number(value || 0);
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 function formatTimelineValue(value: unknown): string {
   if (value === null || value === undefined) return "";
   if (typeof value === "string") return value;
@@ -387,6 +416,7 @@ function permissionItems(): Array<Record<string, unknown>> {
 }
 
 onUnmounted(stopBuildPolling);
+onUnmounted(stopTaskPolling);
 
 async function loadItems() {
   if (!task.value?.task_id) {
@@ -407,6 +437,105 @@ async function loadItems() {
   }
 }
 
+async function loadPreview() {
+  const taskId = task.value?.task_id;
+  if (!taskId) {
+    previewItems.value = [];
+    return;
+  }
+  previewLoading.value = true;
+  previewError.value = "";
+  try {
+    const payload = await getTaskItems(taskId, "product", 10, 0, "DONE", "desc");
+    previewItems.value = payload.items.filter(
+      (item) => item.result.product_preview,
+    );
+  } catch (exc) {
+    previewError.value = exc instanceof Error ? exc.message : String(exc);
+  } finally {
+    previewLoading.value = false;
+  }
+}
+
+function stopTaskPolling() {
+  if (taskTimer !== null) {
+    clearInterval(taskTimer);
+    taskTimer = null;
+  }
+}
+
+function scheduleTaskPolling() {
+  stopTaskPolling();
+  if (!taskActive.value) return;
+  taskTimer = setInterval(() => {
+    void load();
+  }, 3000);
+}
+
+function ensureTaskPolling() {
+  if (!taskActive.value) {
+    stopTaskPolling();
+    return;
+  }
+  if (taskTimer === null) scheduleTaskPolling();
+}
+
+function previewProduct(item: TaskItem): Record<string, unknown> {
+  const value = item.result.product_preview;
+  return value && typeof value === "object"
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function previewImage(item: TaskItem): string {
+  return String(previewProduct(item).primary_image_url || "");
+}
+
+function previewName(item: TaskItem): string {
+  return String(previewProduct(item).name || item.url);
+}
+
+function previewPrice(item: TaskItem): string {
+  const product = previewProduct(item);
+  if (product.price_amount == null) return "价格未提供";
+  const amount = formatAmount(product.price_amount);
+  return `${amount} ${product.price_currency || ""}`.trim();
+}
+
+function previewMeta(item: TaskItem): string {
+  const product = previewProduct(item);
+  return [product.brand, product.category]
+    .filter(Boolean)
+    .map(String)
+    .join(" · ");
+}
+
+function openCardModal(item: TaskItem, tab: "image" | "description") {
+  cardModalItem.value = item;
+  cardModalTab.value = tab;
+  cardModalOpen.value = true;
+}
+
+const cardModalTitle = computed(() =>
+  cardModalItem.value ? previewName(cardModalItem.value) : "商品预览",
+);
+const cardModalImage = computed(() =>
+  cardModalItem.value ? previewImage(cardModalItem.value) : "",
+);
+const cardModalMeta = computed(() => {
+  const item = cardModalItem.value;
+  if (!item) return "";
+  const product = previewProduct(item);
+  return [
+    product.price_amount != null
+      ? `${formatAmount(product.price_amount)} ${product.price_currency || ""}`.trim()
+      : "",
+    previewMeta(item),
+  ]
+    .filter(Boolean)
+    .join(" · ");
+});
+
 async function control(action: "pause" | "resume" | "cancel") {
   if (!task.value?.task_id) return;
   busy.value = action;
@@ -417,7 +546,6 @@ async function control(action: "pause" | "resume" | "cancel") {
     else await cancelTask(task.value.task_id);
     confirmCancel.value = false;
     await load();
-    await loadItems();
   } catch (exc) {
     error.value = exc instanceof Error ? exc.message : String(exc);
   } finally {
@@ -493,7 +621,7 @@ function detailRows(exception: Record<string, unknown>): Array<[string, string]>
 watch(tab, loadItems);
 
 onMounted(async () => {
-  await Promise.all([load(), loadItems(), loadBuildConfig()]);
+  await Promise.all([load(), loadBuildConfig()]);
 });
 </script>
 
@@ -693,6 +821,20 @@ onMounted(async () => {
           当前服务端未启用自动修复（<code>ECOM_BUILD_MAX_REPAIR_ROUNDS=0</code>）。
         </small>
         <label class="check">
+          <input v-model="catalogFull" type="checkbox" />
+          全量目录（按顶层分类和分页生成发现源；验证仍用少量商品）
+        </label>
+        <small class="muted">
+          目标商品数按 3000 写入规则；构建仍只验证 6 个商品，通过后再从批次详情启动全量任务。
+        </small>
+        <label class="check">
+          <input v-model="archiveSample" type="checkbox" />
+          归档样例页面（入口／分类／商品页，最多 20 页）
+        </label>
+        <small class="muted">
+          主机在验证前抓取规则声明的样例并保存到本地 archive；后续规则复验优先复用，减少重复请求。
+        </small>
+        <label class="check">
           <input v-model="detailMode" type="checkbox" />
           详细模式（时间线，显示思考与工具调用）
         </label>
@@ -728,6 +870,13 @@ onMounted(async () => {
           :class="build.repairs.some((item) => item.resolved) ? 'success' : 'muted'"
         >
           自动修复 {{ build.repair_round }}/{{ build.repair_limit }}
+        </span>
+        <span v-if="build.catalog?.catalog_scope === 'full'" class="muted">
+          全量目标 {{ build.catalog.catalog_products }}
+        </span>
+        <span v-if="build.archive_stats" class="muted">
+          样例存档 {{ build.archive_stats.pages }} 页 /
+          {{ formatBytes(build.archive_stats.bytes) }}
         </span>
         <a
           v-if="build.trace_available"
@@ -957,6 +1106,81 @@ onMounted(async () => {
         </div>
       </section>
 
+      <section class="panel data-preview-panel">
+        <div class="panel-head">
+          <div>
+            <h2>已采数据预览</h2>
+            <p class="muted">
+              显示最近 {{ previewItems.length }} 条有效商品；共
+              {{ task.counts.valid_products ?? 0 }} 条有效。
+              <span v-if="taskActive">任务运行中每 3 秒刷新。</span>
+            </p>
+          </div>
+          <div class="row-actions">
+            <span v-if="previewLoading" class="muted">读取中…</span>
+            <button
+              class="button button-sm"
+              type="button"
+              :disabled="previewLoading"
+              @click="loadPreview"
+            >
+              刷新预览
+            </button>
+            <RouterLink class="button button-sm" :to="`/tasks/${task.task_id}`">
+              任务详情
+            </RouterLink>
+          </div>
+        </div>
+        <p v-if="previewError" class="notice danger">{{ previewError }}</p>
+        <div v-if="previewItems.length" class="preview-grid">
+          <article
+            v-for="item in previewItems"
+            :key="item.item_id"
+            class="preview-card"
+          >
+            <button
+              v-if="previewImage(item)"
+              class="preview-image-button"
+              type="button"
+              :title="`查看大图：${previewName(item)}`"
+              @click="openCardModal(item, 'image')"
+            >
+              <img
+                :src="previewImage(item)"
+                :alt="previewName(item)"
+                loading="eager"
+                referrerpolicy="no-referrer"
+              />
+            </button>
+            <div class="preview-body">
+              <strong>{{ previewName(item) }}</strong>
+              <span class="preview-price">{{ previewPrice(item) }}</span>
+              <small v-if="previewMeta(item)" class="muted">
+                {{ previewMeta(item) }}
+              </small>
+              <a :href="item.url" target="_blank" rel="noreferrer">
+                {{ item.url }}
+              </a>
+            </div>
+          </article>
+        </div>
+        <p v-else class="muted">
+          {{ taskActive ? "还没有完成的有效商品；任务运行中，预览会自动刷新。" : "本次任务没有可预览的有效商品。" }}
+        </p>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>CSV 表格预览</h2>
+            <p class="muted">
+              按导出的 9 列结构显示。任务运行中读取 products.jsonl，结束后读取 products.csv。
+            </p>
+          </div>
+        </div>
+        <ProductCsvPreview :task-id="task.task_id" :live="taskActive" />
+      </section>
+
       <section class="panel">
         <div class="panel-head">
           <div>
@@ -1117,6 +1341,16 @@ onMounted(async () => {
         返回批次详情
       </RouterLink>
     </section>
+
+    <PreviewMediaModal
+      :open="cardModalOpen"
+      :title="cardModalTitle"
+      :image-url="cardModalImage"
+      :meta="cardModalMeta"
+      :source-url="cardModalItem?.url || ''"
+      :initial-tab="cardModalTab"
+      @close="cardModalOpen = false"
+    />
   </template>
 
   <div v-else-if="batch" class="empty">

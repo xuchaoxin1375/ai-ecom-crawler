@@ -167,6 +167,32 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(urls["total"], 1)
         self.assertEqual(urls["items"][0]["item_type"], "navigation")
 
+    def test_items_state_and_order_filters(self) -> None:
+        done = self.client.get(
+            "/api/tasks/task-1/items?kind=product&state=DONE&order=desc"
+        ).json()
+        self.assertEqual(done["total"], 2)
+        self.assertEqual(done["items"][0]["item_id"], "p-1")
+        failed = self.client.get(
+            "/api/tasks/task-1/items?kind=product&state=FAILED"
+        ).json()
+        self.assertEqual(failed["total"], 1)
+        self.assertEqual(failed["items"][0]["item_id"], "p-2")
+
+    def test_csv_preview_reads_export_header_and_rows(self) -> None:
+        csv_path = self.out_root / "task-1" / "products.csv"
+        csv_path.write_text(
+            "name,price_amount,price_currency,source_url\n"
+            "Sample,6.45,EUR,https://fixture.test/p0.html\n",
+            encoding="utf-8",
+        )
+        payload = self.client.get("/api/tasks/task-1/csv?limit=10").json()
+        self.assertEqual(payload["source"], "products.csv")
+        self.assertEqual(payload["total"], 1)
+        self.assertEqual(payload["columns"][0], "name")
+        self.assertEqual(payload["rows"][0]["name"], "Sample")
+        self.assertFalse(payload["live"])
+
     def test_export_zip_uses_allowlist(self) -> None:
         response = self.client.get("/api/tasks/task-1/export")
         self.assertEqual(response.status_code, 200)

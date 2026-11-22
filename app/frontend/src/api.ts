@@ -70,6 +70,16 @@ export interface TaskItemPage {
   items: TaskItem[];
 }
 
+export interface TaskCsvPage {
+  task_id: string;
+  state: string;
+  live: boolean;
+  columns: string[];
+  rows: Array<Record<string, unknown>>;
+  total: number;
+  source: string | null;
+}
+
 export interface RuleEntry {
   path: string;
   rule_id: string | null;
@@ -200,6 +210,32 @@ export interface BuildStatus {
   repair_limit: number;
   repair_round: number;
   repairs: BuildRepair[];
+  archive: BuildArchiveConfig | null;
+  archive_stats: BuildArchiveStats | null;
+  catalog: { catalog_scope?: string; catalog_products?: number } | null;
+}
+
+export interface BuildArchiveConfig {
+  mode: "off" | "sample" | "full";
+  root: string;
+  sample_limit: number;
+  max_bytes: number | null;
+  reuse: boolean;
+}
+
+export interface BuildArchiveStats {
+  mode: string;
+  root: string;
+  sample_limit: number;
+  pages: number;
+  bytes: number;
+  hits: number;
+  misses: number;
+  writes: number;
+  skipped: number;
+  skipped_reason?: string | null;
+  limit_reached: boolean;
+  errors: string[];
 }
 
 export interface BuildRepair {
@@ -466,9 +502,28 @@ export function getTaskItems(
   kind: "url" | "product",
   limit = 50,
   offset = 0,
+  state?: string,
+  order: "asc" | "desc" = "asc",
 ): Promise<TaskItemPage> {
+  const query = new URLSearchParams({
+    kind,
+    limit: String(limit),
+    offset: String(offset),
+    order,
+  });
+  if (state) query.set("state", state);
   return getJson<TaskItemPage>(
-    `/api/tasks/${encodeURIComponent(taskId)}/items?kind=${kind}&limit=${limit}&offset=${offset}`,
+    `/api/tasks/${encodeURIComponent(taskId)}/items?${query.toString()}`,
+  );
+}
+
+export function getTaskCsv(
+  taskId: string,
+  limit = 50,
+  offset = 0,
+): Promise<TaskCsvPage> {
+  return getJson<TaskCsvPage>(
+    `/api/tasks/${encodeURIComponent(taskId)}/csv?limit=${limit}&offset=${offset}`,
   );
 }
 
@@ -541,12 +596,20 @@ export function importSites(
 
 export function startBatch(
   batchId: string,
-  limits?: Record<string, number>,
+  body?: {
+    limits?: Record<string, number>;
+    archive_mode?: "off" | "sample" | "full";
+    archive_root?: string;
+    archive_sample_limit?: number;
+    archive_max_bytes?: number;
+    archive_reuse?: boolean;
+    offline?: boolean;
+  },
 ): Promise<BatchActionResponse> {
   return sendJson<BatchActionResponse>(
     `/api/batches/${encodeURIComponent(batchId)}/start`,
     "POST",
-    limits ? { limits } : {},
+    body ?? {},
   );
 }
 
@@ -581,6 +644,12 @@ export function startSiteBuild(
     proxy?: string;
     capture_reasoning?: boolean;
     repair_rounds?: number;
+    archive_mode?: "off" | "sample" | "full";
+    archive_root?: string;
+    archive_sample_limit?: number;
+    archive_max_bytes?: number;
+    catalog_scope?: "sample" | "full";
+    catalog_products?: number;
   } = {},
 ): Promise<BuildResponse> {
   return sendJson<BuildResponse>(

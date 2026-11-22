@@ -27,10 +27,16 @@ import {
   taskStateLabel,
   taskStateTone,
 } from "../ui";
+import ProductCsvPreview from "../components/ProductCsvPreview.vue";
 
 const props = defineProps<{ id: string }>();
 
 const task = ref<TaskSummary | null>(null);
+const taskActive = computed(() =>
+  ["DRAFT", "QUEUED", "RUNNING", "PAUSING", "PAUSED"].includes(
+    task.value?.state || "",
+  ),
+);
 const loading = ref(false);
 const error = ref("");
 const actionNotice = ref("");
@@ -573,6 +579,18 @@ onBeforeUnmount(() => {
         </div>
       </div>
       <p v-else class="muted">任务还没有计数。</p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>CSV 表格预览</h2>
+          <p class="muted">
+            按导出的 9 列结构显示；运行中读取 products.jsonl，结束后读取 products.csv。
+          </p>
+        </div>
+      </div>
+      <ProductCsvPreview :task-id="task.task_id" :live="taskActive" />
     </section>
 
     <section class="panel">

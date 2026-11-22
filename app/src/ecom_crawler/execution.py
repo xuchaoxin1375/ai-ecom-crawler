@@ -31,6 +31,30 @@ class ExecutionResult:
     export_dir: Path | None = None
 
 
+def _archive_input(
+    *,
+    mode: str | None,
+    root: str | Path | None,
+    sample_limit: int,
+    max_bytes: int | None,
+    reuse: bool,
+    offline: bool,
+) -> dict[str, Any] | None:
+    if mode is None and not reuse and not offline:
+        return None
+    payload: dict[str, Any] = {
+        "mode": mode or ("full" if offline else "off"),
+        "sample_limit": max(1, int(sample_limit)),
+        "reuse": bool(reuse),
+        "offline": bool(offline),
+    }
+    if root is not None:
+        payload["root"] = str(root)
+    if max_bytes is not None:
+        payload["max_bytes"] = max(0, int(max_bytes))
+    return payload
+
+
 def build_task(
     *,
     rule_path: Path,
@@ -41,6 +65,12 @@ def build_task(
     max_seconds: int,
     max_attempts: int,
     proxy: str | None = None,
+    archive_mode: str | None = None,
+    archive_root: str | Path | None = None,
+    archive_sample_limit: int = 20,
+    archive_max_bytes: int | None = None,
+    archive_reuse: bool = False,
+    offline: bool = False,
 ) -> Task:
     rule_path = Path(rule_path).resolve()
     if not rule_path.is_file():
@@ -52,6 +82,16 @@ def build_task(
     task_input = {"rule_path": str(rule_path)}
     if proxy:
         task_input["proxy"] = proxy
+    archive = _archive_input(
+        mode=archive_mode,
+        root=archive_root,
+        sample_limit=archive_sample_limit,
+        max_bytes=archive_max_bytes,
+        reuse=archive_reuse,
+        offline=offline,
+    )
+    if archive is not None:
+        task_input["archive"] = archive
     return Task(
         task_id=task_id,
         plan_id=rule.rule_id,
@@ -89,6 +129,12 @@ def submit_task(
     max_seconds: int = 180,
     max_attempts: int = 2,
     proxy: str | None = None,
+    archive_mode: str | None = None,
+    archive_root: str | Path | None = None,
+    archive_sample_limit: int = 20,
+    archive_max_bytes: int | None = None,
+    archive_reuse: bool = False,
+    offline: bool = False,
 ) -> Task:
     """Create a QUEUED task without executing it."""
     task = build_task(
@@ -100,6 +146,12 @@ def submit_task(
         max_seconds=max_seconds,
         max_attempts=max_attempts,
         proxy=proxy,
+        archive_mode=archive_mode,
+        archive_root=archive_root,
+        archive_sample_limit=archive_sample_limit,
+        archive_max_bytes=archive_max_bytes,
+        archive_reuse=archive_reuse,
+        offline=offline,
     )
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -123,6 +175,12 @@ def run_task(
     max_attempts: int = 2,
     per_domain_rps: float = 1.0,
     proxy: str | None = None,
+    archive_mode: str | None = None,
+    archive_root: str | Path | None = None,
+    archive_sample_limit: int = 20,
+    archive_max_bytes: int | None = None,
+    archive_reuse: bool = False,
+    offline: bool = False,
 ) -> tuple[dict[str, Any], Path]:
     """Create and run one task, returning its result and task directory."""
     task = build_task(
@@ -134,6 +192,12 @@ def run_task(
         max_seconds=max_seconds,
         max_attempts=max_attempts,
         proxy=proxy,
+        archive_mode=archive_mode,
+        archive_root=archive_root,
+        archive_sample_limit=archive_sample_limit,
+        archive_max_bytes=archive_max_bytes,
+        archive_reuse=archive_reuse,
+        offline=offline,
     )
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -182,6 +246,12 @@ def run_and_export(
     export_dir: Path | None = None,
     partial_reason: str | None = None,
     proxy: str | None = None,
+    archive_mode: str | None = None,
+    archive_root: str | Path | None = None,
+    archive_sample_limit: int = 20,
+    archive_max_bytes: int | None = None,
+    archive_reuse: bool = False,
+    offline: bool = False,
 ) -> ExecutionResult:
     """Run one task and, for product tasks, export the D02 outputs."""
     task_result, task_dir = run_task(
@@ -196,6 +266,12 @@ def run_and_export(
         max_attempts=max_attempts,
         per_domain_rps=per_domain_rps,
         proxy=proxy,
+        archive_mode=archive_mode,
+        archive_root=archive_root,
+        archive_sample_limit=archive_sample_limit,
+        archive_max_bytes=archive_max_bytes,
+        archive_reuse=archive_reuse,
+        offline=offline,
     )
     if task_type != "product":
         return ExecutionResult(

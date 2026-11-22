@@ -26,6 +26,43 @@ from .runtime.worker import Worker
 from .validate import validate_run, validate_task_result_file
 
 
+def _add_archive_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--archive-mode",
+        choices=("off", "sample", "full"),
+        default="off",
+        help="save fetched pages locally: off, sample (bounded) or full",
+    )
+    parser.add_argument(
+        "--archive-root",
+        type=Path,
+        default=None,
+        help="archive directory; defaults to <out-root>/archive",
+    )
+    parser.add_argument(
+        "--archive-sample-limit",
+        type=int,
+        default=20,
+        help="maximum pages written in sample mode (default: 20)",
+    )
+    parser.add_argument(
+        "--archive-max-bytes",
+        type=int,
+        default=None,
+        help="optional stored-bytes cap for one task",
+    )
+    parser.add_argument(
+        "--archive-reuse",
+        action="store_true",
+        help="read archived pages before requesting the network",
+    )
+    parser.add_argument(
+        "--offline",
+        action="store_true",
+        help="strict offline replay; requires --archive-mode full",
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ecom-crawler",
@@ -92,6 +129,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="override the generic R06 partial-description reason",
     )
+    _add_archive_arguments(run)
 
     submit = subparsers.add_parser(
         "submit",
@@ -112,6 +150,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="HTTP(S) or socks5 proxy recorded on the task; defaults to ECOM_FETCH_PROXY",
     )
+    _add_archive_arguments(submit)
 
     worker = subparsers.add_parser(
         "worker",
@@ -425,6 +464,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 export_dir=args.export_dir,
                 partial_reason=args.partial_reason,
                 proxy=args.proxy,
+                archive_mode=args.archive_mode,
+                archive_root=args.archive_root,
+                archive_sample_limit=args.archive_sample_limit,
+                archive_max_bytes=args.archive_max_bytes,
+                archive_reuse=args.archive_reuse,
+                offline=args.offline,
             )
             counts = result.task_result.get("counts", {})
             print(
@@ -459,6 +504,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 max_seconds=args.max_seconds,
                 max_attempts=args.max_attempts,
                 proxy=args.proxy,
+                archive_mode=args.archive_mode,
+                archive_root=args.archive_root,
+                archive_sample_limit=args.archive_sample_limit,
+                archive_max_bytes=args.archive_max_bytes,
+                archive_reuse=args.archive_reuse,
+                offline=args.offline,
             )
             print(f"submitted: {task.task_id} state={task.state}")
             return 0

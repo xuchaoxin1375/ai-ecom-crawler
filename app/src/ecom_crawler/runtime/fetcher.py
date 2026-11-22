@@ -88,10 +88,25 @@ class ScraplingFetcher:
             if isinstance(body, str):
                 body = body.encode("utf-8")
             final_url = str(getattr(response, "url", url))
+            headers = getattr(response, "headers", {}) or {}
+            content_type = ""
+            try:
+                content_type = str(
+                    headers.get("content-type")
+                    or headers.get("Content-Type")
+                    or ""
+                )
+            except AttributeError:
+                content_type = ""
             if (status == 429 or 500 <= status < 600) and attempt < self.max_attempts:
                 self._sleep_backoff(attempt)
                 continue
-            return FetchResult(status=status, url=final_url, body=bytes(body))
+            return FetchResult(
+                status=status,
+                url=final_url,
+                body=bytes(body),
+                meta={"content_type": content_type},
+            )
         return FetchResult(status=0, url=url, error=last_error)
 
     def get_listing(

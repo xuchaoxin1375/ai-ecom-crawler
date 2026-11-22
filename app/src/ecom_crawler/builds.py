@@ -36,6 +36,7 @@ from .harness import BuildService, BuildTask, OpenCodeHttpAdapter
 from .harness.adapter import BuildSession
 from .harness.dependencies import DependencyPolicy
 from .harness.trace import build_trace, render_trace_markdown
+from .runtime.archive import prefetch_rule_samples
 from .runtime.batch import normalize_site, rule_domains
 from .runtime.models import Batch, BatchSite, BuildRecord, utc_now
 from .runtime.rule import load_rule
@@ -84,7 +85,7 @@ class BuildError(ValueError):
     """Raised when a build cannot start or is invalid for the site."""
 
 
-Validator = Callable[[Path, Path, int, int, str | None], dict[str, Any]]
+Validator = Callable[..., dict[str, Any]]
 
 
 def default_model() -> dict[str, Any] | None:
@@ -112,6 +113,12 @@ def default_validator(
     max_products: int,
     max_seconds: int,
     proxy: str | None = None,
+    *,
+    archive_mode: str = "off",
+    archive_root: str | Path | None = None,
+    archive_sample_limit: int = 20,
+    archive_max_bytes: int | None = None,
+    archive_reuse: bool = False,
 ) -> dict[str, Any]:
     """Run the bounded validation task in an isolated ledger/output tree."""
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -128,6 +135,11 @@ def default_validator(
         max_attempts=1,
         per_domain_rps=1.0,
         proxy=proxy,
+        archive_mode=archive_mode,
+        archive_root=archive_root,
+        archive_sample_limit=archive_sample_limit,
+        archive_max_bytes=archive_max_bytes,
+        archive_reuse=archive_reuse,
     )
     result["failure_samples"] = _validation_failure_samples(work_dir, task_id)
     currencies: dict[str, int] = {}
@@ -411,6 +423,9 @@ class BuildManager:
         capture_reasoning: bool | None = None,
         max_repair_rounds: int | None = None,
         repair_seconds: int | None = None,
+        archive_mode: str | None = None,
+        archive_root: str | Path | None = None,
+        archive_sample_limit: int | None = None,
     ) -> None:
         self.store = store
         self.out_root = Path(out_root)
@@ -448,6 +463,29 @@ class BuildManager:
         self._repair_limits: dict[str, int] = {}
         self._repairs: dict[str, list[dict[str, Any]]] = {}
         self._trace_meta_cache: dict[str, dict[str, Any]] = {}
+        self._archive_configs: dict[str, dict[str, Any]] = {}
+        self._catalog_configs: dict[str, dict[str, Any]] = {}
+        self._archive_stats: dict[str, dict[str, Any]] = {}
+        self.default_archive_mode = (
+            archive_mode
+            or os.environ.get("ECOM_BUILD_ARCHIVE_MODE")
+            or "off"
+        ).strip().lower()
+        if self.default_archive_mode not in {"off", "sample", "full"}:
+            raise BuildError(
+                f"unsupported archive mode: {self.default_archive_mode}"
+            )
+        self.default_archive_root = (
+            Path(archive_root) if archive_root else self.out_root / "archive"
+        )
+        self.default_archive_sample_limit = max(
+            1,
+            int(
+                archive_sample_limit
+                if archive_sample_limit is not None
+                else os.environ.get("ECOM_BUILD_ARCHIVE_SAMPLE_LIMIT", "20")
+            ),
+        )
         self.validator = validator or default_validator
         self.max_seconds = int(
             max_seconds
@@ -492,6 +530,12 @@ class BuildManager:
         proxy: str | None = None,
         capture_reasoning: bool | None = None,
         repair_rounds: int | None = None,
+        archive_mode: str | None = None,
+        archive_root: str | Path | None = None,
+        archive_sample_limit: int | None = None,
+        archive_max_bytes: int | None = None,
+        catalog_scope: str = "sample",
+        catalog_products: int | None = None,
     ) -> BuildRecord:
         if site.readiness in {"invalid", "duplicate"}:
             raise BuildError("invalid or duplicate sites cannot be built")
@@ -524,6 +568,43 @@ class BuildManager:
             )
             self._repair_limits[build_id] = requested_repairs
             self._repairs[build_id] = []
+            resolved_archive_mode = (
+                archive_mode or self.default_archive_mode
+            ).strip().lower()
+            if resolved_archive_mode not in {"off", "sample", "full"}:
+                raise BuildError(f"unsupported archive mode: {resolved_archive_mode}")
+            resolved_catalog_scope = (
+                "full" if str(catalog_scope).strip().lower() == "full" else "sample"
+            )
+            self._archive_configs[build_id] = {
+                "mode": resolved_archive_mode,
+                "root": str(
+                    Path(archive_root)
+                    if archive_root
+                    else self.default_archive_root
+                ),
+                "sample_limit": max(
+                    1,
+                    int(
+                        archive_sample_limit
+                        if archive_sample_limit is not None
+                        else self.default_archive_sample_limit
+                    ),
+                ),
+                "max_bytes": archive_max_bytes,
+                "reuse": True,
+            }
+            self._catalog_configs[build_id] = {
+                "catalog_scope": resolved_catalog_scope,
+                "catalog_products": max(
+                    1,
+                    int(
+                        catalog_products
+                        if catalog_products is not None
+                        else os.environ.get("ECOM_BUILD_CATALOG_PRODUCTS", "2000")
+                    ),
+                ),
+            }
             task = BuildTask(
                 build_id=build_id,
                 site={
@@ -554,7 +635,11 @@ class BuildManager:
                     "Build a declarative product rule from the batch site entry "
                     "and install it only after host validation."
                 ),
-                extra={"proxy": resolved_proxy} if resolved_proxy else {},
+                extra={
+                    **({"proxy": resolved_proxy} if resolved_proxy else {}),
+                    **self._catalog_configs[build_id],
+                    **self._archive_configs[build_id],
+                },
             )
             record = BuildRecord(
                 build_id=build_id,
@@ -633,6 +718,45 @@ class BuildManager:
             if proxy
             else "- Egress proxy: direct; no proxy is configured for this build.\n"
         )
+        catalog_scope = str(task.extra.get("catalog_scope") or "sample").strip().lower()
+        catalog_products = int(
+            task.extra.get("catalog_products") or task.limits.get("max_products") or 1
+        )
+        if catalog_scope == "full":
+            catalog_lines = (
+                f"- Catalog scope: **full site** (target at least {catalog_products} products)\n"
+                f"- Host validation sample: {task.limits.get('max_products')} products\n"
+                "- The rule's `scope.max_products` must be at least the catalog target; "
+                "the host validates only a small sample.\n"
+            )
+            discovery_instruction = (
+                "This build targets the **full catalog**, not a single entry-page sample. "
+                "Inspect the homepage navigation and, when available, the site map page "
+                "(for PrestaShop, `/plan-site`). Enumerate the top-level product "
+                "categories, then use `discovery.sources` entries of type `listing` "
+                "with `product_link_selector` and `advance: {type: page_param, param: "
+                "\"p\"}` (or `next_link` when the category exposes rel=next). When "
+                "`discovery.sources` is present, `discovery.strategies` must be "
+                "`['entry_links']` (schema constraint), even though the actual sources "
+                "are listings. Set `max_pages` from the category pagination you actually "
+                "observe; do not guess a huge number. Deduplicate product URLs by "
+                "canonical URL. You do not need to fetch every product page during the "
+                "build: inspect at least one product page per distinct "
+                "template/category and put 3+ representative product URLs in "
+                "`evidence.sample_urls` so the host can archive them.\n"
+            )
+        else:
+            catalog_lines = (
+                f"- Product budget: `{task.limits.get('max_products')}`\n"
+                f"- Wall-clock budget: `{task.limits.get('max_seconds')}` seconds\n"
+                f"- Request budget: `{task.limits.get('max_requests')}`\n"
+            )
+            discovery_instruction = (
+                "Use the entry page first. If it has product links, a bounded "
+                "`entry_links` sample is enough; do not crawl the whole site. If it has "
+                "no product links, inspect one category or sitemap and use `listing`, "
+                "`html_index` or `sitemap`.\n"
+            )
         return f"""# Build brief: {site.site_key}
 
 You are building a **declarative** rule package for one public e-commerce site.
@@ -647,14 +771,8 @@ valid product. You cannot mark a rule `verified`; the host stores it as
 - Allowed origin: `{origin}`
 - Batch market: `{batch.market or "unknown"}`
 - Batch language: `{batch.language or "unknown"}`
-- Product budget: `{task.limits.get("max_products")}`
-- Wall-clock budget: `{task.limits.get("max_seconds")}` seconds
-- Request budget: `{task.limits.get("max_requests")}`
-{proxy_line}
-Use the entry page first. If it has product links, a bounded `entry_links`
-sample is enough; do not crawl the whole site. If it has no product links,
-inspect one category or sitemap and use `listing`, `html_index` or `sitemap`.
-
+{catalog_lines}{proxy_line}
+{discovery_instruction}
 ## Required output
 
 Write these files from the workspace (`work/` is your current directory):
@@ -728,10 +846,18 @@ domain-mismatched, or produces no valid product.
 """
 
     def _prompt(self, site: BatchSite, batch: Batch, task: BuildTask) -> str:
+        catalog = str(task.extra.get("catalog_scope") or "sample").lower()
+        scope_note = (
+            " This is a full-catalog build: enumerate the top-level product "
+            "categories and their pagination, and set scope.max_products to the "
+            "catalog target. The host validation uses only a small sample."
+            if catalog == "full"
+            else ""
+        )
         return (
             "Read ../input/build-brief.md and ../input/reference-rule.yaml, "
             f"then build the rule package for {site.site_key}. "
-            f"Entry: {task.site['entry_urls'][0]}. "
+            f"Entry: {task.site['entry_urls'][0]}.{scope_note} "
             "Write ../out/plan/rule.yaml and ../out/evidence/build-notes.md, "
             "inspect at least one real product page, and keep within the brief's "
             "request and time budget. Reply briefly when the files are written."
@@ -874,12 +1000,42 @@ domain-mismatched, or produces no valid product.
                 return None
 
             validation: dict[str, Any] | None = None
+            archive_stats: dict[str, Any] | None = None
             try:
                 rule_path = self._find_rule(session)
                 rule = load_rule(rule_path)
+                catalog = self._catalog_configs.get(build_id, {})
+                if str(catalog.get("catalog_scope")) == "full":
+                    target = int(catalog.get("catalog_products") or 2000)
+                    payload = yaml.safe_load(rule_path.read_text(encoding="utf-8"))
+                    scope = payload.setdefault("scope", {}) if isinstance(payload, dict) else {}
+                    if isinstance(scope, dict):
+                        changed = False
+                        if int(scope.get("max_products") or 0) < target:
+                            scope["max_products"] = target
+                            changed = True
+                        if int(scope.get("max_seconds") or 0) < 3600:
+                            scope["max_seconds"] = 3600
+                            changed = True
+                        if changed:
+                            rule_path.write_text(
+                                yaml.safe_dump(payload, allow_unicode=True, sort_keys=False),
+                                encoding="utf-8",
+                            )
+                            rule = load_rule(rule_path)
                 selector_errors = check_rule_selectors(rule.raw)
                 if selector_errors:
                     raise BuildError(format_selector_errors(selector_errors))
+                self._assert_catalog_rule(build_id, rule)
+                archive = self._archive_configs.get(build_id, {})
+                if str(archive.get("mode") or "off") != "off":
+                    archive_stats = prefetch_rule_samples(
+                        rule,
+                        archive.get("root") or self.out_root / "archive",
+                        proxy=record.proxy,
+                        limit=int(archive.get("sample_limit") or 20),
+                    )
+                    self._archive_stats[build_id] = archive_stats
                 domains = rule_domains(rule.site)
                 if record.site_key not in domains:
                     raise BuildError(
@@ -894,6 +1050,11 @@ domain-mismatched, or produces no valid product.
                     self.max_products,
                     self.validation_seconds,
                     record.proxy,
+                    archive_mode=str(archive.get("mode") or "off"),
+                    archive_root=archive.get("root"),
+                    archive_sample_limit=int(archive.get("sample_limit") or 20),
+                    archive_max_bytes=archive.get("max_bytes"),
+                    archive_reuse=True,
                 )
                 counts = task_result.get("counts") if isinstance(task_result, dict) else {}
                 counts = counts if isinstance(counts, dict) else {}
@@ -910,6 +1071,25 @@ domain-mismatched, or produces no valid product.
                     else None,
                     "failure_samples": task_result.get("failure_samples") or [],
                     "currencies": task_result.get("currencies") or {},
+                    "archive": {
+                        **(
+                            {"prefetch": archive_stats}
+                            if archive_stats
+                            else {}
+                        ),
+                        **(
+                            {
+                                "validation": (
+                                    task_result.get("runtime") or {}
+                                ).get("archive")
+                            }
+                            if isinstance(task_result, dict)
+                            and isinstance(task_result.get("runtime"), dict)
+                            and (task_result.get("runtime") or {}).get("archive")
+                            else {}
+                        ),
+                    }
+                    or None,
                 }
                 if valid < 1:
                     raise BuildError(
@@ -1017,6 +1197,23 @@ domain-mismatched, or produces no valid product.
             with self._lock:
                 self._finalizing.discard(build_id)
                 self._handled_permissions.pop(build_id, None)
+
+    def _assert_catalog_rule(self, build_id: str, rule: Any) -> None:
+        catalog = self._catalog_configs.get(build_id, {})
+        if str(catalog.get("catalog_scope")) != "full":
+            return
+        sources = rule.discovery.get("sources")
+        source_types = {
+            str(source.get("type"))
+            for source in sources or []
+            if isinstance(source, dict)
+        }
+        if not source_types & {"listing", "sitemap", "html_index", "public_json"}:
+            raise BuildError(
+                "full catalog build requires discovery.sources with a listing, "
+                "sitemap, html_index or public_json source; entry_links alone is "
+                "not a full-catalog discovery path"
+            )
 
     def _start_repair(
         self,
@@ -1372,6 +1569,9 @@ domain-mismatched, or produces no valid product.
             "repair_limit": repair_limit,
             "repair_round": len(repairs),
             "repairs": repairs,
+            "archive": self._archive_configs.get(build_id),
+            "archive_stats": self._archive_stats.get(build_id),
+            "catalog": self._catalog_configs.get(build_id),
         }
 
     def messages(self, build_id: str, *, limit: int = 80) -> dict[str, Any]:

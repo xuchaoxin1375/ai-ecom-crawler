@@ -6,6 +6,7 @@ import {
   getBuild,
   getBuildConfig,
   getBuildMessages,
+  getTaskCsv,
   getTaskItems,
 } from "../api";
 
@@ -17,6 +18,7 @@ vi.mock("../api", async (importOriginal) => {
     getBuild: vi.fn(),
     getBuildConfig: vi.fn(),
     getBuildMessages: vi.fn(),
+    getTaskCsv: vi.fn(),
     getTaskItems: vi.fn(),
   };
 });
@@ -116,6 +118,15 @@ describe("SiteDetailView build timeline", () => {
       max_repair_rounds: 1,
     });
     vi.mocked(getTaskItems).mockResolvedValue({ total: 0, items: [] } as any);
+    vi.mocked(getTaskCsv).mockResolvedValue({
+      task_id: "build-1",
+      state: "FINISHED",
+      live: false,
+      columns: [],
+      rows: [],
+      total: 0,
+      source: null,
+    });
     vi.mocked(getBuildMessages).mockResolvedValue({
       build_id: "build-1",
       state: "FINISHED",

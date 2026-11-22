@@ -52,6 +52,7 @@ const busy = ref("");
 const actionNotice = ref("");
 const actionSkipped = ref<Array<{ domain: string; reason: string }>>([]);
 const confirm = ref<"" | "cancel" | "archive">("");
+const fullCatalog = ref(false);
 const siteFilter = ref<SiteFilter>("all");
 const importOpen = ref(false);
 const importText = ref("");
@@ -192,7 +193,21 @@ async function runAction(
   actionSkipped.value = [];
   try {
     if (action === "start") {
-      const result = await startBatch(props.id);
+      const result = await startBatch(
+        props.id,
+        fullCatalog.value
+          ? {
+              limits: {
+                max_urls: 8000,
+                max_products: 3000,
+                max_seconds: 14400,
+                max_attempts: 2,
+              },
+              archive_mode: "sample",
+              archive_sample_limit: 20,
+            }
+          : undefined,
+      );
       batch.value = result.batch;
       actionNotice.value = `已受理 ${result.accepted.length} 个站点，跳过 ${result.skipped.length} 个。`;
       actionSkipped.value = result.skipped.map((item) => ({
@@ -332,6 +347,10 @@ onBeforeUnmount(() => {
           导出批次 ZIP
         </a>
       </div>
+      <label class="check batch-full-catalog">
+        <input v-model="fullCatalog" type="checkbox" />
+        全量目录（3000 商品 / 4 小时 / sample 存档）
+      </label>
     </div>
 
     <p v-if="error" class="notice danger" role="alert">{{ error }}</p>

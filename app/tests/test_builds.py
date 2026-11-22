@@ -142,6 +142,23 @@ def invalid_selector_payload(site_key: str = "example.fr") -> dict[str, Any]:
     return payload
 
 
+def listing_rule_payload(site_key: str = "example.fr") -> dict[str, Any]:
+    payload = rule_payload(site_key)
+    payload["discovery"] = {
+        "sources": [
+            {
+                "type": "listing",
+                "url": f"https://{site_key}/products",
+                "product_link_selector": "a.product",
+                "advance": {"type": "page_param", "param": "p", "max_pages": 2},
+            }
+        ],
+        "product_url_patterns": ["/products/[^/]+$"],
+        "url_identity": "canonical",
+    }
+    return payload
+
+
 class FakeBuildAdapter:
     def __init__(
         self,
@@ -325,6 +342,7 @@ class BuildWorkflowTests(unittest.TestCase):
                 max_products: int,
                 max_seconds: int,
                 proxy: str | None = None,
+                **_: Any,
             ) -> dict[str, Any]:
                 return {
                     "counts": {"valid_products": 2, "failed_products": 0},
@@ -344,6 +362,7 @@ class BuildWorkflowTests(unittest.TestCase):
             max_products=2,
             max_repair_rounds=max_repair_rounds,
             repair_seconds=5,
+            archive_mode="off",
         )
 
     def _client(self, manager: BuildManager) -> TestClient:
@@ -406,7 +425,19 @@ class BuildWorkflowTests(unittest.TestCase):
             self.assertEqual(site["rule"]["rule_id"], "example-fr-build")
             self.assertTrue((self.rules / site["rule"]["path"]).is_file())
 
-            started = client.post("/api/batches/b-1/start", json={}, headers=CLIENT_HEADERS)
+            started = client.post(
+                "/api/batches/b-1/start",
+                json={
+                    "limits": {
+                        "max_urls": 200,
+                        "max_products": 100,
+                        "max_seconds": 600,
+                    },
+                    "archive_mode": "sample",
+                    "archive_sample_limit": 5,
+                },
+                headers=CLIENT_HEADERS,
+            )
             self.assertEqual(started.status_code, 202, started.text)
             payload = started.json()
             self.assertEqual(len(payload["accepted"]), 1)
@@ -416,6 +447,9 @@ class BuildWorkflowTests(unittest.TestCase):
             task = self.store.get_task(task_id)
             assert task is not None
             self.assertEqual(task.input.get("proxy"), "http://127.0.0.1:17216")
+            self.assertEqual(task.input["archive"]["mode"], "sample")
+            self.assertEqual(task.input["archive"]["sample_limit"], 5)
+            self.assertEqual(task.limits["max_products"], 100)
 
     def test_missing_rule_fails_and_releases_site(self) -> None:
         adapter = FakeBuildAdapter(self.root, write_rule=False)
@@ -484,6 +518,7 @@ class BuildWorkflowTests(unittest.TestCase):
             max_products: int,
             max_seconds: int,
             proxy: str | None = None,
+            **_: Any,
         ) -> dict[str, Any]:
             validator_calls["count"] += 1
             return {
@@ -532,6 +567,7 @@ class BuildWorkflowTests(unittest.TestCase):
             max_products: int,
             max_seconds: int,
             proxy: str | None = None,
+            **_: Any,
         ) -> dict[str, Any]:
             return {
                 "counts": {"valid_products": 2, "failed_products": 0},
@@ -588,6 +624,7 @@ class BuildWorkflowTests(unittest.TestCase):
             max_products: int,
             max_seconds: int,
             proxy: str | None = None,
+            **_: Any,
         ) -> dict[str, Any]:
             return {
                 "counts": {"valid_products": 0, "failed_products": 3},
@@ -618,6 +655,48 @@ class BuildWorkflowTests(unittest.TestCase):
             self.assertIn("detail:", error)
             self.assertIn("first-of-type", error)
             self.assertIn("https://example.fr/products/1", error)
+
+    def test_full_catalog_build_patches_rule_scope(self) -> None:
+        adapter = FakeBuildAdapter(self.root, rule_payloads=[listing_rule_payload()])
+        manager = self._manager(adapter)
+        with self._client(manager) as client:
+            response = client.post(
+                "/api/batches/b-1/sites/example.fr/build",
+                json={
+                    "catalog_scope": "full",
+                    "catalog_products": 100,
+                    "repair_rounds": 0,
+                },
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(response.status_code, 202, response.text)
+            build_id = response.json()["build"]["build_id"]
+            result = self._wait_ready(client, build_id)
+            self.assertEqual(result["outcome"], "succeeded", result["error"])
+            batch = client.get("/api/batches/b-1").json()
+            site = batch["sites"][0]
+            rule_path = self.rules / site["rule"]["path"]
+            payload = yaml.safe_load(rule_path.read_text(encoding="utf-8"))
+            self.assertGreaterEqual(payload["scope"]["max_products"], 100)
+            self.assertEqual(result["catalog"]["catalog_scope"], "full")
+
+    def test_full_catalog_rejects_entry_links_only(self) -> None:
+        adapter = FakeBuildAdapter(self.root)
+        manager = self._manager(adapter)
+        with self._client(manager) as client:
+            response = client.post(
+                "/api/batches/b-1/sites/example.fr/build",
+                json={
+                    "catalog_scope": "full",
+                    "catalog_products": 100,
+                    "repair_rounds": 0,
+                },
+                headers=CLIENT_HEADERS,
+            )
+            build_id = response.json()["build"]["build_id"]
+            result = self._wait_ready(client, build_id)
+            self.assertEqual(result["outcome"], "failed")
+            self.assertIn("full catalog build requires", result["error"] or "")
 
     def test_build_timeline_merges_trace_parts(self) -> None:
         trace = {

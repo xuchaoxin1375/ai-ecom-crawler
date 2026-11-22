@@ -34,6 +34,7 @@ from pydantic import BaseModel, Field
 from .. import __version__
 from ..builds import BuildError, BuildManager
 from ..execution import build_task
+from ..executor.runner import CSV_COLUMNS
 from ..harness.adapter import HarnessStateError
 from ..model import ContractError
 from ..runtime.batch import parse_site_text, parse_sites, rule_domains
@@ -98,6 +99,12 @@ class BatchImportRequest(BaseModel):
 class BatchStartRequest(BaseModel):
     limits: Limits = Field(default_factory=Limits)
     proxy: str | None = Field(default=None, max_length=500)
+    archive_mode: Literal["off", "sample", "full"] = "off"
+    archive_root: str | None = Field(default=None, max_length=1000)
+    archive_sample_limit: int = Field(default=20, ge=1, le=1000)
+    archive_max_bytes: int | None = Field(default=None, ge=0)
+    archive_reuse: bool = False
+    offline: bool = False
 
 
 class BuildStartRequest(BaseModel):
@@ -106,6 +113,12 @@ class BuildStartRequest(BaseModel):
     proxy: str | None = Field(default=None, max_length=500)
     capture_reasoning: bool = False
     repair_rounds: int | None = Field(default=None, ge=0, le=10)
+    archive_mode: Literal["off", "sample", "full"] = "off"
+    archive_root: str | None = Field(default=None, max_length=1000)
+    archive_sample_limit: int = Field(default=20, ge=1, le=1000)
+    archive_max_bytes: int | None = Field(default=None, ge=0)
+    catalog_scope: Literal["sample", "full"] = "sample"
+    catalog_products: int = Field(default=2000, ge=1, le=10000)
 
 
 class BuildPermissionRequest(BaseModel):
@@ -935,16 +948,74 @@ def create_app(
     def get_task(task_id: str) -> dict[str, Any]:
         return _summary(store, require_task(task_id), root)
 
-    @app.get("/api/tasks/{task_id}/items")
-    def list_items(
+    @app.get("/api/tasks/{task_id}/csv")
+    def preview_task_csv(
         task_id: str,
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+        offset: Annotated[int, Query(ge=0)] = 0,
+    ) -> dict[str, Any]:
+        task = require_task(task_id)
+        task_dir = root / task_id
+        columns: list[str] = list(CSV_COLUMNS)
+        rows: list[dict[str, Any]] = []
+        source: str | None = None
+        terminal = task.state in {"FINISHED", "CANCELLED"}
+        csv_path = task_dir / "products.csv"
+        jsonl_path = task_dir / "products.jsonl"
+        if terminal and csv_path.is_file():
+            try:
+                with csv_path.open(encoding="utf-8", newline="") as handle:
+                    reader = csv.DictReader(handle)
+                    if reader.fieldnames:
+                        columns = list(reader.fieldnames)
+                    rows = [dict(row) for row in reader]
+                source = "products.csv"
+            except OSError:
+                rows = []
+        if source is None and jsonl_path.is_file():
+            try:
+                for line in jsonl_path.read_text(encoding="utf-8").splitlines():
+                    if not line.strip():
+                        continue
+                    try:
+                        record = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    rows.append(
+                        {
+                            column: record.get(column, "")
+                            for column in columns
+                        }
+                    )
+                source = "products.jsonl"
+            except OSError:
+                rows = []
+        return {
+            "task_id": task.task_id,
+            "state": task.state,
+            "live": not terminal,
+            "columns": columns,
+            "rows": rows[offset : offset + limit],
+            "total": len(rows),
+            "source": source,
+        }
+
+    @app.get("/api/tasks/{task_id}/items")
+    def list_items(        task_id: str,
         kind: Annotated[str, Query(pattern="^(url|product)$")] = "product",
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         offset: Annotated[int, Query(ge=0)] = 0,
+        state: Annotated[str | None, Query(max_length=20)] = None,
+        order: Annotated[str, Query(pattern="^(asc|desc)$")] = "asc",
     ) -> dict[str, Any]:
         require_task(task_id)
         item_type = "navigation" if kind == "url" else "product"
         items = store.items(task_id, item_type)
+        if state:
+            wanted = state.strip().upper()
+            items = [item for item in items if item.state == wanted]
+        if order == "desc":
+            items = list(reversed(items))
         return {
             "total": len(items),
             "items": [_item_payload(item) for item in items[offset : offset + limit]],
@@ -1150,6 +1221,12 @@ def create_app(
             raise _error("INVALID_STATE", "batch is archived", 409)
         limits = payload.limits if payload is not None else Limits()
         proxy_override = payload.proxy if payload is not None else None
+        if payload is not None and payload.offline and payload.archive_mode != "full":
+            raise _error(
+                "INVALID_ARCHIVE",
+                "offline replay requires archive_mode=full",
+                422,
+            )
         entries = _rule_entries(rules)
         accepted: list[dict[str, Any]] = []
         skipped: list[dict[str, Any]] = []
@@ -1201,6 +1278,16 @@ def create_app(
                     max_seconds=limits.max_seconds,
                     max_attempts=limits.max_attempts,
                     proxy=proxy_override or site.proxy,
+                    archive_mode=payload.archive_mode if payload is not None else "off",
+                    archive_root=payload.archive_root if payload is not None else None,
+                    archive_sample_limit=(
+                        payload.archive_sample_limit if payload is not None else 20
+                    ),
+                    archive_max_bytes=(
+                        payload.archive_max_bytes if payload is not None else None
+                    ),
+                    archive_reuse=payload.archive_reuse if payload is not None else False,
+                    offline=payload.offline if payload is not None else False,
                 )
             except (RuleError, ContractError) as exc:
                 skipped.append({**item, "reason": f"规则包无法构建任务：{exc}"})
@@ -1455,6 +1542,12 @@ def create_app(
                 proxy=request.proxy,
                 capture_reasoning=request.capture_reasoning,
                 repair_rounds=request.repair_rounds,
+                archive_mode=request.archive_mode,
+                archive_root=request.archive_root,
+                archive_sample_limit=request.archive_sample_limit,
+                archive_max_bytes=request.archive_max_bytes,
+                catalog_scope=request.catalog_scope,
+                catalog_products=request.catalog_products,
             )
         except BuildError as exc:
             raise _error("BUILD_CONFLICT", str(exc), 409) from exc

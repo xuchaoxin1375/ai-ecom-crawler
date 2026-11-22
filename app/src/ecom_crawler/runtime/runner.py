@@ -26,6 +26,7 @@ from ecom_crawler.executor.normalize import csv_safe, format_price
 from ecom_crawler.executor.runner import CSV_COLUMNS, build_record, discover_urls, validate_product
 from ecom_crawler.model import OPTIONAL_QUALITY_FIELDS
 
+from .archive import ArchiveMissError
 from .atomic import append_jsonl, write_json, write_text
 from .fetcher import UnsupportedAdvanceError
 from .models import Lease, Task, WorkItem, utc_now
@@ -161,6 +162,14 @@ class TaskRunner:
                 reason=exc.reason,
                 detail=exc.detail,
                 failure_class=exc.failure_class,
+            )
+        except ArchiveMissError as exc:
+            self._stop_reason = "ARCHIVE_MISS"
+            self._stop_detail = str(exc)
+            self._event(
+                "task_error",
+                reason=self._stop_reason,
+                detail=self._stop_detail,
             )
         except LeaseLostError:
             raise
@@ -342,23 +351,25 @@ class TaskRunner:
 
     def _process_item(self, item: WorkItem) -> tuple[str, dict[str, Any]]:
         advance = item.result.get("advance", {}) if item.discovered_from == "listing" else {}
-        if advance.get("type") in {"load_more", "infinite_scroll"}:
-            get_listing = getattr(self.fetcher, "get_listing", None)
-            if not callable(get_listing):
-                return self._failure(item, "permanent", "unsupported_advance")
-            try:
+        try:
+            if advance.get("type") in {"load_more", "infinite_scroll"}:
+                get_listing = getattr(self.fetcher, "get_listing", None)
+                if not callable(get_listing):
+                    return self._failure(item, "permanent", "unsupported_advance")
                 result = get_listing(
                     item.url,
                     advance=advance,
                     item_selector=item.result.get("link_selector"),
                     item_type=item.item_type,
                 )
-            except UnsupportedAdvanceError as exc:
-                return self._failure(
-                    item, "permanent", "unsupported_advance", detail=str(exc)
-                )
-        else:
-            result = self.fetcher.get(item.url, item_type=item.item_type)
+            else:
+                result = self.fetcher.get(item.url, item_type=item.item_type)
+        except UnsupportedAdvanceError as exc:
+            return self._failure(
+                item, "permanent", "unsupported_advance", detail=str(exc)
+            )
+        except ArchiveMissError as exc:
+            raise StopTask("ARCHIVE_MISS", str(exc)) from exc
         if result.meta.get("challenge_suspected"):
             raise StopTask("ACCESS_DENIED", f"challenge page for {item.url}")
         if result.status == 0:
@@ -630,7 +641,7 @@ class TaskRunner:
             return None
         if advance_type == "page_param":
             param = str(advance.get("param", "page"))
-            parsed = urlparse(item.url)
+            parsed = urlparse(page.url or item.url)
             query = dict(parse_qsl(parsed.query, keep_blank_values=True))
             query[param] = str(current + 1)
             return urlunparse(
@@ -817,7 +828,10 @@ class TaskRunner:
                 url = str(source.get("url") or source.get("seed") or "")
                 if not url:
                     continue
-                advance = source.get("advance", {"type": "none"})
+                advance = dict(source.get("advance") or {"type": "none"})
+                for key in ("max_pages", "start"):
+                    if key in source and key not in advance:
+                        advance[key] = source[key]
                 self._add_navigation(
                     url,
                     source="listing",
@@ -1453,6 +1467,7 @@ class TaskRunner:
         if self._stop_reason in {
             "ACCESS_DENIED",
             "ADAPTER_FAILED",
+            "ARCHIVE_MISS",
             "BUDGET_EXHAUSTED",
             "ENVIRONMENT_ERROR",
             "PLAN_ERROR",
@@ -1511,17 +1526,26 @@ class TaskRunner:
         finished_at: str,
     ) -> dict[str, Any]:
         counts = self._counts()
+        source_count = len(self.rule.sources)
+        coverage_note = (
+            "All candidates declared by the rule's discovery sources were processed; "
+            "this is not proof of full-site inventory."
+            if source_count > 1
+            else "Bounded sample from one entry page; not full-site coverage."
+        )
         if self.task.task_type == "discovery":
             coverage = _coverage(
                 counts["url_candidates"],
                 counts["valid_urls"] + counts["excluded_urls"] + counts["failed_urls"],
                 "declared-source URL candidates",
+                notes=coverage_note,
             )
         else:
             coverage = _coverage(
                 counts["product_candidates"],
                 counts["processed_products"],
                 "declared-source product candidates",
+                notes=coverage_note,
             )
         quality_exceptions = []
         for product in self._products:
@@ -1602,6 +1626,7 @@ class TaskRunner:
                 "raw_pages_retained": False,
                 "http_engine": _engine_summary(engine_info),
                 "fetch_engines": engine_info.get("engines_used", []),
+                "archive": engine_info.get("archive"),
                 "browser": {
                     "launched": browser_launched,
                     "headless": engine_info.get("browser_headless"),
@@ -1906,7 +1931,9 @@ def _normalize_url(url: str) -> str:
     )
 
 
-def _coverage(denominator: int, covered: int, source: str) -> dict[str, Any]:
+def _coverage(
+    denominator: int, covered: int, source: str, *, notes: str | None = None
+) -> dict[str, Any]:
     if denominator <= 0:
         return {
             "status": "UNKNOWN",
@@ -1920,7 +1947,7 @@ def _coverage(denominator: int, covered: int, source: str) -> dict[str, Any]:
         "denominator_source": source,
         "denominator": denominator,
         "covered": covered,
-        "notes": "Bounded sample from one entry page; not full-site coverage.",
+        "notes": notes or "Bounded sample from one entry page; not full-site coverage.",
     }
 
 

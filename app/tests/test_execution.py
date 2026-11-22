@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from ecom_crawler.cli import main
-from ecom_crawler.execution import run_and_export
+from ecom_crawler.execution import run_and_export, run_task
 from ecom_crawler.runtime.store import TaskStore
 from ecom_crawler.validate import validate_run
 
@@ -190,9 +190,23 @@ def fixture_server() -> Iterator[str]:
                 self.end_headers()
                 self.wfile.write(body)
                 return
-            if self.path in {"/p1.html", "/p2.html"}:
-                index = 1 if self.path == "/p1.html" else 2
+            if self.path in {"/p1.html", "/p2.html", "/p3.html"}:
+                index = int(self.path[2])
                 body = product_html(base, index).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            if self.path in {"/list", "/list?p=2", "/list?p=3"}:
+                page = 1
+                if "p=" in self.path:
+                    page = int(self.path.rsplit("=", 1)[1])
+                body = (
+                    f"<html><body><a class='product' href='/p{page}.html'>P{page}</a>"
+                    "</body></html>"
+                ).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
@@ -256,6 +270,96 @@ class ExecutionTests(unittest.TestCase):
             stored = TaskStore(root / "tasks.db").get_task("fixture-product")
             assert stored is not None
             self.assertEqual(stored.state, "FINISHED")
+
+    def test_full_archive_replays_offline(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive_root = root / "archive"
+            with fixture_server() as base:
+                rule = root / "rule.yaml"
+                rule.write_text(
+                    RULE_TEMPLATE.replace("__BASE__", base), encoding="utf-8"
+                )
+                first, _ = run_task(
+                    rule_path=rule,
+                    db_path=root / "first.db",
+                    out_root=root / "first",
+                    task_id="archive-full",
+                    task_type="product",
+                    max_products=10,
+                    max_seconds=30,
+                    max_attempts=1,
+                    per_domain_rps=50,
+                    archive_mode="full",
+                    archive_root=archive_root,
+                )
+            self.assertEqual(first["counts"]["valid_products"], 2)
+            archive_stats = (first.get("runtime") or {}).get("archive") or {}
+            self.assertEqual(archive_stats.get("mode"), "full")
+            self.assertGreaterEqual(archive_stats.get("pages", 0), 3)
+            self.assertTrue((archive_root / "index.jsonl").is_file())
+
+            second, _ = run_task(
+                rule_path=rule,
+                db_path=root / "second.db",
+                out_root=root / "second",
+                task_id="archive-offline",
+                task_type="product",
+                max_products=10,
+                max_seconds=30,
+                max_attempts=1,
+                per_domain_rps=50,
+                archive_mode="full",
+                archive_root=archive_root,
+                offline=True,
+            )
+            self.assertEqual(second["counts"]["valid_products"], 2)
+            offline_archive = (second.get("runtime") or {}).get("archive") or {}
+            self.assertGreater(offline_archive.get("hits", 0), 0)
+            self.assertEqual(offline_archive.get("writes"), 0)
+
+    def test_listing_source_max_pages_is_respected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary, fixture_server() as base:
+            root = Path(temporary)
+            rule_text = RULE_TEMPLATE.replace("__BASE__", base)
+            start = rule_text.index("\ndiscovery:") + 1
+            end = rule_text.index("\nfetch:") + 1
+            discovery = f'''discovery:
+  strategies: ["entry_links"]
+  product_url_patterns: ['^/p[0-9]+\\.html$']
+  url_identity: "canonical"
+  sources:
+    - type: "listing"
+      url: "{base}/list"
+      product_link_selector: "a.product"
+      max_pages: 2
+      advance: {{type: "page_param", param: "p"}}
+
+'''
+            rule = root / "rule.yaml"
+            rule.write_text(
+                rule_text[:start] + discovery + rule_text[end:], encoding="utf-8"
+            )
+            result, _ = run_task(
+                rule_path=rule,
+                db_path=root / "tasks.db",
+                out_root=root / "tasks",
+                task_id="listing-limit",
+                task_type="product",
+                max_products=10,
+                max_seconds=30,
+                max_attempts=1,
+                per_domain_rps=50,
+            )
+            self.assertEqual(result["counts"]["valid_products"], 2)
+            product_urls = {
+                json.loads(line).get("source_url")
+                for line in (root / "tasks" / "listing-limit" / "products.jsonl")
+                .read_text(encoding="utf-8")
+                .splitlines()
+                if line.strip()
+            }
+            self.assertNotIn(f"{base}/p3.html", product_urls)
 
     def test_optional_brand_missing_is_not_quality_exception(self) -> None:
         with tempfile.TemporaryDirectory() as temporary, fixture_server() as base:

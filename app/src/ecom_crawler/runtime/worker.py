@@ -16,6 +16,7 @@ from typing import Any
 
 from scrapling.fetchers import FetcherSession
 
+from .archive import ArchiveFetcher, ArchiveStore, normalize_archive_mode
 from .atomic import write_json
 from .browser import BrowserConfig, BrowserFetcher
 from .fetcher import DomainLimiter, HybridFetcher, ScraplingFetcher, normalize_engine
@@ -447,6 +448,35 @@ class Worker:
                     or (str(task.input.get("proxy")) if task.input.get("proxy") else None),
                 )
                 with self.fetcher_factory(context) as fetcher:
+                    archive_config = task.input.get("archive")
+                    if isinstance(archive_config, dict):
+                        archive_mode = normalize_archive_mode(
+                            archive_config.get("mode")
+                        )
+                        archive_root = (
+                            Path(str(archive_config.get("root")))
+                            if archive_config.get("root")
+                            else self.out_root / "archive"
+                        )
+                        store = ArchiveStore(
+                            archive_root,
+                            mode=archive_mode,
+                            sample_limit=int(
+                                archive_config.get("sample_limit", 20)
+                            ),
+                            max_bytes=(
+                                int(archive_config["max_bytes"])
+                                if archive_config.get("max_bytes") is not None
+                                else None
+                            ),
+                            task_id=task.task_id,
+                        )
+                        fetcher = ArchiveFetcher(
+                            fetcher,
+                            store,
+                            offline=bool(archive_config.get("offline")),
+                            reuse=bool(archive_config.get("reuse")),
+                        )
                     runner = TaskRunner(
                         self.store,
                         rule,
