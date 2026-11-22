@@ -27,4 +27,5 @@
 - 文档：`python scripts/check_docs_links.py`；`python scripts/check_examples.py`；`python scripts/export_docs.py`；`python scripts/export_docs.py --check dist/ai-ecom-crawler-docs.zip`。
 - 运行时原型：`python -m uv run --project experiments/framework-compare/scrapling --with "pyyaml==6.0.3" --with "jsonschema>=4.23" python -m unittest discover -s experiments/r06/tests -v`。
 - Schema 测试不得默认跳过；缺 `jsonschema` 时先补依赖再跑，带 skip 的结果不算完整通过。
+- 行尾：以 `.gitattributes` 和 `.editorconfig` 为准；`.sh`／`.bash` 必须 LF，`.bat`／`.cmd` 必须 CRLF。出现 `CRLF will be replaced by LF` 时先看 `git ls-files --eol`，按 [`docs/30`](docs/30-经验教训.md) 处理；不要用 `core.autocrlf`／`core.safecrlf=false` 静音。
 - 真实站点验证仍按预算和证据要求手工执行，不纳入默认校验。
