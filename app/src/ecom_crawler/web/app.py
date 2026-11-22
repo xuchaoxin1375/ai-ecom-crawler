@@ -37,6 +37,7 @@ from ..runtime.worker import Worker
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).with_name("static")
+BATCH_DIST_DIR = Path(__file__).resolve().parents[3] / "frontend" / "dist"
 EXPORT_FILES = (
     "products.csv",
     "task-result.json",
@@ -570,4 +571,10 @@ def create_app(
         )
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+    if (BATCH_DIST_DIR / "index.html").is_file():
+        app.mount(
+            "/batch",
+            StaticFiles(directory=BATCH_DIST_DIR, html=True),
+            name="batch",
+        )
     return app

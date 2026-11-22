@@ -31,6 +31,7 @@
 - `task_resources` 资源登记：登记子进程 PID 和 profile／临时目录；任务结束、取消或过期接管时按租约令牌回收，避免误删新持有者的资源。
 - 构建 harness 适配器：`harness/` 提供 `HarnessAdapter`、`OpenCodeHttpAdapter`、`OpenCodeServer`、构建工作区、HTTP/SSE 客户端和事件归一化；真实 `opencode serve` 的 session／事件／权限探针已跑通。
 - 构建期依赖请求桥：每个工作区写入 `request-dependency` 插件，Agent 调用 `request_dependency` 后写 `control/dependencies/requests/<id>.json`；`DependencyBridge` 在 host 侧按 `DependencyPolicy` 返回基线／allowlist 结果、安装 allowlist 包、挂起一次性审批或取消未决请求，再写 `responses/<id>.json`。安装支持 build 解释器的 `pip` 和 `uv pip --python`，安装后用 `importlib.metadata` 验证版本。
+- 批次工作台最小端到端路径：`frontend/` 是 Vue 3 + TypeScript + Vite 应用；构建产物存在时 FastAPI 在 `/batch/` 托管，hash 路由、真实 `/api/health`／`/api/tasks`、Vitest 和 Playwright 冒烟已通过。批次／站点对象和导入匹配尚未实现。
 - FastAPI API：健康、规则目录、任务列表／详情、创建／启动／暂停／恢复／取消／归档／还原、URL／商品分页、SSE 和 zip 导出。
 - 本地静态页面：页首标注“内部技术控制台／非业务工作台”及用途边界；任务列表、创建、详情、控制按钮、计数（7 张主卡 + 完整计数行）、覆盖、质量异常数、商品预览（价格／币种／正文状态／缺失字段／字段来源）、URL 明细和导出入口。
 - 账本增加 `site_key`、`domain_key`、`market`、`rule_path`、`archived_at` 和创建幂等键；旧库自动加列。
@@ -47,6 +48,7 @@
 - `src/ecom_crawler/`：应用代码。
 - `src/ecom_crawler/runtime/`、`executor/`：从 R06 抽取的静态运行时和提取器；`runtime/browser.py` 是 Patchright CDP 浏览器 fetcher。
 - `src/ecom_crawler/web/`：本地 FastAPI 应用和静态页面。
+- `frontend/`：批次工作台 Vue 3 + TypeScript + Vite 最小路径；构建产物 `dist/` 不提交，存在时由 FastAPI 挂到 `/batch/`。
 - `src/ecom_crawler/execution.py`、`bridge.py`：执行入口与 R06→D02 转换。
 - `schemas/`：候选输入、内部商品记录和任务结果的 JSON Schema。
 - `tests/`：T1 契约／单元测试和本地 fixture 集成测试，无外部网络。
@@ -233,6 +235,7 @@ runtime:
 - `GET /api/tasks/{id}/events` 是 SSE：连接先发 `snapshot`，再转发 `events.ndjson` 增量，终态发 `end`；断线重连以快照为准。
 - 导出 zip 只允许 `products.csv`、`task-result.json`、`records.jsonl` 和 `diagnostics/` 下的排除／失败文件；`partial=true` 才允许导出未结束任务。
 - 页面支持列表（状态、结果／覆盖、质量异常数）、创建（市场／语言由规则包确定并显示）、详情、控制按钮、计数（7 张主卡 + 完整计数行）、质量异常、商品预览（价格、币种、正文状态、缺失字段、可展开字段来源）、items 和导出；页首显示服务／worker 状态，`QUEUED` 详情显示排队原因；控制请求显示“已受理”，最终状态以账本为准；取消需二次确认。真实案例走查见 `experiments/d08/ui-preview/`（`web-946474de5cf1`，familidoo 6／6、0 失败、0 条质量异常；暂停／恢复／取消、归档／还原、导出和错误提示通过）。
+- `frontend/` 构建后由 FastAPI 在 `/batch/` 提供 Vue 批次工作台最小路径；未构建时 `/batch/` 不存在，内部任务控制台仍在 `/`。
 - 托管 worker 在服务生命周期内执行 `QUEUED` 任务；服务退出时先停止领取新任务，再等待已启动任务结束。
 - `--no-worker` 时创建／启动的任务保持 `QUEUED`，需要另跑 `ecom-crawler worker`；设计门已于 2026-11-22 通过，A16 1280 实机确认未做。
 - 证据：`tests/test_web.py` 覆盖健康、规则目录、列表筛选、详情、items 分页、创建幂等、控制转移、归档／还原、SSE、导出白名单和错误码。
@@ -358,3 +361,4 @@ CSV 对以 `=`、`+`、`-`、`@` 开头的文本单元格加单引号，防止�
 - `discovered_urls`、待处理数和导航数由调用方或运行时提供；导出层不构造全站分母。
 - `outcome` 是推导值，不接受调用方直接覆盖。
 - `schemas/` 目前随仓库分发，尚未打进 wheel；安装包与 schema 分发在 R14 处理。
+- 批次工作台只有 Vue 最小路径；批次／站点对象、导入匹配、批次详情和导出尚未实现。`frontend/dist/` 不提交，部署前需 `npm run build`；Node 建议 24.15+（本机 24.14.1 有 EBADENGINE 警告但构建通过）。
