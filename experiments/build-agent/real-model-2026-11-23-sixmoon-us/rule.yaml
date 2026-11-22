@@ -1,0 +1,265 @@
+schema_version: '1.1'
+rule_id: sixmoondesigns-com-build
+rule_version: 2026.11.23-1
+kind: declarative
+status: candidate
+created_at: '2026-11-23T00:00:00Z'
+updated_at: '2026-11-22T19:51:27Z'
+site:
+  name: Six Moon Designs
+  entry_urls:
+  - https://www.sixmoondesigns.com/collections/ultralight-backpacks
+  allowed_origins:
+  - https://www.sixmoondesigns.com
+  allowed_path_prefixes:
+  - /products/
+  - /collections/
+  market: US
+  locale: en-US
+  currency: USD
+scope:
+  include:
+  - ^/products/
+  exclude:
+  - /cart
+  - /checkout
+  - /account
+  - /search
+  - /policies
+  max_products: 3
+  max_seconds: 300
+  notes: Bounded sample of product links found on the ultralight-backpacks collection
+    page. Not full-site coverage; product URLs are de-duplicated by canonical URL.
+capabilities:
+  discovery: true
+  product: true
+discovery:
+  strategies:
+  - entry_links
+  entry_url: https://www.sixmoondesigns.com/collections/ultralight-backpacks
+  link_selector: a[href*="/products/"]
+  product_url_patterns:
+  - /products/[a-z0-9][a-z0-9-]*([?]|$)
+  url_identity: canonical
+  notes: Collection cards link to /products/<handle>; variant-specific links carry
+    a ?variant= query and are collapsed onto the canonical product URL.
+fetch:
+  default_engine: static
+  concurrency: 1
+  delay_ms: 1500
+  retry:
+    max_attempts: 2
+    backoff_ms: 1000
+  timeout_ms: 45000
+  browser: false
+  login: false
+  challenge_handling: none; stop and record
+extract:
+  fields:
+    name:
+      required: true
+      fallbacks:
+      - type: json_ld
+        path: name
+        label: json_ld_name
+      - type: css_text
+        selector: h1.smd-head__title
+        label: product_h1
+      - type: css_text
+        selector: h1
+        label: h1
+      - type: css_attr
+        selector: meta[property="og:title"]
+        attr: content
+        label: og_title
+      - type: title
+        label: title
+    price.amount:
+      required: true
+      fallbacks:
+      - type: json_ld
+        path: hasVariant.0.offers.price
+        label: json_ld_variant_offer_price
+        take: min_positive
+        tax_basis: unspecified
+      - type: json_ld
+        path: offers.price
+        label: json_ld_offer_price
+        take: min_positive
+        tax_basis: unspecified
+      - type: css_attr
+        selector: meta[property="product:price:amount"]
+        attr: content
+        label: product_price_meta
+      - type: css_text
+        selector: .smd-buy__total
+        label: price_total
+      - type: css_text
+        selector: .price
+        label: price
+    price.currency:
+      required: true
+      fallbacks:
+      - type: json_ld
+        path: hasVariant.0.offers.priceCurrency
+        label: json_ld_variant_currency
+      - type: json_ld
+        path: offers.priceCurrency
+        label: json_ld_currency
+      - type: css_attr
+        selector: meta[property="product:price:currency"]
+        attr: content
+        label: product_price_currency_meta
+      - type: css_attr
+        selector: meta[property="og:price:currency"]
+        attr: content
+        label: og_price_currency_meta
+    primary_image_url:
+      required: true
+      fallbacks:
+      - type: json_ld
+        path: hasVariant.0.image
+        label: json_ld_variant_image
+      - type: json_ld
+        path: image
+        label: json_ld_image
+      - type: css_attr
+        selector: meta[property="og:image:secure_url"]
+        attr: content
+        label: og_image_secure
+        absolute: true
+      - type: css_attr
+        selector: meta[property="og:image"]
+        attr: content
+        label: og_image
+        absolute: true
+      - type: css_attr
+        selector: .smd-gallery__slide img
+        attr: src
+        label: gallery_first_image
+        absolute: true
+    description_html:
+      required: false
+      fallbacks:
+      - type: json_ld
+        path: description
+        label: json_ld_description
+        description_status: complete
+      - type: css_html
+        selector: .rte
+        label: rte_body
+        description_status: partial
+      - type: css_html
+        selector: .product-description
+        label: product_description
+        description_status: partial
+    category:
+      required: false
+      fallbacks:
+      - type: json_ld
+        path: category
+        label: json_ld_category
+      - type: breadcrumb
+        selector: nav[aria-label='Breadcrumb'] a
+        label: breadcrumb
+        drop_last: true
+    brand:
+      required: false
+      fallbacks:
+      - type: json_ld
+        path: brand.name
+        label: json_ld_brand
+      - type: css_attr
+        selector: meta[property="og:site_name"]
+        attr: content
+        label: og_site_name
+    source_url:
+      required: true
+      fallbacks:
+      - type: canonical
+        label: canonical
+normalize:
+  price:
+    tax_basis: exclusive_or_inclusive
+    choose: smaller_public_pair
+    positive_only: true
+  description:
+    mode: clean_html
+    statuses:
+    - complete
+    - partial
+    - not_provided
+    - failed
+  options:
+    exclude_quantity: true
+    strip_price_delta: true
+validate:
+  required_fields:
+  - name
+  - price.amount
+  - price.currency
+  - primary_image_url
+  - source_url
+  assertions:
+  - field: price.amount
+    op: '>'
+    value: 0
+  - field: price.currency
+    op: matches
+    value: ^[A-Z]{3}$
+  partial_description: allowed_with_flag
+output:
+  url_list:
+    enabled: true
+    columns:
+    - url
+    - source
+    - status
+    - title
+    format: csv
+  product_csv:
+    enabled: true
+    columns: 9
+    format: csv
+  task_result: true
+task_defaults:
+  max_urls: 12
+  max_products: 3
+  max_seconds: 300
+  concurrency:
+    navigation: 1
+    product: 1
+compatibility:
+  os:
+  - windows
+  - linux
+  - wsl2
+  runtime: python>=3.11
+  dependencies:
+  - pyyaml
+  - lxml
+evidence:
+  sample_urls:
+  - https://www.sixmoondesigns.com/products/minimalist-v2-ultralight-backpack
+  - https://www.sixmoondesigns.com/products/flight-30-ultralight-backpack
+  - https://www.sixmoondesigns.com/products/wyeast-daypack
+  expected:
+  - At least one valid product from the entry-page sample, priced in USD.
+  limitations:
+  - Static fetches through the build egress proxy were rate limited (HTTP 429) or
+    answered with a Shopify JS 'Verify your browser' interstitial (HTTP 403); the
+    product page was confirmed in a real browser session instead.
+  - JSON-LD on product pages is schema.org ProductGroup with per-variant offers, not
+    a flat Product/offers object.
+  - Variant/option matrix (material, harness, hip belt) is not emitted as an 'options'
+    field.
+  - Host validation is a bounded sample, not full-site or long-term coverage.
+  host_validation:
+    validated_at: '2026-11-22T19:51:27Z'
+    build_id: build-00d042584129
+    valid_products: 3
+    failed_products: 0
+    stop_reason: NATURAL_END
+    outcome: COMPLETED
+    currencies: {}
+    proxy_configured: true

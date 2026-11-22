@@ -108,11 +108,16 @@ def _summary(raw_type: str, data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def normalize_event(raw: dict[str, Any]) -> HarnessEvent:
+def normalize_event(
+    raw: dict[str, Any],
+    *,
+    capture_reasoning: bool = False,
+) -> HarnessEvent:
     """Map one raw OpenCode event to a stable build event.
 
-    Reasoning deltas and other private content are dropped before the event is
-    persisted.  Unknown events keep their source type and a key summary.
+    Reasoning deltas are redacted by default.  With ``capture_reasoning`` they
+    are retained as truncated text for an explicit local review trace; callers
+    must not persist that option by default.
     """
     raw_type = str(raw.get("type") or raw.get("event") or "unknown")
     data = _data_of(raw)
@@ -128,6 +133,18 @@ def normalize_event(raw: dict[str, Any]) -> HarnessEvent:
         )
 
     if raw_type.startswith(REASONING_PREFIX):
+        if capture_reasoning:
+            delta = str(data.get("delta") or data.get("text") or "")
+            return HarnessEvent(
+                type="reasoning",
+                source_type=raw_type,
+                session_id=session_id,
+                data={
+                    "delta": delta[:4000],
+                    "truncated": len(delta) > 4000,
+                },
+                created_at=created_at,
+            )
         return HarnessEvent(
             type="reasoning_event",
             source_type=raw_type,

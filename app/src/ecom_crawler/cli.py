@@ -77,6 +77,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--max-attempts", type=int, default=2)
     run.add_argument("--per-domain-rps", type=float, default=1.0)
     run.add_argument(
+        "--proxy",
+        default=None,
+        help="HTTP(S) or socks5 proxy for fetches; defaults to ECOM_FETCH_PROXY",
+    )
+    run.add_argument(
         "--export-dir",
         type=Path,
         default=None,
@@ -102,6 +107,11 @@ def build_parser() -> argparse.ArgumentParser:
     submit.add_argument("--max-products", type=int, default=20)
     submit.add_argument("--max-seconds", type=int, default=180)
     submit.add_argument("--max-attempts", type=int, default=2)
+    submit.add_argument(
+        "--proxy",
+        default=None,
+        help="HTTP(S) or socks5 proxy recorded on the task; defaults to ECOM_FETCH_PROXY",
+    )
 
     worker = subparsers.add_parser(
         "worker",
@@ -122,6 +132,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="concurrent browser/hybrid task slots per worker; 0 disables the cap (default: 1)",
     )
     worker.add_argument("--per-domain-rps", type=float, default=1.0)
+    worker.add_argument(
+        "--proxy",
+        default=None,
+        help="HTTP(S) or socks5 proxy for fetches; defaults to ECOM_FETCH_PROXY",
+    )
     worker.add_argument("--poll-interval", type=float, default=0.5)
     worker.add_argument(
         "--lease-ttl",
@@ -210,6 +225,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     serve.add_argument("--per-domain-rps", type=float, default=1.0)
     serve.add_argument(
+        "--proxy",
+        default=None,
+        help="HTTP(S) or socks5 proxy for builds and managed worker fetches; defaults to ECOM_FETCH_PROXY",
+    )
+    serve.add_argument(
         "--lease-ttl",
         type=float,
         default=30.0,
@@ -241,6 +261,7 @@ def _run_worker(args: argparse.Namespace) -> int:
             per_domain_rps=args.per_domain_rps,
             lease_ttl_seconds=args.lease_ttl,
             heartbeat_interval=args.heartbeat_interval,
+            proxy=args.proxy,
         )
         stop = threading.Event()
 
@@ -288,6 +309,7 @@ def _serve(args: argparse.Namespace) -> int:
         per_domain_rps=args.per_domain_rps,
         lease_ttl_seconds=args.lease_ttl,
         heartbeat_interval=args.heartbeat_interval,
+        proxy=args.proxy,
     )
     mode = "read-only" if args.no_worker else "managed worker"
     if args.allow_multi_worker:
@@ -402,6 +424,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 per_domain_rps=args.per_domain_rps,
                 export_dir=args.export_dir,
                 partial_reason=args.partial_reason,
+                proxy=args.proxy,
             )
             counts = result.task_result.get("counts", {})
             print(
@@ -435,6 +458,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 max_products=args.max_products,
                 max_seconds=args.max_seconds,
                 max_attempts=args.max_attempts,
+                proxy=args.proxy,
             )
             print(f"submitted: {task.task_id} state={task.state}")
             return 0

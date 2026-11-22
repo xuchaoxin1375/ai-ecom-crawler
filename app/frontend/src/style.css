@@ -1473,3 +1473,97 @@ tr:last-child td {
     scroll-behavior: auto !important;
   }
 }
+
+.build-panel {
+  margin-bottom: 16px;
+}
+
+.build-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.build-status code {
+  overflow-wrap: anywhere;
+}
+
+.build-approval {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-left: 10px;
+}
+
+.build-events {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.build-events li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+
+.build-events .badge {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.build-trace-options {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.build-trace-options .check {
+  min-height: 28px;
+}
+
+.build-output {
+  margin: 12px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-alt);
+}
+
+.build-output summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.build-output-text {
+  max-height: 360px;
+  overflow: auto;
+  margin: 8px 0 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--text);
+  font-family: ui-monospace, "Cascadia Code", "Consolas", monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.build-reasoning {
+  margin-top: 8px;
+}
+
+.build-reasoning summary {
+  color: var(--muted);
+  font-size: 12px;
+}

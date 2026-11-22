@@ -137,6 +137,11 @@ def _resolve_json_path(node: Any, parts: list[str]) -> list[Any]:
             return []
         return _resolve_json_path(node[key], parts[1:])
     if isinstance(node, list):
+        if key.isdigit():
+            index = int(key)
+            if index < len(node):
+                return _resolve_json_path(node[index], parts[1:])
+            return []
         resolved = []
         for item in node:
             resolved.extend(_resolve_json_path(item, parts))
@@ -262,12 +267,20 @@ def _extract_json_ld(
     values = _resolve_json_path(product, str(fallback["path"]).split("."))
     if not values:
         return None
-    if field_name == "price.amount" or fallback.get("take") == "min_positive":
+    take = fallback.get("take")
+    if field_name == "price.amount" or take in {"min_positive", "first_positive"}:
         numbers = _json_numbers(values, plan["site"].get("locale", ""))
         if not numbers:
             return None
+        positive = [number for number in numbers if number > 0]
+        if take == "first_positive":
+            if not positive:
+                return None
+            amount = positive[0]
+        else:
+            amount = min(numbers)
         return FieldHit(
-            min(numbers),
+            amount,
             label,
             {"basis": fallback.get("tax_basis", "unspecified"), "machine": True},
         )

@@ -70,6 +70,7 @@ class LaunchOptions:
     user_agent: str | None = None
     locale: str | None = None
     timezone: str | None = None
+    proxy: str | None = None
     challenge_wait_ms: int = 0
 
 
@@ -128,6 +129,7 @@ class BrowserConfig:
             user_agent=_optional_string(browser.get("user_agent")),
             locale=_optional_string(browser.get("locale")),
             timezone=_optional_string(browser.get("timezone")),
+            proxy=_optional_string(browser.get("proxy")),
             challenge_wait_ms=_non_negative_int(browser.get("challenge_wait_ms"), 0),
         )
         profile_name = _optional_string(browser.get("profile_name")) or DEFAULT_PROFILE_NAME
@@ -580,6 +582,8 @@ class BrowserFetcher:
             args.extend([f"--lang={locale}", f"--accept-lang={locale}"])
         if self.config.launch.user_agent:
             args.append(f"--user-agent={self.config.launch.user_agent}")
+        if self.config.launch.proxy:
+            args.append(f"--proxy-server={self.config.launch.proxy}")
         args.extend(self.config.launch.extra_flags)
         return args
 

@@ -8,6 +8,7 @@ import hashlib
 import io
 import json
 import logging
+import os
 import re
 import threading
 import time
@@ -20,12 +21,20 @@ from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from fastapi.responses import (
+    FileResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+    StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .. import __version__
+from ..builds import BuildError, BuildManager
 from ..execution import build_task
+from ..harness.adapter import HarnessStateError
 from ..model import ContractError
 from ..runtime.batch import parse_site_text, parse_sites, rule_domains
 from ..runtime.models import Batch, BatchSite, Task, WorkItem, utc_now
@@ -66,6 +75,7 @@ class CreateTaskRequest(BaseModel):
     rule_version: str
     task_type: Literal["product", "discovery"] = "product"
     limits: Limits = Field(default_factory=Limits)
+    proxy: str | None = Field(default=None, max_length=500)
 
 
 class BatchCreateRequest(BaseModel):
@@ -87,6 +97,38 @@ class BatchImportRequest(BaseModel):
 
 class BatchStartRequest(BaseModel):
     limits: Limits = Field(default_factory=Limits)
+    proxy: str | None = Field(default=None, max_length=500)
+
+
+class BuildStartRequest(BaseModel):
+    max_products: int = Field(default=6, ge=1, le=50)
+    max_seconds: int = Field(default=600, ge=60, le=3600)
+    proxy: str | None = Field(default=None, max_length=500)
+    capture_reasoning: bool = False
+
+
+class BuildPermissionRequest(BaseModel):
+    decision: Literal["once", "always", "reject"] = "once"
+    message: str | None = Field(default=None, max_length=2000)
+
+
+class BuildDependencyRequest(BaseModel):
+    decision: Literal["once", "reject"] = "once"
+    message: str | None = Field(default=None, max_length=2000)
+
+
+def _mask_proxy(value: str | None) -> str | None:
+    if not value:
+        return None
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return "configured"
+    if parsed.username or parsed.password:
+        host = parsed.hostname or ""
+        port = f":{parsed.port}" if parsed.port else ""
+        return f"{parsed.scheme}://***@{host}{port}"
+    return value
 
 
 def _load_result(out_root: Path, task_id: str) -> dict[str, Any]:
@@ -299,14 +341,24 @@ def create_app(
     per_domain_rps: float = 1.0,
     lease_ttl_seconds: float = 30.0,
     heartbeat_interval: float | None = None,
+    build_manager: BuildManager | None = None,
+    proxy: str | None = None,
 ) -> FastAPI:
     store = TaskStore(db_path)
     root = Path(out_root)
     root.mkdir(parents=True, exist_ok=True)
     rules = Path(rules_dir).resolve() if rules_dir is not None else None
+    if (
+        build_manager is None
+        and rules is not None
+        and os.environ.get("ECOM_BUILD_DISABLED") != "1"
+    ):
+        build_manager = BuildManager(store, root, rules, default_proxy=proxy)
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> Any:
+        if build_manager is not None:
+            build_manager.reconcile()
         stop = threading.Event() if manage_worker else None
         thread: threading.Thread | None = None
         if stop is not None:
@@ -318,6 +370,7 @@ def create_app(
                 per_domain_rps=per_domain_rps,
                 lease_ttl_seconds=lease_ttl_seconds,
                 heartbeat_interval=heartbeat_interval,
+                proxy=proxy,
             )
             thread = threading.Thread(
                 target=worker.run_forever,
@@ -329,6 +382,8 @@ def create_app(
         try:
             yield
         finally:
+            if build_manager is not None:
+                build_manager.shutdown()
             if stop is not None:
                 stop.set()
             if thread is not None:
@@ -348,6 +403,8 @@ def create_app(
     app.state.out_root = root
     app.state.rules_dir = rules
     app.state.worker_managed = manage_worker
+    app.state.build_manager = build_manager
+    app.state.proxy = proxy
 
     @app.middleware("http")
     async def same_origin_guard(request: Request, call_next: Any) -> Any:
@@ -598,6 +655,30 @@ def create_app(
         )
         return "FINISHED" if complete else "PARTIAL"
 
+    def build_summary(build_id: str | None) -> dict[str, Any] | None:
+        if not build_id:
+            return None
+        record = store.get_build(build_id)
+        if record is None:
+            return None
+        return {
+            "build_id": record.build_id,
+            "state": record.state,
+            "outcome": record.outcome,
+            "proxy": _mask_proxy(record.proxy),
+            "error": record.error,
+            "rule": (
+                {
+                    "rule_id": record.rule_id,
+                    "rule_version": record.rule_version,
+                    "path": record.rule_path,
+                }
+                if record.rule_id
+                else None
+            ),
+            "updated_at": record.updated_at,
+        }
+
     def batch_payload(batch: Batch, *, detail: bool = False) -> dict[str, Any]:
         sites = store.list_batch_sites(batch.batch_id)
         tasks = {
@@ -688,6 +769,10 @@ def create_app(
                     ),
                     "task_id": site.task_id,
                     "task": summaries.get(site.task_id) if site.task_id else None,
+                    "build_id": site.build_id,
+                    "build": build_summary(site.build_id),
+                    "proxy": _mask_proxy(site.proxy),
+                    "proxy_configured": bool(site.proxy),
                     "created_at": site.created_at,
                     "updated_at": site.updated_at,
                 }
@@ -738,7 +823,13 @@ def create_app(
         }
 
     @app.get("/", include_in_schema=False)
-    def index() -> FileResponse:
+    def index() -> Response:
+        if (BATCH_DIST_DIR / "index.html").is_file():
+            return RedirectResponse(url="/batch/", status_code=307)
+        return FileResponse(STATIC_DIR / "index.html")
+
+    @app.get("/legacy", include_in_schema=False)
+    def legacy_index() -> FileResponse:
         return FileResponse(STATIC_DIR / "index.html")
 
     @app.get("/api/health")
@@ -814,6 +905,7 @@ def create_app(
                 max_products=payload.limits.max_products,
                 max_seconds=payload.limits.max_seconds,
                 max_attempts=payload.limits.max_attempts,
+                proxy=payload.proxy,
             )
         except (RuleError, ContractError) as exc:
             raise _error("INVALID_RULE", str(exc), 400) from exc
@@ -1056,6 +1148,7 @@ def create_app(
         if batch.archived_at is not None:
             raise _error("INVALID_STATE", "batch is archived", 409)
         limits = payload.limits if payload is not None else Limits()
+        proxy_override = payload.proxy if payload is not None else None
         entries = _rule_entries(rules)
         accepted: list[dict[str, Any]] = []
         skipped: list[dict[str, Any]] = []
@@ -1106,6 +1199,7 @@ def create_app(
                     max_products=limits.max_products,
                     max_seconds=limits.max_seconds,
                     max_attempts=limits.max_attempts,
+                    proxy=proxy_override or site.proxy,
                 )
             except (RuleError, ContractError) as exc:
                 skipped.append({**item, "reason": f"规则包无法构建任务：{exc}"})
@@ -1298,6 +1392,176 @@ def create_app(
             media_type="application/zip",
             headers=headers,
         )
+
+    def require_build(build_id: str) -> dict[str, Any]:
+        if build_manager is None:
+            raise _error(
+                "BUILD_UNAVAILABLE",
+                "build agent is not configured; start serve with --rules-dir",
+                409,
+            )
+        record = store.get_build(build_id)
+        if record is None:
+            raise _error("NOT_FOUND", f"unknown build: {build_id}", 404)
+        return build_manager.describe(build_id)
+
+    def build_failure(exc: Exception) -> HTTPException:
+        if isinstance(exc, KeyError):
+            return _error("NOT_FOUND", str(exc), 404)
+        return _error("BUILD_CONFLICT", str(exc), 409)
+
+    @app.get("/api/builds")
+    def list_builds(
+        batch_id: str | None = None,
+        limit: int = Query(default=20, ge=1, le=100),
+    ) -> dict[str, Any]:
+        if build_manager is None:
+            raise _error("BUILD_UNAVAILABLE", "build agent is not configured", 409)
+        records = store.list_builds(batch_id=batch_id, limit=limit)
+        return {
+            "builds": [
+                build_manager.describe(record.build_id, event_limit=1)
+                for record in records
+            ]
+        }
+
+    @app.post(
+        "/api/batches/{batch_id}/sites/{site_key}/build",
+        status_code=202,
+    )
+    def start_site_build(
+        batch_id: str,
+        site_key: str,
+        payload: BuildStartRequest | None = None,
+    ) -> dict[str, Any]:
+        if build_manager is None:
+            raise _error(
+                "BUILD_UNAVAILABLE",
+                "build agent is not configured; start serve with --rules-dir",
+                409,
+            )
+        batch = require_batch(batch_id)
+        site = store.get_batch_site(batch_id, site_key)
+        if site is None:
+            raise _error("NOT_FOUND", f"unknown batch site: {site_key}", 404)
+        request = payload or BuildStartRequest()
+        try:
+            record = build_manager.start(
+                batch,
+                site,
+                max_products=request.max_products,
+                max_seconds=request.max_seconds,
+                proxy=request.proxy,
+                capture_reasoning=request.capture_reasoning,
+            )
+        except BuildError as exc:
+            raise _error("BUILD_CONFLICT", str(exc), 409) from exc
+        return {
+            "accepted": True,
+            "build": build_manager.describe(record.build_id),
+        }
+
+    @app.get("/api/builds/{build_id}")
+    def get_build(build_id: str) -> dict[str, Any]:
+        return {"build": require_build(build_id)}
+
+    @app.get("/api/builds/{build_id}/messages")
+    def get_build_messages(build_id: str) -> dict[str, Any]:
+        require_build(build_id)
+        try:
+            return build_manager.messages(build_id)
+        except KeyError as exc:
+            raise _error("NOT_FOUND", str(exc), 404) from exc
+
+    @app.get("/api/builds/{build_id}/trace")
+    def get_build_trace(
+        build_id: str,
+        format: Literal["json", "md"] = "md",
+    ) -> FileResponse:
+        require_build(build_id)
+        record = store.get_build(build_id)
+        if record is None or not record.workspace:
+            raise _error("NOT_FOUND", f"unknown build: {build_id}", 404)
+        name = "trace.md" if format == "md" else "trace.json"
+        path = Path(record.workspace) / "out" / name
+        if not path.is_file():
+            raise _error("NOT_FOUND", f"build trace is not available: {name}", 404)
+        return FileResponse(
+            path,
+            media_type="text/markdown; charset=utf-8"
+            if format == "md"
+            else "application/json",
+            filename=f"{build_id}-{name}",
+        )
+
+    @app.post("/api/builds/{build_id}/pause", status_code=202)
+    def pause_build(build_id: str) -> dict[str, Any]:
+        require_build(build_id)
+        try:
+            payload = build_manager.pause(build_id)
+        except (HarnessStateError, ValueError) as exc:
+            raise build_failure(exc) from exc
+        return {"accepted": True, "build": payload}
+
+    @app.post("/api/builds/{build_id}/resume", status_code=202)
+    def resume_build(build_id: str) -> dict[str, Any]:
+        require_build(build_id)
+        try:
+            payload = build_manager.resume(build_id)
+        except (HarnessStateError, ValueError) as exc:
+            raise build_failure(exc) from exc
+        return {"accepted": True, "build": payload}
+
+    @app.post("/api/builds/{build_id}/cancel", status_code=202)
+    def cancel_build(build_id: str) -> dict[str, Any]:
+        require_build(build_id)
+        try:
+            payload = build_manager.cancel(build_id)
+        except (HarnessStateError, ValueError) as exc:
+            raise build_failure(exc) from exc
+        return {"accepted": True, "build": payload}
+
+    @app.post(
+        "/api/builds/{build_id}/permissions/{request_id}",
+        status_code=202,
+    )
+    def reply_build_permission(
+        build_id: str,
+        request_id: str,
+        payload: BuildPermissionRequest,
+    ) -> dict[str, Any]:
+        require_build(build_id)
+        try:
+            result = build_manager.reply_permission(
+                build_id,
+                request_id,
+                payload.decision,
+                message=payload.message,
+            )
+        except (HarnessStateError, ValueError) as exc:
+            raise build_failure(exc) from exc
+        return {"accepted": True, "build": result}
+
+    @app.post(
+        "/api/builds/{build_id}/dependencies/{request_id}",
+        status_code=202,
+    )
+    def reply_build_dependency(
+        build_id: str,
+        request_id: str,
+        payload: BuildDependencyRequest,
+    ) -> dict[str, Any]:
+        require_build(build_id)
+        try:
+            result = build_manager.reply_dependency(
+                build_id,
+                request_id,
+                payload.decision,
+                message=payload.message,
+            )
+        except (HarnessStateError, ValueError) as exc:
+            raise build_failure(exc) from exc
+        return {"accepted": True, "build": result}
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     if (BATCH_DIST_DIR / "index.html").is_file():

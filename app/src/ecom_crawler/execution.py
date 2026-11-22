@@ -40,6 +40,7 @@ def build_task(
     max_products: int,
     max_seconds: int,
     max_attempts: int,
+    proxy: str | None = None,
 ) -> Task:
     rule_path = Path(rule_path).resolve()
     if not rule_path.is_file():
@@ -48,13 +49,16 @@ def build_task(
     rule.validate_task_type(task_type)
     if task_type not in {"product", "discovery"}:
         raise ContractError(f"unsupported task_type: {task_type}")
+    task_input = {"rule_path": str(rule_path)}
+    if proxy:
+        task_input["proxy"] = proxy
     return Task(
         task_id=task_id,
         plan_id=rule.rule_id,
         plan_version=rule.rule_version,
         task_type=task_type,
         state="DRAFT",
-        input={"rule_path": str(rule_path)},
+        input=task_input,
         limits={
             "max_urls": max_urls,
             "max_products": max_products,
@@ -84,6 +88,7 @@ def submit_task(
     max_products: int = 20,
     max_seconds: int = 180,
     max_attempts: int = 2,
+    proxy: str | None = None,
 ) -> Task:
     """Create a QUEUED task without executing it."""
     task = build_task(
@@ -94,6 +99,7 @@ def submit_task(
         max_products=max_products,
         max_seconds=max_seconds,
         max_attempts=max_attempts,
+        proxy=proxy,
     )
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -116,6 +122,7 @@ def run_task(
     max_seconds: int = 180,
     max_attempts: int = 2,
     per_domain_rps: float = 1.0,
+    proxy: str | None = None,
 ) -> tuple[dict[str, Any], Path]:
     """Create and run one task, returning its result and task directory."""
     task = build_task(
@@ -126,6 +133,7 @@ def run_task(
         max_products=max_products,
         max_seconds=max_seconds,
         max_attempts=max_attempts,
+        proxy=proxy,
     )
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -143,6 +151,7 @@ def run_task(
         out_root=out_root,
         max_tasks=1,
         per_domain_rps=per_domain_rps,
+        proxy=proxy,
     )
     worker.run_once()
     task_dir = out_root / task_id
@@ -172,6 +181,7 @@ def run_and_export(
     per_domain_rps: float = 1.0,
     export_dir: Path | None = None,
     partial_reason: str | None = None,
+    proxy: str | None = None,
 ) -> ExecutionResult:
     """Run one task and, for product tasks, export the D02 outputs."""
     task_result, task_dir = run_task(
@@ -185,6 +195,7 @@ def run_and_export(
         max_seconds=max_seconds,
         max_attempts=max_attempts,
         per_domain_rps=per_domain_rps,
+        proxy=proxy,
     )
     if task_type != "product":
         return ExecutionResult(

@@ -47,6 +47,7 @@ BROWSER_OPTION_KEYS = {
     "timezone",
     "challenge_wait_ms",
     "profile_name",
+    "proxy",
     "timeout_ms",
     "wait_until",
     "wait_selector",
@@ -492,9 +493,16 @@ def _validate_browser_config(value: Any) -> None:
         "timezone",
         "profile_name",
         "wait_selector",
+        "proxy",
     ):
         if key in browser and browser[key] is not None:
             _require_string(browser[key], f"fetch.browser.{key}")
+    if "proxy" in browser:
+        parsed = urlparse(str(browser["proxy"]))
+        if parsed.scheme not in {"http", "https", "socks5"} or not parsed.netloc:
+            raise RuleError("fetch.browser.proxy must be an http(s) or socks5 URL")
+        if parsed.username or parsed.password:
+            raise RuleError("fetch.browser.proxy must not contain credentials")
     if "extra_flags" in browser:
         flags = _require_list(browser["extra_flags"], "fetch.browser.extra_flags")
         for flag in flags:

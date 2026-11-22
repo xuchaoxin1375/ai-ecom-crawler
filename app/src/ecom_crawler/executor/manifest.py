@@ -31,7 +31,7 @@ CORE_FIELDS = {"name", "price.amount", "price.currency", "primary_image_url", "s
 OPTIONAL_FIELDS = {"description_html", "category", "brand", "options"}
 KNOWN_FIELDS = CORE_FIELDS | OPTIONAL_FIELDS
 DESCRIPTION_STATUSES = {"complete", "partial", "fallback", "not_provided", "failed"}
-TAKE_VALUES = {"first", "min_positive"}
+TAKE_VALUES = {"first", "first_positive", "min_positive"}
 ASSERTION_OPS = {">", ">=", "<", "<=", "==", "matches"}
 PLAN_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,80}$")
 

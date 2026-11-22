@@ -76,11 +76,20 @@ class BatchStoreTests(unittest.TestCase):
             task_columns = {
                 row[1] for row in connection.execute("PRAGMA table_info(tasks)")
             }
+            site_columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(batch_sites)")
+            }
+            build_columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(builds)")
+            }
         finally:
             connection.close()
         self.assertIn("batches", tables)
         self.assertIn("batch_sites", tables)
+        self.assertIn("builds", tables)
         self.assertIn("batch_id", task_columns)
+        self.assertIn("proxy", site_columns)
+        self.assertIn("proxy", build_columns)
 
     def test_batch_crud_and_site_link(self) -> None:
         batch = Batch(batch_id="b-1", name="France", country="FR", market="FR")

@@ -12,6 +12,7 @@ from typing import Any
 from .models import (
     Batch,
     BatchSite,
+    BuildRecord,
     Lease,
     Task,
     WorkItem,
@@ -72,6 +73,8 @@ CREATE TABLE IF NOT EXISTS batch_sites (
     rule_version TEXT,
     rule_path TEXT,
     task_id TEXT,
+    build_id TEXT,
+    proxy TEXT,
     note TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -80,6 +83,29 @@ CREATE TABLE IF NOT EXISTS batch_sites (
 
 CREATE INDEX IF NOT EXISTS idx_batch_sites_task
     ON batch_sites(task_id);
+
+CREATE TABLE IF NOT EXISTS builds (
+    build_id TEXT PRIMARY KEY,
+    batch_id TEXT NOT NULL,
+    site_key TEXT NOT NULL,
+    state TEXT NOT NULL,
+    outcome TEXT,
+    workspace TEXT,
+    session_id TEXT,
+    model_json TEXT NOT NULL DEFAULT '{}',
+    proxy TEXT,
+    error TEXT,
+    rule_id TEXT,
+    rule_version TEXT,
+    rule_path TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    started_at TEXT,
+    finished_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_builds_batch_site
+    ON builds(batch_id, site_key, created_at);
 
 CREATE TABLE IF NOT EXISTS task_items (
     task_id TEXT NOT NULL,
@@ -209,6 +235,20 @@ class TaskStore:
             ):
                 if column not in task_columns:
                     connection.execute(f"ALTER TABLE tasks ADD COLUMN {column} TEXT")
+            batch_site_columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(batch_sites)")
+            }
+            if "build_id" not in batch_site_columns:
+                connection.execute("ALTER TABLE batch_sites ADD COLUMN build_id TEXT")
+            if "proxy" not in batch_site_columns:
+                connection.execute("ALTER TABLE batch_sites ADD COLUMN proxy TEXT")
+            build_columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(builds)")
+            }
+            if "proxy" not in build_columns:
+                connection.execute("ALTER TABLE builds ADD COLUMN proxy TEXT")
             if "lease_owner" not in task_columns:
                 connection.execute("ALTER TABLE tasks ADD COLUMN lease_owner TEXT")
             if "lease_token" not in task_columns:
@@ -1205,9 +1245,9 @@ class TaskStore:
                         """
                         INSERT OR IGNORE INTO batch_sites (
                             batch_id, site_key, domain, input_value, readiness,
-                            rule_id, rule_version, rule_path, task_id, note,
-                            created_at, updated_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            rule_id, rule_version, rule_path, task_id, build_id,
+                            proxy, note, created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             site.batch_id,
@@ -1219,6 +1259,8 @@ class TaskStore:
                             site.rule_version,
                             site.rule_path,
                             site.task_id,
+                            site.build_id,
+                            site.proxy,
                             site.note,
                             site.created_at,
                             site.updated_at,
@@ -1266,6 +1308,8 @@ class TaskStore:
             "rule_version",
             "rule_path",
             "task_id",
+            "build_id",
+            "proxy",
             "note",
         }
         unknown = set(fields) - allowed
@@ -1339,6 +1383,125 @@ class TaskStore:
                 (batch_id,),
             ).fetchall()
         return [_task_from_row(row) for row in rows]
+
+    def create_build(self, build: BuildRecord) -> None:
+        with self._connect() as connection:
+            try:
+                connection.execute(
+                    """
+                    INSERT INTO builds (
+                        build_id, batch_id, site_key, state, outcome, workspace,
+                        session_id, model_json, proxy, error, rule_id, rule_version,
+                        rule_path, created_at, updated_at, started_at, finished_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        build.build_id,
+                        build.batch_id,
+                        build.site_key,
+                        build.state,
+                        build.outcome,
+                        build.workspace,
+                        build.session_id,
+                        json_dumps(build.model or {}),
+                        build.proxy,
+                        build.error,
+                        build.rule_id,
+                        build.rule_version,
+                        build.rule_path,
+                        build.created_at,
+                        build.updated_at,
+                        build.started_at,
+                        build.finished_at,
+                    ),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise ValueError(f"build already exists: {build.build_id}") from exc
+
+    def get_build(self, build_id: str) -> BuildRecord | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM builds WHERE build_id = ?", (build_id,)
+            ).fetchone()
+        return _build_from_row(row) if row else None
+
+    def list_builds(
+        self,
+        *,
+        batch_id: str | None = None,
+        states: set[str] | None = None,
+        limit: int = 50,
+    ) -> list[BuildRecord]:
+        query = "SELECT * FROM builds"
+        clauses: list[str] = []
+        values: list[Any] = []
+        if batch_id is not None:
+            clauses.append("batch_id = ?")
+            values.append(batch_id)
+        if states:
+            placeholders = ", ".join("?" for _ in states)
+            clauses.append(f"state IN ({placeholders})")
+            values.extend(sorted(states))
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        query += " ORDER BY created_at DESC, build_id DESC LIMIT ?"
+        values.append(max(1, int(limit)))
+        with self._connect() as connection:
+            rows = connection.execute(query, values).fetchall()
+        return [_build_from_row(row) for row in rows]
+
+    def latest_build_for_site(
+        self, batch_id: str, site_key: str
+    ) -> BuildRecord | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM builds WHERE batch_id = ? AND site_key = ? "
+                "ORDER BY created_at DESC, build_id DESC LIMIT 1",
+                (batch_id, site_key),
+            ).fetchone()
+        return _build_from_row(row) if row else None
+
+    def update_build(self, build_id: str, **fields: Any) -> BuildRecord:
+        allowed = {
+            "state",
+            "outcome",
+            "workspace",
+            "session_id",
+            "model",
+            "proxy",
+            "error",
+            "rule_id",
+            "rule_version",
+            "rule_path",
+            "started_at",
+            "finished_at",
+        }
+        unknown = set(fields) - allowed
+        if unknown:
+            raise ValueError(f"unknown build fields: {sorted(unknown)}")
+        values: list[Any] = []
+        assignments: list[str] = []
+        for key, value in fields.items():
+            if key == "model":
+                assignments.append("model_json = ?")
+                values.append(json_dumps(value or {}))
+            else:
+                assignments.append(f"{key} = ?")
+                values.append(value)
+        assignments.append("updated_at = ?")
+        values.append(utc_now())
+        values.append(build_id)
+        with self._connect() as connection:
+            cursor = connection.execute(
+                f"UPDATE builds SET {', '.join(assignments)} WHERE build_id = ?",
+                values,
+            )
+            if cursor.rowcount != 1:
+                raise ValueError(f"unknown build: {build_id}")
+        build = self.get_build(build_id)
+        if build is None:
+            raise ValueError(f"unknown build: {build_id}")
+        return build
 
     def request_archive_batch(self, batch_id: str) -> Batch:
         """Hide a terminal batch; running members must finish or cancel first."""
@@ -1513,9 +1676,33 @@ def _batch_site_from_row(row: sqlite3.Row) -> BatchSite:
         rule_version=row["rule_version"],
         rule_path=row["rule_path"],
         task_id=row["task_id"],
+        build_id=row["build_id"],
+        proxy=row["proxy"],
         note=row["note"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+    )
+
+
+def _build_from_row(row: sqlite3.Row) -> BuildRecord:
+    return BuildRecord(
+        build_id=row["build_id"],
+        batch_id=row["batch_id"],
+        site_key=row["site_key"],
+        state=row["state"],
+        outcome=row["outcome"],
+        workspace=row["workspace"],
+        session_id=row["session_id"],
+        model=json_loads(row["model_json"], {}) or None,
+        proxy=row["proxy"],
+        error=row["error"],
+        rule_id=row["rule_id"],
+        rule_version=row["rule_version"],
+        rule_path=row["rule_path"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+        started_at=row["started_at"],
+        finished_at=row["finished_at"],
     )
 
 

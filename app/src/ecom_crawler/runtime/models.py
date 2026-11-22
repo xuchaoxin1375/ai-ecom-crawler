@@ -119,6 +119,17 @@ BATCH_READINESS = {
     "duplicate",
 }
 
+BUILD_STATES = {
+    "CREATED",
+    "RUNNING",
+    "PAUSING",
+    "PAUSED",
+    "CANCELLING",
+    "CANCELLED",
+    "VALIDATING",
+    "FINISHED",
+}
+
 
 @dataclass
 class BatchSite:
@@ -131,6 +142,8 @@ class BatchSite:
     rule_version: str | None = None
     rule_path: str | None = None
     task_id: str | None = None
+    build_id: str | None = None
+    proxy: str | None = None
     note: str | None = None
     created_at: str = field(default_factory=utc_now)
     updated_at: str = field(default_factory=utc_now)
@@ -138,6 +151,39 @@ class BatchSite:
     def __post_init__(self) -> None:
         if self.readiness not in BATCH_READINESS:
             raise ValueError(f"unsupported batch readiness: {self.readiness!r}")
+
+
+@dataclass
+class BuildRecord:
+    """A build-session record linked to one batch site.
+
+    Harness session state still lives in ``BuildService`` while the process is
+    running; this ledger row is the durable view used by the API and restart
+    reconciliation.  ``VALIDATING`` is host-side rule verification, not an
+    OpenCode session state.
+    """
+
+    build_id: str
+    batch_id: str
+    site_key: str
+    state: str = "CREATED"
+    outcome: str | None = None
+    workspace: str | None = None
+    session_id: str | None = None
+    model: dict[str, Any] | None = None
+    proxy: str | None = None
+    error: str | None = None
+    rule_id: str | None = None
+    rule_version: str | None = None
+    rule_path: str | None = None
+    created_at: str = field(default_factory=utc_now)
+    updated_at: str = field(default_factory=utc_now)
+    started_at: str | None = None
+    finished_at: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.state not in BUILD_STATES:
+            raise ValueError(f"unsupported build state: {self.state!r}")
 
 
 @dataclass

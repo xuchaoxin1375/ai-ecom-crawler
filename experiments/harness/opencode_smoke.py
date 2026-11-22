@@ -95,6 +95,16 @@ def main() -> int:
         help="pause the build immediately after prompt admission to test pause-gate",
     )
     parser.add_argument("--timeout", type=float, default=120.0)
+    parser.add_argument(
+        "--export-session",
+        action="store_true",
+        help="export the sanitized session before closing (useful for trace review)",
+    )
+    parser.add_argument(
+        "--export-raw",
+        action="store_true",
+        help="use sanitize=false for the export; inspect only, do not commit raw output",
+    )
     parser.add_argument("--keep", action="store_true")
     args = parser.parse_args()
 
@@ -229,6 +239,20 @@ def main() -> int:
                     break
         else:
             print("prompt: skipped (no model call)")
+
+        if args.export_session and session.session_id:
+            try:
+                export = adapter.client.export_session(
+                    session.session_id, sanitize=not args.export_raw
+                )
+                export_path = session.workspace.out_dir / "session-export.json"
+                export_path.write_text(
+                    json.dumps(export, ensure_ascii=False, indent=2) + "\n",
+                    encoding="utf-8",
+                )
+                print(f"session export: {export_path} keys={sorted(export)}")
+            except Exception as exc:  # noqa: BLE001 - optional trace export
+                print(f"session export failed: {type(exc).__name__}: {exc}")
 
         artifacts = adapter.collect_artifacts(session.build_id)
         print(f"artifacts: {len(artifacts)}")

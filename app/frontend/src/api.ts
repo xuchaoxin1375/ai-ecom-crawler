@@ -103,6 +103,7 @@ export interface CreateTaskRequest {
   rule_version: string;
   task_type: "product" | "discovery";
   limits: CreateTaskLimits;
+  proxy?: string;
 }
 
 export interface CreateTaskResponse {
@@ -158,6 +159,66 @@ export interface BatchRuleRef {
   path: string;
 }
 
+export interface BuildRuleRef {
+  rule_id: string;
+  rule_version: string;
+  path: string;
+}
+
+export interface BuildEvent {
+  type: string;
+  source_type: string;
+  session_id: string | null;
+  data: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface BuildStatus {
+  build_id: string;
+  batch_id: string;
+  site_key: string;
+  state: string;
+  outcome: string | null;
+  workspace: string | null;
+  session_id: string | null;
+  model: Record<string, unknown> | null;
+  proxy: string | null;
+  proxy_configured: boolean;
+  error: string | null;
+  rule: BuildRuleRef | null;
+  created_at: string;
+  updated_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  elapsed_seconds: number | null;
+  events: BuildEvent[];
+  pending_permissions: Array<Record<string, unknown>>;
+  pending_dependencies: string[];
+  trace_available: boolean;
+  reasoning_capture_enabled: boolean;
+  reasoning_retained: boolean;
+}
+
+export interface BuildResponse {
+  accepted?: boolean;
+  build: BuildStatus;
+}
+
+export interface BuildMessage {
+  created_at: string;
+  text: string;
+}
+
+export interface BuildMessages {
+  build_id: string;
+  state: string;
+  live: boolean;
+  messages: BuildMessage[];
+  reasoning: BuildMessage[];
+  reasoning_retained: boolean;
+  truncated: boolean;
+}
+
 export interface BatchSite {
   site_key: string;
   domain: string;
@@ -167,6 +228,18 @@ export interface BatchSite {
   rule: BatchRuleRef | null;
   task_id: string | null;
   task: TaskSummary | null;
+  build_id: string | null;
+  build: {
+    build_id: string;
+    state: string;
+    outcome: string | null;
+    proxy: string | null;
+    error: string | null;
+    rule: BuildRuleRef | null;
+    updated_at: string;
+  } | null;
+  proxy: string | null;
+  proxy_configured: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -463,6 +536,69 @@ export function archiveBatch(batchId: string): Promise<{ batch: BatchSummary }> 
 
 export function restoreBatch(batchId: string): Promise<{ batch: BatchSummary }> {
   return sendJson(`/api/batches/${encodeURIComponent(batchId)}/restore`, "POST");
+}
+
+export function startSiteBuild(
+  batchId: string,
+  siteKey: string,
+  body: {
+    max_products?: number;
+    max_seconds?: number;
+    proxy?: string;
+    capture_reasoning?: boolean;
+  } = {},
+): Promise<BuildResponse> {
+  return sendJson<BuildResponse>(
+    `/api/batches/${encodeURIComponent(batchId)}/sites/${encodeURIComponent(siteKey)}/build`,
+    "POST",
+    body,
+  );
+}
+
+export function getBuild(buildId: string): Promise<BuildResponse> {
+  return getJson<BuildResponse>(`/api/builds/${encodeURIComponent(buildId)}`);
+}
+
+export function getBuildMessages(buildId: string): Promise<BuildMessages> {
+  return getJson<BuildMessages>(
+    `/api/builds/${encodeURIComponent(buildId)}/messages`,
+  );
+}
+
+export function pauseBuild(buildId: string): Promise<BuildResponse> {
+  return sendJson<BuildResponse>(`/api/builds/${encodeURIComponent(buildId)}/pause`, "POST");
+}
+
+export function resumeBuild(buildId: string): Promise<BuildResponse> {
+  return sendJson<BuildResponse>(`/api/builds/${encodeURIComponent(buildId)}/resume`, "POST");
+}
+
+export function cancelBuild(buildId: string): Promise<BuildResponse> {
+  return sendJson<BuildResponse>(`/api/builds/${encodeURIComponent(buildId)}/cancel`, "POST");
+}
+
+export function replyBuildDependency(
+  buildId: string,
+  requestId: string,
+  decision: "once" | "reject",
+): Promise<BuildResponse> {
+  return sendJson<BuildResponse>(
+    `/api/builds/${encodeURIComponent(buildId)}/dependencies/${encodeURIComponent(requestId)}`,
+    "POST",
+    { decision },
+  );
+}
+
+export function replyBuildPermission(
+  buildId: string,
+  requestId: string,
+  decision: "once" | "always" | "reject",
+): Promise<BuildResponse> {
+  return sendJson<BuildResponse>(
+    `/api/builds/${encodeURIComponent(buildId)}/permissions/${encodeURIComponent(requestId)}`,
+    "POST",
+    { decision },
+  );
 }
 
 export function batchExportUrl(batchId: string, partial = true): string {

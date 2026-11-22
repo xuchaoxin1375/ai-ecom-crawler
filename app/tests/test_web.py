@@ -115,9 +115,15 @@ class WebApiTests(unittest.TestCase):
         health = self.client.get("/api/health")
         self.assertEqual(health.status_code, 200)
         self.assertEqual(health.json()["status"], "ok")
-        index = self.client.get("/")
-        self.assertEqual(index.status_code, 200)
-        self.assertIn("采集", index.text)
+        legacy = self.client.get("/legacy")
+        self.assertEqual(legacy.status_code, 200)
+        self.assertIn("采集", legacy.text)
+        index = self.client.get("/", follow_redirects=False)
+        if index.status_code in {307, 308}:
+            self.assertEqual(index.headers["location"], "/batch/")
+        else:
+            self.assertEqual(index.status_code, 200)
+            self.assertIn("采集", index.text)
 
     def test_managed_worker_lifespan(self) -> None:
         app = create_app(

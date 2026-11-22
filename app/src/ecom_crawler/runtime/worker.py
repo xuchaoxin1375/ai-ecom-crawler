@@ -10,7 +10,7 @@ import time
 import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +38,7 @@ class FetcherContext:
     task: Task
     lease: Lease
     out_root: Path
+    proxy: str | None = None
 
 
 FetcherFactory = Callable[[FetcherContext], Any]
@@ -70,6 +71,7 @@ def _make_static(context: FetcherContext) -> ScraplingFetcher:
         impersonate="chrome",
         timeout=float(fetch.get("timeout_ms", 45000)) / 1000,
         retries=1,
+        proxy=context.proxy,
     )
     session = manager.__enter__()
     max_attempts, backoff_ms = _retry_values(context.rule)
@@ -85,11 +87,17 @@ def _make_static(context: FetcherContext) -> ScraplingFetcher:
 
 def _make_browser(context: FetcherContext) -> BrowserFetcher:
     max_attempts, backoff_ms = _retry_values(context.rule)
+    config = BrowserConfig.from_fetch(context.rule.fetch)
+    if context.proxy and not config.launch.proxy:
+        config = replace(
+            config,
+            launch=replace(config.launch, proxy=context.proxy),
+        )
     return BrowserFetcher(
         context.store,
         task_id=context.task.task_id,
         out_root=context.out_root,
-        config=BrowserConfig.from_fetch(context.rule.fetch),
+        config=config,
         limiter=context.limiter,
         lease_token=context.lease.token,
         max_attempts=max_attempts,
@@ -144,9 +152,11 @@ class Worker:
         heartbeat_interval: float | None = None,
         profile_sweep_age_seconds: float = 24 * 60 * 60,
         owner: str | None = None,
+        proxy: str | None = None,
     ) -> None:
         self.store = store
         self.out_root = Path(out_root)
+        self.proxy = proxy or os.environ.get("ECOM_FETCH_PROXY") or None
         self.max_tasks = max(1, max_tasks)
         self.max_browser_tasks = max(0, max_browser_tasks)
         self._browser_semaphore = (
@@ -433,6 +443,8 @@ class Worker:
                     task=task,
                     lease=lease,
                     out_root=self.out_root,
+                    proxy=self.proxy
+                    or (str(task.input.get("proxy")) if task.input.get("proxy") else None),
                 )
                 with self.fetcher_factory(context) as fetcher:
                     runner = TaskRunner(

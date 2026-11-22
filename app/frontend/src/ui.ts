@@ -28,6 +28,45 @@ const TASK_STATE_LABELS: Record<string, string> = {
   FINISHED: "已结束",
 };
 
+const BUILD_STATE_LABELS: Record<string, string> = {
+  CREATED: "已创建",
+  RUNNING: "构建中",
+  PAUSING: "暂停中",
+  PAUSED: "已暂停",
+  CANCELLING: "取消中",
+  CANCELLED: "已取消",
+  VALIDATING: "验证中",
+  FINISHED: "已结束",
+};
+
+export function buildStateLabel(state: string | null | undefined): string {
+  if (!state) return "-";
+  return BUILD_STATE_LABELS[state] || state;
+}
+
+const BUILD_OUTCOME_LABELS: Record<string, string> = {
+  succeeded: "成功",
+  failed: "失败",
+  cancelled: "已取消",
+  closed: "已关闭",
+  interrupted: "已中断",
+};
+
+export function buildOutcomeLabel(outcome: string | null | undefined): string {
+  if (!outcome) return "";
+  return BUILD_OUTCOME_LABELS[outcome] || outcome;
+}
+
+export function buildStateTone(state: string | null | undefined): string {
+  if (state === "FINISHED") return "success";
+  if (state === "RUNNING" || state === "VALIDATING" || state === "PAUSING") {
+    return "info";
+  }
+  if (state === "CREATED" || state === "PAUSED") return "warning";
+  if (state === "CANCELLED") return "muted";
+  return "muted";
+}
+
 const OUTCOME_LABELS: Record<string, string> = {
   COMPLETED: "完成",
   PARTIAL: "部分",

@@ -135,6 +135,7 @@ class OpenCodeHttpAdapter(HarnessAdapter):
         pause_gate: bool = True,
         dependency_tool: bool = True,
         dependency_policy: DependencyPolicy | None = None,
+        capture_reasoning: bool = False,
     ) -> None:
         if server is not None and client is not None:
             raise ValueError("pass server or client, not both")
@@ -147,18 +148,26 @@ class OpenCodeHttpAdapter(HarnessAdapter):
         self.pause_gate = pause_gate
         self.dependency_tool = dependency_tool
         self.dependency_policy = dependency_policy
+        self.capture_reasoning = capture_reasoning
         self.sessions: dict[str, BuildSession] = {}
         self._lock = threading.RLock()
         self._owns_server = client is None
 
     def _ensure_client(self, *, cwd: Path | None = None) -> OpenCodeClient:
         with self._lock:
-            if self.client is None:
-                if self.server is None:
-                    self.server = OpenCodeServer(cwd=cwd)
-                elif cwd is not None and self.server.cwd is None:
-                    self.server.cwd = cwd
-                self.client = self.server.start()
+            if self.client is not None:
+                # ``close`` stops the owned server; drop the stale client so a
+                # later build can start a fresh server instead of using a dead
+                # base URL.
+                if self.server is not None and self.server.client is None:
+                    self.client = None
+                else:
+                    return self.client
+            if self.server is None:
+                self.server = OpenCodeServer(cwd=cwd)
+            elif cwd is not None and self.server.cwd is None:
+                self.server.cwd = cwd
+            self.client = self.server.start()
             return self.client
 
     def _require(self, build_id: str) -> BuildSession:
@@ -277,7 +286,10 @@ class OpenCodeHttpAdapter(HarnessAdapter):
         if session.session_id is None:
             raise HarnessStateError(f"build {build_id} has no session")
         for raw in client.events(timeout=self.event_timeout):
-            event = normalize_event(raw)
+            event = normalize_event(
+                raw,
+                capture_reasoning=self.capture_reasoning,
+            )
             if event.session_id and event.session_id != session.session_id:
                 continue
             session.workspace.append_event(event)
@@ -437,6 +449,7 @@ class OpenCodeHttpAdapter(HarnessAdapter):
                 self._set_state(session, "FINISHED", outcome=session.outcome or "closed")
             if self._owns_server and self.server is not None:
                 self.server.stop()
+                self.client = None
             session.workspace.update_result(
                 state=session.state,
                 outcome=session.outcome,
