@@ -24,6 +24,7 @@ from skatepro.normalize import (  # noqa: E402
     product_offers,
     serialize_options,
 )
+from skatepro.spiders.products import select_candidates  # noqa: E402
 
 
 class PriceTests(unittest.TestCase):
@@ -114,6 +115,50 @@ class CsvTests(unittest.TestCase):
     def test_formula_guard_only_touches_text(self):
         self.assertEqual(csv_safe("=1+1"), "'=1+1")
         self.assertEqual(csv_safe("69.95"), "69.95")
+
+
+class SharedSelectionTests(unittest.TestCase):
+    def test_shared_urls_preserve_requested_order_and_subset(self) -> None:
+        ordered = [
+            {"url": "https://www.skatepro.es/1-1.htm"},
+            {"url": "https://www.skatepro.es/2-2.htm"},
+            {"url": "https://www.skatepro.es/3-3.htm"},
+        ]
+
+        selected = select_candidates(
+            ordered,
+            10,
+            [
+                "https://www.skatepro.es/3-3.htm",
+                "https://www.skatepro.es/1-1.htm",
+                "https://www.skatepro.es/9-9.htm",
+            ],
+        )
+
+        self.assertEqual(
+            [row["url"] for row in selected],
+            [
+                "https://www.skatepro.es/3-3.htm",
+                "https://www.skatepro.es/1-1.htm",
+            ],
+        )
+
+    def test_shared_urls_respect_product_cap(self) -> None:
+        ordered = [
+            {"url": "https://www.skatepro.es/1-1.htm"},
+            {"url": "https://www.skatepro.es/2-2.htm"},
+        ]
+
+        selected = select_candidates(
+            ordered,
+            1,
+            [
+                "https://www.skatepro.es/1-1.htm",
+                "https://www.skatepro.es/2-2.htm",
+            ],
+        )
+
+        self.assertEqual([row["url"] for row in selected], ["https://www.skatepro.es/1-1.htm"])
 
 
 class ProductGroupTests(unittest.TestCase):

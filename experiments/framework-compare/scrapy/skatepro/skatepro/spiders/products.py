@@ -52,6 +52,27 @@ MAX_BACKOFF_SECONDS = 60.0
 DEFAULT_BACKOFF_SECONDS = 30.0
 
 
+def select_candidates(
+    ordered: list[dict[str, str]],
+    max_products: int,
+    shared_urls: list[str] | None = None,
+) -> list[dict[str, str]]:
+    """Select the first N sitemap rows, or exactly the shared URL sample."""
+
+    if not shared_urls:
+        return ordered[:max_products]
+    by_url = {candidate["url"]: candidate for candidate in ordered}
+    selected: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for url in shared_urls:
+        candidate = by_url.get(url)
+        if candidate is None or url in seen:
+            continue
+        seen.add(url)
+        selected.append(candidate)
+    return selected[:max_products]
+
+
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -70,6 +91,7 @@ class ProductsSpider(scrapy.Spider):
         max_products: int | str = 30,
         max_seconds: int | str = 600,
         base_url: str = DEFAULT_BASE_URL,
+        shared_urls: list[str] | None = None,
         *args: Any,
         **kwargs: Any,
     ) -> None:
@@ -77,6 +99,7 @@ class ProductsSpider(scrapy.Spider):
         self.max_products = int(max_products)
         self.max_seconds = int(max_seconds)
         self.base_url = base_url.rstrip("/")
+        self.shared_urls = list(shared_urls or [])
         self.sitemap_url = f"{self.base_url}{SITEMAP_PATH}"
         self.category_url = f"{self.base_url}{CATEGORY_PROBE_PATH}"
         self.allowed_domains = [urlparse(self.base_url).hostname or "www.skatepro.es"]
@@ -91,6 +114,7 @@ class ProductsSpider(scrapy.Spider):
         self.denominator = 0
         self.sitemap_status: int | None = None
         self.category_status: int | None = None
+        self.selection_note = "not selected"
         self.selected: list[dict[str, str]] = []
         self.category_cards = 0
         self.category_product_links = 0
@@ -159,9 +183,29 @@ class ProductsSpider(scrapy.Spider):
             )
 
         self.denominator = len(ordered)
-        self.selected = ordered[: self.max_products]
+        self.selected = select_candidates(
+            ordered, self.max_products, self.shared_urls
+        )
+        if self.shared_urls:
+            self.selection_note = (
+                f"shared URL file: {len(self.selected)} URLs "
+                "(same sample across frameworks)"
+            )
+        else:
+            self.selection_note = (
+                f"first {len(self.selected)} product URLs in sitemap order"
+            )
+        if self.shared_urls and len(self.selected) < len(self.shared_urls):
+            self.record_error(
+                "sitemap",
+                "shared_urls_missing",
+                f"{len(self.shared_urls) - len(self.selected)} shared URL(s) not in sitemap",
+            )
         self.logger.info(
-            "sitemap products=%s selected=%s", self.denominator, len(self.selected)
+            "sitemap products=%s selected=%s shared=%s",
+            self.denominator,
+            len(self.selected),
+            len(self.shared_urls),
         )
         if not self.selected:
             self.plan_error = True
@@ -524,7 +568,8 @@ class ProductsSpider(scrapy.Spider):
     def task_result(self) -> dict[str, Any]:
         processed = len(self.valid) + len(self.excluded) + len(self.failed)
         candidates = self.denominator or 0
-        pending = max(0, candidates - processed)
+        selected = len(self.selected)
+        pending = max(0, selected - processed)
         partial = sum(
             1 for row in self.valid if row.get("_description_status") in {"partial", "fallback"}
         )
@@ -560,8 +605,10 @@ class ProductsSpider(scrapy.Spider):
             "finished_at": finished,
             "counts": {
                 "discovered_urls": candidates + 2 if candidates else 0,
+                "sitemap_products": candidates,
+                "selected_products": selected,
                 "pending_navigation_entries": 0,
-                "product_candidates": candidates,
+                "product_candidates": selected,
                 "pending_products": pending,
                 "in_flight_products": 0,
                 "processed_products": processed,
@@ -579,10 +626,13 @@ class ProductsSpider(scrapy.Spider):
                     else None
                 ),
                 "denominator": candidates or None,
+                "selected": selected,
+                "selection": self.selection_note,
                 "covered": processed,
                 "notes": (
-                    f"Bounded sample: first {len(self.selected)} product URLs in sitemap order; "
-                    f"{pending} product URLs remain outside this run. Not full-site coverage."
+                    f"Bounded sample: {self.selection_note}; "
+                    f"{max(0, candidates - selected)} sitemap product URLs remain "
+                    "outside this run. Not full-site coverage."
                     if candidates
                     else "The sitemap did not yield product URLs; no reliable denominator."
                 ),
@@ -618,8 +668,7 @@ class ProductsSpider(scrapy.Spider):
 
     def limitations(self) -> list[str]:
         return [
-            "Bounded sample: the first "
-            f"{self.max_products} product URLs in sitemap order. "
+            f"Bounded sample: {self.selection_note}. "
             "It is not full-site coverage; the sitemap is the only denominator.",
             "Category listing is server-rendered for one page only (30 cards); "
             "'?page=2' returns the same page and further pages load through a JS "

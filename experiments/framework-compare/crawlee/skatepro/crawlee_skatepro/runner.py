@@ -147,6 +147,28 @@ def select_evenly(urls: list[str], limit: int) -> list[str]:
     return selected
 
 
+def load_shared_urls(path: Path | None) -> list[str]:
+    """Load the optional shared URL list used by the same-window comparison."""
+
+    if path is None:
+        return []
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(payload, dict):
+        payload = payload.get("urls")
+    if not isinstance(payload, list):
+        raise ValueError("URL file must be a JSON list or an object with a urls list")
+    urls: list[str] = []
+    seen: set[str] = set()
+    for value in payload:
+        url = normalize_url(str(value))
+        if not PRODUCT_PATTERN.match(url):
+            raise ValueError(f"URL does not match the product pattern: {value!r}")
+        if url not in seen:
+            seen.add(url)
+            urls.append(url)
+    return urls
+
+
 def validate_row(row: dict[str, Any]) -> None:
     missing = [field_name for field_name in REQUIRED_ROW_FIELDS if not row.get(field_name)]
     if missing:
@@ -188,6 +210,7 @@ class RunState:
     implementation_revisions: int
     max_products: int = MAX_PRODUCTS
     time_budget_seconds: int = TIME_BUDGET_SECONDS
+    shared_urls: list[str] = field(default_factory=list)
     candidates: list[str] = field(default_factory=list)
     processed: dict[str, str] = field(default_factory=dict)
     valid_rows: list[dict[str, Any]] = field(default_factory=list)
@@ -374,6 +397,9 @@ async def run(args: argparse.Namespace) -> int:
         implementation_revisions=args.implementation_revisions,
         max_products=min(args.max_products, MAX_PRODUCTS),
         time_budget_seconds=min(args.time_budget_seconds, TIME_BUDGET_SECONDS),
+        shared_urls=load_shared_urls(
+            Path(args.urls_file) if args.urls_file else None
+        ),
     )
     state.deadline = time.monotonic() + state.time_budget_seconds
     if state.max_products < args.max_products:
@@ -568,7 +594,24 @@ async def handle_sitemap(state: RunState, context: Any) -> None:
         state.denominator_source = (
             "sitemap.xml: unique <loc> entries matching ^https://www.skatepro.es/\\d+-\\d+\\.htm$"
         )
-    if state.candidates:
+    if state.shared_urls:
+        allowed = set(all_urls)
+        selected = [
+            url for url in state.shared_urls if url in allowed
+        ][: state.max_products]
+        missing = [url for url in state.shared_urls if url not in allowed]
+        if missing:
+            state.warnings.append(
+                f"Shared URL file: {len(missing)} URL(s) not in sitemap; ignored."
+            )
+        if not selected:
+            raise RuntimeError("shared URL file had no URLs matching the sitemap")
+        state.candidates = selected
+        state.selection_rule = (
+            f"shared URL file: {len(selected)} URLs "
+            "(same sample across frameworks)"
+        )
+    elif state.candidates:
         selected = state.candidates
         state.selection_rule = "resume: candidate list from checkpoint"
     else:
@@ -943,6 +986,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--max-products", type=int, default=MAX_PRODUCTS)
     parser.add_argument("--time-budget-seconds", type=int, default=TIME_BUDGET_SECONDS)
+    parser.add_argument(
+        "--urls-file",
+        default=None,
+        help="Optional shared URL list; when set, select exactly these sitemap URLs.",
+    )
     parser.add_argument("--build-started-at", default=None)
     parser.add_argument("--plan-ready-at", default=None)
     parser.add_argument("--implementation-revisions", type=int, default=1)
@@ -956,6 +1004,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return asyncio.run(run(args))
+    except (OSError, ValueError) as exc:
+        LOGGER.error("Invalid URL file: %s", exc)
+        return 2
     except KeyboardInterrupt:
         LOGGER.warning("Interrupted by user.")
         return 130

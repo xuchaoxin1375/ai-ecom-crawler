@@ -33,6 +33,7 @@ from crawlee_skatepro.extract import (  # noqa: E402
     parse_price_text,
     serialize_options,
 )
+from crawlee_skatepro.runner import load_shared_urls  # noqa: E402
 
 URL = "https://www.skatepro.es/1-2.htm"
 
@@ -275,6 +276,40 @@ class DescriptionTests(unittest.TestCase):
         self.assertIn("link", html)
         self.assertNotIn("script", html)
         self.assertNotIn("href", html)
+
+
+class SharedSelectionTests(unittest.TestCase):
+    def test_url_file_accepts_object_and_deduplicates(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "urls.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "urls": [
+                            URL,
+                            URL,
+                            "https://www.skatepro.es/3-4.htm",
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                load_shared_urls(path),
+                [URL, "https://www.skatepro.es/3-4.htm"],
+            )
+
+    def test_url_file_rejects_non_product_urls(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "urls.json"
+            path.write_text(
+                json.dumps(["https://www.skatepro.es/c2.htm"]),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "product pattern"):
+                load_shared_urls(path)
 
 
 class ExportTests(unittest.TestCase):

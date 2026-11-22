@@ -34,7 +34,7 @@ from scrapy.crawler import CrawlerProcess  # noqa: E402
 from scrapy.utils.project import get_project_settings  # noqa: E402
 
 from skatepro.normalize import PLAN_ID, PLAN_VERSION  # noqa: E402
-from skatepro.spiders.products import ProductsSpider  # noqa: E402
+from skatepro.spiders.products import PRODUCT_RE, ProductsSpider  # noqa: E402
 
 FRAMEWORK = "Scrapy"
 FRAMEWORK_VERSION = "2.20.0"
@@ -44,6 +44,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Bounded skatepro.es Scrapy trial")
     parser.add_argument("--max-products", type=int, default=30)
     parser.add_argument("--max-seconds", type=int, default=600)
+    parser.add_argument(
+        "--urls-file",
+        default=None,
+        help="Optional shared URL list; when set, select exactly these sitemap URLs.",
+    )
     parser.add_argument("--output-dir", type=Path, default=SCRIPT_DIR)
     parser.add_argument(
         "--results-dir",
@@ -333,8 +338,33 @@ def render_markdown(metrics: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def load_shared_urls(path: str | None) -> list[str] | None:
+    if not path:
+        return None
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    if isinstance(payload, dict):
+        payload = payload.get("urls")
+    if not isinstance(payload, list):
+        raise ValueError("URL file must be a JSON list or an object with a urls list")
+    urls: list[str] = []
+    seen: set[str] = set()
+    for value in payload:
+        url = str(value).strip()
+        if not PRODUCT_RE.fullmatch(url):
+            raise ValueError(f"URL does not match the product pattern: {value!r}")
+        if url not in seen:
+            seen.add(url)
+            urls.append(url)
+    return urls
+
+
 def main() -> int:
     args = parse_args()
+    try:
+        shared_urls = load_shared_urls(args.urls_file)
+    except (OSError, ValueError) as exc:
+        print(f"invalid --urls-file: {exc}", file=sys.stderr)
+        return 2
     output_dir = args.output_dir.resolve()
     results_dir = args.results_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -360,6 +390,7 @@ def main() -> int:
         max_products=args.max_products,
         max_seconds=args.max_seconds,
         base_url=args.base_url,
+        shared_urls=shared_urls,
     )
     interrupted = False
     try:
