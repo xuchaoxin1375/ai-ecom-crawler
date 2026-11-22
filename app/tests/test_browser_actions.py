@@ -311,6 +311,11 @@ BROWSER_AVAILABLE = _browser_available()
 @unittest.skipUnless(BROWSER_AVAILABLE, "Patchright Chromium is not installed")
 class BrowserListingActionTests(unittest.TestCase):
     def _run(self, root: Path, base: str, html_name: str, advance: str) -> Any:
+        # The fixture attaches its scroll/click handlers at the end of the
+        # document.  A 50-100 ms settle can observe a scroll before the
+        # listener is ready and then stop after one stalled step; use a
+        # longer settle and require two stalled steps to keep the test about
+        # list advancement instead of browser startup timing.
         rule = root / "rule.yaml"
         text = RULE_TEMPLATE.replace("__BASE__", base)
         text = text.replace("/listing-more.html", f"/{html_name}").replace(
@@ -342,7 +347,7 @@ class BrowserListingActionTests(unittest.TestCase):
                 root,
                 base,
                 "listing-more.html",
-                "type: load_more\n        button_selector: \"#more\"\n        max_clicks: 5\n        settle_ms: 50\n        no_new_stop: 1",
+                "type: load_more\n        button_selector: \"#more\"\n        max_clicks: 5\n        settle_ms: 500\n        no_new_stop: 2",
             )
             self.assertEqual(result.task_result["counts"]["valid_products"], 6)
             listing = next(
@@ -367,7 +372,7 @@ class BrowserListingActionTests(unittest.TestCase):
                 root,
                 base,
                 "listing-scroll.html",
-                "type: infinite_scroll\n        mode: \"scroll\"\n        max_scrolls: 5\n        settle_ms: 100\n        no_new_stop: 1",
+                "type: infinite_scroll\n        mode: \"scroll\"\n        max_scrolls: 5\n        settle_ms: 500\n        no_new_stop: 2",
             )
             self.assertEqual(result.task_result["counts"]["valid_products"], 6)
             listing = next(
@@ -392,7 +397,7 @@ class BrowserListingActionTests(unittest.TestCase):
                 root,
                 base,
                 "listing-container.html",
-                "type: infinite_scroll\n        mode: \"scroll\"\n        container: \"#feed\"\n        max_scrolls: 5\n        settle_ms: 100\n        no_new_stop: 1",
+                "type: infinite_scroll\n        mode: \"scroll\"\n        container: \"#feed\"\n        max_scrolls: 5\n        settle_ms: 500\n        no_new_stop: 2",
             )
             self.assertEqual(result.task_result["counts"]["valid_products"], 6)
             listing = next(

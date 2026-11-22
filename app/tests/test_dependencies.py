@@ -69,7 +69,7 @@ class DependencyPolicyTests(unittest.TestCase):
         )
         self.assertEqual(
             policy.request(
-                DependencyRequest(name="pkg", manager="system")
+                DependencyRequest(name="pkg", manager="apt")
             ).status,
             "denied",
         )
@@ -79,6 +79,125 @@ class DependencyPolicyTests(unittest.TestCase):
             ).status,
             "denied",
         )
+
+    def test_system_manager_and_scope_need_operator(self) -> None:
+        policy = DependencyPolicy(
+            allowlist={"pyyaml": {"version": "6.0.3", "license": "MIT"}},
+            installer=lambda name, version, python: completed(0),
+            build_python=Path("/build/python"),
+        )
+        self.assertEqual(
+            policy.request(
+                DependencyRequest(name="pyyaml", manager="system")
+            ).status,
+            "approval_required",
+        )
+        self.assertEqual(
+            policy.request(
+                DependencyRequest(name="pyyaml", scope="system")
+            ).status,
+            "approval_required",
+        )
+
+    def test_package_alias_and_request_metadata_are_preserved(self) -> None:
+        request = DependencyRequest.from_dict(
+            {
+                "package": "pyyaml",
+                "manager": "pip",
+                "version": "6.0.3",
+                "reason": "fixture needs YAML",
+                "source": "PyPI",
+                "license": "MIT",
+                "scope": "build",
+                "fallback": "parse JSON instead",
+            }
+        )
+        self.assertEqual(request.name, "pyyaml")
+        self.assertEqual(request.package, "pyyaml")
+        policy = DependencyPolicy(
+            allowlist={"pyyaml": {"version": "6.0.3"}},
+            installer=lambda name, version, python: completed(0),
+            build_python=Path("/build/python"),
+        )
+        decision = policy.request(request)
+        self.assertEqual(decision.status, "installed")
+        self.assertEqual(decision.scope, "build")
+        self.assertEqual(decision.source, "PyPI")
+        self.assertEqual(decision.reason, "fixture needs YAML")
+        self.assertEqual(decision.fallback, "parse JSON instead")
+        self.assertEqual(decision.to_dict()["package"], "pyyaml")
+
+    def test_approved_unknown_package_installs_with_explicit_version(self) -> None:
+        calls: list[tuple[str, str, Path]] = []
+
+        def installer(name: str, version: str, python: Path):
+            calls.append((name, version, python))
+            return completed(0, stdout="installed")
+
+        policy = DependencyPolicy(
+            installer=installer,
+            build_python=Path("/build/python"),
+        )
+        self.assertEqual(
+            policy.request(
+                DependencyRequest(name="brandnew", version="1.2.3")
+            ).status,
+            "approval_required",
+        )
+        decision = policy.request(
+            DependencyRequest(name="brandnew", version="1.2.3"),
+            approved=True,
+        )
+        self.assertEqual(decision.status, "installed")
+        self.assertTrue(decision.approved)
+        self.assertEqual(
+            calls, [("brandnew", "1.2.3", Path("/build/python"))]
+        )
+
+    def test_approved_unknown_package_still_needs_a_version(self) -> None:
+        policy = DependencyPolicy(
+            installer=lambda name, version, python: completed(0),
+            build_python=Path("/build/python"),
+        )
+        decision = policy.request(
+            DependencyRequest(name="brandnew"), approved=True
+        )
+        self.assertEqual(decision.status, "approval_required")
+        self.assertIn("version", decision.detail)
+
+    def test_verifier_failure_marks_install_failed(self) -> None:
+        policy = DependencyPolicy(
+            allowlist={"pyyaml": {"version": "6.0.3"}},
+            installer=lambda name, version, python: completed(0),
+            verifier=lambda name, version, python: completed(
+                1, stderr="metadata not found"
+            ),
+            build_python=Path("/build/python"),
+        )
+        decision = policy.request(DependencyRequest(name="pyyaml"))
+        self.assertEqual(decision.status, "failed")
+        self.assertIn("verification", decision.detail)
+        self.assertIn("metadata not found", decision.stderr)
+
+    def test_per_manager_installer_is_selected(self) -> None:
+        calls: list[str] = []
+
+        def pip_installer(name: str, version: str, python: Path):
+            calls.append("pip")
+            return completed(0)
+
+        def uv_installer(name: str, version: str, python: Path):
+            calls.append("uv")
+            return completed(0)
+
+        policy = DependencyPolicy(
+            allowlist={"pyyaml": {"version": "6.0.3"}},
+            installers={"pip": pip_installer, "uv": uv_installer},
+            build_python=Path("/build/python"),
+        )
+        policy.request(DependencyRequest(name="pyyaml", manager="uv"))
+        policy.request(DependencyRequest(name="pyyaml", manager="pip"))
+        self.assertEqual(calls, ["uv", "pip"])
 
     def test_policy_file_and_missing_build_interpreter(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

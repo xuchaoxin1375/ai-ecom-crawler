@@ -1,6 +1,6 @@
 # 生产应用（app/）
 
-本目录是 monorepo 中生产应用的承载位置。当前已落地 **D02 数据合同与导出 CLI**、**D04 v0 静态执行器**、**浏览器 adapter v0**和 **hybrid adapter discovery**：规则包 → 发现／获取／提取 → SQLite 任务账本 → D02 导出。静态 worker 带跨进程任务租约和资源登记／回收；浏览器 worker 按任务启动 Patchright CDP，登记并回收浏览器进程和 profile；hybrid 规则把 C2 discovery 交给包内 adapter 子进程，商品页仍由声明式 `fetch`／`extract` 处理。完整跨进程 A20、adapter 浏览器资源配额和构建会话仍未实现。
+本目录是 monorepo 中生产应用的承载位置。当前已落地 **D02 数据合同与导出 CLI**、**D04 v0 静态执行器**、**浏览器 adapter v0**、**hybrid adapter discovery** 和 **构建期依赖请求桥**：规则包 → 发现／获取／提取 → SQLite 任务账本 → D02 导出。静态 worker 带跨进程任务租约和资源登记／回收；浏览器 worker 按任务启动 Patchright CDP，登记并回收浏览器进程和 profile；hybrid 规则把 C2 discovery 交给包内 adapter 子进程，商品页仍由声明式 `fetch`／`extract` 处理；构建期 `request_dependency` 通过工作区文件桥请求基线／allowlist 依赖或一次性审批。完整跨进程 A20、adapter 浏览器资源配额和构建会话 UI 仍未实现。
 
 ## 边界
 
@@ -30,6 +30,7 @@
 - 跨进程任务租约：`tasks` 表保存 `lease_owner`、单调递增的 `lease_token`、到期时间和心跳；`claim_tasks` 原子领取，心跳线程续约，过期任务由任意 worker 对账回收，旧持有者的写入按租约条件拒绝。
 - `task_resources` 资源登记：登记子进程 PID 和 profile／临时目录；任务结束、取消或过期接管时按租约令牌回收，避免误删新持有者的资源。
 - 构建 harness 适配器：`harness/` 提供 `HarnessAdapter`、`OpenCodeHttpAdapter`、`OpenCodeServer`、构建工作区、HTTP/SSE 客户端和事件归一化；真实 `opencode serve` 的 session／事件／权限探针已跑通。
+- 构建期依赖请求桥：每个工作区写入 `request-dependency` 插件，Agent 调用 `request_dependency` 后写 `control/dependencies/requests/<id>.json`；`DependencyBridge` 在 host 侧按 `DependencyPolicy` 返回基线／allowlist 结果、安装 allowlist 包、挂起一次性审批或取消未决请求，再写 `responses/<id>.json`。安装支持 build 解释器的 `pip` 和 `uv pip --python`，安装后用 `importlib.metadata` 验证版本。
 - FastAPI API：健康、规则目录、任务列表／详情、创建／启动／暂停／恢复／取消／归档／还原、URL／商品分页、SSE 和 zip 导出。
 - 本地静态页面：任务列表、创建、详情、控制按钮、计数、质量异常、items 和导出入口。
 - 账本增加 `site_key`、`domain_key`、`market`、`rule_path`、`archived_at` 和创建幂等键；旧库自动加列。
@@ -38,7 +39,7 @@
 
 - 虚拟列表、任意点击序列和 POST／GraphQL；当前 `load_more`／`infinite_scroll` 只支持追加型列表，内部滚动容器（`container`）的追加型列表已有本地 fixture。
 - 跨进程 A20 的真实资源配额和浏览器实例配额；跨机租约为 v1 外，当前租约在单机 SQLite 上验证。
-- 永久移除、异步残留回收、构建会话 UI、`request_dependency` 工具桥、真实依赖安装和完整前端原型评审。
+- 永久移除、异步残留回收、构建会话 UI、完整前端原型评审和真实 OpenCode 模型循环中的 `request_dependency` 工具调用。
 - 跨机浏览器孤儿回收为 v1 外；本机强杀 worker 后的租约接管已演练，浏览器进程和 profile 会被回收。
 
 ## 布局
@@ -218,8 +219,10 @@ runtime:
 - `BuildService` 管理 v1 单个活动构建：后台事件泵、事件日志、pending／held 权限、暂停后恢复时自动回复 held 权限、取消／关闭和依赖请求委托；这是服务边界，不是构建会话 UI。
 - 每次构建在 `sessions/<build_id>/` 下创建 `input/`、`work/`、`out/`、`logs/` 和 `control/`；`control/pause.json` 是 pause-gate 的控制文件，读取失败按暂停处理（fail closed）。`BuildWorkspace.create` 会把 `pause-gate` 插件写入 `work/.opencode/plugins/pause-gate/`；插件在权限 hook 中把暂停期间原本 `allow` 的工具动作提升为 `ask`，并把动作和效果写入 `control/pause-gate.log`。真实 shell 工具冒烟已看到 `shell allow -> ask`。
 - 事件归一化把 OpenCode 事件映射为 `phase_changed`、`tool_started`、`tool_finished`、`permission_requested`、`permission_replied`、`message_delta`、`finished`、`error` 等；推理事件只记录 `redacted`，不保存私有推理。
-- `DependencyPolicy` 提供基线／allowlist 判定和隔离安装边界：包名、版本和 manager 先校验，安装只调用显式 build interpreter 的 `pip`，不经 shell；未配置策略或安装器时返回 `approval_required`。`OpenCodeHttpAdapter.request_dependency` 会写结构化事件，但 OpenCode 侧的 `request_dependency` 工具桥仍未接入。
-- 真实、无模型的冒烟与结果见 `experiments/harness/README.md`。BuildService 和构建会话 UI 仍未接入；真实自然完成尚未验证。
+- `DependencyPolicy` 提供基线／allowlist 判定、一次性审批和隔离安装边界：包名、版本和 manager 先校验；`package`／`manager`／`version`／`reason`／`source`／`license`／`scope`／`fallback` 字段原样记录；系统级或未知 manager 返回 `approval_required`，`approved=True` 只放行已显式批准的 build 包。安装只调用显式 build interpreter 的 `pip` 或 `uv pip --python`，不经 shell，并在安装后用 `importlib.metadata` 验证；失败返回 stderr 摘要。
+- `DependencyBridge` 是文件桥的 host 侧：轮询 `control/dependencies/requests/`，调用 `request_dependency`，写 `responses/`；暂停时保留请求，取消／关闭时写取消响应，审批超时写拒绝。`BuildService` 为每个构建启动桥，并提供 `pending_dependency_ids`／`reply_dependency` 一次性审批入口；构建会话 UI 仍未实现，审批目前由服务 API 调用。
+- `OpenCodeHttpAdapter.request_dependency` 会写 `dependency_available`／`dependency_installed`／`dependency_approval_required`／`dependency_denied`／`dependency_failed` 事件；插件注册和 execute 往返由 `test_dependency_bridge.py` 用假 `@opencode/plugin` 模块验证，真实模型循环仍待一次 prompt 冒烟。
+- 真实、无模型的冒烟与结果见 `experiments/harness/README.md`。`BuildService` 已接入 fake adapter 和依赖桥测试；构建会话 UI、真实模型工具调用和自然完成尚未验证。
 
 ## Web 服务（serve）
 

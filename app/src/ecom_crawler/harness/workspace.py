@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .dependency_bridge import install_dependency_tool
 from .models import BuildTask, HarnessEvent, utc_now
 from .pause_gate import install_pause_gate
 
@@ -48,6 +49,18 @@ class BuildWorkspace:
         return self.root / "control"
 
     @property
+    def dependency_dir(self) -> Path:
+        return self.control_dir / "dependencies"
+
+    @property
+    def dependency_requests_dir(self) -> Path:
+        return self.dependency_dir / "requests"
+
+    @property
+    def dependency_responses_dir(self) -> Path:
+        return self.dependency_dir / "responses"
+
+    @property
     def task_path(self) -> Path:
         return self.input_dir / "build-task.json"
 
@@ -71,6 +84,7 @@ class BuildWorkspace:
         *,
         force: bool = False,
         pause_gate: bool = True,
+        dependency_tool: bool = True,
     ) -> BuildWorkspace:
         base = Path(workspace_root).resolve()
         root = base / task.build_id
@@ -85,12 +99,16 @@ class BuildWorkspace:
             workspace.out_dir,
             workspace.logs_dir,
             workspace.control_dir,
+            workspace.dependency_requests_dir,
+            workspace.dependency_responses_dir,
         ):
             directory.mkdir(parents=True, exist_ok=True)
         workspace.write_task(task)
         workspace.set_paused(False)
         if pause_gate:
             install_pause_gate(workspace.work_dir)
+        if dependency_tool:
+            install_dependency_tool(workspace.work_dir)
         workspace.session_path.touch(exist_ok=True)
         workspace.write_result(
             {

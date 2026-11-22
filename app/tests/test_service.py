@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import os
 import queue
 import tempfile
 import time
@@ -24,6 +26,7 @@ class FakeAdapter:
         self.pending: list[dict[str, Any]] = []
         self.canceled: list[str] = []
         self.closed: list[str] = []
+        self.dependency_calls: list[tuple[dict[str, Any], bool]] = []
 
     def start_build(self, task: BuildTask) -> BuildSession:
         workspace = BuildWorkspace.create(
@@ -68,9 +71,27 @@ class FakeAdapter:
         return list(self.pending)
 
     def request_dependency(
-        self, build_id: str, request: dict[str, Any]
+        self,
+        build_id: str,
+        request: dict[str, Any],
+        *,
+        approved: bool = False,
     ) -> dict[str, Any]:
-        return {"status": "installed", "name": request.get("name")}
+        self.dependency_calls.append((dict(request), approved))
+        package = str(request.get("package") or request.get("name") or "")
+        if package == "unknownpkg" and not approved:
+            return {
+                "status": "approval_required",
+                "package": package,
+                "version": request.get("version"),
+                "detail": "not in allowlist",
+            }
+        return {
+            "status": "installed",
+            "package": package,
+            "version": request.get("version"),
+            "approved": approved,
+        }
 
     def pause(self, build_id: str) -> BuildSession:
         session = self.sessions[build_id]
@@ -208,9 +229,107 @@ class BuildServiceTests(unittest.TestCase):
         decision = self.service.request_dependency(
             task.build_id, {"name": "pyyaml"}
         )
-        self.assertEqual(decision, {"status": "installed", "name": "pyyaml"})
+        self.assertEqual(decision["status"], "installed")
+        self.assertEqual(decision["package"], "pyyaml")
         self.service.cancel(task.build_id)
         self.service.close(task.build_id)
+
+    def _write_request(
+        self, build_id: str, request_id: str, package: str
+    ) -> Path:
+        path = (
+            self.adapter.sessions[build_id]
+            .workspace.dependency_requests_dir
+            / f"{request_id}.json"
+        )
+        temporary = path.with_name(path.name + ".tmp")
+        temporary.write_text(
+            json.dumps(
+                {
+                    "request_id": request_id,
+                    "package": package,
+                    "manager": "pip",
+                    "version": "1.0.0",
+                }
+            ),
+            encoding="utf-8",
+        )
+        os.replace(temporary, path)
+        return path
+
+    def _response(self, build_id: str, request_id: str) -> dict[str, Any] | None:
+        path = (
+            self.adapter.sessions[build_id]
+            .workspace.dependency_responses_dir
+            / f"{request_id}.json"
+        )
+        if not path.is_file():
+            return None
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+
+    def test_bridge_answers_allowlisted_request(self) -> None:
+        task = self._task("build-bridge")
+        self.service.start_build(task)
+        self._write_request(task.build_id, "req-ok", "pyyaml")
+        self._wait(
+            lambda: self._response(task.build_id, "req-ok") is not None,
+            "bridge did not answer the request",
+        )
+        response = self._response(task.build_id, "req-ok")
+        assert response is not None
+        self.assertEqual(response["status"], "installed")
+        self.assertTrue(
+            any(
+                event.type == "dependency_installed"
+                for event in self.service.event_log(task.build_id)
+            )
+        )
+        self.service.cancel(task.build_id)
+        self.service.close(task.build_id)
+
+    def test_bridge_holds_unknown_package_for_approval(self) -> None:
+        task = self._task("build-approval")
+        self.service.start_build(task)
+        self._write_request(task.build_id, "req-unknown", "unknownpkg")
+        self._wait(
+            lambda: self.service.pending_dependency_ids(task.build_id)
+            == ["req-unknown"],
+            "request was not held for approval",
+        )
+        self.assertIsNone(self._response(task.build_id, "req-unknown"))
+        decision = self.service.reply_dependency(
+            task.build_id, "req-unknown", "once"
+        )
+        self.assertEqual(decision["status"], "installed")
+        self.assertTrue(decision["approved"])
+        self.assertEqual(
+            self.service.pending_dependency_ids(task.build_id), []
+        )
+        response = self._response(task.build_id, "req-unknown")
+        assert response is not None
+        self.assertEqual(response["status"], "installed")
+        self.service.cancel(task.build_id)
+        self.service.close(task.build_id)
+
+    def test_cancel_stops_pending_dependency(self) -> None:
+        task = self._task("build-cancel-deps")
+        self.service.start_build(task)
+        self._write_request(task.build_id, "req-cancel", "unknownpkg")
+        self._wait(
+            lambda: self.service.pending_dependency_ids(task.build_id)
+            == ["req-cancel"],
+            "request was not held",
+        )
+        self.service.cancel(task.build_id)
+        response = self._response(task.build_id, "req-cancel")
+        assert response is not None
+        self.assertEqual(response["status"], "cancelled")
+        self.assertEqual(
+            self.service.pending_dependency_ids(task.build_id), []
+        )
 
 
 if __name__ == "__main__":

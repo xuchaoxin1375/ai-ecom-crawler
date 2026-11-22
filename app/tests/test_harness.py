@@ -340,6 +340,20 @@ class HarnessTests(unittest.TestCase):
         )
         self.assertTrue(plugin.is_file())
         self.assertIn("permission.hook", plugin.read_text(encoding="utf-8"))
+        dependency_plugin = (
+            session.workspace.work_dir
+            / ".opencode"
+            / "plugins"
+            / "request-dependency"
+            / "index.js"
+        )
+        self.assertTrue(dependency_plugin.is_file())
+        self.assertIn(
+            "request_dependency",
+            dependency_plugin.read_text(encoding="utf-8"),
+        )
+        self.assertTrue(session.workspace.dependency_requests_dir.is_dir())
+        self.assertTrue(session.workspace.dependency_responses_dir.is_dir())
 
         adapter.send_prompt(task.build_id, "make a plan")
         self.assertEqual(adapter.status(task.build_id).state, "RUNNING")
@@ -420,6 +434,53 @@ class HarnessTests(unittest.TestCase):
         self.assertTrue(
             any(json.loads(line)["type"] == "dependency_installed" for line in events)
         )
+        adapter.cancel(task.build_id)
+        adapter.close(task.build_id)
+
+    def test_adapter_dependency_approval_and_install(self) -> None:
+        policy = DependencyPolicy(
+            installer=lambda name, version, python: subprocess.CompletedProcess(
+                args=[name, version],
+                returncode=0,
+                stdout="ok",
+            ),
+            build_python=Path(sys.executable),
+        )
+        adapter = OpenCodeHttpAdapter(
+            self.root / "sessions",
+            client=self.client,
+            dependency_policy=policy,
+        )
+        task = self._task("build-approval")
+        session = adapter.start_build(task)
+        held = adapter.request_dependency(
+            task.build_id,
+            {
+                "package": "brandnew",
+                "manager": "pip",
+                "version": "1.2.3",
+            },
+        )
+        self.assertEqual(held["status"], "approval_required")
+        installed = adapter.request_dependency(
+            task.build_id,
+            {
+                "package": "brandnew",
+                "manager": "pip",
+                "version": "1.2.3",
+            },
+            approved=True,
+        )
+        self.assertEqual(installed["status"], "installed")
+        self.assertTrue(installed["approved"])
+        event_types = [
+            json.loads(line)["type"]
+            for line in session.workspace.session_path.read_text(
+                encoding="utf-8"
+            ).splitlines()
+        ]
+        self.assertIn("dependency_approval_required", event_types)
+        self.assertIn("dependency_installed", event_types)
         adapter.cancel(task.build_id)
         adapter.close(task.build_id)
 

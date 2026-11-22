@@ -7,7 +7,7 @@ updated: 2026-11-20
 
 ## 状态与适用范围
 
-**Proposed**。项目方于 2026-11-20 确认 v1 采用 OpenCode + HTTP/SSE，并确认高自动化、常见依赖预置；安全沙箱不作为 v1 前置。2026-11-21 适配器核心、契约测试和真实端到端冒烟已通过（session、prompt、事件、权限回复、执行中 interrupt、pause-gate、关闭回收）；`request_dependency` 工具桥、真实依赖安装和构建会话 UI 未完成，保持 Proposed。
+**Proposed**。项目方于 2026-11-20 确认 v1 采用 OpenCode + HTTP/SSE，并确认高自动化、常见依赖预置；安全沙箱不作为 v1 前置。2026-11-21 适配器核心、契约测试和真实端到端冒烟已通过（session、prompt、事件、权限回复、执行中 interrupt、pause-gate、关闭回收）；2026-11-22 `request_dependency` 工作区文件桥、一次性审批、uv／pip 真实安装和安装后校验已实现并有测试／安装冒烟，真实模型循环中的工具调用和构建会话 UI 仍未完成，保持 Proposed。
 
 本文决定参考 harness、集成协议、适配器边界和构建会话的暂停／取消／恢复映射。构建会话契约以 [构建 Agent Harness 契约](0005-构建Agent与Harness契约.md) 为准；采集任务状态以 [任务状态与计数契约](../09-任务状态与计数契约.md) 和 [采集规则与任务运行时](../19-采集规则与任务运行时.md) 为准；方案包以 [采集方案与兼容契约](../08-采集方案与兼容契约.md) 为准。本文不改变执行期，也不把 harness 引入运行期。
 
@@ -17,8 +17,15 @@ updated: 2026-11-20
 - 真实 `opencode serve` 冒烟已完成：随机端口和 `OPENCODE_PASSWORD`、session 创建、`/api/event` 首事件、权限请求创建／列表／回复、session 删除和 server 回收；另有一次真实 prompt，使用 `opencode-go/deepseek-v4.1-flash`（`variant=high`），在 `session.execution.started` 后执行 `interrupt`／取消，结果为 `CANCELLED`。
 - `app/tests/test_harness.py` 7 个用例覆盖 fake server 的 session／prompt／permission／interrupt、SSE、事件归一化、推理脱敏、工作区、pause-gate 控制文件、依赖策略事件、取消／关闭和进程回收；`app/tests/test_dependencies.py` 6 个用例覆盖依赖基线／allowlist／安装失败和非法输入。
 - pause-gate 插件已写入每个构建工作区；真实 shell 工具冒烟中基线 `allow` 被提升为 `ask`，权限被拒绝后工具失败、session 正常关闭。暂停门只作用于后续工具权限，不暂停已接纳的 prompt 或模型推理。
-- `DependencyPolicy` 已提供基线／allowlist 判定和显式 build interpreter 的安装边界；`BuildService` 已提供单活动构建、事件泵、held 权限、取消／关闭和依赖委托服务边界；OpenCode 侧的 `request_dependency` 工具桥、真实安装和构建会话 UI 仍未完成。
+- `DependencyPolicy` 已提供基线／allowlist 判定和显式 build interpreter 的安装边界；`BuildService` 已提供单活动构建、事件泵、held 权限、取消／关闭和依赖委托服务边界；截至 2026-11-21，OpenCode 侧的 `request_dependency` 工具桥、真实安装和构建会话 UI 未完成；工具桥和真实安装已于 2026-11-22 补入，见下节。
 - ADR 0006 保持 Proposed；核心协议、prompt＋interrupt 和 pause-gate 已通过，剩余实现前检查项完成后再转 Accepted。
+
+## 2026-11-22 依赖请求实现进展
+
+- `request-dependency` 插件写入构建工作区，暴露 `request_dependency` 工具；工具把结构化请求写到 `control/dependencies/requests/<id>.json` 并轮询响应，不直接调用宿主包管理器。
+- `DependencyBridge` 在 host 侧轮询请求，调用 `OpenCodeHttpAdapter.request_dependency`；基线直接返回版本，allowlist 自动安装，未知／系统级挂起为 `approval_required`，由 `BuildService.reply_dependency` 做一次性批准或拒绝。暂停保留请求，取消／关闭写取消响应，审批超时写拒绝。
+- `DependencyPolicy` 接受文档字段 `package`／`manager`／`version`／`reason`／`source`／`license`／`scope`／`fallback`；安装支持 build 解释器的 `pip` 和 `uv pip --python`，不经 shell，安装后用 `importlib.metadata` 校验版本，失败返回 stderr 摘要。
+- 证据：`app/tests/test_dependency_bridge.py`（含假 `@opencode/plugin` 上下文加载真实插件并执行工具）、`test_dependencies.py`、`test_service.py`、`experiments/harness/dependency_install_smoke.py`（uv／pip 各安装并验证 `six==1.17.0`）。真实 OpenCode 模型循环中的工具调用仍需一次 prompt 冒烟。
 
 ## 背景与约束
 
@@ -200,7 +207,7 @@ v1 采用 **任务服务托管的 `opencode serve` 子进程 + HTTP/SSE 适配**
 - 安全沙箱、VM／容器、独立 OS 用户和网络隔离不在 v1 范围；出现不可信站点或多人共用时再评估。
 - ACP 适配器维持备选，HTTP 契约稳定后再评估。
 
-2026-11-21 状态：`HarnessAdapter`、`OpenCodeHttpAdapter`、server 进程管理、事件归一化、真实 session／prompt／permission／interrupt 和 pause-gate 冒烟已通过；`DependencyPolicy` 和 `BuildService` 已补，但 `request_dependency` 工具桥、真实依赖安装和构建会话 UI 仍未完成。
+2026-11-22 状态：`HarnessAdapter`、`OpenCodeHttpAdapter`、server 进程管理、事件归一化、真实 session／prompt／permission／interrupt 和 pause-gate 冒烟已通过；`DependencyPolicy`、`DependencyBridge`、`request_dependency` 工作区插件、一次性审批和 uv／pip 真实安装已补并有测试与安装冒烟；真实模型循环中的工具调用、构建会话 UI 和自然完成仍未验证。
 
 ## 参考
 

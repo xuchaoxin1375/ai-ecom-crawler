@@ -8,6 +8,10 @@ layout, an OpenCode HTTP/SSE client, event normalization and the
 
 from .adapter import BuildSession, HarnessAdapter, OpenCodeHttpAdapter
 from .dependencies import DependencyPolicy, DependencyRequest
+from .dependency_bridge import (
+    DependencyBridge,
+    install_dependency_tool,
+)
 from .events import normalize_event
 from .models import BuildTask, HarnessEvent
 from .opencode import OpenCodeClient, OpenCodeServer
@@ -20,6 +24,7 @@ __all__ = [
     "BuildSession",
     "BuildTask",
     "BuildWorkspace",
+    "DependencyBridge",
     "DependencyPolicy",
     "DependencyRequest",
     "HarnessAdapter",
@@ -27,6 +32,7 @@ __all__ = [
     "OpenCodeClient",
     "OpenCodeHttpAdapter",
     "OpenCodeServer",
+    "install_dependency_tool",
     "install_pause_gate",
     "normalize_event",
 ]

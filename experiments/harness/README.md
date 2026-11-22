@@ -1,10 +1,10 @@
-# 构建 Harness 适配器冒烟
+# 构建 Harness 适配器与依赖桥冒烟
 
 ## 目的与边界
 
-按 ADR 0006 的 v1 方案，用一个真实的 `opencode serve` 子进程验证 HTTP/SSE 适配器的核心路径：创建 session、订阅事件、处理权限请求、关闭 session 和回收 server。
+按 ADR 0006 的 v1 方案，用一个真实的 `opencode serve` 子进程验证 HTTP/SSE 适配器的核心路径：创建 session、订阅事件、处理权限请求、关闭 session 和回收 server；并验证构建期的 `request_dependency` 文件桥、依赖审批和隔离安装。
 
-本页记录的是适配器和真实 server 的协议冒烟，不是一次完整构建，也不是 BuildService 或构建 UI 的实现证据。脚本默认不发送 prompt，因此不调用模型、不产生模型费用。
+本页记录的是适配器、依赖桥和真实 server 的协议冒烟，不是一次完整构建，也不是 BuildService 或构建 UI 的实现证据。脚本默认不发送 prompt，因此不调用模型、不产生模型费用。
 
 ## 运行
 
@@ -42,7 +42,14 @@ python -m uv run --project app python experiments/harness/opencode_smoke.py `
   --pause-after-prompt --allow-shell --permission reject
 ```
 
-`--workspace-root` 可指定构建工作区根目录；`--keep` 保留本次工作区用于检查，否则临时目录会在关闭后清理。脚本不会把 prompt 文本或服务端日志写入仓库。
+依赖桥 + 真实安装冒烟（会创建临时 venv 并联网安装一个包，不调用模型）：
+
+```powershell
+python -m uv run --project app python experiments/harness/dependency_install_smoke.py --manager uv
+python -m uv run --project app python experiments/harness/dependency_install_smoke.py --manager pip
+```
+
+`--workspace-root` 可指定构建工作区根目录；`--keep` 保留本次工作区用于检查，否则临时目录会在关闭后清理。脚本不会把 prompt 文本或服务端日志写入仓库。依赖冒烟默认安装 `six==1.17.0`，可用 `--package`／`--version` 覆盖。
 
 ## 2026-11-21 无模型结果
 
@@ -71,12 +78,21 @@ python -m uv run --project app python experiments/harness/opencode_smoke.py `
 - 说明暂停门在真实工具权限 hook 上生效；它不暂停模型推理，也不阻断已接纳的 prompt。
 - 证据：本次运行的 `control/pause-gate.log` 和 `out/session.ndjson`；工作区默认清理。
 
-`DependencyPolicy` 已有单元测试（基线／allowlist／安装失败／非法包名和 manager／显式 build interpreter），但 OpenCode 侧的 `request_dependency` 工具桥和真实安装尚未接入。
+## 2026-11-22 request_dependency 文件桥与真实安装
 
-`BuildService` 服务边界已有 `test_service.py` 3 个用例：单活动构建、事件泵、暂停期间 held 权限、恢复时回复 `once`、finished 事件和依赖委托。
+依赖请求现在由两侧组成：`work/.opencode/plugins/request-dependency/` 暴露 `request_dependency` 工具，把请求写成 `control/dependencies/requests/<id>.json` 并轮询 `responses/<id>.json`；`DependencyBridge` 在 host 侧读取请求、调用适配器策略、安装或挂起审批，并写回唯一响应。暂停中的构建保留请求，恢复后再处理；取消／关闭会把未决请求写成取消响应。
 
-WSL2 Ubuntu + Python 3.12.3、`PYTHONPATH=app/src` 下，`test_harness.py` 7 个、`test_dependencies.py` 6 个和 `test_service.py` 3 个用例通过；WSL 没有安装真实 `opencode`，这里只验证 fake server、策略层和服务层。
+- **策略**：`DependencyPolicy` 接受文档字段 `package`／`manager`／`version`／`reason`／`source`／`license`／`scope`／`fallback`；基线直接返回版本，allowlist 自动安装，未知或系统级返回 `approval_required`。`approved=True` 是一次性审批，只允许已显式批准且带固定版本的 build 包；系统级仍由操作者安装。安装后调用 `verify_with_python` 检查 `importlib.metadata` 版本，验证失败记为 `failed`。
+- **安装器**：`install_with_pip` 走 build 解释器的 `pip`；`install_with_uv` 走 `uv pip install --python <build-python>`，默认从 PATH 查找 uv，找不到时退回 `python -m uv`。两者都不经 shell。
+- **服务边界**：`BuildService` 为每个构建启动 `DependencyBridge`；`pending_dependency_ids` 和 `reply_dependency` 提供一次性审批入口。构建会话 UI 仍未实现，审批目前由服务 API／测试调用，不是页面按钮。
+- **自动化证据**：`test_dependency_bridge.py` 覆盖请求应答、审批挂起／批准／拒绝／超时、暂停保留、非法请求、停止取消，以及用假 `@opencode/plugin` 模块加载真实 `index.js` 并执行工具的往返；`test_service.py` 覆盖服务层桥和取消；`test_dependencies.py` 覆盖字段别名、系统级审批、一次性审批和验证失败。全量 `app/tests` 180 个用例通过。
+- **真实安装（2026-11-22）**：临时 venv 中通过文件桥安装 `six==1.17.0` 并验证 `1.17.0`，uv 与 pip 两条路径均返回 `installed`／`installed and verified`，事件为 `dependency_installed`。uv 0.13.9、Python 3.13.13；pip 路径使用本机配置的 `mirrors.aliyun.com` 索引。命令见上文；证据是本次运行的 `dependency_install_smoke.py` 输出，不含包索引凭据。
+- **未覆盖**：真实 OpenCode 模型循环中调用 `request_dependency`（需要一次付费 prompt），以及构建自然完成。无模型的 `opencode serve` 探针不能确认工具注册：OpenCode 工作区插件按执行路径懒加载，创建 session 不会触发插件 `setup`；插件注册与 execute 由假 `@opencode/plugin` 上下文验证，真实加载仍以一次 prompt 冒烟为准。
 
-未覆盖：BuildService/UI、真实自然完成、`request_dependency` 工具桥和真实依赖安装。
+`BuildService` 服务边界现有 6 个用例：单活动构建、事件泵、暂停期间 held 权限、恢复时回复 `once`、finished 事件、桥请求和审批；`test_harness.py` 8 个用例覆盖 fake server、适配器生命周期、依赖事件和插件文件。
+
+WSL2 Ubuntu + Python 3.12.3、`PYTHONPATH=app/src` 下，`test_harness.py`、`test_dependencies.py` 和 `test_service.py` 曾通过；WSL 没有安装真实 `opencode`，这里只验证 fake server、策略层和服务层。2026-11-22 的依赖桥新增用例只在 Windows 本机执行。
+
+未覆盖：BuildService/UI、真实自然完成和真实模型工具调用；跨物理设备仍未测。
 
 server 使用当前 OpenCode 的 provider 配置；构建工作区隔离，但 OpenCode 自身的数据目录尚未按构建强制隔离。每次冒烟会删除 session，不保留模型对话。

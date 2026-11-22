@@ -91,7 +91,11 @@ class HarnessAdapter(ABC):
 
     @abstractmethod
     def request_dependency(
-        self, build_id: str, request: dict[str, Any]
+        self,
+        build_id: str,
+        request: dict[str, Any],
+        *,
+        approved: bool = False,
     ) -> dict[str, Any]:
         raise NotImplementedError
 
@@ -129,6 +133,7 @@ class OpenCodeHttpAdapter(HarnessAdapter):
         permissions: list[dict[str, Any]] | None = None,
         event_timeout: float | None = None,
         pause_gate: bool = True,
+        dependency_tool: bool = True,
         dependency_policy: DependencyPolicy | None = None,
     ) -> None:
         if server is not None and client is not None:
@@ -140,6 +145,7 @@ class OpenCodeHttpAdapter(HarnessAdapter):
         self.permissions = permissions
         self.event_timeout = event_timeout
         self.pause_gate = pause_gate
+        self.dependency_tool = dependency_tool
         self.dependency_policy = dependency_policy
         self.sessions: dict[str, BuildSession] = {}
         self._lock = threading.RLock()
@@ -210,6 +216,7 @@ class OpenCodeHttpAdapter(HarnessAdapter):
                 self.workspace_root,
                 task,
                 pause_gate=self.pause_gate,
+                dependency_tool=self.dependency_tool,
             )
             client = self._ensure_client(cwd=workspace.work_dir)
             try:
@@ -318,7 +325,11 @@ class OpenCodeHttpAdapter(HarnessAdapter):
         return self._ensure_client().list_permissions(session.session_id)
 
     def request_dependency(
-        self, build_id: str, request: dict[str, Any]
+        self,
+        build_id: str,
+        request: dict[str, Any],
+        *,
+        approved: bool = False,
     ) -> dict[str, Any]:
         session = self._require(build_id)
         if self.dependency_policy is None:
@@ -326,13 +337,15 @@ class OpenCodeHttpAdapter(HarnessAdapter):
                 "no dependency policy is configured for this adapter"
             )
         decision = self.dependency_policy.request(
-            DependencyRequest.from_dict(request)
+            DependencyRequest.from_dict(request),
+            approved=approved,
         )
         event_type = {
             "available": "dependency_available",
             "installed": "dependency_installed",
             "failed": "dependency_failed",
             "denied": "dependency_denied",
+            "approval_required": "dependency_approval_required",
         }.get(decision.status, "dependency_requested")
         self._append_adapter_event(
             session,
