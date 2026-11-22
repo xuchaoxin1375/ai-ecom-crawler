@@ -836,6 +836,16 @@ th.num {
   white-space: nowrap;
 }
 
+.issue-list {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+.issue-list li {
+  margin: 2px 0;
+  overflow-wrap: anywhere;
+}
+
 .stat-line {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

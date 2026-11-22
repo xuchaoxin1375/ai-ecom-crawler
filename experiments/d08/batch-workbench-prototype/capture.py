@@ -124,6 +124,13 @@ def main() -> int:
                 "workflow_copy": "把一批站点组织成一个采集项目" in list_text,
                 "needs_onboarding": "待接入" in batch_text,
                 "partial_start": "不阻塞可采站点" in batch_text,
+                "not_started_count": "2 暂停／排队" in batch_text
+                and "暂停 1" in batch_text
+                and "排队 1" in batch_text,
+                "list_invalid_summary": "2 无效／重复" in list_text,
+                "import_invalid_rows": "2 条无效／重复需要处理" in new_batch_text
+                and "pas-un-domaine" in new_batch_text
+                and "maison-lin.fr" in new_batch_text,
                 "quality_formatted": "描述状态" in site_text and "缺失字段" in site_text,
                 "create_starts_with_batch": not new_batch_has_rule_select,
                 "preview_shows_readiness": "可采" in new_batch_text and "待接入" in new_batch_text,
@@ -136,6 +143,7 @@ def main() -> int:
         (ROOT / "evidence.json").write_text(
             json.dumps(evidence, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
+            newline="\n",
         )
         print(json.dumps(evidence, ensure_ascii=False, indent=2))
         return 0

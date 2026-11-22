@@ -486,7 +486,7 @@ function renderBatches() {
 
     <div class="summary-strip" aria-label="全部批次摘要">
       ${summaryItem("批次", summary.batches, "全部项目")}
-      ${summaryItem("站点", summary.sites, "跨批次")}
+      ${summaryItem("站点", summary.sites, `${summary.invalid} 无效／重复`)}
       ${summaryItem("可采", summary.ready, "已有规则包")}
       ${summaryItem("待接入", summary.needs, "需技术构建")}
       ${summaryItem("运行中", summary.running, "不含排队与暂停")}
@@ -646,6 +646,7 @@ function renderNewBatch() {
     const readyCount = parsed.filter((item) => item.readiness === "ready").length;
     const needsCount = parsed.filter((item) => item.readiness === "needs_onboarding").length;
     const invalidCount = parsed.filter((item) => item.readiness === "invalid").length;
+    const invalidItems = parsed.filter((item) => item.readiness === "invalid");
     content = `
       <section class="panel">
         <div class="panel-head">
@@ -660,6 +661,17 @@ function renderNewBatch() {
             <div class="stat-box"><span class="label">待接入</span><span class="value">${needsCount}</span></div>
             <div class="stat-box"><span class="label">无效／重复</span><span class="value">${invalidCount}</span></div>
           </div>
+          ${invalidItems.length ? `
+            <div class="notice danger">
+              <div>
+                <strong>${invalidItems.length} 条无效／重复需要处理</strong>
+                <ul class="issue-list">
+                  ${invalidItems.map((item) => `<li><code>${esc(item.domain)}</code>：${esc(item.note || "网址无效或重复")}</li>`).join("")}
+                </ul>
+                <p>这些条目不会进入批次；修正后重新导入，不要把它们当成任务失败。</p>
+              </div>
+            </div>
+          ` : ""}
           <div class="preview-list">
             ${parsed.map((item) => `
               <div class="preview-row">
@@ -745,8 +757,11 @@ function renderBatch(batchId) {
   const filters = [
     ["all", `全部 ${stats.total}`],
     ["ready", `可采 ${stats.ready}`],
+    ...(stats.startable ? [["not_started", `未开始 ${stats.startable}`]] : []),
     ["needs_onboarding", `待接入 ${stats.needs}`],
     ["running", `运行中 ${stats.running}`],
+    ...(stats.paused ? [["paused", `暂停 ${stats.paused}`]] : []),
+    ...(stats.queued ? [["queued", `排队 ${stats.queued}`]] : []),
     ["finished", `已完成 ${stats.finished}`],
     ["failed", `失败 ${stats.failed}`],
     ["invalid", `无效／重复 ${stats.invalid}`],
@@ -754,6 +769,9 @@ function renderBatch(batchId) {
   const visibleSites = batch.sites.filter((site) => {
     if (state.siteFilter === "all") return true;
     if (state.siteFilter === "ready") return site.readiness === "ready";
+    if (state.siteFilter === "not_started") {
+      return site.readiness === "ready" && (!site.taskState || site.taskState === "DRAFT");
+    }
     if (state.siteFilter === "needs_onboarding") return site.readiness === "needs_onboarding" || site.readiness === "building";
     if (state.siteFilter === "invalid") return site.readiness === "invalid";
     return site.taskState === state.siteFilter.toUpperCase();
@@ -817,10 +835,10 @@ function renderBatch(batchId) {
 
     <div class="summary-strip" aria-label="批次摘要">
       ${summaryItem("站点", stats.total, "整批")}
-      ${summaryItem("可采", stats.ready, "已有规则包")}
+      ${summaryItem("可采", stats.ready, stats.startable ? `${stats.startable} 未开始` : "已有规则包")}
       ${summaryItem("待接入", stats.needs, "需技术构建")}
       ${summaryItem("无效／重复", stats.invalid, "不会启动")}
-      ${summaryItem("运行中", stats.running, "不含排队与暂停")}
+      ${summaryItem("运行中", stats.running, `${stats.paused + stats.queued} 暂停／排队`)}
       ${summaryItem("完成／失败", `${stats.finished}／${stats.failed}`, "终态／需处理")}
     </div>
 
