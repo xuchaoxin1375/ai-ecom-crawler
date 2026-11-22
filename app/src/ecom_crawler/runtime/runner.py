@@ -24,6 +24,7 @@ from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 from ecom_crawler.executor.extract import HtmlPage, extract_product
 from ecom_crawler.executor.normalize import csv_safe, format_price
 from ecom_crawler.executor.runner import CSV_COLUMNS, build_record, discover_urls, validate_product
+from ecom_crawler.model import OPTIONAL_QUALITY_FIELDS
 
 from .atomic import append_jsonl, write_json, write_text
 from .fetcher import UnsupportedAdvanceError
@@ -1524,9 +1525,15 @@ class TaskRunner:
             )
         quality_exceptions = []
         for product in self._products:
+            missing_reasons = product.get("missing_reasons") or {}
+            quality_missing = {
+                key: value
+                for key, value in missing_reasons.items()
+                if key not in OPTIONAL_QUALITY_FIELDS
+            }
             if (
-                product.get("description_status") == "complete"
-                and not product.get("missing_reasons")
+                str(product.get("description_status") or "").lower() == "complete"
+                and not quality_missing
             ):
                 continue
             quality_exceptions.append(
@@ -1534,7 +1541,7 @@ class TaskRunner:
                     "source_url": product["source_url"],
                     "description_status": product.get("description_status", "complete"),
                     "partial_reason": product.get("partial_reason"),
-                    "missing_reasons": product.get("missing_reasons", {}),
+                    "missing_reasons": quality_missing,
                 }
             )
         engine_info = self._engine_info()
@@ -1838,7 +1845,11 @@ def _preview_payload(product: dict[str, Any]) -> dict[str, Any]:
         "brand": product.get("brand"),
         "description_status": product.get("description_status"),
         "partial_reason": product.get("partial_reason"),
-        "missing_reasons": product.get("missing_reasons") or {},
+        "missing_reasons": {
+            key: value
+            for key, value in (product.get("missing_reasons") or {}).items()
+            if key not in OPTIONAL_QUALITY_FIELDS
+        },
         "field_sources": product.get("field_sources") or {},
     }
 

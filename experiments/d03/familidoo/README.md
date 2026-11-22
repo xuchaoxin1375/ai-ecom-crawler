@@ -18,7 +18,7 @@
 
 目标请求共 **8 次**：两次入口页（discovery／product 各一次）＋ 6 个商品页；没有 robots 请求，discovery 任务没有请求商品页。出口为直连，未使用代理。
 
-`d03-product` 的 6 条记录全部有正文、价格、图片和 canonical；品牌均为空，`missing_reasons` 为 `{"brand": "NOT_PROVIDED"}`，因此 `quality_exceptions` 有 6 条，这是预期结果，不是提取失败。
+`d03-product` 的 6 条记录全部有正文、价格、图片和 canonical；品牌均为空，`missing_reasons` 为 `{"brand": "NOT_PROVIDED"}`，因此 `quality_exceptions` 有 6 条，这是预期结果，不是提取失败。**2026-11-23 口径变更**：品牌等可空字段缺失不再计入 `quality_exceptions`；本目录保留当时生成的 6 条历史结果，新任务会得到 0 条。
 
 ## 方案
 

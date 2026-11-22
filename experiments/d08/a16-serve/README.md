@@ -33,7 +33,7 @@ app/.venv/Scripts/python.exe -m ecom_crawler serve `
 
 - 时间线：`QUEUED` 0.03s → `RUNNING` 0.54s → 暂停请求 1.88s → `PAUSING` 2.17s → `PAUSED` 3.71s → 恢复 5.0s → `FINISHED` 17.49s。
 - 计数：`navigation_urls=1`、`discovered_urls=7`、`product_candidates=6`、`processed_products=6`、`valid_products=6`、`excluded_products=0`、`failed_products=0`。
-- `quality_exceptions=6`，均为品牌未提供（`brand: NOT_PROVIDED`）。
+- `quality_exceptions=6`，均为品牌未提供（`brand: NOT_PROVIDED`）。**2026-11-23 口径变更**：品牌等可空字段缺失不再计入新的 `quality_exceptions`；本目录保留当时的历史结果。
 - 归档：默认列表不包含；`include_archived=true` 包含；还原后回到默认列表。
 - 导出 zip：`products.csv`、`task-result.json`；`products.csv` 6 行数据。
 - UI：`ui-list.png` 显示创建表单、筛选和任务行；`ui-detail.png` 显示计数、质量异常、items 和归档按钮。

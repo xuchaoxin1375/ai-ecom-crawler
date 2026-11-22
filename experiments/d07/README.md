@@ -100,7 +100,7 @@ python -m uv run --project experiments/framework-compare/scrapling `
   python -m unittest discover -s experiments/r06/tests -v
 ```
 
-结果：**83 个测试通过**，无 skip。覆盖原子写、契约、提取、运行时、重试、恢复、控制、并行、Schema 和新的字段分类。当时 `app` **159 个测试通过**（含 8 个浏览器配置／路由／fixture 用例、5 个 load_more／infinite_scroll 用例（含内部容器）、8 个 hybrid adapter 用例、4 个 worker 浏览器配额用例、10 个资源回收／孤儿 profile 用例、4 个桥接状态用例和 1 个原子写用例），`ruff check app` 通过；2026-11-22 依赖请求桥补入后全量为 180 个用例。真实浏览器用例在缺少 Chromium 的环境中会跳过，本机运行结果为通过。
+结果：**83 个测试通过**，无 skip。覆盖原子写、契约、提取、运行时、重试、恢复、控制、并行、Schema 和新的字段分类。当时 `app` **159 个测试通过**（含 8 个浏览器配置／路由／fixture 用例、5 个 load_more／infinite_scroll 用例（含内部容器）、8 个 hybrid adapter 用例、4 个 worker 浏览器配额用例、10 个资源回收／孤儿 profile 用例、4 个桥接状态用例和 1 个原子写用例），`ruff check app` 通过；2026-11-22 依赖请求桥补入后全量为 180 个用例，2026-11-23 质量异常口径补测后为 182 个用例。真实浏览器用例在缺少 Chromium 的环境中会跳过，本机运行结果为通过。
 
 ## D07 结论
 

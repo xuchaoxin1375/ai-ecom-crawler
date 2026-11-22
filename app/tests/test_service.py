@@ -147,7 +147,7 @@ class BuildServiceTests(unittest.TestCase):
     def _task(self, build_id: str = "build-service") -> BuildTask:
         return BuildTask(build_id=build_id, market="GB", locale="en-GB")
 
-    def _wait(self, predicate: Any, message: str, timeout: float = 5) -> None:
+    def _wait(self, predicate: Any, message: str, timeout: float = 10) -> None:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             if predicate():

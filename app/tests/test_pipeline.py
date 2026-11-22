@@ -199,8 +199,18 @@ class TaskResultTests(unittest.TestCase):
         self.assertEqual(
             exceptions[0]["partial_reason"], "Compatibility table could not be loaded."
         )
-        self.assertEqual(exceptions[0]["missing_reasons"], {"brand": "NOT_PROVIDED"})
+        self.assertEqual(exceptions[0]["missing_reasons"], {})
         self.assertEqual(result.task_result["counts"]["partial_description_products"], 1)
+
+    def test_optional_missing_fields_do_not_create_quality_exception(self) -> None:
+        item = candidate(
+            description_status="complete",
+            missing_reasons={"brand": "NOT_PROVIDED", "category": "NOT_PROVIDED"},
+            brand=None,
+        )
+        result = export_candidates(base_task(), [item])
+        self.assertEqual(result.task_result["quality_exceptions"], [])
+        self.assertEqual(result.task_result["counts"]["valid_products"], 1)
 
     def test_discovered_urls_smaller_than_candidates_is_rejected(self) -> None:
         task = base_task(counts={"discovered_urls": 1, "pending_navigation_entries": 0})

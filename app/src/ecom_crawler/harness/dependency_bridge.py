@@ -254,6 +254,22 @@ def _atomic_json(path: Path, payload: dict[str, Any]) -> None:
     os.replace(temporary, path)
 
 
+def _read_request_text(path: Path) -> tuple[str | None, Exception | None]:
+    """Read a request, retrying transient Windows sharing errors."""
+    for attempt in range(3):
+        try:
+            return path.read_text(encoding="utf-8"), None
+        except FileNotFoundError:
+            return None, None
+        except PermissionError as exc:
+            if attempt == 2:
+                return None, exc
+            time.sleep(0.02)
+        except OSError as exc:
+            return None, exc
+    return None, None
+
+
 @dataclass
 class PendingDependency:
     request_id: str
@@ -335,9 +351,23 @@ class DependencyBridge:
             with self._lock:
                 if request_id in self._pending:
                     continue
+            text, read_error = _read_request_text(request_path)
+            if text is None:
+                if read_error is None:
+                    continue
+                self._write_response(
+                    request_id,
+                    {
+                        "status": "denied",
+                        "package": "",
+                        "request_id": request_id,
+                        "detail": f"invalid request file: {type(read_error).__name__}",
+                    },
+                )
+                continue
             try:
-                payload = json.loads(request_path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError) as exc:
+                payload = json.loads(text)
+            except json.JSONDecodeError as exc:
                 self._write_response(
                     request_id,
                     {

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import threading
 import unittest
@@ -255,6 +256,48 @@ class ExecutionTests(unittest.TestCase):
             stored = TaskStore(root / "tasks.db").get_task("fixture-product")
             assert stored is not None
             self.assertEqual(stored.state, "FINISHED")
+
+    def test_optional_brand_missing_is_not_quality_exception(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary, fixture_server() as base:
+            root = Path(temporary)
+            rule = root / "rule.yaml"
+            text = RULE_TEMPLATE.replace("__BASE__", base)
+            text = text.replace(
+                '    brand:\n'
+                '      required: false\n'
+                '      fallbacks:\n'
+                '        - {type: constant, value: "Fixture Brand", label: "brand"}\n',
+                "",
+            )
+            rule.write_text(text, encoding="utf-8")
+            result = run_and_export(
+                rule_path=rule,
+                db_path=root / "tasks.db",
+                out_root=root / "tasks",
+                task_id="fixture-no-brand",
+                task_type="product",
+                max_products=2,
+                max_seconds=30,
+                max_attempts=1,
+                per_domain_rps=50,
+            )
+            self.assertEqual(result.task_result["quality_exceptions"], [])
+            items = TaskStore(root / "tasks.db").items(
+                "fixture-no-brand", "product"
+            )
+            preview = next(
+                item.result["product_preview"]
+                for item in items
+                if item.result.get("product_preview")
+            )
+            self.assertEqual(preview["missing_reasons"], {})
+            assert result.export_dir is not None
+            record = json.loads(
+                (result.export_dir / "records.jsonl")
+                .read_text(encoding="utf-8")
+                .splitlines()[0]
+            )
+            self.assertEqual(record["missing_reasons"]["brand"], "NOT_PROVIDED")
 
     def test_cli_run_command(self) -> None:
         with tempfile.TemporaryDirectory() as temporary, fixture_server() as base:

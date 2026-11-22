@@ -41,9 +41,7 @@
       "source_url": "https://shop.example/products/filter",
       "description_status": "PARTIAL",
       "partial_reason": "复杂车型适配表经有界观察仍无法可靠取得；现保留已验证的产品说明。",
-      "missing_reasons": {
-        "brand": "NOT_PROVIDED"
-      }
+      "missing_reasons": {}
     }
   ],
   "runtime": {

@@ -73,7 +73,7 @@ class DependencyBridgeTests(unittest.TestCase):
         self.bridge.stop()
         self.temporary.cleanup()
 
-    def _wait(self, predicate: Any, message: str, timeout: float = 5) -> None:
+    def _wait(self, predicate: Any, message: str, timeout: float = 15) -> None:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             if predicate():

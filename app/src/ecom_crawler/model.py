@@ -18,6 +18,17 @@ DESCRIPTION_STATUSES = (
     "FAILED",
 )
 
+OPTIONAL_QUALITY_FIELDS = frozenset(
+    {
+        "brand",
+        "category",
+        "categories",
+        "availability",
+        "options",
+        "sales_unit",
+    }
+)
+
 TASK_STATES = (
     "DRAFT",
     "QUEUED",
@@ -174,14 +185,27 @@ class NormalizedProduct:
         }
 
     def quality_exception(self) -> dict[str, Any] | None:
-        """Return the docs/09 exception entry, or ``None`` for a clean record."""
-        if self.description_status == "COMPLETE" and not self.missing_reasons:
+        """Return the docs/09 exception entry, or ``None`` for a clean record.
+
+        Optional business fields (brand, category, availability, options and
+        sales unit) may be absent without turning the product into a quality
+        exception.  They remain in the internal record's ``missing_reasons``;
+        only description quality and non-optional missing reasons are surfaced
+        in the task report.
+        """
+        quality_missing = {
+            key: value
+            for key, value in self.missing_reasons.items()
+            if key not in OPTIONAL_QUALITY_FIELDS
+        }
+        status = str(self.description_status or "").upper()
+        if status == "COMPLETE" and not quality_missing:
             return None
         return {
             "source_url": self.source_url,
             "description_status": self.description_status,
             "partial_reason": self.partial_reason,
-            "missing_reasons": dict(self.missing_reasons),
+            "missing_reasons": quality_missing,
         }
 
 

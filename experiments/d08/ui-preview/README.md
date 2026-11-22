@@ -31,11 +31,11 @@ app\.venv\Scripts\python.exe experiments/d08/ui-preview/serve_preview.py --port 
 
 ## 2026-11-23 真实案例结果
 
-- 任务：`web-704791e11005`，`familidoo-fr-d03@2026.11.21-1`，`FINISHED`／`COMPLETED`／`NATURAL_END`。
-- 计数：6／6 有效，0 失败、0 业务排除，6 条质量异常（品牌未提供）；真实商品页和导出可用。
+- 任务：`web-946474de5cf1`，`familidoo-fr-d03@2026.11.21-1`，`FINISHED`／`COMPLETED`／`NATURAL_END`。
+- 计数：6／6 有效，0 失败、0 业务排除，0 条质量异常（品牌等可空字段缺失不再计入）；真实商品页和导出可用。
 - 浏览器检查通过：页首用途说明、真实任务与计数、详情计数、质量异常、真实商品名、字段来源、归档／还原、导出 zip、新建真实任务、暂停、恢复、取消（二次确认）和不存在任务的“读取失败”提示。证据：`evidence.json`。
 - 截图：`real-list-1280.png`、`real-items-1280.png`、`real-controls-1280.png`。
-- 本轮真实数据暴露并修正了一个 mock 掩盖的问题：运行时原先把完整商品从 item 结果移走，真实页面拿不到正文状态和字段来源；现在保留紧凑的 `product_preview`，完整商品仍只写 `products.jsonl`，并补了真实 fixture 测试。
+- 本轮真实数据暴露并修正了两个 mock 掩盖的问题：运行时原先把完整商品从 item 结果移走，真实页面拿不到正文状态和字段来源；现在保留紧凑的 `product_preview`，完整商品仍只写 `products.jsonl`。另外，品牌等可空字段缺失曾让每个商品都成为质量异常；现在只把正文非完整和非可选字段缺失计入 `quality_exceptions`，可空字段仍留在内部记录。两处都有真实 fixture 测试。
 
 真实预览会发起目标站点请求；如果网络或站点不可用，页面会显示真实失败状态，不以合成数据代替。
 

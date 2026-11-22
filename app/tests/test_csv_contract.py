@@ -69,7 +69,7 @@ class CsvFidelityTests(unittest.TestCase):
             )
             self.assertEqual(
                 payload["quality_exceptions"][0]["missing_reasons"],
-                {"brand": 'Not "provided"'},
+                {},
             )
             self.assertEqual(result.task_result["counts"]["partial_description_products"], 1)
 

@@ -38,26 +38,27 @@ a {
 }
 
 .purpose-banner {
-  margin-bottom: 16px;
-  padding: 12px 16px;
-  background: var(--accent-soft);
-  border: 1px solid #c9dfea;
-  border-radius: var(--radius);
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
 }
 
 .purpose-head {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 8px;
   flex-wrap: wrap;
 }
 
-.purpose-banner p {
-  margin: 4px 0 0;
+.purpose-head .muted {
+  flex: 1 1 420px;
 }
 
 .purpose-banner .badge {
-  background: var(--panel);
+  background: var(--accent-soft);
 }
 
 .service-status {
