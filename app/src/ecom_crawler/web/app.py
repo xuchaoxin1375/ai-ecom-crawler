@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import csv
+import hashlib
 import io
 import json
 import logging
@@ -11,6 +13,7 @@ import threading
 import time
 import uuid
 import zipfile
+from collections import Counter
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -24,9 +27,12 @@ from pydantic import BaseModel, Field
 from .. import __version__
 from ..execution import build_task
 from ..model import ContractError
-from ..runtime.models import Task, WorkItem
+from ..runtime.batch import parse_site_text, parse_sites, rule_domains
+from ..runtime.models import Batch, BatchSite, Task, WorkItem, utc_now
 from ..runtime.rule import RuleError, load_rule
 from ..runtime.store import (
+    BatchNotFoundError,
+    BatchTransitionError,
     RequestConflictError,
     TaskNotFoundError,
     TaskStore,
@@ -59,6 +65,27 @@ class CreateTaskRequest(BaseModel):
     rule_id: str
     rule_version: str
     task_type: Literal["product", "discovery"] = "product"
+    limits: Limits = Field(default_factory=Limits)
+
+
+class BatchCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    country: str | None = Field(default=None, max_length=80)
+    market: str | None = Field(default=None, max_length=80)
+    language: str | None = Field(default=None, max_length=80)
+    category: str | None = Field(default=None, max_length=120)
+    note: str | None = Field(default=None, max_length=2000)
+    sites: list[str] = Field(default_factory=list, max_length=5000)
+    sites_text: str = Field(default="", max_length=500000)
+    preview: bool = False
+
+
+class BatchImportRequest(BaseModel):
+    sites: list[str] = Field(default_factory=list, max_length=5000)
+    sites_text: str = Field(default="", max_length=500000)
+
+
+class BatchStartRequest(BaseModel):
     limits: Limits = Field(default_factory=Limits)
 
 
@@ -99,6 +126,8 @@ def _summary(store: TaskStore, task: Task, out_root: Path) -> dict[str, Any]:
         "plan_id": task.plan_id,
         "plan_version": task.plan_version,
         "site_key": task.site_key or task.plan_id,
+        "domain_key": task.domain_key,
+        "batch_id": task.batch_id,
         "market": task.market,
         "state": task.state,
         "outcome": task.outcome,
@@ -109,6 +138,8 @@ def _summary(store: TaskStore, task: Task, out_root: Path) -> dict[str, Any]:
         "archived_at": task.archived_at,
         "created_at": task.created_at,
         "updated_at": task.updated_at,
+        "started_at": task.started_at,
+        "finished_at": task.finished_at,
     }
 
 
@@ -199,6 +230,8 @@ def _rule_entries(rules_dir: Path | None) -> list[dict[str, Any]]:
             "rule_version": None,
             "task_types": [],
             "site": None,
+            "domains": [],
+            "status": None,
             "market": None,
             "locale": None,
             "currency": None,
@@ -224,6 +257,8 @@ def _rule_entries(rules_dir: Path | None) -> list[dict[str, Any]]:
                         if capabilities.get(name)
                     ],
                     "site": site.get("name"),
+                    "domains": sorted(rule_domains(site)),
+                    "status": rule.raw.get("status", "candidate"),
                     "market": site.get("market"),
                     "locale": site.get("locale"),
                     "currency": site.get("currency"),
@@ -359,6 +394,347 @@ def create_app(
             "task_id": task.task_id,
             "state": task.state,
             "archived_at": task.archived_at,
+        }
+
+    ACTIVE_TASK_STATES = {"QUEUED", "RUNNING", "PAUSING", "PAUSED", "CANCELLING"}
+    READINESS_SKIP = {
+        "needs_onboarding": "待接入：没有受管规则包",
+        "building": "构建中：规则包尚未可采",
+        "invalid": "无效条目：不进入采集",
+        "duplicate": "重复条目：不进入采集",
+    }
+
+    def require_batch(batch_id: str) -> Batch:
+        batch = store.get_batch(batch_id)
+        if batch is None:
+            raise _error("NOT_FOUND", f"unknown batch: {batch_id}", 404)
+        return batch
+
+    def site_values(payload: BatchCreateRequest | BatchImportRequest) -> list[str]:
+        values = [value.strip() for value in payload.sites if value.strip()]
+        values.extend(parse_site_text(payload.sites_text))
+        return values
+
+    def match_rule(
+        site_key: str, entries: list[dict[str, Any]]
+    ) -> tuple[dict[str, Any] | None, int]:
+        matches = [
+            entry
+            for entry in entries
+            if entry.get("valid")
+            and entry.get("status") != "deprecated"
+            and site_key in entry.get("domains", [])
+        ]
+        if not matches:
+            return None, 0
+        rank = {"verified": 2, "candidate": 1}
+        matches.sort(
+            key=lambda entry: (
+                rank.get(str(entry.get("status")), 0),
+                str(entry.get("rule_version") or ""),
+                str(entry.get("path") or ""),
+            )
+        )
+        return matches[-1], len(matches)
+
+    def unique_site_key(prefix: str, value: str, used: set[str]) -> str:
+        digest = hashlib.sha1(value.encode("utf-8")).hexdigest()[:10]
+        base = f"!{prefix}:{digest}"
+        key = base
+        index = 2
+        while key in used:
+            key = f"{base}:{index}"
+            index += 1
+        return key
+
+    def import_sites(
+        batch_id: str,
+        values: list[str],
+        existing: list[BatchSite],
+        entries: list[dict[str, Any]],
+        *,
+        persist: bool,
+    ) -> tuple[dict[str, Any], list[BatchSite]]:
+        parsed = parse_sites(values)
+        existing_input: dict[str, BatchSite] = {}
+        for site in existing:
+            existing_input.setdefault(site.input_value.strip(), site)
+        existing_keys = {
+            site.site_key: site
+            for site in existing
+            if not site.site_key.startswith("!")
+        }
+        used = {site.site_key for site in existing}
+        rows: list[BatchSite] = []
+        items: list[dict[str, Any]] = []
+        counts: Counter[str] = Counter()
+        for item in parsed:
+            counts["total"] += 1
+            same_input = existing_input.get(item.input_value.strip())
+            rule: dict[str, Any] | None = None
+            stored_key: str | None = None
+            stored = False
+            if same_input is not None:
+                readiness = "duplicate"
+                note = f"已在批次中：{same_input.domain}"
+            elif not item.valid:
+                readiness = "duplicate" if item.duplicate_of else "invalid"
+                note = (
+                    f"与首次出现的 {item.duplicate_of} 重复"
+                    if item.duplicate_of
+                    else (item.error or "网址无效")
+                )
+                stored = True
+            elif item.site_key in existing_keys:
+                readiness = "duplicate"
+                note = f"与批次内 {existing_keys[item.site_key].domain} 重复"
+                stored = True
+            else:
+                rule, match_count = match_rule(item.site_key or "", entries)
+                if rule is None:
+                    readiness = "needs_onboarding"
+                    note = "未匹配受管规则包"
+                else:
+                    readiness = "ready"
+                    note = f"已匹配 {rule['rule_id']}@{rule['rule_version']}"
+                    if match_count > 1:
+                        note += f"（{match_count} 个匹配，使用优先级最高的版本）"
+                stored = True
+            if stored:
+                if readiness in {"ready", "needs_onboarding", "building"} and item.site_key:
+                    site_key = item.site_key
+                else:
+                    site_key = unique_site_key(readiness, item.input_value, used)
+                used.add(site_key)
+                stored_key = site_key
+                rows.append(
+                    BatchSite(
+                        batch_id=batch_id,
+                        site_key=site_key,
+                        domain=item.domain,
+                        input_value=item.input_value,
+                        readiness=readiness,
+                        rule_id=rule["rule_id"] if rule else None,
+                        rule_version=rule["rule_version"] if rule else None,
+                        rule_path=rule["path"] if rule else None,
+                        note=note,
+                    )
+                )
+            counts[readiness] += 1
+            items.append(
+                {
+                    "input_value": item.input_value,
+                    "domain": item.domain,
+                    "site_key": stored_key,
+                    "readiness": readiness,
+                    "reason": note,
+                    "stored": stored,
+                    "rule": (
+                        {
+                            "rule_id": rule["rule_id"],
+                            "rule_version": rule["rule_version"],
+                            "path": rule["path"],
+                        }
+                        if rule
+                        else None
+                    ),
+                }
+            )
+        if persist and rows:
+            store.add_batch_sites(rows)
+        counts["accepted"] = counts["ready"] + counts["needs_onboarding"]
+        summary = {
+            key: counts[key]
+            for key in (
+                "total",
+                "ready",
+                "needs_onboarding",
+                "duplicate",
+                "invalid",
+                "accepted",
+            )
+        }
+        summary["stored"] = len(rows)
+        return {"summary": summary, "items": items}, rows
+
+    def batch_status(
+        batch: Batch,
+        sites: list[BatchSite],
+        summaries: dict[str, dict[str, Any]],
+    ) -> str:
+        if batch.archived_at:
+            return "ARCHIVED"
+        if any(
+            summary["state"] in ACTIVE_TASK_STATES
+            for summary in summaries.values()
+        ):
+            return "RUNNING"
+        started = [site for site in sites if site.task_id]
+        ready = [site for site in sites if site.readiness == "ready"]
+        needs = [
+            site
+            for site in sites
+            if site.readiness in {"needs_onboarding", "building"}
+        ]
+        invalid = [
+            site
+            for site in sites
+            if site.readiness in {"invalid", "duplicate"}
+        ]
+        if not started:
+            if ready and (needs or invalid):
+                return "PARTIAL_READY"
+            return "DRAFT"
+        unfinished = [site for site in ready if not site.task_id]
+        complete = (
+            len(summaries) == len(started)
+            and all(
+                summary["state"] == "FINISHED"
+                and summary["outcome"] == "COMPLETED"
+                for summary in summaries.values()
+            )
+            and not unfinished
+            and not needs
+        )
+        return "FINISHED" if complete else "PARTIAL"
+
+    def batch_payload(batch: Batch, *, detail: bool = False) -> dict[str, Any]:
+        sites = store.list_batch_sites(batch.batch_id)
+        tasks = {
+            task.task_id: task
+            for task in store.list_batch_tasks(batch.batch_id)
+        }
+        summaries = {
+            task_id: _summary(store, task, root)
+            for task_id, task in tasks.items()
+        }
+        readiness = Counter(site.readiness for site in sites)
+        states = Counter(summary["state"] for summary in summaries.values())
+        failed_tasks = sum(
+            1
+            for summary in summaries.values()
+            if summary["state"] == "FINISHED"
+            and summary["outcome"] == "FAILED"
+        )
+        partial_tasks = sum(
+            1
+            for summary in summaries.values()
+            if summary["state"] == "FINISHED"
+            and summary["outcome"] == "PARTIAL"
+        )
+        counts = {
+            "sites": len(sites),
+            "ready": readiness.get("ready", 0),
+            "needs_onboarding": readiness.get("needs_onboarding", 0),
+            "building": readiness.get("building", 0),
+            "invalid": readiness.get("invalid", 0),
+            "duplicate": readiness.get("duplicate", 0),
+            "startable": sum(
+                1
+                for site in sites
+                if site.readiness == "ready" and not site.task_id
+            ),
+            "tasks": len(summaries),
+            "draft": states.get("DRAFT", 0),
+            "queued": states.get("QUEUED", 0),
+            "running": sum(
+                states.get(state, 0)
+                for state in ("RUNNING", "PAUSING", "CANCELLING")
+            ),
+            "paused": states.get("PAUSED", 0),
+            "finished": states.get("FINISHED", 0),
+            "cancelled": states.get("CANCELLED", 0),
+            "failed": failed_tasks,
+            "partial_tasks": partial_tasks,
+        }
+        payload: dict[str, Any] = {
+            "batch_id": batch.batch_id,
+            "name": batch.name,
+            "country": batch.country,
+            "market": batch.market,
+            "language": batch.language,
+            "category": batch.category,
+            "note": batch.note,
+            "status": batch_status(batch, sites, summaries),
+            "archived_at": batch.archived_at,
+            "created_at": batch.created_at,
+            "updated_at": batch.updated_at,
+            "counts": counts,
+            "valid_products": sum(
+                int(summary["counts"].get("valid_products", 0))
+                for summary in summaries.values()
+            ),
+            "failed_products": sum(
+                int(summary["counts"].get("failed_products", 0))
+                for summary in summaries.values()
+            ),
+        }
+        if detail:
+            payload["sites"] = [
+                {
+                    "site_key": site.site_key,
+                    "domain": site.domain,
+                    "input_value": site.input_value,
+                    "readiness": site.readiness,
+                    "note": site.note,
+                    "rule": (
+                        {
+                            "rule_id": site.rule_id,
+                            "rule_version": site.rule_version,
+                            "path": site.rule_path,
+                        }
+                        if site.rule_id
+                        else None
+                    ),
+                    "task_id": site.task_id,
+                    "task": summaries.get(site.task_id) if site.task_id else None,
+                    "created_at": site.created_at,
+                    "updated_at": site.updated_at,
+                }
+                for site in sites
+            ]
+        return payload
+
+    def control_batch(batch_id: str, action: str) -> dict[str, Any]:
+        batch = require_batch(batch_id)
+        if batch.archived_at is not None:
+            raise _error("INVALID_STATE", "batch is archived", 409)
+        accepted: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+        for site in store.list_batch_sites(batch_id):
+            if not site.task_id:
+                continue
+            item = {
+                "site_key": site.site_key,
+                "domain": site.domain,
+                "task_id": site.task_id,
+            }
+            task = store.get_task(site.task_id)
+            if task is None:
+                skipped.append({**item, "reason": "任务不存在"})
+                continue
+            if action == "pause" and task.state == "QUEUED":
+                skipped.append(
+                    {**item, "reason": "排队任务尚未运行，不能暂停；可取消"}
+                )
+                continue
+            if task.state in {"FINISHED", "CANCELLED"}:
+                skipped.append({**item, "reason": f"任务已结束（{task.state}）"})
+                continue
+            try:
+                updated = getattr(store, f"request_{action}")(site.task_id)
+            except TaskNotFoundError as exc:
+                skipped.append({**item, "reason": str(exc)})
+            except TaskTransitionError as exc:
+                skipped.append({**item, "reason": str(exc)})
+            else:
+                accepted.append(
+                    {**item, "state": updated.state, "outcome": updated.outcome}
+                )
+        return {
+            "accepted": accepted,
+            "skipped": skipped,
+            "batch": batch_payload(batch, detail=True),
         }
 
     @app.get("/", include_in_schema=False)
@@ -564,6 +940,359 @@ def create_app(
         if written == 0:
             raise _error("NOT_FOUND", "no exportable files", 404)
         headers = {"Content-Disposition": f'attachment; filename="{_safe_filename(task)}"'}
+        return Response(
+            content=buffer.getvalue(),
+            media_type="application/zip",
+            headers=headers,
+        )
+
+    @app.get("/api/batches")
+    def list_batches(
+        status: Annotated[str | None, Query()] = None,
+        country: Annotated[str | None, Query()] = None,
+        category: Annotated[str | None, Query()] = None,
+        include_archived: Annotated[bool, Query()] = False,
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+        offset: Annotated[int, Query(ge=0)] = 0,
+    ) -> dict[str, Any]:
+        batches = store.list_batches(include_archived=include_archived)
+        items = [batch_payload(batch) for batch in batches]
+        if status:
+            wanted = status.strip().upper()
+            items = [item for item in items if item["status"] == wanted]
+        if country:
+            wanted = country.strip().casefold()
+            items = [
+                item
+                for item in items
+                if (item["country"] or "").casefold() == wanted
+            ]
+        if category:
+            wanted = category.strip().casefold()
+            items = [
+                item
+                for item in items
+                if (item["category"] or "").casefold() == wanted
+            ]
+        total = len(items)
+        return {"total": total, "items": items[offset : offset + limit]}
+
+    @app.post("/api/batches", status_code=201)
+    def create_batch(payload: BatchCreateRequest) -> JSONResponse:
+        entries = _rule_entries(rules)
+        values = site_values(payload)
+        if payload.preview:
+            report, _ = import_sites("", values, [], entries, persist=False)
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "created": False,
+                    "preview": {
+                        "name": payload.name.strip(),
+                        "country": payload.country,
+                        "market": payload.market,
+                        "language": payload.language,
+                        "category": payload.category,
+                        "import": report,
+                    },
+                },
+            )
+        batch = Batch(
+            batch_id=f"b-{uuid.uuid4().hex[:12]}",
+            name=payload.name.strip(),
+            country=payload.country,
+            market=payload.market,
+            language=payload.language,
+            category=payload.category,
+            note=payload.note,
+        )
+        try:
+            store.create_batch(batch)
+        except ValueError as exc:
+            raise _error("CONFLICT", str(exc), 409) from exc
+        report, _ = import_sites(
+            batch.batch_id,
+            values,
+            [],
+            entries,
+            persist=True,
+        )
+        return JSONResponse(
+            status_code=201,
+            content={
+                "created": True,
+                "batch": batch_payload(require_batch(batch.batch_id), detail=True),
+                "import": report,
+            },
+        )
+
+    @app.get("/api/batches/{batch_id}")
+    def get_batch(batch_id: str) -> dict[str, Any]:
+        return batch_payload(require_batch(batch_id), detail=True)
+
+    @app.post("/api/batches/{batch_id}/import")
+    def import_batch(batch_id: str, payload: BatchImportRequest) -> dict[str, Any]:
+        batch = require_batch(batch_id)
+        if batch.archived_at is not None:
+            raise _error("INVALID_STATE", "batch is archived", 409)
+        report, _ = import_sites(
+            batch_id,
+            site_values(payload),
+            store.list_batch_sites(batch_id),
+            _rule_entries(rules),
+            persist=True,
+        )
+        return {
+            "batch_id": batch_id,
+            "import": report,
+            "batch": batch_payload(require_batch(batch_id), detail=True),
+        }
+
+    @app.post("/api/batches/{batch_id}/start", status_code=202)
+    def start_batch(
+        batch_id: str, payload: BatchStartRequest | None = None
+    ) -> dict[str, Any]:
+        batch = require_batch(batch_id)
+        if batch.archived_at is not None:
+            raise _error("INVALID_STATE", "batch is archived", 409)
+        limits = payload.limits if payload is not None else Limits()
+        entries = _rule_entries(rules)
+        accepted: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+        for site in store.list_batch_sites(batch_id):
+            item = {
+                "site_key": site.site_key,
+                "domain": site.domain,
+                "task_id": site.task_id,
+            }
+            if site.task_id:
+                skipped.append({**item, "reason": "站点已开始"})
+                continue
+            if site.readiness != "ready":
+                skipped.append(
+                    {
+                        **item,
+                        "reason": READINESS_SKIP.get(
+                            site.readiness, f"站点状态为 {site.readiness}"
+                        ),
+                    }
+                )
+                continue
+            if rules is None or not rules.is_dir():
+                skipped.append({**item, "reason": "服务未配置规则目录"})
+                continue
+            rule = next(
+                (
+                    entry
+                    for entry in entries
+                    if entry.get("valid")
+                    and entry.get("rule_id") == site.rule_id
+                    and entry.get("rule_version") == site.rule_version
+                ),
+                None,
+            )
+            if rule is None:
+                skipped.append({**item, "reason": "规则包不可用或已变更"})
+                continue
+            if "product" not in rule.get("task_types", []):
+                skipped.append({**item, "reason": "规则包不支持商品任务"})
+                continue
+            try:
+                task = build_task(
+                    rule_path=rules / str(rule["path"]),
+                    task_id=f"web-{uuid.uuid4().hex[:12]}",
+                    task_type="product",
+                    max_urls=limits.max_urls,
+                    max_products=limits.max_products,
+                    max_seconds=limits.max_seconds,
+                    max_attempts=limits.max_attempts,
+                )
+            except (RuleError, ContractError) as exc:
+                skipped.append({**item, "reason": f"规则包无法构建任务：{exc}"})
+                continue
+            task.batch_id = batch_id
+            task.site_key = site.site_key
+            task.domain_key = site.site_key
+            task.market = batch.market or rule.get("market")
+            try:
+                created = store.create_task_for_site(task, site_key=site.site_key)
+            except BatchNotFoundError:
+                skipped.append({**item, "reason": "站点在批次中不存在"})
+                continue
+            if not created:
+                skipped.append({**item, "reason": "站点已开始"})
+                continue
+            try:
+                store.request_start(task.task_id)
+            except TaskTransitionError as exc:
+                store.request_cancel(task.task_id)
+                skipped.append({**item, "reason": f"任务受理失败：{exc}"})
+                continue
+            accepted.append(
+                {
+                    "site_key": site.site_key,
+                    "domain": site.domain,
+                    "task_id": task.task_id,
+                }
+            )
+        return {
+            "accepted": accepted,
+            "skipped": skipped,
+            "batch": batch_payload(require_batch(batch_id), detail=True),
+        }
+
+    @app.post("/api/batches/{batch_id}/pause", status_code=202)
+    def pause_batch(batch_id: str) -> dict[str, Any]:
+        return control_batch(batch_id, "pause")
+
+    @app.post("/api/batches/{batch_id}/cancel", status_code=202)
+    def cancel_batch(batch_id: str) -> dict[str, Any]:
+        return control_batch(batch_id, "cancel")
+
+    @app.post("/api/batches/{batch_id}/archive", status_code=202)
+    def archive_batch(batch_id: str) -> dict[str, Any]:
+        try:
+            batch = store.request_archive_batch(batch_id)
+        except BatchNotFoundError as exc:
+            raise _error("NOT_FOUND", str(exc), 404) from exc
+        except BatchTransitionError as exc:
+            raise _error("INVALID_STATE", str(exc), 409) from exc
+        return {"accepted": True, "batch": batch_payload(batch, detail=True)}
+
+    @app.post("/api/batches/{batch_id}/restore", status_code=202)
+    def restore_batch(batch_id: str) -> dict[str, Any]:
+        try:
+            batch = store.request_restore_batch(batch_id)
+        except BatchNotFoundError as exc:
+            raise _error("NOT_FOUND", str(exc), 404) from exc
+        return {"accepted": True, "batch": batch_payload(batch, detail=True)}
+
+    @app.get("/api/batches/{batch_id}/export")
+    def export_batch(batch_id: str, partial: bool = False) -> Response:
+        batch = require_batch(batch_id)
+        sites = store.list_batch_sites(batch_id)
+        tasks = {
+            task.task_id: task
+            for task in store.list_batch_tasks(batch_id)
+        }
+        if not partial and any(
+            task.state in ACTIVE_TASK_STATES or task.state == "DRAFT"
+            for task in tasks.values()
+        ):
+            raise _error(
+                "EXPORT_NOT_READY",
+                "batch has active tasks; use partial=true",
+                409,
+            )
+        manifest_sites: list[dict[str, Any]] = []
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            for site in sites:
+                task = tasks.get(site.task_id) if site.task_id else None
+                summary = _summary(store, task, root) if task else None
+                files: list[str] = []
+                if task is not None:
+                    run_dir = root / task.task_id
+                    if run_dir.is_dir():
+                        for name in EXPORT_FILES:
+                            path = (run_dir / name).resolve()
+                            if not path.is_relative_to(run_dir.resolve()):
+                                continue
+                            if not path.is_file():
+                                continue
+                            safe_site = re.sub(
+                                r"[^A-Za-z0-9_.-]+", "-", site.site_key
+                            )
+                            archive.write(
+                                path, arcname=f"sites/{safe_site}/{name}"
+                            )
+                            files.append(name)
+                if not site.task_id:
+                    export_status = (
+                        "not_started"
+                        if site.readiness == "ready"
+                        else site.readiness
+                    )
+                elif summary is None:
+                    export_status = "missing"
+                elif summary["state"] == "CANCELLED":
+                    export_status = "partial" if files else "cancelled"
+                elif summary["state"] in ACTIVE_TASK_STATES or summary["state"] == "DRAFT":
+                    export_status = "running"
+                elif summary["outcome"] == "COMPLETED":
+                    export_status = "complete" if files else "missing"
+                elif summary["outcome"] == "PARTIAL":
+                    export_status = "partial"
+                else:
+                    export_status = "failed"
+                manifest_sites.append(
+                    {
+                        "site_key": site.site_key,
+                        "domain": site.domain,
+                        "input_value": site.input_value,
+                        "readiness": site.readiness,
+                        "note": site.note,
+                        "task_id": site.task_id,
+                        "task_state": summary["state"] if summary else None,
+                        "outcome": summary["outcome"] if summary else None,
+                        "stop_reason": summary["stop_reason"] if summary else None,
+                        "export_status": export_status,
+                        "files": files,
+                        "counts": summary["counts"] if summary else None,
+                        "coverage": summary["coverage"] if summary else None,
+                        "quality_exceptions": (
+                            summary["quality_exceptions"] if summary else []
+                        ),
+                    }
+                )
+            manifest = {
+                "generated_at": utc_now(),
+                "batch": batch_payload(batch),
+                "sites": manifest_sites,
+            }
+            archive.writestr(
+                "batch.json",
+                json.dumps(manifest, ensure_ascii=False, indent=2),
+            )
+            text = io.StringIO()
+            writer = csv.writer(text)
+            writer.writerow(
+                [
+                    "site_key",
+                    "domain",
+                    "readiness",
+                    "task_id",
+                    "task_state",
+                    "outcome",
+                    "export_status",
+                    "valid_products",
+                    "failed_products",
+                    "stop_reason",
+                ]
+            )
+            for item in manifest_sites:
+                counts = item["counts"] or {}
+                writer.writerow(
+                    [
+                        item["site_key"],
+                        item["domain"],
+                        item["readiness"],
+                        item["task_id"] or "",
+                        item["task_state"] or "",
+                        item["outcome"] or "",
+                        item["export_status"],
+                        counts.get("valid_products", 0),
+                        counts.get("failed_products", 0),
+                        item["stop_reason"] or "",
+                    ]
+                )
+            archive.writestr("sites.csv", text.getvalue().encode("utf-8-sig"))
+        headers = {
+            "Content-Disposition": (
+                f'attachment; filename="'
+                f"{re.sub(r'[^A-Za-z0-9_.-]+', '-', batch.batch_id)}-batch.zip\""
+            )
+        }
         return Response(
             content=buffer.getvalue(),
             media_type="application/zip",

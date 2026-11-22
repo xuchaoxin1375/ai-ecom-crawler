@@ -9,7 +9,16 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from .models import Lease, Task, WorkItem, json_dumps, json_loads, utc_now
+from .models import (
+    Batch,
+    BatchSite,
+    Lease,
+    Task,
+    WorkItem,
+    json_dumps,
+    json_loads,
+    utc_now,
+)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS tasks (
@@ -25,6 +34,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     market TEXT,
     rule_path TEXT,
     archived_at TEXT,
+    batch_id TEXT,
     lease_owner TEXT,
     lease_token INTEGER NOT NULL DEFAULT 0,
     lease_expires_at REAL,
@@ -38,6 +48,38 @@ CREATE TABLE IF NOT EXISTS tasks (
     started_at TEXT,
     finished_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS batches (
+    batch_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    country TEXT,
+    market TEXT,
+    language TEXT,
+    category TEXT,
+    note TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    archived_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS batch_sites (
+    batch_id TEXT NOT NULL,
+    site_key TEXT NOT NULL,
+    domain TEXT NOT NULL,
+    input_value TEXT NOT NULL,
+    readiness TEXT NOT NULL,
+    rule_id TEXT,
+    rule_version TEXT,
+    rule_path TEXT,
+    task_id TEXT,
+    note TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (batch_id, site_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_batch_sites_task
+    ON batch_sites(task_id);
 
 CREATE TABLE IF NOT EXISTS task_items (
     task_id TEXT NOT NULL,
@@ -100,6 +142,7 @@ TASK_COLUMNS = {
     "market",
     "rule_path",
     "archived_at",
+    "batch_id",
     "updated_at",
 }
 
@@ -118,6 +161,14 @@ class RequestConflictError(ValueError):
 
 class LeaseLostError(ValueError):
     """Raised when a worker tries to write after its task lease expired or moved."""
+
+
+class BatchNotFoundError(ValueError):
+    """Raised when a batch command targets an unknown batch."""
+
+
+class BatchTransitionError(ValueError):
+    """Raised when a batch command is invalid for the batch's current members."""
 
 
 class TaskStore:
@@ -148,7 +199,14 @@ class TaskStore:
                 connection.execute(
                     "ALTER TABLE tasks RENAME COLUMN rule_version TO plan_version"
                 )
-            for column in ("site_key", "domain_key", "market", "rule_path", "archived_at"):
+            for column in (
+                "site_key",
+                "domain_key",
+                "market",
+                "rule_path",
+                "archived_at",
+                "batch_id",
+            ):
                 if column not in task_columns:
                     connection.execute(f"ALTER TABLE tasks ADD COLUMN {column} TEXT")
             if "lease_owner" not in task_columns:
@@ -168,6 +226,9 @@ class TaskStore:
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS idx_tasks_lease "
                 "ON tasks(state, lease_expires_at)"
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_tasks_batch ON tasks(batch_id)"
             )
             item_columns = {
                 row["name"]
@@ -200,9 +261,9 @@ class TaskStore:
             INSERT INTO tasks (
                 task_id, plan_id, plan_version, task_type, state, outcome,
                 stop_reason, site_key, domain_key, market, rule_path, archived_at,
-                input_json, limits_json, output_json, counters_json,
+                batch_id, input_json, limits_json, output_json, counters_json,
                 created_at, updated_at, started_at, finished_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 task.task_id,
@@ -217,6 +278,7 @@ class TaskStore:
                 task.market,
                 task.rule_path,
                 task.archived_at,
+                task.batch_id,
                 json_dumps(task.input),
                 json_dumps(task.limits),
                 json_dumps(task.output),
@@ -1068,6 +1130,265 @@ class TaskStore:
                 "DELETE FROM task_resources WHERE task_id = ?", (task_id,)
             )
 
+    def create_batch(self, batch: Batch) -> None:
+        with self._connect() as connection:
+            try:
+                connection.execute(
+                    """
+                    INSERT INTO batches (
+                        batch_id, name, country, market, language, category,
+                        note, created_at, updated_at, archived_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        batch.batch_id,
+                        batch.name,
+                        batch.country,
+                        batch.market,
+                        batch.language,
+                        batch.category,
+                        batch.note,
+                        batch.created_at,
+                        batch.updated_at,
+                        batch.archived_at,
+                    ),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise ValueError(f"batch already exists: {batch.batch_id}") from exc
+
+    def get_batch(self, batch_id: str) -> Batch | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM batches WHERE batch_id = ?", (batch_id,)
+            ).fetchone()
+        return _batch_from_row(row) if row else None
+
+    def list_batches(self, *, include_archived: bool = False) -> list[Batch]:
+        query = "SELECT * FROM batches"
+        if not include_archived:
+            query += " WHERE archived_at IS NULL"
+        query += " ORDER BY created_at DESC, batch_id DESC"
+        with self._connect() as connection:
+            rows = connection.execute(query).fetchall()
+        return [_batch_from_row(row) for row in rows]
+
+    def update_batch(self, batch_id: str, **fields: Any) -> Batch:
+        allowed = {"name", "country", "market", "language", "category", "note"}
+        unknown = set(fields) - allowed
+        if unknown:
+            raise ValueError(f"unknown batch fields: {sorted(unknown)}")
+        assignments = [f"{key} = ?" for key in fields]
+        values = list(fields.values())
+        assignments.append("updated_at = ?")
+        values.append(utc_now())
+        values.append(batch_id)
+        with self._connect() as connection:
+            cursor = connection.execute(
+                f"UPDATE batches SET {', '.join(assignments)} WHERE batch_id = ?",
+                values,
+            )
+            if cursor.rowcount != 1:
+                raise BatchNotFoundError(f"unknown batch: {batch_id}")
+        batch = self.get_batch(batch_id)
+        if batch is None:
+            raise BatchNotFoundError(f"unknown batch: {batch_id}")
+        return batch
+
+    def add_batch_sites(self, sites: list[BatchSite]) -> int:
+        """Insert site rows, skipping keys that already exist in the batch."""
+        inserted = 0
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                for site in sites:
+                    cursor = connection.execute(
+                        """
+                        INSERT OR IGNORE INTO batch_sites (
+                            batch_id, site_key, domain, input_value, readiness,
+                            rule_id, rule_version, rule_path, task_id, note,
+                            created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            site.batch_id,
+                            site.site_key,
+                            site.domain,
+                            site.input_value,
+                            site.readiness,
+                            site.rule_id,
+                            site.rule_version,
+                            site.rule_path,
+                            site.task_id,
+                            site.note,
+                            site.created_at,
+                            site.updated_at,
+                        ),
+                    )
+                    inserted += cursor.rowcount
+                if inserted:
+                    batch_ids = {site.batch_id for site in sites}
+                    for batch_id in batch_ids:
+                        connection.execute(
+                            "UPDATE batches SET updated_at = ? WHERE batch_id = ?",
+                            (utc_now(), batch_id),
+                        )
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+        return inserted
+
+    def list_batch_sites(self, batch_id: str) -> list[BatchSite]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM batch_sites WHERE batch_id = ? "
+                "ORDER BY created_at, rowid",
+                (batch_id,),
+            ).fetchall()
+        return [_batch_site_from_row(row) for row in rows]
+
+    def get_batch_site(self, batch_id: str, site_key: str) -> BatchSite | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM batch_sites WHERE batch_id = ? AND site_key = ?",
+                (batch_id, site_key),
+            ).fetchone()
+        return _batch_site_from_row(row) if row else None
+
+    def update_batch_site(
+        self, batch_id: str, site_key: str, **fields: Any
+    ) -> BatchSite:
+        allowed = {
+            "domain",
+            "input_value",
+            "readiness",
+            "rule_id",
+            "rule_version",
+            "rule_path",
+            "task_id",
+            "note",
+        }
+        unknown = set(fields) - allowed
+        if unknown:
+            raise ValueError(f"unknown batch site fields: {sorted(unknown)}")
+        assignments = [f"{key} = ?" for key in fields]
+        values = list(fields.values())
+        assignments.append("updated_at = ?")
+        values.append(utc_now())
+        values.extend([batch_id, site_key])
+        with self._connect() as connection:
+            cursor = connection.execute(
+                f"UPDATE batch_sites SET {', '.join(assignments)} "
+                "WHERE batch_id = ? AND site_key = ?",
+                values,
+            )
+            if cursor.rowcount != 1:
+                raise BatchNotFoundError(
+                    f"unknown batch site: {batch_id}/{site_key}"
+                )
+        site = self.get_batch_site(batch_id, site_key)
+        if site is None:
+            raise BatchNotFoundError(f"unknown batch site: {batch_id}/{site_key}")
+        return site
+
+    def create_task_for_site(self, task: Task, *, site_key: str) -> bool:
+        """Create a task and link it to a batch site in one transaction.
+
+        Returns ``False`` when the site already has a task, which makes a
+        repeated batch start idempotent even with concurrent callers.
+        """
+        if not task.batch_id:
+            raise ValueError("task.batch_id is required for batch starts")
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                row = connection.execute(
+                    "SELECT task_id FROM batch_sites WHERE batch_id = ? AND site_key = ?",
+                    (task.batch_id, site_key),
+                ).fetchone()
+                if row is None:
+                    raise BatchNotFoundError(
+                        f"unknown batch site: {task.batch_id}/{site_key}"
+                    )
+                if row["task_id"]:
+                    connection.rollback()
+                    return False
+                self._insert_task(connection, task)
+                cursor = connection.execute(
+                    "UPDATE batch_sites SET task_id = ?, updated_at = ? "
+                    "WHERE batch_id = ? AND site_key = ? AND task_id IS NULL",
+                    (task.task_id, utc_now(), task.batch_id, site_key),
+                )
+                if cursor.rowcount != 1:
+                    connection.rollback()
+                    return False
+                connection.execute(
+                    "UPDATE batches SET updated_at = ? WHERE batch_id = ?",
+                    (utc_now(), task.batch_id),
+                )
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+        return True
+
+    def list_batch_tasks(self, batch_id: str) -> list[Task]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM tasks WHERE batch_id = ? ORDER BY created_at, task_id",
+                (batch_id,),
+            ).fetchall()
+        return [_task_from_row(row) for row in rows]
+
+    def request_archive_batch(self, batch_id: str) -> Batch:
+        """Hide a terminal batch; running members must finish or cancel first."""
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                row = connection.execute(
+                    "SELECT archived_at FROM batches WHERE batch_id = ?",
+                    (batch_id,),
+                ).fetchone()
+                if row is None:
+                    raise BatchNotFoundError(f"unknown batch: {batch_id}")
+                active = connection.execute(
+                    "SELECT 1 FROM batch_sites bs JOIN tasks t ON t.task_id = bs.task_id "
+                    "WHERE bs.batch_id = ? AND t.state NOT IN ('FINISHED', 'CANCELLED') "
+                    "LIMIT 1",
+                    (batch_id,),
+                ).fetchone()
+                if active is not None:
+                    raise BatchTransitionError(
+                        f"cannot archive batch {batch_id} while a member task is active"
+                    )
+                if row["archived_at"] is None:
+                    connection.execute(
+                        "UPDATE batches SET archived_at = ?, updated_at = ? "
+                        "WHERE batch_id = ?",
+                        (utc_now(), utc_now(), batch_id),
+                    )
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+        batch = self.get_batch(batch_id)
+        if batch is None:
+            raise BatchNotFoundError(f"unknown batch: {batch_id}")
+        return batch
+
+    def request_restore_batch(self, batch_id: str) -> Batch:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "UPDATE batches SET archived_at = NULL, updated_at = ? WHERE batch_id = ?",
+                (utc_now(), batch_id),
+            )
+            if cursor.rowcount != 1:
+                raise BatchNotFoundError(f"unknown batch: {batch_id}")
+        batch = self.get_batch(batch_id)
+        if batch is None:
+            raise BatchNotFoundError(f"unknown batch: {batch_id}")
+        return batch
+
 
 def _lease_valid(
     connection: sqlite3.Connection,
@@ -1166,6 +1487,38 @@ def _reject_in_flight(
     return cursor.rowcount
 
 
+def _batch_from_row(row: sqlite3.Row) -> Batch:
+    return Batch(
+        batch_id=row["batch_id"],
+        name=row["name"],
+        country=row["country"],
+        market=row["market"],
+        language=row["language"],
+        category=row["category"],
+        note=row["note"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+        archived_at=row["archived_at"],
+    )
+
+
+def _batch_site_from_row(row: sqlite3.Row) -> BatchSite:
+    return BatchSite(
+        batch_id=row["batch_id"],
+        site_key=row["site_key"],
+        domain=row["domain"],
+        input_value=row["input_value"],
+        readiness=row["readiness"],
+        rule_id=row["rule_id"],
+        rule_version=row["rule_version"],
+        rule_path=row["rule_path"],
+        task_id=row["task_id"],
+        note=row["note"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
 def _task_from_row(row: sqlite3.Row) -> Task:
     return Task(
         task_id=row["task_id"],
@@ -1188,6 +1541,7 @@ def _task_from_row(row: sqlite3.Row) -> Task:
         market=row["market"],
         rule_path=row["rule_path"],
         archived_at=row["archived_at"],
+        batch_id=row["batch_id"],
         lease_owner=row["lease_owner"],
         lease_token=int(row["lease_token"] or 0),
         lease_expires_at=row["lease_expires_at"],

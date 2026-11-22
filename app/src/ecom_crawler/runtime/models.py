@@ -63,6 +63,7 @@ class Task:
     market: str | None = None
     rule_path: str | None = None
     archived_at: str | None = None
+    batch_id: str | None = None
     lease_owner: str | None = None
     lease_token: int = 0
     lease_expires_at: float | None = None
@@ -88,6 +89,55 @@ class Lease:
     owner: str
     token: int
     expires_at: float
+
+
+@dataclass
+class Batch:
+    """A user-facing project that groups imported sites.
+
+    ``status`` is deliberately not stored: it is derived from member sites and
+    tasks by the service layer.  The batch itself is only an organizing object.
+    """
+
+    batch_id: str
+    name: str
+    country: str | None = None
+    market: str | None = None
+    language: str | None = None
+    category: str | None = None
+    note: str | None = None
+    created_at: str = field(default_factory=utc_now)
+    updated_at: str = field(default_factory=utc_now)
+    archived_at: str | None = None
+
+
+BATCH_READINESS = {
+    "ready",
+    "needs_onboarding",
+    "building",
+    "invalid",
+    "duplicate",
+}
+
+
+@dataclass
+class BatchSite:
+    batch_id: str
+    site_key: str
+    domain: str
+    input_value: str
+    readiness: str
+    rule_id: str | None = None
+    rule_version: str | None = None
+    rule_path: str | None = None
+    task_id: str | None = None
+    note: str | None = None
+    created_at: str = field(default_factory=utc_now)
+    updated_at: str = field(default_factory=utc_now)
+
+    def __post_init__(self) -> None:
+        if self.readiness not in BATCH_READINESS:
+            raise ValueError(f"unsupported batch readiness: {self.readiness!r}")
 
 
 @dataclass
