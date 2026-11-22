@@ -113,6 +113,73 @@ def cleanup_all_registered(
     return report
 
 
+def cleanup_orphan_profiles(
+    store: TaskStore,
+    out_root: str | Path,
+    *,
+    dirname: str = "adapter-browser-profile",
+    min_age_seconds: float = 24 * 60 * 60,
+) -> dict[str, int]:
+    """Remove stale adapter profile directories under a task output root.
+
+    The sweep only removes a directory older than ``min_age_seconds`` when no
+    live lease protects its task.  Active tasks with a live lease are kept, as
+    are non-terminal tasks whose lease state cannot be proven stale.  This is a
+    self-healing fallback for profiles left behind by a killed worker; normal
+    task cleanup still removes its own registered profile first.
+    """
+    report = {"scanned": 0, "removed": 0, "kept": 0, "failed": 0}
+    root = Path(out_root)
+    if not root.is_dir():
+        return report
+    now = time.time()
+    cutoff = now - max(0.0, float(min_age_seconds))
+    try:
+        task_dirs = list(root.iterdir())
+    except OSError:
+        report["failed"] += 1
+        return report
+    for task_dir in task_dirs:
+        try:
+            if task_dir.is_symlink() or not task_dir.is_dir():
+                continue
+        except OSError:
+            report["failed"] += 1
+            continue
+        profile = task_dir / dirname
+        try:
+            if profile.is_symlink() or not profile.is_dir():
+                continue
+            mtime = profile.stat().st_mtime
+        except OSError:
+            report["failed"] += 1
+            continue
+        report["scanned"] += 1
+        if mtime > cutoff:
+            report["kept"] += 1
+            continue
+        task = store.get_task(task_dir.name)
+        if task is not None:
+            live_lease = (
+                task.lease_expires_at is not None
+                and task.lease_expires_at > now
+            )
+            if live_lease:
+                report["kept"] += 1
+                continue
+            if (
+                task.state in {"RUNNING", "PAUSING", "CANCELLING"}
+                and task.lease_expires_at is None
+            ):
+                report["kept"] += 1
+                continue
+        if remove_path(profile):
+            report["removed"] += 1
+        else:
+            report["failed"] += 1
+    return report
+
+
 def pid_alive(pid: int) -> bool:
     if pid <= 0:
         return False

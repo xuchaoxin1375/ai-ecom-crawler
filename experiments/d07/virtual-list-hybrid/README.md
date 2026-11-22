@@ -132,7 +132,7 @@ python -m uv run --project app --extra dev python -m unittest app.tests.test_hyb
 
 ## 缺口
 
-- `app run` 已支持 adapter discovery，超时按进程组终止；但 adapter 的浏览器实例和临时目录尚未登记到 `task_resources`，正常退出后的孤儿扫描仍需补。
+- `app run` 已支持 adapter discovery，超时按进程组终止；adapter 的 Python 子进程和 task profile 已登记到 `task_resources`，adapter 自己启动的 Chromium 仍由 adapter 关闭、未单独登记。worker 启动时会对旧 `adapter-browser-profile` 做 24 小时年龄 + live lease 扫描，但不覆盖 adapter Chromium 的跨机回收。
 - 未在真实基准站验证；虚拟列表的稳定 ID 属性、滚动容器和终止文案因站而异，需要逐站配置。
 - 未实现浏览器实例配额和跨进程资源配额；跨机租约为 v1 外。
 - 未处理登录、挑战页、私有 XHR、网络重放或多步状态；`app run` 目前只支持 adapter 返回 URL 后由声明式 `fetch`／`extract` 处理商品页。

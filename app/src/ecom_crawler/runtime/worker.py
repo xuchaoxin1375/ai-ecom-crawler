@@ -20,7 +20,7 @@ from .atomic import write_json
 from .browser import BrowserConfig, BrowserFetcher
 from .fetcher import DomainLimiter, HybridFetcher, ScraplingFetcher, normalize_engine
 from .models import Lease, Task, utc_now
-from .resources import cleanup_task_resources
+from .resources import cleanup_orphan_profiles, cleanup_task_resources
 from .rule import RulePackage, load_rule
 from .runner import TaskRunner
 from .store import LeaseLostError, TaskStore
@@ -142,6 +142,7 @@ class Worker:
         fetcher_factory: FetcherFactory = default_fetcher,
         lease_ttl_seconds: float = 30.0,
         heartbeat_interval: float | None = None,
+        profile_sweep_age_seconds: float = 24 * 60 * 60,
         owner: str | None = None,
     ) -> None:
         self.store = store
@@ -169,6 +170,9 @@ class Worker:
         self._browser_slots: dict[str, str] = {}
         self._browser_slot_lock = threading.Lock()
         self.browser_slot_ttl_seconds = max(30.0, self.lease_ttl_seconds * 2)
+        self.profile_sweep_age_seconds = max(
+            0.0, float(profile_sweep_age_seconds)
+        )
         self._heartbeat_stop = threading.Event()
         self._heartbeat_thread: threading.Thread | None = None
         self._next_settle = 0.0
@@ -306,6 +310,16 @@ class Worker:
         stop_event: threading.Event | None = None,
     ) -> int:
         self.out_root.mkdir(parents=True, exist_ok=True)
+        try:
+            sweep = cleanup_orphan_profiles(
+                self.store,
+                self.out_root,
+                min_age_seconds=self.profile_sweep_age_seconds,
+            )
+            if sweep["removed"] or sweep["failed"]:
+                logger.warning("orphan adapter profile sweep: %s", sweep)
+        except Exception:
+            logger.exception("orphan adapter profile sweep failed")
         running: dict[str, threading.Thread] = {}
         started = 0
         self._maybe_settle(force=True)
