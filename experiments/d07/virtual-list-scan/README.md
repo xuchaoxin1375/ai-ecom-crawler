@@ -66,7 +66,7 @@ python -m uv run --project app --extra dev python experiments/d07/virtual-list-h
 
 - 本轮 14 个主表站点和 4 个补充尝试中没有观察到替换式 DOM。主流大站更常见的是**固定批次 + 加载更多**、**追加式无限滚动**或**分页**，而不是滚动时回收旧卡片。
 - 固定批次和追加式列表不能证明 hybrid adapter 的替换式路径；它们只能作为 `recycled=0` 的对照。
-- 真实虚拟列表仍是 D07 的未闭合项。下一步优先找明确使用 `react-window`、`react-virtualized`、`virtua` 或类似虚拟化库的商品列表，或由项目方指定一个已知站点；找不到时保留未测，不用普通无限滚动冒充。
+- 真实替换式虚拟列表仍是 D07 的未闭合项，但项目方判断这类站点在当前业务中预计较少：本轮扫描后不再主动寻找候选，也不把普通无限滚动当成替换式列表的证明；遇到明确使用 `react-window`、`react-virtualized`、`virtua` 等库的实际目标，或项目方指定站点时再验证。保留“未观察到”的结论，不写成“已覆盖”。
 - adapter 已增加 `rendered` 和 `recycled` 指标：`recycled > 0` 表示上一批 ID 在当前 DOM 消失，是替换式列表的直接信号；追加式列表应保持 `recycled=0`。
 
 ## 证据边界
