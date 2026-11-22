@@ -19,6 +19,7 @@
 ## 记录与交付
 
 - 新增或复核站点后，把日期、实际出口、客户端、请求数、结论写回对应 probe 的 `probe.json` / `README.md`，或 `docs/12` 的初筛表；不要只留在会话里。
+- 技术选型是开写前的硬门：前端、后端及每个进入生产路径的层都要有决策记录；不知道哪个更好时也要按已知信息给出推荐、成功机会、开发效率、可维护性、可扩展性、风险和复审条件，不得开工后即兴选择。Proposed 只用于实验或验证原型，进入 `app/` 生产路径须 Accepted 或登记 Provisional 例外；逐层状态见 `docs/21` 的“技术选型覆盖”。
 - 文档改动后运行 `python scripts/export_docs.py`，再用 `python scripts/export_docs.py --check dist/ai-ecom-crawler-docs.zip` 复核；纯 Markdown 改动至少检查相对链接。
 - 不提交 `dist/`、密钥、Cookie、浏览器 profile、整页原文或运行期任务数据库（`tasks.db` 等）；需要证据时保留任务结果、CSV、事件摘要或可重跑命令。
 

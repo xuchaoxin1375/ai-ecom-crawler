@@ -1,13 +1,13 @@
 ---
 title: 构建 Harness 选型与集成方式
 document_type: adr
-status: proposed
+status: provisional
 updated: 2026-11-20
 ---
 
 ## 状态与适用范围
 
-**Proposed**。项目方于 2026-11-20 确认 v1 采用 OpenCode + HTTP/SSE，并确认高自动化、常见依赖预置；安全沙箱不作为 v1 前置。2026-11-21 适配器核心、契约测试和真实端到端冒烟已通过（session、prompt、事件、权限回复、执行中 interrupt、pause-gate、关闭回收）；2026-11-22 `request_dependency` 工作区文件桥、一次性审批、uv／pip 真实安装和安装后校验已实现并有测试／安装冒烟，真实模型循环中的工具调用和构建会话 UI 仍未完成，保持 Proposed。
+**Provisional**（方向已确认，验证未完成）。项目方于 2026-11-20 确认 v1 采用 OpenCode + HTTP/SSE，并确认高自动化、常见依赖预置；安全沙箱不作为 v1 前置。2026-11-21 适配器核心、契约测试和真实端到端冒烟已通过（session、prompt、事件、权限回复、执行中 interrupt、pause-gate、关闭回收）；2026-11-22 `request_dependency` 工作区文件桥、一次性审批、uv／pip 真实安装和安装后校验已实现并有测试／安装冒烟，真实模型循环中的工具调用和构建会话 UI 仍未完成，保持 Provisional。
 
 本文决定参考 harness、集成协议、适配器边界和构建会话的暂停／取消／恢复映射。构建会话契约以 [构建 Agent Harness 契约](0005-构建Agent与Harness契约.md) 为准；采集任务状态以 [任务状态与计数契约](../09-任务状态与计数契约.md) 和 [采集规则与任务运行时](../19-采集规则与任务运行时.md) 为准；方案包以 [采集方案与兼容契约](../08-采集方案与兼容契约.md) 为准。本文不改变执行期，也不把 harness 引入运行期。
 
@@ -18,7 +18,7 @@ updated: 2026-11-20
 - `app/tests/test_harness.py` 7 个用例覆盖 fake server 的 session／prompt／permission／interrupt、SSE、事件归一化、推理脱敏、工作区、pause-gate 控制文件、依赖策略事件、取消／关闭和进程回收；`app/tests/test_dependencies.py` 6 个用例覆盖依赖基线／allowlist／安装失败和非法输入。
 - pause-gate 插件已写入每个构建工作区；真实 shell 工具冒烟中基线 `allow` 被提升为 `ask`，权限被拒绝后工具失败、session 正常关闭。暂停门只作用于后续工具权限，不暂停已接纳的 prompt 或模型推理。
 - `DependencyPolicy` 已提供基线／allowlist 判定和显式 build interpreter 的安装边界；`BuildService` 已提供单活动构建、事件泵、held 权限、取消／关闭和依赖委托服务边界；截至 2026-11-21，OpenCode 侧的 `request_dependency` 工具桥、真实安装和构建会话 UI 未完成；工具桥和真实安装已于 2026-11-22 补入，见下节。
-- ADR 0006 保持 Proposed；核心协议、prompt＋interrupt 和 pause-gate 已通过，剩余实现前检查项完成后再转 Accepted。
+- ADR 0006 保持 Provisional；核心协议、prompt＋interrupt 和 pause-gate 已通过，剩余实现前检查项完成后再转 Accepted。
 
 ## 2026-11-22 依赖请求实现进展
 

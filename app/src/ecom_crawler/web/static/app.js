@@ -17,6 +17,8 @@ let lastListLoadedAt = null;
 let lastDetailLoadedAt = null;
 let lastItemsLoadedAt = null;
 let pendingControl = null;
+let health = null;
+let healthError = null;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -55,6 +57,61 @@ async function api(path, options = {}) {
 
 function apiPost(path, body) {
   return api(path, { method: "POST", body: body ? JSON.stringify(body) : undefined });
+}
+
+function workerText(info) {
+  if (!info) return "worker 状态未知";
+  if (info.worker === "managed") {
+    const slots = info.max_tasks ?? 1;
+    return `托管 worker 运行中（任务槽位 ${slots}）`;
+  }
+  if (info.worker === "external") {
+    return "外部 worker 模式：排队任务需要独立 worker 进程领取";
+  }
+  if (info.worker) return `worker 模式：${info.worker}`;
+  return "未检测到 worker：排队任务不会自动执行";
+}
+
+function renderServiceStatus() {
+  const element = document.querySelector("#service-status");
+  if (healthError) {
+    element.className = "service-status warn";
+    element.textContent = `服务不可达：${healthError}；页面数据可能过期`;
+    return;
+  }
+  if (!health) {
+    element.className = "service-status";
+    element.textContent = "服务状态加载中…";
+    return;
+  }
+  const managed = health.worker === "managed";
+  element.className = `service-status ${managed ? "ok" : "warn"}`;
+  element.textContent = `服务在线 · ${workerText(health)} · 账本 ${health.tasks ?? "-"} 个任务`;
+}
+
+async function loadHealth() {
+  try {
+    health = await api("/api/health");
+    healthError = null;
+  } catch (error) {
+    health = null;
+    healthError = error.message;
+  }
+  renderServiceStatus();
+}
+
+function queueNote(task) {
+  if (task.state !== "QUEUED") return "";
+  if (!health) {
+    return "排队中：服务状态未知。若是只读或外部 worker 模式，任务需要独立 worker 领取。";
+  }
+  if (health.worker === "managed") {
+    return "排队中：托管 worker 会领取该任务；若长时间不变，检查 worker 日志和任务锁。";
+  }
+  if (health.worker === "external") {
+    return "排队中：当前服务使用外部 worker；请确认独立 worker 进程在线并消费同一账本。";
+  }
+  return "排队中：当前服务未托管 worker，任务不会自动执行；请在后台启动 worker。";
 }
 
 function requestId() {
@@ -156,6 +213,45 @@ const COVERAGE_LABELS = {
   UNKNOWN: "未知",
 };
 
+const PRODUCT_ITEM_HEAD = `
+  <tr>
+    <th>URL</th>
+    <th>名称</th>
+    <th>价格</th>
+    <th>正文 / 质量</th>
+    <th>状态</th>
+    <th>尝试</th>
+  </tr>`;
+
+const URL_ITEM_HEAD = `
+  <tr>
+    <th>URL</th>
+    <th>状态</th>
+    <th>失败分类</th>
+    <th>尝试</th>
+  </tr>`;
+
+const PRIMARY_COUNT_KEYS = {
+  product: [
+    "valid_products",
+    "excluded_products",
+    "failed_products",
+    "pending_products",
+    "in_flight_products",
+    "product_candidates",
+    "partial_description_products",
+  ],
+  discovery: [
+    "discovered_urls",
+    "navigation_urls",
+    "valid_urls",
+    "excluded_urls",
+    "failed_urls",
+    "pending_urls",
+    "url_candidates",
+  ],
+};
+
 function labelFor(labels, value) {
   return labels[value] || value || "-";
 }
@@ -176,6 +272,7 @@ function countsText(counts) {
     "valid_products",
     "excluded_products",
     "failed_products",
+    "partial_description_products",
     "pending_products",
     "in_flight_products",
     "in_flight",
@@ -219,7 +316,7 @@ function updateRuleContext() {
     (item) => `${item.rule_id}@${item.rule_version}` === key,
   );
   target.textContent = rule
-    ? `市场 ${rule.market || "-"} · 语言 ${rule.locale || "-"}`
+    ? `市场 ${rule.market || "-"} · 语言 ${rule.locale || "-"}（由规则包确定）`
     : "";
 }
 
@@ -272,6 +369,10 @@ function renderList(tasks) {
       const stateText = labelFor(STATE_LABELS, task.state);
       const outcomeText = task.outcome ? labelFor(OUTCOME_LABELS, task.outcome) : "-";
       const stopText = task.stop_reason ? labelFor(STOP_REASON_LABELS, task.stop_reason) : "";
+      const coverageText = labelFor(COVERAGE_LABELS, task.coverage?.status || "UNKNOWN");
+      const qualityCount = Array.isArray(task.quality_exceptions)
+        ? task.quality_exceptions.length
+        : 0;
       return `
         <tr>
           <td class="col-task">
@@ -286,7 +387,12 @@ function renderList(tasks) {
           </td>
           <td class="col-market">${escapeHtml(task.market || "-")}</td>
           <td class="col-state"><span class="${stateClass(task.state)}" title="${escapeHtml(task.state)}">${escapeHtml(stateText)}</span></td>
-          <td class="col-result">${escapeHtml(outcomeText)}${stopText ? `<div class="muted" title="${escapeHtml(task.stop_reason)}">${escapeHtml(stopText)}</div>` : ""}</td>
+          <td class="col-result">
+            <div>${escapeHtml(outcomeText)}</div>
+            ${stopText ? `<div class="muted" title="${escapeHtml(task.stop_reason)}">停止：${escapeHtml(stopText)}</div>` : ""}
+            <div class="muted" title="${escapeHtml(task.coverage?.status || "UNKNOWN")}">覆盖 ${escapeHtml(coverageText)}</div>
+            ${qualityCount ? `<div class="quality-badge" title="质量异常条数">质量异常 ${qualityCount}</div>` : ""}
+          </td>
           <td class="counts-cell col-counts">${escapeHtml(countsText(task.counts))}</td>
           <td class="col-updated">${escapeHtml(task.updated_at || "-")}</td>
         </tr>`;
@@ -306,8 +412,13 @@ async function loadList() {
   try {
     const payload = await api(`/api/tasks?${params.toString()}`);
     lastListLoadedAt = new Date();
-    renderList(payload.items || []);
-    setStatus(listStatus, `共 ${payload.total ?? 0} 个任务`);
+    await loadHealth();
+    const items = payload.items || [];
+    renderList(items);
+    const queued = items.filter((task) => task.state === "QUEUED").length;
+    const queueText = queued ? ` · ${queued} 个排队` : "";
+    const worker = health ? ` · ${workerText(health)}` : "";
+    setStatus(listStatus, `共 ${payload.total ?? 0} 个任务${queueText}${worker}`);
   } catch (error) {
     setStatus(
       listStatus,
@@ -459,8 +570,32 @@ function renderControls(task) {
     )
     .join("");
   controls.querySelectorAll("button").forEach((button) => {
-    button.addEventListener("click", () => controlTask(button.dataset.action));
+    button.addEventListener("click", () => {
+      if (
+        button.dataset.action === "cancel" &&
+        !window.confirm("取消任务不可恢复，确认取消？")
+      ) {
+        return;
+      }
+      controlTask(button.dataset.action);
+    });
   });
+}
+
+function splitCountEntries(task, entries) {
+  const keys = PRIMARY_COUNT_KEYS[task.task_type] || [];
+  const remaining = new Map(entries);
+  const primary = [];
+  for (const key of keys) {
+    if (!remaining.has(key)) continue;
+    primary.push([key, remaining.get(key)]);
+    remaining.delete(key);
+  }
+  const rest = [...remaining.entries()];
+  while (primary.length < 7 && rest.length) {
+    primary.push(rest.shift());
+  }
+  return { primary, secondary: rest };
 }
 
 function renderDetail(task) {
@@ -497,6 +632,10 @@ function renderDetail(task) {
     <div><span class="label">更新时间</span>${escapeHtml(task.updated_at || "-")}</div>
   `;
   renderControls(task);
+  const queue = document.querySelector("#detail-queue");
+  const queueText = queueNote(task);
+  queue.textContent = queueText;
+  queue.hidden = !queueText;
   const counts = task.counts || {};
   const countEntries = Object.entries(counts).filter(
     ([key]) =>
@@ -507,9 +646,23 @@ function renderDetail(task) {
         (key === "in_flight" && "in_flight_products" in counts)
       ),
   );
-  document.querySelector("#detail-counts").innerHTML = countEntries
-    .map(([key, value]) => `<div class="count"><span>${escapeHtml(countLabel(key))}</span><strong>${escapeHtml(value)}</strong></div>`)
+  const { primary, secondary } = splitCountEntries(task, countEntries);
+  const primaryHtml = primary
+    .map(
+      ([key, value]) =>
+        `<div class="count"><span>${escapeHtml(countLabel(key))}</span><strong>${escapeHtml(value)}</strong></div>`,
+    )
     .join("");
+  const secondaryHtml = secondary.length
+    ? `<div class="counts-secondary">${secondary
+        .map(
+          ([key, value]) =>
+            `<span>${escapeHtml(countLabel(key))} <strong>${escapeHtml(value)}</strong></span>`,
+        )
+        .join("")}</div>`
+    : "";
+  document.querySelector("#detail-counts").innerHTML =
+    primaryHtml + secondaryHtml;
 
   const quality = Array.isArray(task.quality_exceptions) ? task.quality_exceptions : [];
   document.querySelector("#detail-quality").innerHTML = quality.length
@@ -546,6 +699,98 @@ function renderQualityItem(item) {
   </li>`;
 }
 
+function productPayload(item) {
+  const result = item.result && typeof item.result === "object" ? item.result : {};
+  if (result.product_preview && typeof result.product_preview === "object") {
+    return result.product_preview;
+  }
+  return result.product && typeof result.product === "object"
+    ? result.product
+    : result;
+}
+
+function descriptionText(product) {
+  const rawStatus = String(
+    product.description_status || product.description?.status || "",
+  ).toLowerCase();
+  const status = rawStatus
+    ? labelFor(DESCRIPTION_STATUS_LABELS, rawStatus)
+    : "";
+  const partial =
+    product.partial_reason || product.description?.partial_reason || "";
+  const missing =
+    product.missing_reasons && typeof product.missing_reasons === "object"
+      ? Object.entries(product.missing_reasons)
+          .filter(([, value]) => value)
+          .map(([key, value]) => {
+            const label = MISSING_FIELD_LABELS[key] || key;
+            const reason = labelFor(MISSING_REASON_LABELS, String(value));
+            return `${label}：${reason}`;
+          })
+      : [];
+  if (!status && !partial && !missing.length) return "-";
+  const parts = [];
+  if (status) parts.push(`描述：${status}`);
+  if (partial) parts.push(`部分原因：${partial}`);
+  if (missing.length) parts.push(`缺失：${missing.join("；")}`);
+  return parts.map((part) => escapeHtml(part)).join("<br>");
+}
+
+function fieldSources(product) {
+  const sources =
+    product.field_sources && typeof product.field_sources === "object"
+      ? Object.entries(product.field_sources)
+      : [];
+  if (!sources.length) return "";
+  return `<details class="sources"><summary>字段来源</summary><ul>${sources
+    .map(
+      ([field, source]) =>
+        `<li>${escapeHtml(field)} ← ${escapeHtml(source || "-")}</li>`,
+    )
+    .join("")}</ul></details>`;
+}
+
+function productPrice(product) {
+  const amount = product.price_amount ?? product.price?.amount;
+  const currency = product.price_currency ?? product.price?.currency;
+  if (amount === null || amount === undefined || amount === "") return "-";
+  const numeric = Number(amount);
+  const shown = Number.isFinite(numeric)
+    ? numeric.toLocaleString("zh-CN", { maximumFractionDigits: 2 })
+    : String(amount);
+  const currencyText = currency ? ` ${escapeHtml(currency)}` : "";
+  return `<span title="${escapeHtml(String(amount))}">${escapeHtml(shown)}${currencyText}</span>`;
+}
+
+function renderProductItem(item) {
+  const product = productPayload(item);
+  const name = product.name || item.result?.name || "-";
+  const sources = fieldSources(product);
+  const detail = descriptionText(product);
+  const failure = item.failure_class
+    ? `<div class="muted">${escapeHtml(item.failure_class)}</div>`
+    : "";
+  return `
+    <tr>
+      <td class="url"><a href="${escapeHtml(item.url)}" target="_blank" rel="noreferrer">${escapeHtml(item.url)}</a></td>
+      <td class="product-name">${escapeHtml(name)}${sources}</td>
+      <td class="product-price">${productPrice(product)}</td>
+      <td class="description-cell">${detail}</td>
+      <td><span class="${stateClass(item.state)}" title="${escapeHtml(item.state)}">${escapeHtml(labelFor(STATE_LABELS, item.state))}</span>${failure}</td>
+      <td>${escapeHtml(item.attempts ?? 0)}</td>
+    </tr>`;
+}
+
+function renderUrlItem(item) {
+  return `
+    <tr>
+      <td class="url">${escapeHtml(item.url)}</td>
+      <td><span class="${stateClass(item.state)}" title="${escapeHtml(item.state)}">${escapeHtml(labelFor(STATE_LABELS, item.state))}</span></td>
+      <td>${escapeHtml(item.failure_class || "-")}</td>
+      <td>${escapeHtml(item.attempts ?? 0)}</td>
+    </tr>`;
+}
+
 async function loadItems(taskId, kind) {
   if (kind !== currentKind) {
     lastItemsLoadedAt = null;
@@ -554,6 +799,8 @@ async function loadItems(taskId, kind) {
   document.querySelectorAll(".tab").forEach((tab) => {
     tab.classList.toggle("active", tab.dataset.kind === kind);
   });
+  document.querySelector("#items-head").innerHTML =
+    kind === "product" ? PRODUCT_ITEM_HEAD : URL_ITEM_HEAD;
   setStatus(itemsStatus, "加载中…");
   try {
     const payload = await api(
@@ -562,17 +809,12 @@ async function loadItems(taskId, kind) {
     if (currentTaskId !== taskId) return;
     lastItemsLoadedAt = new Date();
     if (!payload.items?.length) {
-      itemRows.innerHTML = '<tr><td colspan="4" class="empty">暂无记录</td></tr>';
+      const colspan = kind === "product" ? 6 : 4;
+      itemRows.innerHTML = `<tr><td colspan="${colspan}" class="empty">暂无记录</td></tr>`;
     } else {
       itemRows.innerHTML = payload.items
-        .map(
-          (item) => `
-          <tr>
-            <td class="url">${escapeHtml(item.url)}</td>
-            <td><span class="${stateClass(item.state)}" title="${escapeHtml(item.state)}">${escapeHtml(labelFor(STATE_LABELS, item.state))}</span></td>
-            <td>${escapeHtml(item.failure_class || "-")}</td>
-            <td>${escapeHtml(item.attempts ?? 0)}</td>
-          </tr>`,
+        .map((item) =>
+          kind === "product" ? renderProductItem(item) : renderUrlItem(item),
         )
         .join("");
     }
@@ -596,8 +838,12 @@ function clearDetail(taskId) {
   document.querySelector("#detail-counts").innerHTML = "";
   document.querySelector("#detail-quality").innerHTML = "";
   document.querySelector("#detail-controls").innerHTML = "";
+  const queue = document.querySelector("#detail-queue");
+  queue.textContent = "";
+  queue.hidden = true;
   document.querySelector("#export-link").href = "#";
   document.querySelector("#export-link").hidden = true;
+  document.querySelector("#items-head").innerHTML = PRODUCT_ITEM_HEAD;
   itemRows.innerHTML = "";
   setStatus(itemsStatus, "");
 }
@@ -661,6 +907,7 @@ function route() {
     listView.hidden = true;
     detailView.hidden = false;
     const taskId = decodeURIComponent(match[1]);
+    loadHealth();
     loadDetail(taskId);
     openEvents(taskId);
     detailTimer = setInterval(() => {
@@ -692,3 +939,7 @@ document.querySelectorAll(".tab").forEach((tab) => {
 });
 window.addEventListener("hashchange", route);
 route();
+setInterval(loadHealth, 5000);
+setInterval(() => {
+  if (!currentTaskId) loadList();
+}, 5000);

@@ -240,6 +240,18 @@ class ExecutionTests(unittest.TestCase):
             rows = (result.export_dir / "products.csv").read_text(encoding="utf-8").splitlines()
             self.assertEqual(len(rows), 3)
             self.assertIn("Product 1", rows[1])
+            items = TaskStore(root / "tasks.db").items(
+                "fixture-product", "product"
+            )
+            preview = next(
+                item.result["product_preview"]
+                for item in items
+                if item.result.get("product_preview")
+            )
+            self.assertTrue(preview["name"])
+            self.assertTrue(preview["price_amount"])
+            self.assertTrue(preview["field_sources"])
+            self.assertNotIn("description_html", preview)
             stored = TaskStore(root / "tasks.db").get_task("fixture-product")
             assert stored is not None
             self.assertEqual(stored.state, "FINISHED")

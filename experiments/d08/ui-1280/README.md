@@ -14,7 +14,15 @@ app/.venv/Scripts/python.exe experiments/d08/ui-1280/capture.py
 
 脚本创建临时 SQLite 账本和 6 个合成任务（列表默认显示 5 个，另 1 个归档），启动 `ecom-crawler serve --no-worker`，用 Patchright Chromium 在 1280×900 截图，并检查页面是否横向溢出。
 
-## 2026-11-21 结果
+需要直接点开页面检查时，优先用真实案例预览：
+
+```powershell
+app\.venv\Scripts\python.exe experiments/d08/ui-preview/run_real_preview.py --port 8775
+```
+
+预览会创建一个 `familidoo` 6 商品真实任务并保持服务运行；打开 `http://127.0.0.1:8775/`，`Ctrl+C` 停止。`serve_preview.py` 的合成数据只用于布局检查。
+
+## 2026-11-22 结果
 
 | 项 | 结果 |
 | --- | --- |
@@ -23,19 +31,22 @@ app/.venv/Scripts/python.exe experiments/d08/ui-1280/capture.py
 | 列表横向溢出 | 无 |
 | 创建面板横向溢出 | 无 |
 | 详情横向溢出 | 无 |
-| 详情内容 | 计数、覆盖、质量异常、归档和导出均可见 |
-| 截图 | `list-1280.png`、`create-1280.png`、`detail-1280.png` |
+| 列表内容 | 结果／覆盖、停止原因、质量异常数可见 |
+| 创建内容 | 市场／语言显示“由规则包确定” |
+| 详情内容 | 7 张主计数卡 + 完整计数行、覆盖、质量异常、归档和导出均可见 |
+| 商品预览 | 名称、19.99 EUR、描述部分／缺失字段、可展开字段来源可见 |
+| 截图 | `list-1280.png`、`create-1280.png`、`detail-1280.png`、`detail-items-1280.png` |
 
-本轮发现并修正：质量异常原先以整段 JSON 字符串显示，现改为来源链接、描述状态／部分原因和缺失字段的条目化展示。
+本轮按 2026-11-22 项目方设计评审结论对齐：列表补覆盖／停止原因和质量异常数，创建页说明市场／语言由规则包确定，详情补商品预览和完整计数，取消加二次确认。项目方设计门已通过；A16 仍需 1280 实机逐页确认。
 
 ## 文件
 
 - `capture.py`：合成账本、启动 serve、1280 截图和溢出检查。
-- `evidence.json`：本次视口、行数、溢出和详情可见项。
-- `list-1280.png`、`create-1280.png`、`detail-1280.png`：1280 截图。
+- `evidence.json`：本次视口、行数、溢出和页面内容检查。
+- `list-1280.png`、`create-1280.png`、`detail-1280.png`、`detail-items-1280.png`：1280 截图。
 
 ## 限制
 
 - 合成任务不是真实采集结果；真实站点闭环见 `experiments/d08/a16-serve/`。
 - 仅检查 1280 主规格；768／320 完整矩阵和深色主题仍按交付前适配阶段。
-- 截图是技术验收证据，不替代项目方签字。
+- 截图是技术验收证据，不替代项目方在 1280 实机的 A16 签字。

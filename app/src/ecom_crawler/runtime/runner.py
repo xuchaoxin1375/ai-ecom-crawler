@@ -1285,6 +1285,7 @@ class TaskRunner:
         product = result.pop("product", None) if state == "DONE" and accept else None
         if product is not None:
             result["source_url"] = product.get("source_url")
+            result["product_preview"] = _preview_payload(product)
             self._append_product(product)
         failure_class = result.get("failure_class")
         self.store.mark_item(
@@ -1817,6 +1818,28 @@ def _record_payload(record: Any) -> dict[str, Any]:
         "price_displayed": record.price_displayed,
         "price_pretax": record.price_pretax,
         "tax_basis": record.tax_basis,
+    }
+
+
+def _preview_payload(product: dict[str, Any]) -> dict[str, Any]:
+    """Keep a compact product preview in the work-item result.
+
+    The full record goes to ``products.jsonl``; duplicating description HTML in
+    the SQLite ledger would bloat it.  The API item list needs enough fields to
+    render the real product preview (price, description state, missing fields
+    and field sources) without reading the export files.
+    """
+    return {
+        "name": product.get("name"),
+        "price_amount": product.get("price_amount"),
+        "price_currency": product.get("price_currency"),
+        "primary_image_url": product.get("primary_image_url"),
+        "category": product.get("category"),
+        "brand": product.get("brand"),
+        "description_status": product.get("description_status"),
+        "partial_reason": product.get("partial_reason"),
+        "missing_reasons": product.get("missing_reasons") or {},
+        "field_sources": product.get("field_sources") or {},
     }
 
 
