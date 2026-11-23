@@ -63,6 +63,12 @@ python -X utf8 -m uv run --project app python experiments/build-agent/run_real_b
 - 其他市场在 `C:\Users\opcxxu\Desktop\mihomo-profiles\spider_lb_ch.generated.yaml` 的 `listeners` 中按名称取端口；入口只代表本地代理服务，出口地区要用目标站或回显服务的一次请求核验。
 - 代理不写入规则包；构建记录和批次站点保存本次出口，后续任务沿用同一出口，换出口时重新构建或在批次启动时覆盖。
 
+### 共享 skills 与页面工具验证（2026-11-23）
+
+- 构建 `build-6d3cbafe1188`（`familidoo.fr`，sample，`max_products=3`，`max_seconds=600`）：`FINISHED`／`succeeded`，约 334 秒，34 次工具调用，0 轮自动修复；主机验证 6 条有效、0 失败；规则 `familidoo-fr-build@2026.11.23-1` 以 `candidate` 安装，站点进入 `ready`。
+- 直接 harness smoke：模型加载 `product-crawl-workflow` 并引用首标题；`htmlmini_extract_url` 返回 `Example Domain`；`browse` 打开 `https://example.com` 并返回标题。两组 smoke 均未使用 shell。
+- 完整构建主要使用 `webfetch` 和 `shell`，没有强制调用 skill／MCP；skill、`htmlmini` 和 `browse` 由单独 smoke 验证。
+
 ### 构建过程追踪：familidoo.fr（带 trace，验证失败）
 
 - 批次 `b-0b0356e90383`，构建 `build-d8a95003d2d4`，展示“过程可复盘”而不是只看最终规则。
