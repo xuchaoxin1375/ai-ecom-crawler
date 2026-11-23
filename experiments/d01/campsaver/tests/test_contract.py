@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -12,6 +13,8 @@ from pathlib import Path
 from lxml import html as LH
 
 ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[4]
+EVIDENCE_ROOT = Path(os.environ.get("ECOM_EVIDENCE_ROOT", REPO_ROOT))
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -131,7 +134,7 @@ class CsvTests(unittest.TestCase):
 
 class PublishedResultTests(unittest.TestCase):
     def test_counts_if_published(self) -> None:
-        result_path = ROOT / "task-result.json"
+        result_path = EVIDENCE_ROOT / ROOT.relative_to(REPO_ROOT) / "task-result.json"
         if not result_path.is_file():
             self.skipTest("no published task-result.json")
         result = json.loads(result_path.read_text(encoding="utf-8"))

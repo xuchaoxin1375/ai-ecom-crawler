@@ -28,8 +28,57 @@ Thumbs.db
 dist/
 /storage/
 
-# 实验目录的生成导出包
-experiments/**/task-export.zip
+# 实验目录只保留源码、规则、README 与合成 fixture
+# 采集运行产物放仓库外证据库，见 experiments/README.md
+experiments/**/tasks/
+experiments/**/app-run/
+experiments/**/app-evidence/
+experiments/**/diagnostics/
+experiments/**/results/
+experiments/**/crawlee_storage/
+experiments/**/screens/
+experiments/**/screens-*/
+experiments/**/*.csv
+experiments/**/*.jsonl
+experiments/**/*.ndjson
+experiments/**/*.png
+experiments/**/*.zip
+experiments/**/*.log
+experiments/**/task.json
+experiments/**/task-result*.json
+experiments/**/*task-result*.json
+experiments/**/evidence.json
+experiments/**/*-evidence.json
+experiments/**/run-summary.json
+experiments/**/run-meta.json
+experiments/**/*-summary.json
+experiments/**/events.json
+experiments/**/selected_urls.json
+experiments/**/sitemap-summary.json
+experiments/**/valid_internal.json
+experiments/**/batch.json
+experiments/**/build.json
+experiments/**/build-trace.json
+experiments/**/build-timeline.json
+experiments/**/timing*.json
+experiments/**/comparison.json
+experiments/**/comparison.md
+experiments/**/probe.json
+experiments/**/shared-urls.json
+experiments/**/sitemap-crosscheck.json
+experiments/**/adapter-context.json
+experiments/**/crash-summary.json
+experiments/**/visual-audit-summary.json
+experiments/**/scan.json
+experiments/**/trace.json
+experiments/**/trace.md
+experiments/**/category-product-urls.txt
+experiments/**/wsl-environment.txt
+experiments/**/compare-output.txt
+experiments/framework-compare/probes/**/*.json
+
+# 合成 fixture 例外
+!experiments/**/fixtures/**
 
 # Python
 __pycache__/

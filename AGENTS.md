@@ -6,6 +6,7 @@
 
 - 生产应用放在 `app/`（本仓库 monorepo）；`app/` 不进入 `scripts/export_docs.py` 的文档包。
 - `docs/` 仍是业务口径与验收的唯一入口；`experiments/` 是实验与原型，不作为生产代码。
+- 采集运行产物（CSV、结果 JSON、NDJSON、trace、截图、导出 zip、运行期数据库）不进版本控制；放仓库外私有证据库，`experiments/` 只保留规则、脚本、测试、README 和合成 fixture，见 [`experiments/README.md`](experiments/README.md)。
 - 项目最终闭源，未授予开源复用许可；第三方依赖保留各自许可证。
 
 ## 站点评估入口

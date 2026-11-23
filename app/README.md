@@ -354,6 +354,8 @@ CSV 对以 `=`、`+`、`-`、`@` 开头的文本单元格加单引号，防止�
 
 ## D04 执行器证据
 
+真实站点运行产物（CSV、结果 JSON、截图）在仓库外证据库；下面引用的是实验说明和规则目录。
+
 - `test_execution.py::test_fixture_rule_runs_and_exports`：本地 HTTP fixture，规则 → 2 商品采集 → 账本 → D02 导出。
 - `test_execution.py::test_cli_run_command`：同一 fixture 走 `ecom-crawler run`。
 - `tests/test_browser.py`：本地 JS 商品页，静态 HTML 不含名称／价格，浏览器渲染后 1／1 有效；断言 task result 的浏览器字段、导出 CSV、资源表清空、profile 删除和 PID 退出。
