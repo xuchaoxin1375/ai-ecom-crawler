@@ -35,7 +35,7 @@ export function RowActionsMenu({
   const hasActions = visibleGroups.length > 0;
 
   return (
-    <DropdownMenuPrimitive.Root>
+    <DropdownMenuPrimitive.Root modal={false}>
       <DropdownMenuPrimitive.Trigger asChild disabled={disabled || !hasActions}>
         {trigger ?? (
           <button

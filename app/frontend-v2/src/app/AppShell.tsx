@@ -149,7 +149,7 @@ function ServicePill() {
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs whitespace-nowrap",
+        "inline-flex min-w-[176px] items-center justify-center gap-2 rounded-full border px-3 py-1 text-xs whitespace-nowrap",
         tone === "success" && "border-success/20 bg-success-soft text-success",
         tone === "danger" && "border-danger/20 bg-danger-soft text-danger",
         tone === "neutral" && "border-line bg-surface-muted text-ink-3",
