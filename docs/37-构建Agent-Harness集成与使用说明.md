@@ -155,7 +155,7 @@ python -m uv run --project app ecom-crawler serve `
 - **全局 `AGENTS.md` 仍会加载**。`work/AGENTS.md` 明确以构建工作区规则为准；出现冲突时不要静默采用全局规则。
 - **skills 是宿主环境的一部分**。构建可复现性取决于 skills 版本和目录；正式构建前记录 manifest，需要固定版本时使用 `ECOM_BUILD_SKILLS_DIR` 或只读副本。
 - **`browse` 和 `htmlmini` 扩大可见面**。前者可能带真实登录态，后者可读本地 HTML；只用它们访问公开页面或本次输入，不要把它们当文件隔离。
-- **`shell` 是最大边界缺口**。它能绕过 read／edit 规则；需要强隔离时使用专用用户、容器或独立设备，不能只靠 prompt。
+- **`shell` 是最大边界缺口**。它能绕过 read／edit 规则；`grep`／`glob` 的路径检查也是尽力而为。需要强隔离时使用专用用户、容器或独立设备，不能只靠 prompt。
 - **模型调用有费用**。一次构建可能持续数分钟；先用小预算和单站验证，再放大。
 - **出口与市场必须一致**。浏览器样本、静态请求和主机验证走不同出口时，币种／促销价可能不同；换出口视为新的市场上下文。
 - **robots 只取 Sitemap 行**。不要读整份 robots、不解析 `Disallow`／`Crawl-delay`，也不要把它当停止信号。
@@ -178,6 +178,12 @@ python -m uv run --project app ecom-crawler serve `
 | 第二个构建被拒 | 已有活动构建；先等待、暂停或取消 |
 
 ## 验证状态
+
+### 2026-11-23 本次验证
+
+- 构建 `build-6d3cbafe1188`（`familidoo.fr`，`catalog_scope=sample`，`max_products=3`，`max_seconds=600`）：`FINISHED`／`succeeded`，约 334 秒，34 次工具调用，0 轮自动修复；主机验证 6 条有效、0 失败；规则 `familidoo-fr-build@2026.11.23-1` 以 `candidate` 安装，站点 `readiness=ready`。
+- 直接 harness smoke：模型加载 `product-crawl-workflow` 并引用其首标题；`htmlmini_extract_url` 成功返回 `Example Domain`；`browse` MCP 成功打开 `https://example.com` 并返回标题。两组 smoke 均未使用 shell。
+- 说明：完整构建主要使用 `webfetch` 和 `shell`，没有强制调用 skill／MCP；skill、`htmlmini` 和 `browse` 由单独 smoke 验证可用。
 
 - 适配器、权限、暂停门、依赖桥和构建工作区有单元测试；`app/tests/test_builds.py`、`test_harness.py`、`test_service.py`、`test_dependency_bridge.py` 覆盖主要路径。
 - 真实 `opencode serve` 无模型 smoke 通过：session、事件、权限请求、关闭和 server 回收。
