@@ -10,6 +10,7 @@ interface StartSiteDialogProps {
   open: boolean;
   batchId: string;
   site: BatchSite;
+  rerun?: boolean;
   onOpenChange: (open: boolean) => void;
   onStarted: (response: BatchActionResponse) => void;
 }
@@ -18,6 +19,7 @@ export function StartSiteDialog({
   open,
   batchId,
   site,
+  rerun = false,
   onOpenChange,
   onStarted,
 }: StartSiteDialogProps) {
@@ -32,6 +34,7 @@ export function StartSiteDialog({
     try {
       const response = await startBatch(batchId, {
         site_keys: [site.site_key],
+        rerun_finished: rerun,
         ...(fullCatalog
           ? {
               limits: {
@@ -67,10 +70,12 @@ export function StartSiteDialog({
           <header className="flex items-start justify-between gap-6 border-b border-line px-6 py-4">
             <div>
               <Dialog.Title className="text-[22px] leading-8 font-semibold tracking-[-0.01em] text-ink">
-                启动站点采集
+                {rerun ? "复跑站点采集" : "启动站点采集"}
               </Dialog.Title>
               <Dialog.Description className="mt-1 text-sm leading-6 text-ink-2">
-                为 {site.domain} 创建采集任务；只影响当前站点，其他站点不受影响。
+                {rerun
+                  ? `为 ${site.domain} 重新创建采集任务；已完成或已取消的旧任务保留在账本中，当前站点会指向新任务。`
+                  : `为 ${site.domain} 创建采集任务；只影响当前站点，其他站点不受影响。`}
               </Dialog.Description>
             </div>
             <Dialog.Close asChild>
@@ -88,7 +93,7 @@ export function StartSiteDialog({
           <div className="space-y-4 px-6 py-5">
             <div className="flex items-baseline justify-between gap-4 rounded-panel border border-line bg-surface-muted px-4 py-3">
               <div>
-                <p className="text-xs text-ink-3">本次启动</p>
+                <p className="text-xs text-ink-3">{rerun ? "本次复跑" : "本次启动"}</p>
                 <p className="mt-0.5 text-xl leading-7 font-semibold text-ink tabular">
                   1 个站点
                 </p>
@@ -124,11 +129,17 @@ export function StartSiteDialog({
               时会保持排队。启动后留在当前页，可直接看到任务状态和结果预览。
             </p>
 
-            {error ? <ErrorNotice title="启动失败" message={error} compact /> : null}
+            {error ? (
+              <ErrorNotice
+                title={rerun ? "复跑失败" : "启动失败"}
+                message={error}
+                compact
+              />
+            ) : null}
           </div>
 
           <footer className="flex items-center justify-between gap-4 border-t border-line px-6 py-4">
-            <p className="text-xs text-ink-3">站点级启动不会动到批次内其他站点。</p>
+            <p className="text-xs text-ink-3">站点级操作不会动到批次内其他站点。</p>
             <div className="flex items-center gap-2">
               <Button
                 id="start-site-cancel"
@@ -140,7 +151,13 @@ export function StartSiteDialog({
               </Button>
               <Button variant="primary" onClick={() => void runStart()} disabled={busy}>
                 <Play size={14} aria-hidden="true" />
-                {busy ? "启动中…" : "启动采集"}
+                {busy
+                  ? rerun
+                    ? "复跑中…"
+                    : "启动中…"
+                  : rerun
+                    ? "开始复跑"
+                    : "启动采集"}
               </Button>
             </div>
           </footer>

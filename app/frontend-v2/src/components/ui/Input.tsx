@@ -1,7 +1,9 @@
-import type {
-  InputHTMLAttributes,
-  SelectHTMLAttributes,
-  TextareaHTMLAttributes,
+import {
+  useEffect,
+  useRef,
+  type InputHTMLAttributes,
+  type SelectHTMLAttributes,
+  type TextareaHTMLAttributes,
 } from "react";
 import { cn } from "../../lib/cn";
 
@@ -37,10 +39,18 @@ export function Select({
 
 export function Checkbox({
   className,
+  indeterminate = false,
   ...props
-}: InputHTMLAttributes<HTMLInputElement>) {
+}: InputHTMLAttributes<HTMLInputElement> & { indeterminate?: boolean }) {
+  const ref = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = indeterminate;
+  }, [indeterminate]);
+
   return (
     <input
+      ref={ref}
       type="checkbox"
       className={cn("h-4 w-4 rounded border-line-strong accent-accent", className)}
       {...props}

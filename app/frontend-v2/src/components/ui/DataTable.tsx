@@ -7,6 +7,10 @@ export interface DataTableColumn<T> {
   width?: string;
   align?: "left" | "right";
   cell: (row: T) => ReactNode;
+  headerClassName?: string;
+  cellClassName?: string;
+  /** Set false for checkbox/action columns that should stay blank while loading. */
+  skeleton?: boolean;
 }
 
 interface DataTableProps<T> {
@@ -60,6 +64,7 @@ export function DataTable<T>({
                 "sticky top-14 z-10 border-b border-line bg-surface-muted text-xs font-medium text-ink-3",
                 headerPadding,
                 column.align === "right" ? "text-right" : "text-left",
+                column.headerClassName,
               )}
             >
               {column.header}
@@ -75,14 +80,19 @@ export function DataTable<T>({
                 className="border-b border-line last:border-0"
               >
                 {columns.map((column, columnIndex) => (
-                  <td key={column.key} className={cn(cellPadding)}>
-                    <div
-                      className={cn(
-                        "h-3 animate-pulse rounded bg-surface-sunken",
-                        column.align === "right" ? "ml-auto" : "",
-                        columnIndex === 0 ? "w-3/4" : "w-1/2",
-                      )}
-                    />
+                  <td
+                    key={column.key}
+                    className={cn(cellPadding, column.cellClassName)}
+                  >
+                    {column.skeleton === false ? null : (
+                      <div
+                        className={cn(
+                          "h-3 animate-pulse rounded bg-surface-sunken",
+                          column.align === "right" ? "ml-auto" : "",
+                          columnIndex === 0 ? "w-3/4" : "w-1/2",
+                        )}
+                      />
+                    )}
                   </td>
                 ))}
               </tr>
@@ -102,6 +112,7 @@ export function DataTable<T>({
                       cellPadding,
                       "align-middle",
                       column.align === "right" ? "text-right tabular" : "text-left",
+                      column.cellClassName,
                     )}
                   >
                     {column.cell(row)}
