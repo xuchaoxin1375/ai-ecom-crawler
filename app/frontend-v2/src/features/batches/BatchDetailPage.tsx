@@ -13,7 +13,6 @@ import {
   Ban,
   Download,
   Eye,
-  ExternalLink,
   FileUp,
   Pause,
   Play,
@@ -1328,13 +1327,6 @@ export function BatchDetailPage() {
                   没有排队、运行或暂停中的任务，无需取消。
                 </p>
               )}
-              <a
-                className="inline-flex items-center gap-1 pt-1 text-xs font-medium text-accent hover:text-accent-hover hover:underline"
-                href="/batch/#/tasks"
-              >
-                在旧版中查看全部任务
-                <ExternalLink size={11} aria-hidden="true" />
-              </a>
             </div>
           </section>
         </aside>

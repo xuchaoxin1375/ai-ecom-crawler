@@ -141,7 +141,7 @@ export function NewBatchDialog({ open, onOpenChange, onSaved }: NewBatchDialogPr
             tone: "warning",
             text: `批次已保存，但启动失败：${
               exc instanceof Error ? exc.message : String(exc)
-            }。可在批次列表或旧版详情中重试启动。`,
+            }。可在批次列表中重试启动。`,
           });
           onOpenChange(false);
           return;

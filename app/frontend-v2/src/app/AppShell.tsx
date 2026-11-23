@@ -1,39 +1,21 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { ExternalLink, Layers, LayoutList, ListChecks, Plus } from "lucide-react";
+import { Layers, LayoutList, Plus } from "lucide-react";
 import { getHealth } from "../lib/api";
 import { cn } from "../lib/cn";
-import { Badge } from "../components/ui/Badge";
 
 function SidebarLink({
   to,
   icon,
   children,
-  external = false,
 }: {
   to: string;
   icon: ReactNode;
   children: ReactNode;
-  external?: boolean;
 }) {
   const className =
     "flex h-9 items-center gap-2.5 rounded-control px-2.5 text-sm text-ink-2 transition-colors hover:bg-surface-muted hover:text-ink";
-
-  if (external) {
-    return (
-      <a className={className} href={to}>
-        <span
-          className="flex h-5 w-5 items-center justify-center text-ink-3"
-          aria-hidden="true"
-        >
-          {icon}
-        </span>
-        <span className="flex-1">{children}</span>
-        <ExternalLink size={13} className="text-ink-3" aria-hidden="true" />
-      </a>
-    );
-  }
 
   return (
     <NavLink
@@ -183,9 +165,6 @@ export function AppShell() {
         </nav>
 
         <div className="ml-auto flex items-center gap-3">
-          <Badge tone="info" dot={false}>
-            新版默认
-          </Badge>
           <ServicePill />
         </div>
       </header>
@@ -201,48 +180,12 @@ export function AppShell() {
                 <SidebarLink to="/batches" icon={<LayoutList size={17} />}>
                   采集批次
                 </SidebarLink>
-                <SidebarLink
-                  to="/batch/#/tasks"
-                  icon={<ListChecks size={17} />}
-                  external
-                >
-                  全部任务（旧版）
-                </SidebarLink>
                 <SidebarAction href="#/batches?new=1" icon={<Plus size={17} />}>
                   新建批次
                 </SidebarAction>
               </div>
             </div>
-
-            <div>
-              <p className="px-2.5 pb-1.5 text-[11px] font-semibold tracking-[0.08em] text-ink-3">
-                系统
-              </p>
-              <div className="space-y-0.5">
-                <SidebarLink to="/batch/" icon={<ExternalLink size={17} />} external>
-                  旧版工作台（弃用）
-                </SidebarLink>
-                <SidebarLink to="/legacy" icon={<ExternalLink size={17} />} external>
-                  技术兜底入口
-                </SidebarLink>
-              </div>
-            </div>
           </nav>
-
-          <div className="border-t border-line px-4 py-4">
-            <p className="text-xs font-medium text-ink-2">v2 前端试点</p>
-            <p className="mt-1 text-xs leading-5 text-ink-3">
-              当前覆盖桌面端批次列表、批次详情、站点详情和新建批次弹窗。旧版已弃用，仅保留任务列表／详情与
-              SSE 等未迁移功能。
-            </p>
-            <a
-              className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-accent hover:text-accent-hover hover:underline"
-              href="/batch/"
-            >
-              返回旧版
-              <ExternalLink size={12} aria-hidden="true" />
-            </a>
-          </div>
         </div>
       </aside>
 

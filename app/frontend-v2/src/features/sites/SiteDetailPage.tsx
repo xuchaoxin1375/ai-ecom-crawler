@@ -8,8 +8,6 @@ import {
   Ban,
   Circle,
   Download,
-  ExternalLink,
-  FileText,
   Pause,
   Play,
   RefreshCw,
@@ -105,16 +103,6 @@ const toneClasses: Record<string, string> = {
   danger: "border-danger/25 bg-danger-soft text-danger",
   info: "border-info/20 bg-info-soft text-info",
 };
-
-function oldTaskHref(taskId: string): string {
-  return `/batch/#/tasks/${encodeURIComponent(taskId)}`;
-}
-
-function oldSiteHref(batchId: string, siteKey: string): string {
-  return `/batch/#/batches/${encodeURIComponent(batchId)}/sites/${encodeURIComponent(
-    siteKey,
-  )}`;
-}
 
 function StepIcon({ action }: { action: SiteActionKind }) {
   const props = { size: 18, strokeWidth: 1.75, "aria-hidden": true } as const;
@@ -809,15 +797,6 @@ export function SiteDetailPage() {
                 导出站点 ZIP
               </Button>
             ) : null}
-            {task ? (
-              <Button asChild>
-                <a href={oldTaskHref(task.task_id)} title="任务详情暂由旧版处理">
-                  <FileText size={14} aria-hidden="true" />
-                  任务详情（旧版）
-                  <ExternalLink size={11} aria-hidden="true" />
-                </a>
-              </Button>
-            ) : null}
             <Button
               onClick={() => {
                 void batchQuery.refetch();
@@ -1246,12 +1225,7 @@ export function SiteDetailPage() {
               </Fact>
               <Fact label="任务 ID">
                 {task ? (
-                  <a
-                    className="font-mono text-[11px] text-accent hover:underline"
-                    href={oldTaskHref(task.task_id)}
-                  >
-                    {task.task_id}
-                  </a>
+                  <code className="font-mono text-[11px]">{task.task_id}</code>
                 ) : (
                   "—"
                 )}
@@ -1290,15 +1264,6 @@ export function SiteDetailPage() {
               </Fact>
               <Fact label="更新">
                 <span className="tabular">{formatTime(site.updated_at)}</span>
-              </Fact>
-              <Fact label="旧版入口">
-                <a
-                  className="inline-flex items-center gap-1 text-accent hover:underline"
-                  href={oldSiteHref(batch.batch_id, site.site_key)}
-                >
-                  在旧版中打开站点详情
-                  <ExternalLink size={11} aria-hidden="true" />
-                </a>
               </Fact>
             </dl>
           </details>
@@ -1405,28 +1370,19 @@ export function SiteDetailPage() {
           <section className="rounded-panel border border-line bg-surface">
             <div className="border-b border-line px-4 py-3">
               <h2 className="text-[15px] leading-6 font-semibold text-ink">
-                导出与入口
+                导出与返回
               </h2>
             </div>
             <div className="space-y-3 px-4 py-4">
               {task ? (
-                <>
-                  <Button
-                    className="w-full justify-start"
-                    size="sm"
-                    onClick={downloadTask}
-                  >
-                    <Download size={14} aria-hidden="true" />
-                    {taskActive ? "导出部分结果" : "导出站点 ZIP"}
-                  </Button>
-                  <Button asChild className="w-full justify-start" size="sm">
-                    <a href={oldTaskHref(task.task_id)}>
-                      <FileText size={14} aria-hidden="true" />
-                      任务详情（旧版）
-                      <ExternalLink size={11} aria-hidden="true" />
-                    </a>
-                  </Button>
-                </>
+                <Button
+                  className="w-full justify-start"
+                  size="sm"
+                  onClick={downloadTask}
+                >
+                  <Download size={14} aria-hidden="true" />
+                  {taskActive ? "导出部分结果" : "导出站点 ZIP"}
+                </Button>
               ) : (
                 <p className="text-xs leading-5 text-ink-3">
                   还没有任务结果。启动可采站点后可导出站点 ZIP。
