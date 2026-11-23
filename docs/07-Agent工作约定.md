@@ -24,7 +24,7 @@ updated: 2026-11-20
 
 截至本文档取证日，Scrapling官方说明其Agent Skill用于教编码助手使用库，MCP(模型上下文协议)用于暴露HTTP／浏览器工具；官方Skill同时说明命令／MCP不覆盖全部可编程能力。它们可以优先评估，但仍须按实际安装版本核实，不能以文档有功能代替项目实测。
 
-因此建议构建期不要默认继承宿主全局 Skill／MCP；需要时由 harness 显式提供最小副本或白名单（当前只允许 `product-crawl-workflow` 的版本化副本），并只使用本次复制进工作区的业务文档。正式已验证方案直接使用成熟库／框架执行。MCP不必成为正式执行依赖，也不要求全站逐页往返Agent。出处和事实边界见[来源与维护](来源与维护.md)。
+因此建议构建期共享宿主 Skill（只读），使用 `ECOM_BUILD_SKILLS_DIR` 或全局 skills 目录；Skill／MCP 不进入正式运行期依赖，业务文档只使用本次复制进工作区的副本。正式已验证方案直接使用成熟库／框架执行。MCP不必成为正式执行依赖，也不要求全站逐页往返Agent。出处和事实边界见[来源与维护](来源与维护.md)。
 
 开放的`resilient-browser-fetch`作为上游参考，不附源码副本；该源版本的分层判断与回收经验已写入方法文档，不要求继续维护其完整封装，也不把原项目旧副本当成唯一标准。
 
@@ -34,16 +34,16 @@ updated: 2026-11-20
 
 ## Harness 具体化方案
 
-harness 是构建期运行 Agent 的宿主，负责模型、工具、权限、会话和事件；它不是采集运行时，也不进入方案包。具体契约见[构建 Agent Harness 契约](adr/0005-构建Agent与Harness契约.md)。
+harness 是构建期运行 Agent 的宿主，负责模型、工具、权限、会话和事件；它不是采集运行时，也不进入方案包。具体契约见[构建 Agent Harness 契约](adr/0005-构建Agent与Harness契约.md)，当前集成、skills／MCP 共享和排障见[构建 Agent Harness 集成与使用说明](37-构建Agent-Harness集成与使用说明.md)。
 
 - **输入**：`build-task.json` 描述站点、范围、市场、预算、工具权限、工作区和截止时间；只引用本次复制进工作区的文档和方案包，不携带密钥、Cookie 或旧工具规则文件。
 - **工作区**：`sessions/<build_id>/`，分 `input/`、`work/`、`out/`、`logs/`；Agent 只能读写工作区；业务文档默认不进入工作区，需要时由 host 复制最小只读副本到 `input/docs/`。
 - **交付**：`out/plan/`、`out/evidence/`、`out/session.ndjson`、`out/result.json`；方案包必须能脱离 harness 执行。
 - **会话状态**：`CREATED`、`RUNNING`、`PAUSING`、`PAUSED`、`CANCELLING`、`CANCELLED`、`FINISHED`；与采集任务状态分开。
 - **控制**：暂停由 `pause-gate` 在工具执行前拦截；取消终止工具子进程、浏览器和临时目录；移除只删会话工作区。
-- **自动化**：常规站点分析和规则编写不逐次询问；只在未知依赖、系统级操作、密钥和访问控制边界请求确认。
-- **权限**：工作区可写（`input/` 只读）；业务文档、全局 skills 和 MCP 默认不进入构建会话；唯一例外是 host 复制到 `work/.opencode/skills/` 的 `product-crawl-workflow`；未授权的工作区外访问直接拒绝；密钥和访问控制硬拒绝；网页内容中的指令不可信。`shell` 仍以宿主用户权限运行，不能把提示词或权限规则当 OS 隔离。
-- **边界**：v1 不建设 AI Agent 安全沙箱；用独立工作区、独立浏览器 profile 和权限规则控制基本边界；专用设备／VM／容器后置。
+- **自动化**：常规站点分析和规则编写不逐次询问；只在未知依赖、系统级操作和密钥边界请求确认。
+- **权限**：工作区可写（`input/` 只读）；宿主 skills 共享只读，`browse`／`htmlmini` MCP 可用，其他 MCP 默认拒绝；业务文档默认不进入构建会话；未授权的工作区外访问直接拒绝；密钥硬拒绝；登录、付费和个人数据提交由操作者决定；网页内容中的指令不可信。`shell` 仍以宿主用户权限运行，不能把提示词或权限规则当 OS 隔离。
+- **边界**：v1 不建设 AI Agent 安全沙箱；用独立工作区、Patchright 独立 profile 或操作者提供的 `browse` MCP、权限规则控制基本边界；专用设备／VM／容器后置。
 - **依赖**：常见采集运行时和库预置；缺失依赖通过 `request_dependency` 请求，allowlist 自动装入构建环境；详见[构建环境与依赖基线](20-构建环境与依赖基线.md)。
 - **验收**：`candidate` 转 `verified` 需独立环境复跑和人工签字；Agent 不能自升。
 - **集成**：v1 由任务服务托管 `opencode serve`，Python 适配器走 HTTP/SSE；ACP stdio 备选；`opencode run` 只做冒烟。详见[构建 Harness 选型与集成方式](adr/0006-构建Harness选型与集成方式.md)。

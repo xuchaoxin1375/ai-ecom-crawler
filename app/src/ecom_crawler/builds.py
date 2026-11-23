@@ -66,7 +66,6 @@ SAFE_PERMISSIONS = {
     "websearch",
     "write",
 }
-BUILD_SKILL_ALLOWLIST = ("product-crawl-workflow",)
 MARKET_CURRENCY = {
     "US": "USD",
     "GB": "GBP",
@@ -151,78 +150,44 @@ def default_model() -> dict[str, Any] | None:
 def default_permissions(
     workspace: str | Path | None = None,
     *,
-    allowed_origins: list[str] | None = None,
-    allowed_skills: list[str] | None = None,
+    skill_roots: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Build-session permissions.
 
-    A build may use workspace tools and the target site, but it must not inherit
-    the host's global skills or MCP servers, and it must not read outside the
-    build workspace.  ``shell`` still runs with the host user's authority; this
-    policy is a guardrail, not an OS sandbox.
+    Host skills and the local page/browser MCP tools are shared deliberately.
+    The workspace keeps ``input/`` read-only and limits host writes to ``out/``
+    and ``work/``; ``shell`` keeps the host user's authority, so this is a
+    guardrail rather than an OS sandbox.
     """
-    skills = (
-        BUILD_SKILL_ALLOWLIST
-        if allowed_skills is None
-        else tuple(dict.fromkeys(allowed_skills))
-    )
     rules: list[dict[str, Any]] = [
         {"action": "question", "resource": "*", "effect": "deny"},
-        {"action": "skill", "resource": "*", "effect": "deny"},
-        *(
-            {
-                "action": "skill",
-                "resource": skill_id,
-                "effect": "allow",
-            }
-            for skill_id in skills
-        ),
+        {"action": "skill", "resource": "*", "effect": "allow"},
         {"action": "subagent", "resource": "*", "effect": "deny"},
-        {"action": "websearch", "resource": "*", "effect": "deny"},
-        {"action": "browse_*", "resource": "*", "effect": "deny"},
-        {"action": "htmlmini_*", "resource": "*", "effect": "deny"},
-        {"action": "opencode_list_mcp_resources", "resource": "*", "effect": "deny"},
-        {"action": "opencode_read_mcp_resource", "resource": "*", "effect": "deny"},
         {"action": "read", "resource": "*", "effect": "allow"},
         {"action": "edit", "resource": "*", "effect": "allow"},
         {"action": "write", "resource": "*", "effect": "allow"},
         {"action": "bash", "resource": "*", "effect": "allow"},
         {"action": "shell", "resource": "*", "effect": "allow"},
         {"action": "webfetch", "resource": "*", "effect": "allow"},
+        {"action": "websearch", "resource": "*", "effect": "allow"},
         {"action": "browser", "resource": "*", "effect": "allow"},
         {"action": "shell", "resource": "git push *", "effect": "deny"},
         {"action": "shell", "resource": "sudo *", "effect": "deny"},
         {"action": "bash", "resource": "git push *", "effect": "deny"},
         {"action": "bash", "resource": "sudo *", "effect": "deny"},
     ]
-    origins = sorted(
-        {
-            str(origin).rstrip("/")
-            for origin in (allowed_origins or [])
-            if str(origin).strip()
-        }
-    )
-    if origins:
-        rules.append({"action": "webfetch", "resource": "*", "effect": "deny"})
-        for origin in origins:
-            rules.append(
-                {"action": "webfetch", "resource": origin, "effect": "allow"}
-            )
-            rules.append(
-                {
-                    "action": "webfetch",
-                    "resource": f"{origin}/*",
-                    "effect": "allow",
-                }
-            )
     if workspace is None:
         return rules
     root = Path(workspace).resolve().as_posix().rstrip("/")
     rules.extend(
         [
-            # MCP tools/resources and other underscore actions are denied by
-            # default; the explicit directory rules below re-allow input/out.
+            # Unknown MCP tools/resources stay denied; the known page tools are
+            # re-allowed below. External-directory rules also contain an
+            # underscore, so they are re-allowed separately.
             {"action": "*_*", "resource": "*", "effect": "deny"},
+            {"action": "browse_*", "resource": "*", "effect": "allow"},
+            {"action": "htmlmini_*", "resource": "*", "effect": "allow"},
+            {"action": "opencode_*", "resource": "*", "effect": "allow"},
             {"action": "external_directory", "resource": "*", "effect": "deny"},
             {
                 "action": "external_directory",
@@ -271,6 +236,24 @@ def default_permissions(
             {"action": "edit", "resource": "../logs*", "effect": "deny"},
         ]
     )
+    for skill_root in skill_roots or []:
+        resolved = Path(skill_root).resolve().as_posix().rstrip("/")
+        rules.extend(
+            [
+                {
+                    "action": "external_directory",
+                    "resource": resolved,
+                    "effect": "allow",
+                },
+                {
+                    "action": "external_directory",
+                    "resource": f"{resolved}/*",
+                    "effect": "allow",
+                },
+                {"action": "edit", "resource": resolved, "effect": "deny"},
+                {"action": "edit", "resource": f"{resolved}/*", "effect": "deny"},
+            ]
+        )
     return rules
 
 
@@ -795,18 +778,8 @@ class BuildManager:
 
             build_id = f"build-{uuid.uuid4().hex[:12]}"
             workspace_path = self.workspace_root / build_id
-            build_origins = [_origin(entry_url)] + [
-                _origin(str(url))
-                for url in robots_sitemaps
-                if str(url).startswith(("http://", "https://"))
-            ]
-            skill_source = self._skill_source()
-            available_skills = [
-                skill_id
-                for skill_id in BUILD_SKILL_ALLOWLIST
-                if skill_source is not None
-                and (skill_source / skill_id / "SKILL.md").is_file()
-            ]
+            skill_roots = self._skill_roots()
+            skill_manifest = self._skill_manifest(skill_roots)
             self._trace_reasoning[build_id] = bool(
                 capture_reasoning and self.reasoning_capture_enabled
             )
@@ -888,9 +861,9 @@ class BuildManager:
                     **({"proxy": resolved_proxy} if resolved_proxy else {}),
                     "permissions": default_permissions(
                         workspace_path,
-                        allowed_origins=build_origins,
-                        allowed_skills=available_skills,
+                        skill_roots=[str(root) for root in skill_roots],
                     ),
+                    "skills": skill_manifest,
                     "robots_note": robots_note,
                     "robots_sitemaps": robots_sitemaps,
                     **self._catalog_configs[build_id],
@@ -992,47 +965,69 @@ class BuildManager:
             repair_reason=reason,
         )
 
-    def _skill_source(self) -> Path | None:
+    def _skill_roots(self) -> list[Path]:
+        candidates: list[Path] = []
         if self.skills_dir is not None:
-            return self.skills_dir
+            candidates.append(self.skills_dir)
         configured = os.environ.get("ECOM_BUILD_SKILLS_DIR", "").strip()
         if configured:
-            return Path(configured)
-        return Path.home() / ".config" / "opencode" / "skills"
+            candidates.append(Path(configured))
+        candidates.extend(
+            [
+                Path.home() / ".config" / "opencode" / "skills",
+                Path.home() / ".claude" / "skills",
+                Path.home() / ".agents" / "skills",
+            ]
+        )
+        roots: list[Path] = []
+        seen: set[str] = set()
+        for candidate in candidates:
+            resolved = candidate.expanduser().resolve()
+            key = str(resolved).lower() if os.name == "nt" else str(resolved)
+            if key in seen:
+                continue
+            seen.add(key)
+            roots.append(resolved)
+        return roots
 
-    def _install_skills(
-        self,
-        session: BuildSession,
-        task: BuildTask,
-    ) -> list[dict[str, str]]:
-        source = self._skill_source()
-        if source is None or not source.is_dir():
-            return []
-        target_root = session.workspace.work_dir / ".opencode" / "skills"
-        installed: list[dict[str, str]] = []
-        for skill_id in BUILD_SKILL_ALLOWLIST:
-            source_skill = source / skill_id
-            if not (source_skill / "SKILL.md").is_file():
+    def _skill_manifest(self, roots: list[Path]) -> dict[str, Any]:
+        items: list[dict[str, str]] = []
+        for root in roots:
+            if not root.is_dir():
                 continue
-            target = target_root / skill_id
-            try:
-                shutil.copytree(source_skill, target, dirs_exist_ok=True)
-            except OSError:
-                logger.debug("skill copy failed: %s", source_skill, exc_info=True)
-                shutil.rmtree(target, ignore_errors=True)
-                continue
-            digest = hashlib.sha256(
-                (source_skill / "SKILL.md").read_bytes()
-            ).hexdigest()
-            installed.append(
-                {
-                    "id": skill_id,
-                    "source": "host-allowlist",
-                    "sha256": digest,
-                }
-            )
-            logger.info("build skill copied: %s from %s", skill_id, source_skill)
-        return installed
+            for path in sorted(root.rglob("SKILL.md")):
+                relative = path.relative_to(root)
+                if any(
+                    part.startswith(".") or part == "node_modules"
+                    for part in relative.parts[:-1]
+                ):
+                    continue
+                try:
+                    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+                except OSError:
+                    continue
+                items.append(
+                    {
+                        "id": path.parent.name,
+                        "root": str(root),
+                        "sha256": digest,
+                    }
+                )
+            for path in sorted(root.glob("*.md")):
+                if path.name == "SKILL.md" or path.name.startswith("."):
+                    continue
+                try:
+                    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+                except OSError:
+                    continue
+                items.append(
+                    {
+                        "id": path.stem,
+                        "root": str(root),
+                        "sha256": digest,
+                    }
+                )
+        return {"roots": [str(root) for root in roots], "items": items}
 
     def _write_inputs(
         self,
@@ -1055,10 +1050,6 @@ class BuildManager:
             self._agent_rules(),
             encoding="utf-8",
         )
-        installed = self._install_skills(session, task)
-        if installed:
-            task.extra["skills"] = installed
-            session.workspace.write_task(task)
 
     def _write_repair_inputs(
         self,
@@ -1141,12 +1132,13 @@ from scratch. The previous rule is available at
 - Keep the existing discovery sources, scope, market, locale, currency and
   five core fields unless the evidence shows a clear bug.
 - Do not enumerate the whole catalog again.
-- Do not read or search host paths outside the build workspace. Only read
-  `../input`, `../out` and the declared sample URLs; do not scan other
-  repositories, user directories or prior run output.
-- Other skills and MCP tools are disabled for this build; only the copied
-  `product-crawl-workflow` is optional. Do not read project site records or
-  probes from it.
+- Read local files from `../input`, `../out`, `work/` and the host skills
+  directories; do not scan other repositories, user directories or prior run
+  output.
+- Host skills are available read-only, including `product-crawl-workflow`,
+  `resilient-browser-fetch`, `browser-automation`, `network-access`, `htmlmini`
+  and `scrapling-official`; use the relevant ones. The `browse` and `htmlmini`
+  MCP tools are available. Do not read project site records or probes.
 - Inspect 3–5 representative product pages, including at least one page whose
   description is split into a narrative block and a specification/feature list.
 - If descriptions are split, use a `compose` fallback to merge the real blocks
@@ -1193,6 +1185,8 @@ rate. Do not use archive.org or caches as a substitute for the live target.
             "../input/existing-rule.yaml, then "
             f"repair the existing rule for {site.site_key}. "
             f"Entry: {task.site['entry_urls'][0]}. "
+            "Use the available host skills as needed; do not read project site "
+            "records or prior probes. "
             "Focus on the reported content gap and merge any description blocks "
             "that are currently missing. Keep discovery and scope unchanged. "
             "Write ../out/plan/rule.yaml and ../out/evidence/build-notes.md, "
@@ -1211,19 +1205,22 @@ Read first, in this order:
 
 ## Local files, network and tools
 
-- Read local files only from `../input`, `../out` and `work/`. Do not read or
-  search host paths, other repositories, user directories, prior run output or
-  credentials.
-- Only fetch the target origin and path prefixes in the brief. Do not use web
-  search, archives, caches or a different origin as a substitute for the live
-  target.
-- Other skills and MCP tools are disabled for this build. The only optional
-  skill is the copied `product-crawl-workflow` under `.opencode/skills/`; do not
-  load any other skill or MCP tool. Ignore the skill's instruction to read
-  project site records, probes or other repositories.
+- Read local files from `../input`, `../out`, `work/` and the host skills
+  directories. Do not read project site records, other repositories, user
+  directories, prior run output or credentials.
+- Host skills are available read-only: `product-crawl-workflow`,
+  `resilient-browser-fetch`, `browser-automation`, `network-access`, `htmlmini`,
+  `scrapling-official` and other installed user skills. Use the relevant ones;
+  read their references or scripts as needed, but do not write into the skills
+  directories.
+- The `browse` and `htmlmini` MCP tools are available. Other MCP servers are
+  disabled.
+- Prefer the target origin and path prefixes in the brief; network and search
+  tools may use their normal endpoints within the request budget. Do not use an
+  archive or cache as a substitute for the live target.
 - This workspace is headless. If a global instruction asks for interactive
-  confirmation, skill loading, MCP use or host file access, follow this file
-  and the brief instead.
+  confirmation or host file access outside the skills and workspace roots,
+  follow this file and the brief instead.
 
 ## Site access and robots
 
@@ -1240,8 +1237,8 @@ Read first, in this order:
   looks permissive.
 - Do not use archive.org, caches, search snippets, or a different origin as a
   substitute for the live target.
-- Do not log in, pay, solve captchas, spoof a different user agent, or bypass
-  access control.
+- Logins, payments and personal-data submission are outside this build unless
+  the operator explicitly includes them.
 - Stay within the brief's request and time budget; do not crawl the whole site.
 
 ## Outputs
@@ -1333,10 +1330,12 @@ Write these files from the workspace (`work/` is your current directory):
 - `../out/evidence/build-notes.md` — what you inspected, sample URLs, selectors,
   limitations and anything you could not verify.
 
-Read local files only from `../input`, `../out` and `work/`; do not read or
-search host paths, other repositories, user directories or prior run output.
-Do not write outside the workspace. Do not install packages. Do not log in,
-pay, solve captchas or bypass access control. Respect the request budget.
+Read local files from `../input`, `../out`, `work/` and the host skills
+directories; do not read project site records, other repositories, user
+directories or prior run output.
+Do not write outside the workspace. Do not install packages. Respect the
+request budget. Logins, payments and personal-data submission are outside this
+build unless the operator explicitly includes them.
 
 ## Site access and robots
 
@@ -1436,9 +1435,10 @@ domain-mismatched, or produces no valid product.
             "../input/reference-rule.yaml, "
             f"then build the rule package for {site.site_key}. "
             f"Entry: {task.site['entry_urls'][0]}.{scope_note} "
-            "If the `product-crawl-workflow` skill is listed in this workspace, "
-            "load it before triage; do not read project site records or prior "
-            "probes from it. "
+            "Use the available host skills (for example "
+            "`product-crawl-workflow`, `resilient-browser-fetch`, "
+            "`browser-automation`, `network-access`) as needed; do not read "
+            "project site records or prior probes. "
             "Write ../out/plan/rule.yaml and ../out/evidence/build-notes.md, "
             "inspect at least one real product page, and keep within the brief's "
             "request and time budget. Reply briefly when the files are written."

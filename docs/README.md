@@ -68,6 +68,7 @@ updated: 2026-11-23
 | 按需 | [规则修复与异常工作流](34-规则修复与异常工作流.md) | 结果不达标、质量反馈、证据包、定向修复、问题样本与回归验证、人工激活、复跑和回滚；系统 v2 的 API、状态、错误和迁移契约，以及运行层 v2 的新问题 |
 | 按需 | [前端设计系统与 v2 视觉方向](35-前端设计系统与视觉方向.md) | 项目方前端意见、现状诊断、设计主张、令牌、组件、页面重设计、新建批次弹窗、批次详情、默认入口、旧版弃用、迁移和验收；Provisional |
 | 参考 | [编号与代号索引](36-编号与代号索引.md) | D／A／R／S／T／C／J／G、文档序号、ADR、实验目录和运行期编号的集中解释、定义出处与易混对照；不记录完成状态 |
+| 按需 | [构建 Agent Harness 集成与使用说明](37-构建Agent-Harness集成与使用说明.md) | 当前 OpenCode 集成、工作区、skills／MCP／网络、权限、使用注意和排障；Provisional |
 | 按需 | [方案 manifest JSON Schema](schema/manifest.schema.json) | 规则包（`rule_*`）与方案包（`plan_*`）的机器可校验结构；跨字段约束仍由执行器校验 |
 | 按需 | [系统 v2 规则／反馈 DDL](schema/v2-rules-feedback.sql) | 质量反馈、规则版本、站点规则指针和激活审计的 SQLite 建表／加列参考；迁移由 `TaskStore._init_schema()` 条件执行 |
 | 按需 | [系统 v2 构建变更摘要 Schema](schema/v2-build-change-summary.schema.json) | 修复构建 `change_summary` 的机器可校验结构；主机验证后记录 |
