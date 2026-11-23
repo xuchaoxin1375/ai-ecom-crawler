@@ -23,7 +23,7 @@ export function InlineNotice({ tone, title, children, onDismiss }: InlineNoticeP
   return (
     <div
       className={cn(
-        "flex items-start justify-between gap-4 rounded-panel border px-4 py-3",
+        "flex animate-notice-in items-start justify-between gap-4 rounded-panel border px-4 py-3",
         classes.box,
       )}
       role={tone === "danger" ? "alert" : "status"}

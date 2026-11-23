@@ -36,7 +36,7 @@ export function BulkActionBar({
 
   return (
     <div
-      className="fixed bottom-6 left-[calc(50%+124px)] z-30 w-[min(760px,calc(100vw-320px))] -translate-x-1/2"
+      className="fixed bottom-6 left-[calc(50%+124px)] z-30 w-[min(760px,calc(100vw-320px))] animate-bulk-in -translate-x-1/2"
       role="region"
       aria-label="批量操作"
     >

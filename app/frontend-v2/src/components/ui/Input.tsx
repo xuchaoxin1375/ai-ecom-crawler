@@ -11,7 +11,7 @@ export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElem
   return (
     <input
       className={cn(
-        "h-9 w-full rounded-control border border-line-strong bg-surface px-3 text-sm text-ink placeholder:text-ink-3 focus:border-accent",
+        "h-9 w-full rounded-control border border-line-strong bg-surface px-3 text-sm text-ink transition-colors placeholder:text-ink-3 focus:border-accent",
         className,
       )}
       {...props}
@@ -27,7 +27,7 @@ export function Select({
   return (
     <select
       className={cn(
-        "h-9 w-full rounded-control border border-line-strong bg-surface px-3 text-sm text-ink focus:border-accent",
+        "h-9 w-full rounded-control border border-line-strong bg-surface px-3 text-sm text-ink transition-colors focus:border-accent",
         className,
       )}
       {...props}
@@ -52,7 +52,10 @@ export function Checkbox({
     <input
       ref={ref}
       type="checkbox"
-      className={cn("h-4 w-4 rounded border-line-strong accent-accent", className)}
+      className={cn(
+        "h-4 w-4 rounded border-line-strong accent-accent transition-colors",
+        className,
+      )}
       {...props}
     />
   );
@@ -65,7 +68,7 @@ export function Textarea({
   return (
     <textarea
       className={cn(
-        "w-full rounded-control border border-line-strong bg-surface px-3 py-2 text-sm leading-6 text-ink placeholder:text-ink-3 focus:border-accent",
+        "w-full rounded-control border border-line-strong bg-surface px-3 py-2 text-sm leading-6 text-ink transition-colors placeholder:text-ink-3 focus:border-accent",
         className,
       )}
       {...props}

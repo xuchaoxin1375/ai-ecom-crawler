@@ -110,8 +110,8 @@ export function ProductPreviewDialog({
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-ink/55" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 flex max-h-[90vh] w-[min(960px,calc(100vw-64px))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-overlay border border-line bg-surface shadow-overlay">
+        <Dialog.Overlay className="animate-overlay-in fixed inset-0 z-50 bg-ink/55" />
+        <Dialog.Content className="animate-dialog-in fixed left-1/2 top-1/2 z-50 flex max-h-[90vh] w-[min(960px,calc(100vw-64px))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-overlay border border-line bg-surface shadow-overlay">
           <header className="flex items-start justify-between gap-6 border-b border-line px-6 py-4">
             <div className="min-w-0">
               <Dialog.Title className="truncate text-[20px] leading-7 font-semibold tracking-[-0.01em] text-ink">

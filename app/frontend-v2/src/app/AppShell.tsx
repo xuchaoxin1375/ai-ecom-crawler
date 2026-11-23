@@ -1,36 +1,82 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type FocusEvent,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Layers, LayoutList, Plus } from "lucide-react";
+import { Layers, LayoutList, PanelLeftClose, PanelLeftOpen, Plus } from "lucide-react";
 import { getHealth } from "../lib/api";
 import { cn } from "../lib/cn";
+
+const SIDEBAR_KEY = "ecom.sidebar.pinned";
+const SIDEBAR_EXPANDED = 248;
+const SIDEBAR_RAIL = 64;
+
+function readPinned(): boolean {
+  try {
+    const stored = localStorage.getItem(SIDEBAR_KEY);
+    if (stored !== null) return stored === "true";
+  } catch {
+    // Storage can be unavailable in private mode; keep the default.
+  }
+  return true;
+}
+
+function persistPinned(pinned: boolean): void {
+  try {
+    localStorage.setItem(SIDEBAR_KEY, String(pinned));
+  } catch {
+    // Persistence is a preference, not a functional requirement.
+  }
+}
 
 function SidebarLink({
   to,
   icon,
-  children,
+  label,
+  expanded,
+  onPointerNavigate,
 }: {
   to: string;
   icon: ReactNode;
-  children: ReactNode;
+  label: string;
+  expanded: boolean;
+  onPointerNavigate?: () => void;
 }) {
-  const className =
-    "flex h-9 items-center gap-2.5 rounded-control px-2.5 text-sm text-ink-2 transition-colors hover:bg-surface-muted hover:text-ink";
-
   return (
     <NavLink
       className={({ isActive }) =>
-        cn(className, isActive && "bg-accent-soft font-semibold text-ink")
+        cn(
+          "flex h-9 items-center gap-2.5 overflow-hidden rounded-control px-2.5 text-sm text-ink-2 transition-colors hover:bg-surface-muted hover:text-ink",
+          isActive && "bg-accent-soft font-semibold text-ink",
+        )
       }
       to={to}
+      aria-label={expanded ? undefined : label}
+      title={expanded ? undefined : label}
+      onClick={(event) => {
+        if (event.detail > 0) onPointerNavigate?.();
+      }}
     >
       <span
-        className="flex h-5 w-5 items-center justify-center text-ink-3"
+        className="flex h-5 w-5 shrink-0 items-center justify-center text-ink-3"
         aria-hidden="true"
       >
         {icon}
       </span>
-      <span>{children}</span>
+      <span
+        className={cn(
+          "truncate whitespace-nowrap transition-opacity duration-150",
+          expanded ? "opacity-100" : "opacity-0",
+        )}
+        aria-hidden={!expanded || undefined}
+      >
+        {label}
+      </span>
     </NavLink>
   );
 }
@@ -38,24 +84,41 @@ function SidebarLink({
 function SidebarAction({
   href,
   icon,
-  children,
+  label,
+  expanded,
+  onPointerNavigate,
 }: {
   href: string;
   icon: ReactNode;
-  children: ReactNode;
+  label: string;
+  expanded: boolean;
+  onPointerNavigate?: () => void;
 }) {
   return (
     <a
-      className="flex h-9 items-center gap-2.5 rounded-control px-2.5 text-sm text-ink-2 transition-colors hover:bg-surface-muted hover:text-ink"
+      className="flex h-9 items-center gap-2.5 overflow-hidden rounded-control px-2.5 text-sm text-ink-2 transition-colors hover:bg-surface-muted hover:text-ink"
       href={href}
+      aria-label={expanded ? undefined : label}
+      title={expanded ? undefined : label}
+      onClick={(event) => {
+        if (event.detail > 0) onPointerNavigate?.();
+      }}
     >
       <span
-        className="flex h-5 w-5 items-center justify-center text-ink-3"
+        className="flex h-5 w-5 shrink-0 items-center justify-center text-ink-3"
         aria-hidden="true"
       >
         {icon}
       </span>
-      <span>{children}</span>
+      <span
+        className={cn(
+          "truncate whitespace-nowrap transition-opacity duration-150",
+          expanded ? "opacity-100" : "opacity-0",
+        )}
+        aria-hidden={!expanded || undefined}
+      >
+        {label}
+      </span>
     </a>
   );
 }
@@ -103,15 +166,89 @@ function ServicePill() {
 export function AppShell() {
   const location = useLocation();
   const mainRef = useRef<HTMLElement | null>(null);
+  const panelRef = useRef<HTMLElement | null>(null);
+  const toggleRef = useRef<HTMLButtonElement | null>(null);
+  const keyboardFocusRef = useRef(false);
+  const [pinned, setPinned] = useState(readPinned);
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const [suppressed, setSuppressed] = useState(false);
   const siteMatch = location.pathname.match(/^\/batches\/([^/]+)\/sites\/[^/]+/);
   const batchMatch = location.pathname.match(/^\/batches\/([^/]+)/);
   const isSiteDetail = Boolean(siteMatch);
   const isBatchDetail = Boolean(batchMatch) && !isSiteDetail;
 
+  const visualOpen = pinned || (!suppressed && (hovered || focused));
+  const peeking = !pinned && visualOpen;
+  const slotWidth = pinned ? SIDEBAR_EXPANDED : SIDEBAR_RAIL;
+  const visualWidth = visualOpen ? SIDEBAR_EXPANDED : SIDEBAR_RAIL;
+  const toggleLabel = pinned
+    ? "收起侧边栏"
+    : visualOpen
+      ? "展开并固定侧边栏"
+      : "展开侧边栏";
+
+  useEffect(() => {
+    persistPinned(pinned);
+  }, [pinned]);
+
+  useEffect(() => {
+    function onPointerDown() {
+      keyboardFocusRef.current = false;
+    }
+    function onKeyDown() {
+      keyboardFocusRef.current = true;
+    }
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, []);
+
   useEffect(() => {
     mainRef.current?.focus({ preventScroll: true });
     window.scrollTo({ top: 0, behavior: "auto" });
   }, [location.pathname]);
+
+  function togglePinned() {
+    const next = !pinned;
+    setPinned(next);
+    setSuppressed(!next);
+  }
+
+  function handleMouseEnter() {
+    if (pinned) return;
+    setHovered(true);
+    setSuppressed(false);
+  }
+
+  function handleMouseLeave() {
+    setHovered(false);
+    if (document.activeElement !== toggleRef.current) setSuppressed(false);
+  }
+
+  function handleFocus(event: FocusEvent<HTMLElement>) {
+    const focusVisible = keyboardFocusRef.current;
+    setFocused(focusVisible);
+    if (focusVisible && event.target !== toggleRef.current) setSuppressed(false);
+  }
+
+  function handleBlur(event: FocusEvent<HTMLElement>) {
+    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+      setFocused(false);
+    }
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLElement>) {
+    if (event.key !== "Escape" || pinned || !visualOpen) return;
+    event.preventDefault();
+    setHovered(false);
+    setFocused(false);
+    setSuppressed(true);
+    toggleRef.current?.focus();
+  }
 
   return (
     <div className="min-w-[1180px] bg-canvas text-ink">
@@ -169,30 +306,92 @@ export function AppShell() {
         </div>
       </header>
 
-      <aside className="fixed bottom-0 left-0 top-14 z-40 w-[248px] border-r border-line bg-surface">
+      {/* The shell owns hover/focus peek; controls inside stay native links/buttons. */}
+      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions */}
+      <aside
+        id="app-sidebar"
+        ref={panelRef}
+        aria-label="侧边栏"
+        className={cn(
+          "fixed bottom-0 left-0 top-14 z-40 overflow-hidden border-r border-line bg-surface transition-[width] duration-300 ease-out",
+          peeking && "shadow-overlay",
+        )}
+        style={{ width: visualWidth }}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+        onFocusCapture={handleFocus}
+        onBlurCapture={handleBlur}
+        onKeyDown={handleKeyDown}
+      >
         <div className="flex h-full flex-col">
-          <nav className="flex-1 space-y-6 px-3 py-4" aria-label="主导航">
-            <div>
-              <p className="px-2.5 pb-1.5 text-[11px] font-semibold tracking-[0.08em] text-ink-3">
-                工作台
-              </p>
-              <div className="space-y-0.5">
-                <SidebarLink to="/batches" icon={<LayoutList size={17} />}>
-                  采集批次
-                </SidebarLink>
-                <SidebarAction href="#/batches?new=1" icon={<Plus size={17} />}>
-                  新建批次
-                </SidebarAction>
-              </div>
+          <nav className="flex-1 overflow-y-auto px-3 py-4" aria-label="主导航">
+            <div className="mb-1.5 flex h-4 items-center px-2.5">
+              {visualOpen ? (
+                <p className="text-[11px] font-semibold tracking-[0.08em] text-ink-3">
+                  工作台
+                </p>
+              ) : (
+                <span className="mx-auto h-px w-6 bg-line-strong" aria-hidden="true" />
+              )}
+            </div>
+            <div className="space-y-0.5">
+              <SidebarLink
+                to="/batches"
+                icon={<LayoutList size={17} />}
+                label="采集批次"
+                expanded={visualOpen}
+                onPointerNavigate={() => {
+                  if (!pinned) setFocused(false);
+                }}
+              />
+              <SidebarAction
+                href="#/batches?new=1"
+                icon={<Plus size={17} />}
+                label="新建批次"
+                expanded={visualOpen}
+                onPointerNavigate={() => {
+                  if (!pinned) setFocused(false);
+                }}
+              />
             </div>
           </nav>
+
+          <div className="border-t border-line px-3 py-3">
+            <button
+              ref={toggleRef}
+              type="button"
+              className="flex h-9 w-full items-center gap-2.5 overflow-hidden rounded-control px-2.5 text-sm text-ink-2 transition-colors hover:bg-surface-muted hover:text-ink"
+              aria-expanded={visualOpen}
+              aria-controls="app-sidebar"
+              aria-label={toggleLabel}
+              title={toggleLabel}
+              onClick={togglePinned}
+            >
+              <span
+                className="flex h-5 w-5 shrink-0 items-center justify-center text-ink-3"
+                aria-hidden="true"
+              >
+                {pinned ? <PanelLeftClose size={17} /> : <PanelLeftOpen size={17} />}
+              </span>
+              <span
+                className={cn(
+                  "truncate whitespace-nowrap transition-opacity duration-150",
+                  visualOpen ? "opacity-100" : "opacity-0",
+                )}
+                aria-hidden={!visualOpen || undefined}
+              >
+                {toggleLabel}
+              </span>
+            </button>
+          </div>
         </div>
       </aside>
 
       <main
         id="main"
         ref={mainRef}
-        className="ml-[248px] min-h-screen pt-14"
+        className="min-h-screen pt-14 transition-[margin-left] duration-300 ease-out"
+        style={{ marginLeft: slotWidth }}
         tabIndex={-1}
       >
         <div className="mx-auto w-full max-w-[1560px] px-8 py-8">

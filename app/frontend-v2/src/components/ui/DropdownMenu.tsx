@@ -58,7 +58,7 @@ export function RowActionsMenu({
           align={align}
           sideOffset={6}
           collisionPadding={12}
-          className="z-50 min-w-[190px] rounded-panel border border-line bg-surface p-1 shadow-overlay"
+          className="z-50 min-w-[190px] animate-menu-in rounded-panel border border-line bg-surface p-1 shadow-overlay"
         >
           {visibleGroups.map((group, groupIndex) => (
             <Fragment key={`group-${groupIndex}`}>

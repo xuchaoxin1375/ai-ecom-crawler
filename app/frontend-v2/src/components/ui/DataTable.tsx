@@ -101,7 +101,7 @@ export function DataTable<T>({
               <tr
                 key={rowKey(row)}
                 className={cn(
-                  "border-b border-line last:border-0 hover:bg-surface-muted/60",
+                  "border-b border-line transition-colors duration-150 last:border-0 hover:bg-surface-muted/60",
                   typeof rowClassName === "function" ? rowClassName(row) : rowClassName,
                 )}
               >

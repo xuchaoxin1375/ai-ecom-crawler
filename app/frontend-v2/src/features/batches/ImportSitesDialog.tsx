@@ -97,9 +97,9 @@ export function ImportSitesDialog({
   return (
     <Dialog.Root open={open} onOpenChange={requestOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-ink/35" />
+        <Dialog.Overlay className="animate-overlay-in fixed inset-0 z-50 bg-ink/35" />
         <Dialog.Content
-          className="fixed left-1/2 top-1/2 z-50 flex max-h-[86vh] w-[min(720px,calc(100vw-64px))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-overlay border border-line bg-surface shadow-overlay"
+          className="animate-dialog-in fixed left-1/2 top-1/2 z-50 flex max-h-[86vh] w-[min(720px,calc(100vw-64px))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-overlay border border-line bg-surface shadow-overlay"
           onOpenAutoFocus={(event) => {
             event.preventDefault();
             document.getElementById("import-sites-text")?.focus();

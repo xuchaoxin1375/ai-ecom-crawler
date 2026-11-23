@@ -54,7 +54,7 @@ export function Toast({
 
   return (
     <div
-      className="fixed right-6 top-20 z-[60] w-[min(380px,calc(100vw-48px))]"
+      className="fixed right-6 top-20 z-[60] w-[min(380px,calc(100vw-48px))] animate-toast-in"
       role={toast.tone === "error" ? "alert" : "status"}
     >
       <div className="flex items-start gap-3 rounded-panel border border-line bg-surface px-4 py-3 shadow-overlay">
