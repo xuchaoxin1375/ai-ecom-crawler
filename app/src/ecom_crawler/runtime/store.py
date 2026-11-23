@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 import time
+import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -15,6 +16,9 @@ from .models import (
     BuildRecord,
     Lease,
     QualityFeedback,
+    RuleActivation,
+    RuleVersion,
+    SiteRule,
     Task,
     WorkItem,
     json_dumps,
@@ -35,6 +39,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     domain_key TEXT,
     market TEXT,
     rule_path TEXT,
+    rule_sha256 TEXT,
     archived_at TEXT,
     batch_id TEXT,
     lease_owner TEXT,
@@ -100,6 +105,16 @@ CREATE TABLE IF NOT EXISTS builds (
     rule_version TEXT,
     rule_path TEXT,
     mode TEXT NOT NULL DEFAULT 'build',
+    feedback_id TEXT,
+    request_id TEXT,
+    source_rule_version TEXT,
+    source_rule_sha256 TEXT,
+    target_rule_version TEXT,
+    target_rule_sha256 TEXT,
+    error_class TEXT,
+    change_summary_json TEXT NOT NULL DEFAULT '{}',
+    validation_json TEXT NOT NULL DEFAULT '{}',
+    evidence_sha256 TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     started_at TEXT,
@@ -148,6 +163,63 @@ CREATE INDEX IF NOT EXISTS idx_quality_feedback_site
 
 CREATE INDEX IF NOT EXISTS idx_quality_feedback_status
     ON quality_feedback(status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS rule_versions (
+    rule_id TEXT NOT NULL,
+    rule_version TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    parent_version TEXT,
+    status TEXT NOT NULL,
+    source_build_id TEXT,
+    source_feedback_id TEXT,
+    path TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    activated_at TEXT,
+    activated_by TEXT,
+    reviewed_by TEXT,
+    reviewed_at TEXT,
+    notes TEXT,
+    PRIMARY KEY (rule_id, rule_version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_rule_versions_status
+    ON rule_versions(rule_id, status, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_rule_versions_hash
+    ON rule_versions(rule_id, sha256);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_rule_versions_one_active
+    ON rule_versions(rule_id) WHERE status = 'active';
+
+CREATE TABLE IF NOT EXISTS site_rules (
+    site_key TEXT PRIMARY KEY,
+    rule_id TEXT NOT NULL,
+    rule_version TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    path TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_site_rules_rule
+    ON site_rules(rule_id, rule_version);
+
+CREATE TABLE IF NOT EXISTS rule_activations (
+    activation_id TEXT PRIMARY KEY,
+    request_id TEXT NOT NULL UNIQUE,
+    site_key TEXT NOT NULL,
+    rule_id TEXT NOT NULL,
+    action TEXT NOT NULL,
+    from_version TEXT,
+    from_sha256 TEXT,
+    to_version TEXT NOT NULL,
+    to_sha256 TEXT NOT NULL,
+    reason TEXT,
+    actor TEXT NOT NULL DEFAULT 'local-user',
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_rule_activations_site
+    ON rule_activations(site_key, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS task_items (
     task_id TEXT NOT NULL,
@@ -209,6 +281,7 @@ TASK_COLUMNS = {
     "domain_key",
     "market",
     "rule_path",
+    "rule_sha256",
     "archived_at",
     "batch_id",
     "updated_at",
@@ -251,6 +324,22 @@ class FeedbackRequestConflictError(ValueError):
     """Raised when a feedback request_id is reused with a different body."""
 
 
+class RuleVersionError(ValueError):
+    """Raised when a rule version cannot be created, activated or rolled back."""
+
+
+class RuleActivationConflictError(RuleVersionError):
+    """Raised when a rule activation request conflicts with current state."""
+
+
+class SiteRuleNotFoundError(ValueError):
+    """Raised when a site has no rule pointer and no candidates."""
+
+
+class RuleActivationNotFoundError(ValueError):
+    """Raised when an activation audit record does not exist."""
+
+
 class TaskStore:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
@@ -284,6 +373,7 @@ class TaskStore:
                 "domain_key",
                 "market",
                 "rule_path",
+                "rule_sha256",
                 "archived_at",
                 "batch_id",
             ):
@@ -307,6 +397,35 @@ class TaskStore:
                 connection.execute(
                     "ALTER TABLE builds ADD COLUMN mode TEXT NOT NULL DEFAULT 'build'"
                 )
+            for column in (
+                "feedback_id",
+                "request_id",
+                "source_rule_version",
+                "source_rule_sha256",
+                "target_rule_version",
+                "target_rule_sha256",
+                "error_class",
+                "evidence_sha256",
+            ):
+                if column not in build_columns:
+                    connection.execute(f"ALTER TABLE builds ADD COLUMN {column} TEXT")
+            for column in ("change_summary_json", "validation_json"):
+                if column not in build_columns:
+                    connection.execute(
+                        f"ALTER TABLE builds ADD COLUMN {column} TEXT NOT NULL DEFAULT '{{}}'"
+                    )
+            connection.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_builds_request "
+                "ON builds(request_id) WHERE request_id IS NOT NULL"
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_builds_feedback "
+                "ON builds(feedback_id, created_at DESC)"
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_tasks_rule_sha "
+                "ON tasks(rule_sha256)"
+            )
             if "lease_owner" not in task_columns:
                 connection.execute("ALTER TABLE tasks ADD COLUMN lease_owner TEXT")
             if "lease_token" not in task_columns:
@@ -358,10 +477,10 @@ class TaskStore:
             """
             INSERT INTO tasks (
                 task_id, plan_id, plan_version, task_type, state, outcome,
-                stop_reason, site_key, domain_key, market, rule_path, archived_at,
-                batch_id, input_json, limits_json, output_json, counters_json,
-                created_at, updated_at, started_at, finished_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                stop_reason, site_key, domain_key, market, rule_path, rule_sha256,
+                archived_at, batch_id, input_json, limits_json, output_json,
+                counters_json, created_at, updated_at, started_at, finished_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 task.task_id,
@@ -375,6 +494,7 @@ class TaskStore:
                 task.domain_key,
                 task.market,
                 task.rule_path,
+                task.rule_sha256,
                 task.archived_at,
                 task.batch_id,
                 json_dumps(task.input),
@@ -1461,8 +1581,15 @@ class TaskStore:
                     INSERT INTO builds (
                         build_id, batch_id, site_key, state, outcome, workspace,
                         session_id, model_json, proxy, error, rule_id, rule_version,
-                        rule_path, mode, created_at, updated_at, started_at, finished_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        rule_path, mode, feedback_id, request_id,
+                        source_rule_version, source_rule_sha256,
+                        target_rule_version, target_rule_sha256, error_class,
+                        change_summary_json, validation_json, evidence_sha256,
+                        created_at, updated_at, started_at, finished_at
+                    ) VALUES (
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    )
                     """,
                     (
                         build.build_id,
@@ -1479,6 +1606,16 @@ class TaskStore:
                         build.rule_version,
                         build.rule_path,
                         build.mode,
+                        build.feedback_id,
+                        build.request_id,
+                        build.source_rule_version,
+                        build.source_rule_sha256,
+                        build.target_rule_version,
+                        build.target_rule_sha256,
+                        build.error_class,
+                        json_dumps(build.change_summary or {}),
+                        json_dumps(build.validation or {}),
+                        build.evidence_sha256,
                         build.created_at,
                         build.updated_at,
                         build.started_at,
@@ -1487,6 +1624,13 @@ class TaskStore:
                 )
             except sqlite3.IntegrityError as exc:
                 raise ValueError(f"build already exists: {build.build_id}") from exc
+
+    def get_build_by_request_id(self, request_id: str) -> BuildRecord | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM builds WHERE request_id = ?", (request_id,)
+            ).fetchone()
+        return _build_from_row(row) if row else None
 
     def get_build(self, build_id: str) -> BuildRecord | None:
         with self._connect() as connection:
@@ -1499,6 +1643,8 @@ class TaskStore:
         self,
         *,
         batch_id: str | None = None,
+        site_key: str | None = None,
+        feedback_id: str | None = None,
         states: set[str] | None = None,
         limit: int = 50,
     ) -> list[BuildRecord]:
@@ -1508,6 +1654,12 @@ class TaskStore:
         if batch_id is not None:
             clauses.append("batch_id = ?")
             values.append(batch_id)
+        if site_key is not None:
+            clauses.append("site_key = ?")
+            values.append(site_key)
+        if feedback_id is not None:
+            clauses.append("feedback_id = ?")
+            values.append(feedback_id)
         if states:
             placeholders = ", ".join("?" for _ in states)
             clauses.append(f"state IN ({placeholders})")
@@ -1543,6 +1695,16 @@ class TaskStore:
             "rule_id",
             "rule_version",
             "rule_path",
+            "feedback_id",
+            "request_id",
+            "source_rule_version",
+            "source_rule_sha256",
+            "target_rule_version",
+            "target_rule_sha256",
+            "error_class",
+            "change_summary",
+            "validation",
+            "evidence_sha256",
             "started_at",
             "finished_at",
         }
@@ -1554,6 +1716,9 @@ class TaskStore:
         for key, value in fields.items():
             if key == "model":
                 assignments.append("model_json = ?")
+                values.append(json_dumps(value or {}))
+            elif key in {"change_summary", "validation"}:
+                assignments.append(f"{key}_json = ?")
                 values.append(json_dumps(value or {}))
             else:
                 assignments.append(f"{key} = ?")
@@ -1733,6 +1898,437 @@ class TaskStore:
                 (*values, max(1, int(limit)), max(0, int(offset))),
             ).fetchall()
         return [_feedback_from_row(row) for row in rows], total
+
+    def create_rule_version(self, version: RuleVersion) -> RuleVersion:
+        with self._connect() as connection:
+            try:
+                connection.execute(
+                    """
+                    INSERT INTO rule_versions (
+                        rule_id, rule_version, sha256, parent_version, status,
+                        source_build_id, source_feedback_id, path, created_at,
+                        activated_at, activated_by, reviewed_by, reviewed_at, notes
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        version.rule_id,
+                        version.rule_version,
+                        version.sha256,
+                        version.parent_version,
+                        version.status,
+                        version.source_build_id,
+                        version.source_feedback_id,
+                        version.path,
+                        version.created_at,
+                        version.activated_at,
+                        version.activated_by,
+                        version.reviewed_by,
+                        version.reviewed_at,
+                        version.notes,
+                    ),
+                )
+            except sqlite3.IntegrityError as exc:
+                existing = self.get_rule_version(version.rule_id, version.rule_version)
+                if existing and existing.sha256 == version.sha256:
+                    return existing
+                raise RuleVersionError(
+                    f"rule version already exists with different content: "
+                    f"{version.rule_id}@{version.rule_version}"
+                ) from exc
+        created = self.get_rule_version(version.rule_id, version.rule_version)
+        if created is None:
+            raise RuleVersionError("rule version insert was not visible")
+        return created
+
+    def get_rule_version(
+        self, rule_id: str, rule_version: str
+    ) -> RuleVersion | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM rule_versions WHERE rule_id = ? AND rule_version = ?",
+                (rule_id, rule_version),
+            ).fetchone()
+        return _rule_version_from_row(row) if row else None
+
+    def list_rule_versions(
+        self,
+        rule_id: str,
+        *,
+        status: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[RuleVersion], int]:
+        where = " WHERE rule_id = ?"
+        values: list[Any] = [rule_id]
+        if status:
+            where += " AND status = ?"
+            values.append(status)
+        with self._connect() as connection:
+            total = int(
+                connection.execute(
+                    f"SELECT COUNT(*) FROM rule_versions{where}", values
+                ).fetchone()[0]
+            )
+            rows = connection.execute(
+                f"""
+                SELECT * FROM rule_versions{where}
+                ORDER BY created_at DESC, rule_version DESC
+                LIMIT ? OFFSET ?
+                """,
+                (*values, max(1, int(limit)), max(0, int(offset))),
+            ).fetchall()
+        return [_rule_version_from_row(row) for row in rows], total
+
+    def get_site_rule(self, site_key: str) -> SiteRule | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM site_rules WHERE site_key = ?", (site_key,)
+            ).fetchone()
+        return _site_rule_from_row(row) if row else None
+
+    def upsert_site_rule(self, site_rule: SiteRule) -> SiteRule:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO site_rules (
+                    site_key, rule_id, rule_version, sha256, path, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(site_key) DO UPDATE SET
+                    rule_id = excluded.rule_id,
+                    rule_version = excluded.rule_version,
+                    sha256 = excluded.sha256,
+                    path = excluded.path,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    site_rule.site_key,
+                    site_rule.rule_id,
+                    site_rule.rule_version,
+                    site_rule.sha256,
+                    site_rule.path,
+                    site_rule.updated_at,
+                ),
+            )
+        stored = self.get_site_rule(site_rule.site_key)
+        if stored is None:
+            raise RuleVersionError("site rule pointer was not written")
+        return stored
+
+    def latest_batch_site_rule(self, site_key: str) -> BatchSite | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM batch_sites
+                WHERE site_key = ? AND rule_id IS NOT NULL AND rule_version IS NOT NULL
+                ORDER BY updated_at DESC, batch_id DESC LIMIT 1
+                """,
+                (site_key,),
+            ).fetchone()
+        return _batch_site_from_row(row) if row else None
+
+    def list_site_batch_sites(self, site_key: str) -> list[BatchSite]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM batch_sites WHERE site_key = ? ORDER BY updated_at DESC",
+                (site_key,),
+            ).fetchall()
+        return [_batch_site_from_row(row) for row in rows]
+
+    def list_candidate_rules(self, rule_id: str) -> list[RuleVersion]:
+        versions, _ = self.list_rule_versions(
+            rule_id, status="candidate", limit=200, offset=0
+        )
+        return versions
+
+    def latest_superseded_rule(self, rule_id: str) -> RuleVersion | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM rule_versions
+                WHERE rule_id = ? AND status = 'superseded'
+                ORDER BY activated_at DESC, created_at DESC
+                LIMIT 1
+                """,
+                (rule_id,),
+            ).fetchone()
+        return _rule_version_from_row(row) if row else None
+
+    def get_activation_by_request(
+        self, request_id: str
+    ) -> RuleActivation | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM rule_activations WHERE request_id = ?",
+                (request_id,),
+            ).fetchone()
+        return _rule_activation_from_row(row) if row else None
+
+    def activate_rule(
+        self,
+        *,
+        site_key: str,
+        rule_id: str,
+        rule_version: str,
+        sha256: str,
+        expected_active_version: str | None = None,
+        expected_active_sha256: str | None = None,
+        feedback_id: str | None = None,
+        request_id: str,
+        reason: str | None = None,
+        actor: str = "local-user",
+        action: str = "activate",
+    ) -> tuple[SiteRule, RuleActivation]:
+        if action not in {"activate", "rollback"}:
+            raise RuleVersionError(f"unsupported rule action: {action}")
+        now = utc_now()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                target_row = connection.execute(
+                    "SELECT * FROM rule_versions WHERE rule_id = ? AND rule_version = ?",
+                    (rule_id, rule_version),
+                ).fetchone()
+                if target_row is None:
+                    raise RuleVersionError(
+                        f"unknown rule version: {rule_id}@{rule_version}"
+                    )
+                target = _rule_version_from_row(target_row)
+                if target.sha256 != sha256:
+                    raise RuleVersionError(
+                        f"rule hash mismatch: {rule_id}@{rule_version}"
+                    )
+                required = "candidate" if action == "activate" else "superseded"
+                if target.status != required:
+                    raise RuleVersionError(
+                        f"rule {rule_id}@{rule_version} is {target.status}, "
+                        f"expected {required}"
+                    )
+                current_row = connection.execute(
+                    "SELECT * FROM site_rules WHERE site_key = ?", (site_key,)
+                ).fetchone()
+                current = _site_rule_from_row(current_row) if current_row else None
+                if expected_active_version is not None and (
+                    current is None or current.rule_version != expected_active_version
+                ):
+                    raise RuleActivationConflictError(
+                        "expected active version does not match current pointer"
+                    )
+                if expected_active_sha256 is not None and (
+                    current is None or current.sha256 != expected_active_sha256
+                ):
+                    raise RuleActivationConflictError(
+                        "expected active hash does not match current pointer"
+                    )
+                if current is not None and current.rule_id != rule_id:
+                    raise RuleVersionError(
+                        f"site rule_id mismatch: {current.rule_id} != {rule_id}"
+                    )
+                if current is not None:
+                    connection.execute(
+                        """
+                        UPDATE rule_versions SET status = 'superseded'
+                        WHERE rule_id = ? AND rule_version = ? AND status = 'active'
+                        """,
+                        (current.rule_id, current.rule_version),
+                    )
+                connection.execute(
+                    """
+                    UPDATE rule_versions
+                    SET status = 'active', activated_at = ?, activated_by = ?
+                    WHERE rule_id = ? AND rule_version = ?
+                    """,
+                    (now, actor, rule_id, rule_version),
+                )
+                connection.execute(
+                    """
+                    INSERT INTO site_rules (
+                        site_key, rule_id, rule_version, sha256, path, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(site_key) DO UPDATE SET
+                        rule_id = excluded.rule_id,
+                        rule_version = excluded.rule_version,
+                        sha256 = excluded.sha256,
+                        path = excluded.path,
+                        updated_at = excluded.updated_at
+                    """,
+                    (site_key, rule_id, rule_version, sha256, target.path, now),
+                )
+                connection.execute(
+                    """
+                    UPDATE batch_sites
+                    SET rule_id = ?, rule_version = ?, rule_path = ?,
+                        readiness = CASE
+                            WHEN readiness IN ('needs_onboarding', 'building')
+                            THEN 'ready' ELSE readiness END,
+                        updated_at = ?
+                    WHERE site_key = ?
+                    """,
+                    (rule_id, rule_version, target.path, now, site_key),
+                )
+                linked_feedback = feedback_id or target.source_feedback_id
+                if linked_feedback:
+                    feedback = connection.execute(
+                        "SELECT * FROM quality_feedback WHERE feedback_id = ?",
+                        (linked_feedback,),
+                    ).fetchone()
+                    if feedback is not None:
+                        if feedback["site_key"] != site_key:
+                            raise RuleVersionError(
+                                "feedback does not belong to the activated site"
+                            )
+                        if feedback["status"] == "AWAITING_ACTIVATION":
+                            connection.execute(
+                                """
+                                UPDATE quality_feedback
+                                SET status = 'AWAITING_RERUN', updated_at = ?
+                                WHERE feedback_id = ?
+                                """,
+                                (now, linked_feedback),
+                            )
+                activation = RuleActivation(
+                    activation_id=f"act-{uuid.uuid4().hex[:12]}",
+                    request_id=request_id,
+                    site_key=site_key,
+                    rule_id=rule_id,
+                    action=action,
+                    from_version=current.rule_version if current else None,
+                    from_sha256=current.sha256 if current else None,
+                    to_version=rule_version,
+                    to_sha256=sha256,
+                    reason=reason,
+                    actor=actor,
+                    created_at=now,
+                )
+                connection.execute(
+                    """
+                    INSERT INTO rule_activations (
+                        activation_id, request_id, site_key, rule_id, action,
+                        from_version, from_sha256, to_version, to_sha256,
+                        reason, actor, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        activation.activation_id,
+                        activation.request_id,
+                        activation.site_key,
+                        activation.rule_id,
+                        activation.action,
+                        activation.from_version,
+                        activation.from_sha256,
+                        activation.to_version,
+                        activation.to_sha256,
+                        activation.reason,
+                        activation.actor,
+                        activation.created_at,
+                    ),
+                )
+                connection.commit()
+            except sqlite3.IntegrityError as exc:
+                connection.rollback()
+                raise RuleActivationConflictError(
+                    "activation request already exists or rule state conflicts"
+                ) from exc
+            except Exception:
+                connection.rollback()
+                raise
+        site_rule = self.get_site_rule(site_key)
+        if site_rule is None:
+            raise RuleVersionError("site rule pointer was not written")
+        return site_rule, activation
+
+    def reject_rule_version(
+        self,
+        rule_id: str,
+        rule_version: str,
+        *,
+        reason: str | None = None,
+        feedback_id: str | None = None,
+        retry: bool = False,
+        actor: str = "local-user",
+    ) -> RuleVersion:
+        now = utc_now()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                cursor = connection.execute(
+                    """
+                    UPDATE rule_versions SET status = 'rejected'
+                    WHERE rule_id = ? AND rule_version = ? AND status = 'candidate'
+                    """,
+                    (rule_id, rule_version),
+                )
+                if cursor.rowcount != 1:
+                    raise RuleVersionError(
+                        f"rule {rule_id}@{rule_version} is not a candidate"
+                    )
+                if feedback_id:
+                    feedback = connection.execute(
+                        "SELECT * FROM quality_feedback WHERE feedback_id = ?",
+                        (feedback_id,),
+                    ).fetchone()
+                    if feedback is None:
+                        raise RuleVersionError(f"unknown feedback: {feedback_id}")
+                    if feedback["status"] != "AWAITING_ACTIVATION":
+                        raise RuleVersionError(
+                            "feedback is not awaiting activation"
+                        )
+                    next_status = "TRIAGED" if retry else "WONTFIX"
+                    connection.execute(
+                        """
+                        UPDATE quality_feedback
+                        SET status = ?, resolution = ?, resolution_note = ?,
+                            resolved_by = ?, closed_at = ?, updated_at = ?
+                        WHERE feedback_id = ?
+                        """,
+                        (
+                            next_status,
+                            None if retry else "WONTFIX",
+                            reason,
+                            None if retry else actor,
+                            None if retry else now,
+                            now,
+                            feedback_id,
+                        ),
+                    )
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+        updated = self.get_rule_version(rule_id, rule_version)
+        if updated is None:
+            raise RuleVersionError("rule version not found after reject")
+        return updated
+
+    def update_feedback(self, feedback_id: str, **fields: Any) -> QualityFeedback:
+        allowed = {
+            "status",
+            "triage",
+            "triage_note",
+            "triage_source",
+            "repair_build_id",
+            "rerun_task_id",
+            "resolution",
+            "resolution_note",
+            "resolved_by",
+            "closed_at",
+            "updated_at",
+        }
+        unknown = set(fields) - allowed
+        if unknown:
+            raise ValueError(f"unknown feedback fields: {sorted(unknown)}")
+        fields.setdefault("updated_at", utc_now())
+        assignments = ", ".join(f"{key} = ?" for key in fields)
+        with self._connect() as connection:
+            cursor = connection.execute(
+                f"UPDATE quality_feedback SET {assignments} WHERE feedback_id = ?",
+                (*fields.values(), feedback_id),
+            )
+            if cursor.rowcount != 1:
+                raise FeedbackNotFoundError(f"unknown feedback: {feedback_id}")
+        feedback = self.get_feedback(feedback_id)
+        if feedback is None:
+            raise FeedbackNotFoundError(f"unknown feedback: {feedback_id}")
+        return feedback
 
     def triage_feedback(
         self,
@@ -1976,6 +2572,16 @@ def _build_from_row(row: sqlite3.Row) -> BuildRecord:
         rule_version=row["rule_version"],
         rule_path=row["rule_path"],
         mode=row["mode"],
+        feedback_id=row["feedback_id"],
+        request_id=row["request_id"],
+        source_rule_version=row["source_rule_version"],
+        source_rule_sha256=row["source_rule_sha256"],
+        target_rule_version=row["target_rule_version"],
+        target_rule_sha256=row["target_rule_sha256"],
+        error_class=row["error_class"],
+        change_summary=json_loads(row["change_summary_json"], {}),
+        validation=json_loads(row["validation_json"], {}),
+        evidence_sha256=row["evidence_sha256"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         started_at=row["started_at"],
@@ -2004,12 +2610,60 @@ def _task_from_row(row: sqlite3.Row) -> Task:
         domain_key=row["domain_key"],
         market=row["market"],
         rule_path=row["rule_path"],
+        rule_sha256=row["rule_sha256"],
         archived_at=row["archived_at"],
         batch_id=row["batch_id"],
         lease_owner=row["lease_owner"],
         lease_token=int(row["lease_token"] or 0),
         lease_expires_at=row["lease_expires_at"],
         lease_heartbeat_at=row["lease_heartbeat_at"],
+    )
+
+
+def _rule_version_from_row(row: sqlite3.Row) -> RuleVersion:
+    return RuleVersion(
+        rule_id=row["rule_id"],
+        rule_version=row["rule_version"],
+        sha256=row["sha256"],
+        parent_version=row["parent_version"],
+        status=row["status"],
+        source_build_id=row["source_build_id"],
+        source_feedback_id=row["source_feedback_id"],
+        path=row["path"],
+        created_at=row["created_at"],
+        activated_at=row["activated_at"],
+        activated_by=row["activated_by"],
+        reviewed_by=row["reviewed_by"],
+        reviewed_at=row["reviewed_at"],
+        notes=row["notes"],
+    )
+
+
+def _site_rule_from_row(row: sqlite3.Row) -> SiteRule:
+    return SiteRule(
+        site_key=row["site_key"],
+        rule_id=row["rule_id"],
+        rule_version=row["rule_version"],
+        sha256=row["sha256"],
+        path=row["path"],
+        updated_at=row["updated_at"],
+    )
+
+
+def _rule_activation_from_row(row: sqlite3.Row) -> RuleActivation:
+    return RuleActivation(
+        activation_id=row["activation_id"],
+        request_id=row["request_id"],
+        site_key=row["site_key"],
+        rule_id=row["rule_id"],
+        action=row["action"],
+        from_version=row["from_version"],
+        from_sha256=row["from_sha256"],
+        to_version=row["to_version"],
+        to_sha256=row["to_sha256"],
+        reason=row["reason"],
+        actor=row["actor"],
+        created_at=row["created_at"],
     )
 
 

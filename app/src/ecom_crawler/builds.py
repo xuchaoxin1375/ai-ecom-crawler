@@ -43,7 +43,14 @@ from .harness.trace import build_trace, render_trace_markdown
 from .robots import extract_sitemaps, robots_url_for
 from .runtime.archive import prefetch_rule_samples
 from .runtime.batch import normalize_site, rule_domains
-from .runtime.models import Batch, BatchSite, BuildRecord, utc_now
+from .runtime.models import (
+    Batch,
+    BatchSite,
+    BuildRecord,
+    RuleVersion,
+    SiteRule,
+    utc_now,
+)
 from .runtime.rule import load_rule
 from .runtime.store import TaskStore
 
@@ -684,6 +691,7 @@ class BuildManager:
         robots_probe: Callable[[str, str | None], tuple[str, list[str]]] | None = None,
         max_repair_rounds: int | None = None,
         repair_seconds: int | None = None,
+        activation_mode: str | None = None,
         archive_mode: str | None = None,
         archive_root: str | Path | None = None,
         archive_sample_limit: int | None = None,
@@ -732,6 +740,15 @@ class BuildManager:
                 else os.environ.get("ECOM_BUILD_REPAIR_SECONDS", "240")
             ),
         )
+        self.activation_mode = (
+            activation_mode
+            or os.environ.get("ECOM_RULE_ACTIVATION_MODE")
+            or "manual"
+        ).strip().lower()
+        if self.activation_mode not in {"legacy", "manual"}:
+            raise BuildError(
+                f"unsupported rule activation mode: {self.activation_mode}"
+            )
         self._repair_limits: dict[str, int] = {}
         self._repairs: dict[str, list[dict[str, Any]]] = {}
         self._trace_meta_cache: dict[str, dict[str, Any]] = {}
@@ -792,6 +809,49 @@ class BuildManager:
         self._stopping = threading.Event()
 
     # ------------------------------------------------------------------ start
+    def _ensure_site_rule(self, site: BatchSite) -> SiteRule | None:
+        """Seed the v2 site pointer from a legacy batch-site rule once."""
+        current = self.store.get_site_rule(site.site_key)
+        if current is not None:
+            return current
+        if not site.rule_id or not site.rule_version or not site.rule_path:
+            return None
+        path = self.rules_dir / site.rule_path
+        if not path.is_file():
+            return None
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        self.store.create_rule_version(
+            RuleVersion(
+                rule_id=site.rule_id,
+                rule_version=site.rule_version,
+                sha256=digest,
+                path=site.rule_path,
+                status="active",
+                created_at=site.updated_at,
+                activated_at=site.updated_at,
+                activated_by="legacy-migration",
+            )
+        )
+        return self.store.upsert_site_rule(
+            SiteRule(
+                site_key=site.site_key,
+                rule_id=site.rule_id,
+                rule_version=site.rule_version,
+                sha256=digest,
+                path=site.rule_path,
+                updated_at=site.updated_at,
+            )
+        )
+
+    def ensure_site_rule(self, site_key: str) -> SiteRule | None:
+        current = self.store.get_site_rule(site_key)
+        if current is not None:
+            return current
+        site = self.store.latest_batch_site_rule(site_key)
+        if site is None:
+            return None
+        return self._ensure_site_rule(site)
+
     def start(
         self,
         batch: Batch,
@@ -810,6 +870,8 @@ class BuildManager:
         catalog_products: int | None = None,
         repair: bool = False,
         repair_reason: str | None = None,
+        feedback_id: str | None = None,
+        request_id: str | None = None,
     ) -> BuildRecord:
         if site.readiness in {"invalid", "duplicate"}:
             raise BuildError("invalid or duplicate sites cannot be built")
@@ -829,6 +891,14 @@ class BuildManager:
                     )
         if not self.rules_dir.is_dir():
             raise BuildError("rules directory is not configured")
+        self._ensure_site_rule(site)
+        source_rule_sha256 = None
+        if repair and site.rule_path:
+            source_rule_path = self.rules_dir / site.rule_path
+            if source_rule_path.is_file():
+                source_rule_sha256 = hashlib.sha256(
+                    source_rule_path.read_bytes()
+                ).hexdigest()
         entry_url = _entry_url(site)
         product_budget = max(1, int(max_products or self.max_products))
         second_budget = max(60, int(max_seconds or self.max_seconds))
@@ -953,6 +1023,10 @@ class BuildManager:
                 proxy=resolved_proxy,
                 workspace=str(self.workspace_root / build_id),
                 mode="repair" if repair else "build",
+                feedback_id=feedback_id,
+                request_id=request_id,
+                source_rule_version=site.rule_version if repair else None,
+                source_rule_sha256=source_rule_sha256,
             )
             self.store.create_build(record)
             self.store.update_batch_site(
@@ -1020,6 +1094,8 @@ class BuildManager:
         archive_root: str | Path | None = None,
         archive_sample_limit: int | None = None,
         archive_max_bytes: int | None = None,
+        feedback_id: str | None = None,
+        request_id: str | None = None,
     ) -> BuildRecord:
         """Revalidate and repair an installed rule without clearing task data."""
         return self.start(
@@ -1037,6 +1113,8 @@ class BuildManager:
             catalog_scope="sample",
             repair=True,
             repair_reason=reason,
+            feedback_id=feedback_id,
+            request_id=request_id,
         )
 
     def _skill_roots(self) -> list[Path]:
@@ -1870,7 +1948,7 @@ domain-mismatched, or produces no valid product.
                         f"host validation produced {sorted(currencies)}; "
                         "use a market-localized URL or fix the rule currency"
                     )
-                rule_id, rule_version, rule_name = self._install_rule(
+                rule_id, rule_version, rule_name, rule_sha256 = self._install_rule(
                     rule_path,
                     record,
                     counts,
@@ -1884,6 +1962,14 @@ domain-mismatched, or produces no valid product.
                 self._write_trace(
                     build_id, session, validation=validation, error=message
                 )
+                if record.feedback_id:
+                    feedback = self.store.get_feedback(record.feedback_id)
+                    if feedback and feedback.status == "REPAIRING":
+                        self.store.update_feedback(
+                            record.feedback_id,
+                            status="TRIAGED",
+                            triage_note=message[:2000],
+                        )
                 self._release_site(
                     record.batch_id,
                     record.site_key,
@@ -1896,28 +1982,63 @@ domain-mismatched, or produces no valid product.
 
             validation.update(
                 {
+                    "status": "PASSED",
                     "rule_id": rule_id,
                     "rule_version": rule_version,
                     "rule_path": rule_name,
+                    "rule_sha256": rule_sha256,
                     "batch_market": batch_market or None,
                 }
             )
+            auto_activate = (
+                record.mode == "build" or self.activation_mode == "legacy"
+            )
+            note_prefix = "候选方案" if not auto_activate else "已激活方案"
             note = (
-                f"候选方案：{rule_id}@{rule_version}，"
-                f"有界验证 {valid} 条有效、{failed} 失败；待人工签字"
+                f"{note_prefix}：{rule_id}@{rule_version}，"
+                f"有界验证 {valid} 条有效、{failed} 失败"
+                + ("" if auto_activate else "；待人工激活")
             )
             site = self.store.get_batch_site(record.batch_id, record.site_key)
-            if site is not None and site.build_id == build_id:
+            if auto_activate:
+                current = self.store.get_site_rule(record.site_key)
+                self.store.activate_rule(
+                    site_key=record.site_key,
+                    rule_id=rule_id,
+                    rule_version=rule_version,
+                    sha256=rule_sha256,
+                    expected_active_version=(
+                        current.rule_version if current else None
+                    ),
+                    expected_active_sha256=current.sha256 if current else None,
+                    feedback_id=record.feedback_id,
+                    request_id=f"{build_id}-activate",
+                    reason="host validation passed",
+                    actor="build" if record.mode == "build" else "legacy-build",
+                    action="activate",
+                )
+                if record.feedback_id:
+                    feedback = self.store.get_feedback(record.feedback_id)
+                    if feedback and feedback.status == "REPAIRING":
+                        self.store.update_feedback(
+                            record.feedback_id,
+                            status="AWAITING_RERUN",
+                            repair_build_id=build_id,
+                        )
+            elif site is not None and site.build_id == build_id:
                 self.store.update_batch_site(
                     record.batch_id,
                     record.site_key,
                     readiness="ready",
-                    rule_id=rule_id,
-                    rule_version=rule_version,
-                    rule_path=rule_name,
                     proxy=record.proxy,
                     note=note,
                 )
+                if record.feedback_id:
+                    self.store.update_feedback(
+                        record.feedback_id,
+                        status="AWAITING_ACTIVATION",
+                        repair_build_id=build_id,
+                    )
             self._mark_repair_finished(build_id, resolved=True)
             self._write_trace(
                 build_id,
@@ -1931,6 +2052,9 @@ domain-mismatched, or produces no valid product.
                 rule_id=rule_id,
                 rule_version=rule_version,
                 rule_path=rule_name,
+                target_rule_version=rule_version,
+                target_rule_sha256=rule_sha256,
+                validation=validation,
                 finished_at=utc_now(),
                 error=None,
             )
@@ -2143,7 +2267,7 @@ domain-mismatched, or produces no valid product.
         record: BuildRecord,
         counts: dict[str, Any],
         task_result: dict[str, Any],
-    ) -> tuple[str, str, str]:
+    ) -> tuple[str, str, str, str]:
         payload = yaml.safe_load(rule_path.read_text(encoding="utf-8"))
         if not isinstance(payload, dict):
             raise BuildError("rule manifest is not a mapping")
@@ -2203,7 +2327,22 @@ domain-mismatched, or produces no valid product.
             encoding="utf-8",
         )
         os.replace(temporary, target)
-        return rule_id, rule_version, target.name
+        digest = hashlib.sha256(target.read_bytes()).hexdigest()
+        previous = self.store.get_batch_site(record.batch_id, record.site_key)
+        self.store.create_rule_version(
+            RuleVersion(
+                rule_id=rule_id,
+                rule_version=rule_version,
+                sha256=digest,
+                path=target.name,
+                status="candidate",
+                parent_version=previous.rule_version if previous else None,
+                source_build_id=record.build_id,
+                source_feedback_id=record.feedback_id,
+                created_at=utc_now(),
+            )
+        )
+        return rule_id, rule_version, target.name, digest
 
     def _record_failure(self, build_id: str, message: str) -> None:
         record = self.store.get_build(build_id)
@@ -2345,6 +2484,26 @@ domain-mismatched, or produces no valid product.
                 if record.rule_id
                 else None
             ),
+            "feedback_id": record.feedback_id,
+            "source_rule": (
+                {
+                    "rule_version": record.source_rule_version,
+                    "sha256": record.source_rule_sha256,
+                }
+                if record.source_rule_version
+                else None
+            ),
+            "candidate_rule": (
+                {
+                    "rule_version": record.target_rule_version,
+                    "sha256": record.target_rule_sha256,
+                }
+                if record.target_rule_version
+                else None
+            ),
+            "error_class": record.error_class,
+            "change_summary": record.change_summary,
+            "validation": record.validation,
             "created_at": record.created_at,
             "updated_at": record.updated_at,
             "started_at": record.started_at,

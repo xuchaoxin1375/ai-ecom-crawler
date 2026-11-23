@@ -62,6 +62,7 @@ class Task:
     domain_key: str | None = None
     market: str | None = None
     rule_path: str | None = None
+    rule_sha256: str | None = None
     archived_at: str | None = None
     batch_id: str | None = None
     lease_owner: str | None = None
@@ -155,6 +156,9 @@ FEEDBACK_CATEGORIES = {
 FEEDBACK_TRIAGE = {"RULE_REPAIR", "RUNTIME", "BUSINESS", "DUPLICATE"}
 FEEDBACK_RESOLUTIONS = {"RESOLVED", "WONTFIX", "DUPLICATE"}
 
+RULE_VERSION_STATUSES = {"candidate", "active", "superseded", "rejected", "retired"}
+RULE_ACTIONS = {"activate", "rollback"}
+
 
 @dataclass
 class BatchSite:
@@ -202,6 +206,16 @@ class BuildRecord:
     rule_version: str | None = None
     rule_path: str | None = None
     mode: str = "build"
+    feedback_id: str | None = None
+    request_id: str | None = None
+    source_rule_version: str | None = None
+    source_rule_sha256: str | None = None
+    target_rule_version: str | None = None
+    target_rule_sha256: str | None = None
+    error_class: str | None = None
+    change_summary: dict[str, Any] = field(default_factory=dict)
+    validation: dict[str, Any] = field(default_factory=dict)
+    evidence_sha256: str | None = None
     created_at: str = field(default_factory=utc_now)
     updated_at: str = field(default_factory=utc_now)
     started_at: str | None = None
@@ -256,6 +270,58 @@ class QualityFeedback:
             raise ValueError(f"unsupported feedback triage: {self.triage!r}")
         if self.resolution is not None and self.resolution not in FEEDBACK_RESOLUTIONS:
             raise ValueError(f"unsupported feedback resolution: {self.resolution!r}")
+
+
+@dataclass
+class RuleVersion:
+    rule_id: str
+    rule_version: str
+    sha256: str
+    path: str
+    status: str = "candidate"
+    parent_version: str | None = None
+    source_build_id: str | None = None
+    source_feedback_id: str | None = None
+    created_at: str = field(default_factory=utc_now)
+    activated_at: str | None = None
+    activated_by: str | None = None
+    reviewed_by: str | None = None
+    reviewed_at: str | None = None
+    notes: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.status not in RULE_VERSION_STATUSES:
+            raise ValueError(f"unsupported rule version status: {self.status!r}")
+
+
+@dataclass
+class SiteRule:
+    site_key: str
+    rule_id: str
+    rule_version: str
+    sha256: str
+    path: str
+    updated_at: str = field(default_factory=utc_now)
+
+
+@dataclass
+class RuleActivation:
+    activation_id: str
+    request_id: str
+    site_key: str
+    rule_id: str
+    action: str
+    to_version: str
+    to_sha256: str
+    from_version: str | None = None
+    from_sha256: str | None = None
+    reason: str | None = None
+    actor: str = "local-user"
+    created_at: str = field(default_factory=utc_now)
+
+    def __post_init__(self) -> None:
+        if self.action not in RULE_ACTIONS:
+            raise ValueError(f"unsupported rule action: {self.action!r}")
 
 
 @dataclass

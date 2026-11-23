@@ -19,15 +19,19 @@ import {
   cancelTask,
   getBatch,
   getBuild,
+  activateSiteRule,
   getBuildConfig,
   getBuildMessages,
+  getSiteRule,
   getTasks,
   pauseBuild,
   pauseTask,
+  rejectRuleVersion,
   replyBuildDependency,
   replyBuildPermission,
   resumeBuild,
   resumeTask,
+  rollbackSiteRule,
   taskExportUrl,
   type BatchActionResponse,
   type BatchDetail,
@@ -179,6 +183,13 @@ function DetailSkeleton() {
   );
 }
 
+function newRuleRequest(prefix: string): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return `${prefix}-${crypto.randomUUID()}`;
+  }
+  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
 export function SiteDetailPage() {
   const { batchId = "", siteKey = "" } = useParams<{
     batchId: string;
@@ -194,6 +205,9 @@ export function SiteDetailPage() {
   const [confirmError, setConfirmError] = useState("");
   const [taskBusy, setTaskBusy] = useState("");
   const [buildBusy, setBuildBusy] = useState("");
+  const [ruleBusy, setRuleBusy] = useState("");
+  const [ruleError, setRuleError] = useState("");
+  const [ruleNotice, setRuleNotice] = useState("");
   const [startedBuild, setStartedBuild] = useState<{
     siteKey: string;
     buildId: string;
@@ -255,6 +269,13 @@ export function SiteDetailPage() {
     queryKey: ["build-config"],
     queryFn: ({ signal }) => getBuildConfig(signal),
     staleTime: 60_000,
+  });
+
+  const siteRuleQuery = useQuery({
+    queryKey: ["site-rule", siteKey],
+    queryFn: ({ signal }) => getSiteRule(siteKey, signal),
+    enabled: Boolean(siteKey && site),
+    refetchInterval: 10_000,
   });
 
   const historyQuery = useQuery({
@@ -329,6 +350,77 @@ export function SiteDetailPage() {
       else setActionError(message);
     } finally {
       setTaskBusy("");
+    }
+  }
+
+  function refreshRuleState() {
+    void queryClient.invalidateQueries({ queryKey: ["site-rule", siteKey] });
+    void queryClient.invalidateQueries({ queryKey: ["batch", batchId] });
+    void queryClient.invalidateQueries({ queryKey: ["site-task-history", siteKey] });
+    void queryClient.invalidateQueries({ queryKey: ["task-feedback"] });
+  }
+
+  async function activateCandidate(ruleVersion: string) {
+    const rule = siteRuleQuery.data;
+    if (!rule) return;
+    setRuleBusy(`activate-${ruleVersion}`);
+    setRuleError("");
+    setRuleNotice("");
+    try {
+      await activateSiteRule(siteKey, {
+        request_id: newRuleRequest("activate"),
+        rule_id: rule.rule_id,
+        rule_version: ruleVersion,
+        expected_active_version: rule.active?.rule_version ?? null,
+        expected_active_sha256: rule.active?.sha256 ?? null,
+      });
+      setRuleNotice(`规则版本 ${ruleVersion} 已激活；旧任务结果标记为过期。`);
+      refreshRuleState();
+    } catch (exc) {
+      setRuleError(exc instanceof Error ? exc.message : String(exc));
+    } finally {
+      setRuleBusy("");
+    }
+  }
+
+  async function rejectCandidate(ruleVersion: string) {
+    const rule = siteRuleQuery.data;
+    if (!rule?.rule_id) return;
+    setRuleBusy(`reject-${ruleVersion}`);
+    setRuleError("");
+    setRuleNotice("");
+    try {
+      await rejectRuleVersion(rule.rule_id, ruleVersion, {
+        reason: "用户放弃候选规则",
+        retry: true,
+      });
+      setRuleNotice(`候选规则 ${ruleVersion} 已放弃，关联反馈回到待分诊。`);
+      refreshRuleState();
+    } catch (exc) {
+      setRuleError(exc instanceof Error ? exc.message : String(exc));
+    } finally {
+      setRuleBusy("");
+    }
+  }
+
+  async function rollbackRule() {
+    const rule = siteRuleQuery.data;
+    if (!rule?.active) return;
+    setRuleBusy("rollback");
+    setRuleError("");
+    setRuleNotice("");
+    try {
+      const response = await rollbackSiteRule(siteKey, {
+        request_id: newRuleRequest("rollback"),
+        expected_active_version: rule.active.rule_version,
+        reason: "回滚到上一生效版本",
+      });
+      setRuleNotice(`已回滚到 ${response.site.active?.rule_version ?? "上一版本"}。`);
+      refreshRuleState();
+    } catch (exc) {
+      setRuleError(exc instanceof Error ? exc.message : String(exc));
+    } finally {
+      setRuleBusy("");
     }
   }
 
@@ -1026,6 +1118,119 @@ export function SiteDetailPage() {
                 <span className="tabular">{formatTime(site.updated_at)}</span>
               </Fact>
             </dl>
+          </section>
+
+          <section className="rounded-panel border border-line bg-surface">
+            <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
+              <h2 className="text-[15px] leading-6 font-semibold text-ink">规则版本</h2>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => void siteRuleQuery.refetch()}
+                disabled={siteRuleQuery.isFetching}
+              >
+                刷新
+              </Button>
+            </div>
+            {siteRuleQuery.isError ? (
+              <p className="px-4 py-3 text-xs leading-5 text-danger">
+                读取规则版本失败：
+                {siteRuleQuery.error instanceof Error
+                  ? siteRuleQuery.error.message
+                  : "服务暂时不可用。"}
+              </p>
+            ) : (
+              <div className="space-y-3 px-4 py-3">
+                {ruleNotice ? (
+                  <p className="rounded-control border border-success/20 bg-success-soft px-2.5 py-2 text-xs leading-5 text-success">
+                    {ruleNotice}
+                  </p>
+                ) : null}
+                {ruleError ? (
+                  <p className="rounded-control border border-danger/20 bg-danger-soft px-2.5 py-2 text-xs leading-5 text-danger">
+                    {ruleError}
+                  </p>
+                ) : null}
+                <div>
+                  <p className="text-[11px] text-ink-3">当前生效</p>
+                  <p className="mt-0.5 font-mono text-xs text-ink">
+                    {siteRuleQuery.data?.active
+                      ? `${siteRuleQuery.data.rule_id}@${siteRuleQuery.data.active.rule_version}`
+                      : "暂无生效规则"}
+                  </p>
+                  {siteRuleQuery.data?.active ? (
+                    <p className="mt-0.5 text-[11px] text-ink-3">
+                      过期任务 {siteRuleQuery.data.stale_tasks} · 未关闭反馈{" "}
+                      {siteRuleQuery.data.open_feedback}
+                    </p>
+                  ) : null}
+                  {siteRuleQuery.data?.active ? (
+                    <Button
+                      className="mt-2"
+                      size="sm"
+                      onClick={() => void rollbackRule()}
+                      disabled={Boolean(ruleBusy)}
+                    >
+                      回滚上一版本
+                    </Button>
+                  ) : null}
+                </div>
+
+                <div className="border-t border-line pt-3">
+                  <p className="text-[11px] text-ink-3">候选规则</p>
+                  {siteRuleQuery.data?.candidates.length ? (
+                    <ul className="mt-1.5 space-y-2">
+                      {siteRuleQuery.data.candidates.map((candidate) => (
+                        <li
+                          key={candidate.rule_version}
+                          className="rounded-control border border-warning/25 bg-warning-soft px-2.5 py-2"
+                        >
+                          <p className="flex items-center justify-between gap-2 font-mono text-[11px] text-ink">
+                            <span>{candidate.rule_version}</span>
+                            <Badge tone="warning" dot={false}>
+                              待激活
+                            </Badge>
+                          </p>
+                          <p className="mt-0.5 text-[11px] text-ink-3">
+                            {candidate.build_id || "未知构建"} ·{" "}
+                            {formatTime(candidate.created_at)}
+                          </p>
+                          <div className="mt-2 flex items-center gap-1.5">
+                            <Button
+                              size="sm"
+                              variant="primary"
+                              onClick={() =>
+                                void activateCandidate(candidate.rule_version)
+                              }
+                              disabled={
+                                Boolean(ruleBusy) || siteHasActiveWork(site, build)
+                              }
+                            >
+                              激活
+                            </Button>
+                            <Button
+                              size="sm"
+                              onClick={() =>
+                                void rejectCandidate(candidate.rule_version)
+                              }
+                              disabled={Boolean(ruleBusy)}
+                            >
+                              放弃
+                            </Button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="mt-1 text-xs leading-5 text-ink-3">
+                      {siteRuleQuery.isPending
+                        ? "正在读取…"
+                        : "没有候选规则；定向修复成功后会出现。"}
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
           </section>
 
           <section className="rounded-panel border border-line bg-surface">

@@ -33,7 +33,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .. import __version__
-from ..builds import BuildError, BuildManager
+from ..builds import ACTIVE_BUILD_STATES, BuildError, BuildManager
 from ..execution import build_task
 from ..executor.runner import CSV_COLUMNS
 from ..harness.adapter import HarnessStateError
@@ -43,6 +43,8 @@ from ..runtime.models import (
     Batch,
     BatchSite,
     QualityFeedback,
+    RuleVersion,
+    SiteRule,
     Task,
     WorkItem,
     utc_now,
@@ -55,6 +57,8 @@ from ..runtime.store import (
     FeedbackRequestConflictError,
     FeedbackTransitionError,
     RequestConflictError,
+    RuleActivationConflictError,
+    RuleVersionError,
     TaskNotFoundError,
     TaskStore,
     TaskTransitionError,
@@ -180,6 +184,105 @@ class FeedbackTriageResponse(BaseModel):
     feedback: FeedbackRecord
 
 
+class FeedbackRepairRequest(BaseModel):
+    request_id: str = Field(min_length=1, max_length=200)
+    reason: str | None = Field(default=None, max_length=2000)
+    max_products: int = Field(default=6, ge=1, le=50)
+    max_seconds: int = Field(default=600, ge=60, le=3600)
+    repair_rounds: int | None = Field(default=None, ge=0, le=10)
+    archive_mode: Literal["off", "sample", "full"] = "off"
+    archive_sample_limit: int = Field(default=20, ge=1, le=1000)
+    archive_root: str | None = Field(default=None, max_length=1000)
+    archive_max_bytes: int | None = Field(default=None, ge=0)
+    capture_reasoning: bool = False
+
+
+class FeedbackRerunRequest(BaseModel):
+    request_id: str = Field(min_length=1, max_length=200)
+    limits: Limits = Field(default_factory=lambda: Limits())
+    archive_mode: Literal["off", "sample", "full"] = "off"
+
+
+class FeedbackResolveRequest(BaseModel):
+    request_id: str = Field(min_length=1, max_length=200)
+    resolution: Literal["RESOLVED", "WONTFIX"]
+    note: str | None = Field(default=None, max_length=2000)
+    actor: str | None = Field(default=None, max_length=120)
+
+
+class RuleVersionRecord(BaseModel):
+    rule_id: str
+    rule_version: str
+    sha256: str
+    parent_version: str | None = None
+    status: Literal["candidate", "active", "superseded", "rejected", "retired"]
+    source_build_id: str | None = None
+    source_feedback_id: str | None = None
+    path: str
+    created_at: str
+    activated_at: str | None = None
+    activated_by: str | None = None
+    reviewed_by: str | None = None
+    reviewed_at: str | None = None
+    notes: str | None = None
+
+
+class RuleVersionListResponse(BaseModel):
+    total: int
+    items: list[RuleVersionRecord]
+
+
+class SiteRuleActive(BaseModel):
+    rule_version: str
+    sha256: str
+    path: str
+    activated_at: str | None = None
+
+
+class SiteRuleCandidate(BaseModel):
+    rule_version: str
+    sha256: str
+    build_id: str | None = None
+    validation_status: str | None = None
+    created_at: str
+
+
+class SiteRuleResponse(BaseModel):
+    site_key: str
+    rule_id: str | None = None
+    active: SiteRuleActive | None = None
+    candidates: list[SiteRuleCandidate] = Field(default_factory=list)
+    stale_tasks: int = 0
+    open_feedback: int = 0
+
+
+class RuleActivateRequest(BaseModel):
+    request_id: str = Field(min_length=1, max_length=200)
+    rule_id: str | None = Field(default=None, max_length=200)
+    rule_version: str = Field(min_length=1, max_length=120)
+    expected_active_version: str | None = Field(default=None, max_length=120)
+    expected_active_sha256: str | None = Field(default=None, max_length=64)
+    feedback_id: str | None = Field(default=None, max_length=200)
+    reason: str | None = Field(default=None, max_length=2000)
+    actor: str | None = Field(default=None, max_length=120)
+
+
+class RuleRollbackRequest(BaseModel):
+    request_id: str = Field(min_length=1, max_length=200)
+    to_version: str | None = Field(default=None, max_length=120)
+    expected_active_version: str | None = Field(default=None, max_length=120)
+    reason: str | None = Field(default=None, max_length=2000)
+    actor: str | None = Field(default=None, max_length=120)
+
+
+class RuleRejectRequest(BaseModel):
+    request_id: str | None = Field(default=None, max_length=200)
+    reason: str | None = Field(default=None, max_length=2000)
+    feedback_id: str | None = Field(default=None, max_length=200)
+    retry: bool = False
+    actor: str | None = Field(default=None, max_length=120)
+
+
 class BatchCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     country: str | None = Field(default=None, max_length=80)
@@ -224,6 +327,8 @@ class BuildStartRequest(BaseModel):
     archive_max_bytes: int | None = Field(default=None, ge=0)
     catalog_scope: Literal["sample", "full"] = "sample"
     catalog_products: int = Field(default=2000, ge=1, le=10000)
+    feedback_id: str | None = Field(default=None, max_length=200)
+    request_id: str | None = Field(default=None, max_length=200)
 
 
 class BuildPermissionRequest(BaseModel):
@@ -336,6 +441,24 @@ def _counts(store: TaskStore, task: Task, result: dict[str, Any]) -> dict[str, i
 
 def _summary(store: TaskStore, task: Task, out_root: Path) -> dict[str, Any]:
     result = _load_result(out_root, task.task_id)
+    site_rule = store.get_site_rule(task.site_key or task.plan_id)
+    active_version = site_rule.rule_version if site_rule else None
+    active_sha256 = site_rule.sha256 if site_rule else None
+    if site_rule is None:
+        stale: bool | None = None
+    elif task.rule_sha256:
+        stale = task.rule_sha256 != site_rule.sha256
+    elif task.plan_version != site_rule.rule_version:
+        stale = True
+    else:
+        stale = None
+    feedback, _ = store.list_feedback(task_id=task.task_id, limit=50)
+    open_feedback = [
+        item
+        for item in feedback
+        if item.status not in {"RESOLVED", "WONTFIX"}
+    ]
+    latest_feedback = feedback[0] if feedback else None
     return {
         "task_id": task.task_id,
         "task_type": task.task_type,
@@ -352,6 +475,19 @@ def _summary(store: TaskStore, task: Task, out_root: Path) -> dict[str, Any]:
         "coverage": result.get("coverage") or {"status": "UNKNOWN"},
         "quality_exceptions": result.get("quality_exceptions") or [],
         "content_audit": result.get("content_audit") or {},
+        "rule": {
+            "rule_id": task.plan_id,
+            "rule_version": task.plan_version,
+            "sha256": task.rule_sha256,
+            "active_version": active_version,
+            "active_sha256": active_sha256,
+            "stale": stale,
+        },
+        "feedback": {
+            "open": len(open_feedback),
+            "latest_id": latest_feedback.feedback_id if latest_feedback else None,
+            "latest_status": latest_feedback.status if latest_feedback else None,
+        },
         "archived_at": task.archived_at,
         "created_at": task.created_at,
         "updated_at": task.updated_at,
@@ -382,8 +518,16 @@ WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
-def _error(code: str, message: str, status_code: int) -> HTTPException:
-    return HTTPException(status_code=status_code, detail={"code": code, "message": message})
+def _error(
+    code: str,
+    message: str,
+    status_code: int,
+    details: dict[str, Any] | None = None,
+) -> HTTPException:
+    return HTTPException(
+        status_code=status_code,
+        detail={"code": code, "message": message, "details": details or {}},
+    )
 
 
 def _forbidden(message: str) -> JSONResponse:
@@ -581,6 +725,205 @@ def create_app(
     app.state.build_manager = build_manager
     app.state.proxy = proxy
 
+    def rule_error(exc: Exception) -> HTTPException:
+        if isinstance(exc, RuleActivationConflictError):
+            code = "ACTIVATION_CONFLICT"
+        else:
+            text = str(exc)
+            if "hash mismatch" in text:
+                code = "RULE_HASH_MISMATCH"
+            elif "not a candidate" in text or "expected candidate" in text:
+                code = "RULE_NOT_CANDIDATE"
+            elif "not a superseded" in text or "expected superseded" in text:
+                code = "RULE_NOT_ACTIVE"
+            elif "already exists" in text:
+                code = "RULE_VERSION_CONFLICT"
+            elif "rule_id mismatch" in text:
+                code = "RULE_ID_MISMATCH"
+            else:
+                code = "RULE_CONFLICT"
+        return _error(code, str(exc), 409)
+
+    def site_busy(site_key: str) -> dict[str, str] | None:
+        tasks = [
+            task
+            for task in store.list_tasks()
+            if (task.site_key or task.plan_id) == site_key
+            and task.state in ACTIVE_TASK_STATES
+        ]
+        builds = store.list_builds(
+            site_key=site_key, states=ACTIVE_BUILD_STATES, limit=1
+        )
+        if tasks:
+            task = tasks[0]
+            return {"task_id": task.task_id, "task_state": task.state}
+        if builds:
+            build = builds[0]
+            return {"build_id": build.build_id, "build_state": build.state}
+        return None
+
+    def rule_version_payload(version: RuleVersion) -> RuleVersionRecord:
+        return RuleVersionRecord(
+            rule_id=version.rule_id,
+            rule_version=version.rule_version,
+            sha256=version.sha256,
+            parent_version=version.parent_version,
+            status=version.status,
+            source_build_id=version.source_build_id,
+            source_feedback_id=version.source_feedback_id,
+            path=version.path,
+            created_at=version.created_at,
+            activated_at=version.activated_at,
+            activated_by=version.activated_by,
+            reviewed_by=version.reviewed_by,
+            reviewed_at=version.reviewed_at,
+            notes=version.notes,
+        )
+
+    def ensure_site_rule(site_key: str) -> SiteRule | None:
+        if build_manager is not None:
+            return build_manager.ensure_site_rule(site_key)
+        current = store.get_site_rule(site_key)
+        if current is not None:
+            return current
+        latest = store.latest_batch_site_rule(site_key)
+        if (
+            latest is None
+            or rules is None
+            or not latest.rule_id
+            or not latest.rule_version
+            or not latest.rule_path
+        ):
+            return None
+        path = rules / latest.rule_path
+        if not path.is_file():
+            return None
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        store.create_rule_version(
+            RuleVersion(
+                rule_id=latest.rule_id,
+                rule_version=latest.rule_version,
+                sha256=digest,
+                path=latest.rule_path,
+                status="active",
+                created_at=latest.updated_at,
+                activated_at=latest.updated_at,
+                activated_by="legacy-migration",
+            )
+        )
+        return store.upsert_site_rule(
+            SiteRule(
+                site_key=site_key,
+                rule_id=latest.rule_id,
+                rule_version=latest.rule_version,
+                sha256=digest,
+                path=latest.rule_path,
+                updated_at=latest.updated_at,
+            )
+        )
+
+    def known_site(site_key: str) -> bool:
+        return bool(
+            store.get_site_rule(site_key)
+            or store.latest_batch_site_rule(site_key)
+            or store.list_builds(site_key=site_key, limit=1)
+        )
+
+    def site_rule_payload(site_key: str) -> SiteRuleResponse:
+        if not known_site(site_key):
+            raise _error("SITE_NOT_FOUND", f"unknown site: {site_key}", 404)
+        active = ensure_site_rule(site_key)
+        rule_id = active.rule_id if active else None
+        if rule_id is None:
+            latest = store.latest_batch_site_rule(site_key)
+            rule_id = latest.rule_id if latest else None
+        candidates: list[RuleVersion] = []
+        if rule_id is None:
+            builds = store.list_builds(site_key=site_key, limit=1)
+            if builds and builds[0].rule_id:
+                rule_id = builds[0].rule_id
+        if rule_id:
+            candidates = store.list_candidate_rules(rule_id)
+        tasks = [
+            task
+            for task in store.list_tasks()
+            if (task.site_key or task.plan_id) == site_key
+        ]
+        stale_tasks = 0
+        if active is not None:
+            for task in tasks:
+                if task.plan_version != active.rule_version or (
+                    task.rule_sha256 and task.rule_sha256 != active.sha256
+                ):
+                    stale_tasks += 1
+        feedback, _ = store.list_feedback(site_key=site_key, limit=200)
+        open_feedback = sum(
+            1
+            for item in feedback
+            if item.status
+            not in {"RESOLVED", "WONTFIX"}
+        )
+        active_record = (
+            store.get_rule_version(active.rule_id, active.rule_version)
+            if active
+            else None
+        )
+        candidate_payloads: list[SiteRuleCandidate] = []
+        for item in candidates:
+            build = (
+                store.get_build(item.source_build_id)
+                if item.source_build_id
+                else None
+            )
+            candidate_payloads.append(
+                SiteRuleCandidate(
+                    rule_version=item.rule_version,
+                    sha256=item.sha256,
+                    build_id=item.source_build_id,
+                    validation_status=(
+                        str((build.validation or {}).get("status") or "") or None
+                        if build
+                        else None
+                    ),
+                    created_at=item.created_at,
+                )
+            )
+        return SiteRuleResponse(
+            site_key=site_key,
+            rule_id=rule_id,
+            active=(
+                SiteRuleActive(
+                    rule_version=active.rule_version,
+                    sha256=active.sha256,
+                    path=active.path,
+                    activated_at=active_record.activated_at if active_record else None,
+                )
+                if active
+                else None
+            ),
+            candidates=candidate_payloads,
+            stale_tasks=stale_tasks,
+            open_feedback=open_feedback,
+        )
+
+    def require_file_hash(version: RuleVersion) -> None:
+        if rules is None:
+            raise _error("RULES_NOT_CONFIGURED", "rules directory is not set", 400)
+        path = rules / version.path
+        if not path.is_file():
+            raise _error(
+                "RULE_HASH_MISMATCH",
+                f"rule file is missing: {version.path}",
+                409,
+            )
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        if digest != version.sha256:
+            raise _error(
+                "RULE_HASH_MISMATCH",
+                f"rule file hash does not match ledger: {version.path}",
+                409,
+            )
+
     @app.middleware("http")
     async def same_origin_guard(request: Request, call_next: Any) -> Any:
         host = request.headers.get("host", "")
@@ -603,7 +946,7 @@ def create_app(
                 "error": {
                     "code": detail.get("code", "ERROR"),
                     "message": detail.get("message", str(exc.detail)),
-                    "details": {},
+                    "details": detail.get("details", {}),
                 }
             },
         )
@@ -1478,6 +1821,431 @@ def create_app(
             raise _error("INVALID_FEEDBACK_STATE", str(exc), 409) from exc
         return FeedbackTriageResponse(feedback=_feedback_payload(feedback))
 
+    @app.post("/api/feedback/{feedback_id}/repair", status_code=202)
+    def repair_feedback(
+        feedback_id: str, payload: FeedbackRepairRequest
+    ) -> dict[str, Any]:
+        if build_manager is None:
+            raise _error(
+                "BUILD_UNAVAILABLE",
+                "build agent is not configured; start serve with --rules-dir",
+                409,
+            )
+        feedback = store.get_feedback(feedback_id)
+        if feedback is None:
+            raise _error("FEEDBACK_NOT_FOUND", f"unknown feedback: {feedback_id}", 404)
+        existing_build = store.get_build_by_request_id(payload.request_id)
+        if existing_build is not None:
+            if existing_build.feedback_id != feedback_id:
+                raise _error(
+                    "CONFLICT", "request_id belongs to another feedback", 409
+                )
+            return {
+                "accepted": True,
+                "build": build_manager.describe(existing_build.build_id),
+                "feedback": _feedback_payload(
+                    store.get_feedback(feedback_id) or feedback
+                ),
+            }
+        if feedback.status not in {"OPEN", "TRIAGED"}:
+            raise _error(
+                "INVALID_FEEDBACK_STATE",
+                f"feedback is {feedback.status}, expected OPEN or TRIAGED",
+                409,
+            )
+        if feedback.triage not in {None, "RULE_REPAIR"}:
+            raise _error(
+                "INVALID_FEEDBACK_STATE",
+                f"feedback triage is {feedback.triage}, expected RULE_REPAIR",
+                409,
+            )
+        if feedback.category in {"ACCESS_RUNTIME", "BUSINESS_EXPECTATION"}:
+            raise _error(
+                "INVALID_FEEDBACK_STATE",
+                "runtime/business feedback must be triaged and handled outside rule repair",
+                409,
+            )
+        if not feedback.batch_id or not feedback.site_key:
+            raise _error(
+                "INVALID_STATE",
+                "feedback has no batch/site; use the site build entry instead",
+                409,
+            )
+        task = store.get_task(feedback.task_id)
+        if task is None or task.state not in {"FINISHED", "CANCELLED"}:
+            raise _error(
+                "INVALID_TASK_STATE",
+                "feedback task must be terminal before repair",
+                409,
+            )
+        busy = site_busy(feedback.site_key)
+        if busy:
+            raise _error("SITE_BUSY", "site has active work", 409, busy)
+        active = build_manager.ensure_site_rule(feedback.site_key)
+        if active is None:
+            raise _error(
+                "RULE_NOT_ACTIVE",
+                "site has no active rule; use the site build entry",
+                409,
+            )
+        batch = store.get_batch(feedback.batch_id)
+        site = store.get_batch_site(feedback.batch_id, feedback.site_key)
+        if batch is None or site is None:
+            raise _error("INVALID_STATE", "feedback batch/site no longer exists", 409)
+        store.update_feedback(
+            feedback_id,
+            status="REPAIRING",
+            triage=feedback.triage or "RULE_REPAIR",
+            triage_source=feedback.triage_source or "repair",
+        )
+        try:
+            record = build_manager.repair(
+                batch,
+                site,
+                reason=payload.reason or feedback.expectation,
+                max_products=payload.max_products,
+                max_seconds=payload.max_seconds,
+                capture_reasoning=payload.capture_reasoning,
+                repair_rounds=payload.repair_rounds,
+                archive_mode=payload.archive_mode,
+                archive_root=payload.archive_root,
+                archive_sample_limit=payload.archive_sample_limit,
+                archive_max_bytes=payload.archive_max_bytes,
+                feedback_id=feedback_id,
+                request_id=payload.request_id,
+            )
+        except BuildError as exc:
+            store.update_feedback(feedback_id, status="TRIAGED")
+            raise _error("BUILD_CONFLICT", str(exc), 409) from exc
+        store.update_feedback(feedback_id, repair_build_id=record.build_id)
+        updated = store.get_feedback(feedback_id) or feedback
+        return {
+            "accepted": True,
+            "build": build_manager.describe(record.build_id),
+            "feedback": _feedback_payload(updated),
+        }
+
+    @app.post("/api/feedback/{feedback_id}/rerun", status_code=202)
+    def rerun_feedback(
+        feedback_id: str, payload: FeedbackRerunRequest
+    ) -> dict[str, Any]:
+        if rules is None or not rules.is_dir():
+            raise _error("RULES_NOT_CONFIGURED", "rules directory is not set", 400)
+        feedback = store.get_feedback(feedback_id)
+        if feedback is None:
+            raise _error("FEEDBACK_NOT_FOUND", f"unknown feedback: {feedback_id}", 404)
+        if feedback.status != "AWAITING_RERUN":
+            raise _error(
+                "INVALID_FEEDBACK_STATE",
+                f"feedback is {feedback.status}, expected AWAITING_RERUN",
+                409,
+            )
+        if not feedback.batch_id or not feedback.site_key:
+            raise _error(
+                "INVALID_STATE", "feedback has no batch/site; create a task manually", 409
+            )
+        batch = store.get_batch(feedback.batch_id)
+        if batch is None or batch.archived_at:
+            raise _error("INVALID_STATE", "feedback batch is missing or archived", 409)
+        active = ensure_site_rule(feedback.site_key)
+        if active is None:
+            raise _error("RULE_NOT_ACTIVE", "site has no active rule", 409)
+        busy = site_busy(feedback.site_key)
+        if busy:
+            raise _error("SITE_BUSY", "site has active work", 409, busy)
+        rule_path = rules / active.path
+        if not rule_path.is_file():
+            raise _error("RULE_HASH_MISMATCH", "active rule file is missing", 409)
+        task_id = f"web-{uuid.uuid4().hex[:12]}"
+        task = build_task(
+            rule_path=rule_path,
+            task_id=task_id,
+            task_type="product",
+            max_urls=payload.limits.max_urls,
+            max_products=payload.limits.max_products,
+            max_seconds=payload.limits.max_seconds,
+            max_attempts=payload.limits.max_attempts,
+            archive_mode=payload.archive_mode,
+            archive_root=root / "archive",
+        )
+        task.batch_id = feedback.batch_id
+        task.site_key = feedback.site_key
+        request_json = json.dumps(
+            {"feedback_id": feedback_id, **payload.model_dump()},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        task, created = store.create_task_idempotent(
+            task, payload.request_id, request_json
+        )
+        if created:
+            store.request_start(task.task_id)
+        store.update_feedback(
+            feedback_id,
+            status="RERUN_PENDING",
+            rerun_task_id=task.task_id,
+        )
+        updated = store.get_feedback(feedback_id) or feedback
+        return {
+            "accepted": True,
+            "created": created,
+            "task": _summary(store, store.get_task(task.task_id) or task, root),
+            "feedback": _feedback_payload(updated),
+        }
+
+    @app.post("/api/feedback/{feedback_id}/resolve")
+    def resolve_feedback(
+        feedback_id: str, payload: FeedbackResolveRequest
+    ) -> dict[str, Any]:
+        feedback = store.get_feedback(feedback_id)
+        if feedback is None:
+            raise _error("FEEDBACK_NOT_FOUND", f"unknown feedback: {feedback_id}", 404)
+        if payload.resolution == "RESOLVED":
+            if feedback.status == "RERUN_PENDING":
+                if not feedback.rerun_task_id:
+                    raise _error(
+                        "INVALID_FEEDBACK_STATE", "rerun task is missing", 409
+                    )
+                rerun = store.get_task(feedback.rerun_task_id)
+                if rerun is None or rerun.state not in {"FINISHED", "CANCELLED"}:
+                    raise _error(
+                        "INVALID_FEEDBACK_STATE",
+                        "rerun task is not terminal",
+                        409,
+                    )
+            elif feedback.status == "TRIAGED" and feedback.triage in {
+                "RUNTIME",
+                "BUSINESS",
+            }:
+                pass
+            else:
+                raise _error(
+                    "INVALID_FEEDBACK_STATE",
+                    f"feedback is {feedback.status}; cannot resolve as RESOLVED",
+                    409,
+                )
+            resolution = "RESOLVED"
+        else:
+            if feedback.status in {"RESOLVED", "WONTFIX"}:
+                raise _error(
+                    "INVALID_FEEDBACK_STATE", "feedback is already closed", 409
+                )
+            if feedback.status == "REPAIRING":
+                raise _error(
+                    "SITE_BUSY",
+                    "repair build is still active; wait or cancel it first",
+                    409,
+                )
+            resolution = "WONTFIX"
+        updated = store.update_feedback(
+            feedback_id,
+            status=resolution,
+            resolution=resolution,
+            resolution_note=payload.note,
+            resolved_by=payload.actor or "local-user",
+            closed_at=utc_now(),
+        )
+        return {"feedback": _feedback_payload(updated)}
+
+    @app.get(
+        "/api/rules/{rule_id}/versions",
+        response_model=RuleVersionListResponse,
+    )
+    def list_rule_versions(
+        rule_id: str,
+        status: Annotated[str | None, Query(max_length=30)] = None,
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+        offset: Annotated[int, Query(ge=0)] = 0,
+    ) -> RuleVersionListResponse:
+        items, total = store.list_rule_versions(
+            rule_id,
+            status=status.strip().lower() if status else None,
+            limit=limit,
+            offset=offset,
+        )
+        return RuleVersionListResponse(
+            total=total, items=[rule_version_payload(item) for item in items]
+        )
+
+    @app.get(
+        "/api/rules/{rule_id}/versions/{rule_version}",
+        response_model=RuleVersionRecord,
+    )
+    def get_rule_version(rule_id: str, rule_version: str) -> RuleVersionRecord:
+        version = store.get_rule_version(rule_id, rule_version)
+        if version is None:
+            raise _error(
+                "RULE_NOT_FOUND",
+                f"unknown rule version: {rule_id}@{rule_version}",
+                404,
+            )
+        return rule_version_payload(version)
+
+    @app.post(
+        "/api/rules/{rule_id}/versions/{rule_version}/reject",
+        response_model=RuleVersionRecord,
+    )
+    def reject_rule_version(
+        rule_id: str,
+        rule_version: str,
+        payload: RuleRejectRequest,
+    ) -> RuleVersionRecord:
+        try:
+            version = store.reject_rule_version(
+                rule_id,
+                rule_version,
+                reason=payload.reason,
+                feedback_id=payload.feedback_id,
+                retry=payload.retry,
+                actor=payload.actor or "local-user",
+            )
+        except RuleVersionError as exc:
+            raise rule_error(exc) from exc
+        return rule_version_payload(version)
+
+    @app.get("/api/sites/{site_key}/rule", response_model=SiteRuleResponse)
+    def read_site_rule(site_key: str) -> SiteRuleResponse:
+        return site_rule_payload(site_key)
+
+    @app.post("/api/sites/{site_key}/rule/activate")
+    def activate_site_rule(
+        site_key: str, payload: RuleActivateRequest
+    ) -> dict[str, Any]:
+        existing = store.get_activation_by_request(payload.request_id)
+        if existing is not None:
+            return {
+                "activated": True,
+                "site": site_rule_payload(site_key).model_dump(),
+                "previous": {
+                    "rule_version": existing.from_version,
+                    "sha256": existing.from_sha256,
+                },
+            }
+        busy = site_busy(site_key)
+        if busy:
+            raise _error("SITE_BUSY", "site has active work", 409, busy)
+        active = store.get_site_rule(site_key)
+        target = store.get_rule_version(
+            payload.rule_id or (active.rule_id if active else ""),
+            payload.rule_version,
+        )
+        if target is None:
+            raise _error("RULE_NOT_FOUND", "candidate rule version not found", 404)
+        if payload.rule_id and payload.rule_id != target.rule_id:
+            raise _error(
+                "RULE_ID_MISMATCH",
+                f"rule_id does not match candidate: {target.rule_id}",
+                409,
+            )
+        require_file_hash(target)
+        try:
+            site_rule, activation = store.activate_rule(
+                site_key=site_key,
+                rule_id=target.rule_id,
+                rule_version=target.rule_version,
+                sha256=target.sha256,
+                expected_active_version=payload.expected_active_version,
+                expected_active_sha256=payload.expected_active_sha256,
+                feedback_id=payload.feedback_id,
+                request_id=payload.request_id,
+                reason=payload.reason,
+                actor=payload.actor or "local-user",
+                action="activate",
+            )
+        except RuleVersionError as exc:
+            raise rule_error(exc) from exc
+        feedback = None
+        linked = payload.feedback_id or target.source_feedback_id
+        if linked:
+            record = store.get_feedback(linked)
+            feedback = _feedback_payload(record) if record else None
+        return {
+            "activated": True,
+            "site": {
+                "site_key": site_rule.site_key,
+                "active": {
+                    "rule_version": site_rule.rule_version,
+                    "sha256": site_rule.sha256,
+                    "path": site_rule.path,
+                },
+            },
+            "previous": {
+                "rule_version": activation.from_version,
+                "sha256": activation.from_sha256,
+            },
+            "feedback": feedback,
+        }
+
+    @app.post("/api/sites/{site_key}/rule/rollback")
+    def rollback_site_rule(
+        site_key: str, payload: RuleRollbackRequest
+    ) -> dict[str, Any]:
+        existing = store.get_activation_by_request(payload.request_id)
+        if existing is not None:
+            return {
+                "rolled_back": True,
+                "site": site_rule_payload(site_key).model_dump(),
+                "previous": {
+                    "rule_version": existing.from_version,
+                    "sha256": existing.from_sha256,
+                },
+                "target": {
+                    "rule_version": existing.to_version,
+                    "sha256": existing.to_sha256,
+                },
+            }
+        busy = site_busy(site_key)
+        if busy:
+            raise _error("SITE_BUSY", "site has active work", 409, busy)
+        active = ensure_site_rule(site_key)
+        if active is None:
+            raise _error("RULE_NOT_ACTIVE", "site has no active rule", 409)
+        target = None
+        if payload.to_version:
+            target = store.get_rule_version(active.rule_id, payload.to_version)
+        else:
+            target = store.latest_superseded_rule(active.rule_id)
+        if target is None:
+            raise _error("RULE_NOT_ACTIVE", "no rollback target found", 409)
+        require_file_hash(target)
+        try:
+            site_rule, activation = store.activate_rule(
+                site_key=site_key,
+                rule_id=target.rule_id,
+                rule_version=target.rule_version,
+                sha256=target.sha256,
+                expected_active_version=(
+                    payload.expected_active_version or active.rule_version
+                ),
+                feedback_id=None,
+                request_id=payload.request_id,
+                reason=payload.reason,
+                actor=payload.actor or "local-user",
+                action="rollback",
+            )
+        except RuleVersionError as exc:
+            raise rule_error(exc) from exc
+        return {
+            "rolled_back": True,
+            "site": {
+                "site_key": site_rule.site_key,
+                "active": {
+                    "rule_version": site_rule.rule_version,
+                    "sha256": site_rule.sha256,
+                    "path": site_rule.path,
+                },
+            },
+            "previous": {
+                "rule_version": activation.from_version,
+                "sha256": activation.from_sha256,
+            },
+            "target": {
+                "rule_version": target.rule_version,
+                "sha256": target.sha256,
+            },
+        }
+
     @app.get("/api/batches")
     def list_batches(
         status: Annotated[str | None, Query()] = None,
@@ -1898,11 +2666,20 @@ def create_app(
     @app.get("/api/builds")
     def list_builds(
         batch_id: str | None = None,
+        site_key: str | None = None,
+        feedback_id: str | None = None,
+        state: str | None = None,
         limit: int = Query(default=20, ge=1, le=100),
     ) -> dict[str, Any]:
         if build_manager is None:
             raise _error("BUILD_UNAVAILABLE", "build agent is not configured", 409)
-        records = store.list_builds(batch_id=batch_id, limit=limit)
+        records = store.list_builds(
+            batch_id=batch_id,
+            site_key=site_key,
+            feedback_id=feedback_id,
+            states={state} if state else None,
+            limit=limit,
+        )
         return {
             "builds": [
                 build_manager.describe(record.build_id, event_limit=1)
@@ -1930,6 +2707,41 @@ def create_app(
         if site is None:
             raise _error("NOT_FOUND", f"unknown batch site: {site_key}", 404)
         request = payload or BuildStartRequest()
+        feedback = None
+        if request.feedback_id:
+            if request.mode != "repair":
+                raise _error(
+                    "INVALID_STATE",
+                    "feedback_id is only valid for mode=repair",
+                    409,
+                )
+            feedback = store.get_feedback(request.feedback_id)
+            if feedback is None:
+                raise _error(
+                    "FEEDBACK_NOT_FOUND",
+                    f"unknown feedback: {request.feedback_id}",
+                    404,
+                )
+            if (
+                feedback.site_key != site.site_key
+                or feedback.batch_id != batch.batch_id
+            ):
+                raise _error(
+                    "INVALID_STATE",
+                    "feedback does not belong to this batch site",
+                    409,
+                )
+        if request.mode == "repair" and request.feedback_id:
+            triage_value = (feedback.triage if feedback else None) or "RULE_REPAIR"
+            triage_source = (
+                feedback.triage_source if feedback else None
+            ) or "repair"
+            store.update_feedback(
+                request.feedback_id,
+                status="REPAIRING",
+                triage=triage_value,
+                triage_source=triage_source,
+            )
         try:
             if request.mode == "repair":
                 record = build_manager.repair(
@@ -1945,7 +2757,14 @@ def create_app(
                     archive_root=request.archive_root,
                     archive_sample_limit=request.archive_sample_limit,
                     archive_max_bytes=request.archive_max_bytes,
+                    feedback_id=request.feedback_id,
+                    request_id=request.request_id,
                 )
+                if request.feedback_id:
+                    store.update_feedback(
+                        request.feedback_id,
+                        repair_build_id=record.build_id,
+                    )
             else:
                 record = build_manager.start(
                     batch,

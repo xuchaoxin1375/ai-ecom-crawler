@@ -159,7 +159,8 @@ export function TaskDetailPage() {
   const quality = task?.quality_exceptions ?? [];
   const site = batchQuery.data?.sites.find((item) => item.site_key === task?.site_key);
   const siteRule = site?.rule ?? null;
-  const stale = task ? taskRuleIsStale(task, siteRule) : false;
+  const stale = task ? (task.rule?.stale ?? taskRuleIsStale(task, siteRule)) : false;
+  const activeVersion = task?.rule?.active_version ?? siteRule?.rule_version;
 
   function applyTask(next: TaskSummary) {
     queryClient.setQueryData(["task", taskId], next);
@@ -379,9 +380,9 @@ export function TaskDetailPage() {
                   已归档
                 </Badge>
               ) : null}
-              {stale && siteRule ? (
+              {stale && activeVersion ? (
                 <span
-                  title={`站点当前规则 ${siteRule.rule_id}@${siteRule.rule_version}`}
+                  title={`站点当前规则 ${task.rule?.rule_id ?? task.plan_id}@${activeVersion}`}
                 >
                   <Badge tone="warning" dot={false}>
                     结果基于旧规则
@@ -481,14 +482,14 @@ export function TaskDetailPage() {
         </div>
       </header>
 
-      {stale && siteRule ? (
+      {stale && activeVersion ? (
         <div
           className="rounded-panel border border-warning/25 bg-warning-soft px-4 py-3 text-sm leading-6 text-warning"
           role="status"
         >
           站点规则已更新到{" "}
           <code className="font-mono text-xs">
-            {siteRule.rule_id}@{siteRule.rule_version}
+            {task.rule?.rule_id ?? task.plan_id}@{activeVersion}
           </code>
           ，当前结果仍基于{" "}
           <code className="font-mono text-xs">
@@ -570,10 +571,10 @@ export function TaskDetailPage() {
                 </code>
               </Fact>
               <Fact label="站点当前规则">
-                {siteRule ? (
+                {activeVersion ? (
                   <span>
                     <code className="font-mono text-[11px]">
-                      {siteRule.rule_id}@{siteRule.rule_version}
+                      {task.rule?.rule_id ?? task.plan_id}@{activeVersion}
                     </code>
                     <span className="ml-1 text-ink-3">
                       {stale ? "（新于结果）" : "（与结果一致）"}

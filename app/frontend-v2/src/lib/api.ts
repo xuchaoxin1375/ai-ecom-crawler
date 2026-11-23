@@ -103,6 +103,19 @@ export interface TaskSummary {
   coverage?: TaskCoverage | null;
   quality_exceptions?: QualityException[];
   content_audit?: TaskContentAudit | null;
+  rule?: {
+    rule_id: string;
+    rule_version: string;
+    sha256: string | null;
+    active_version: string | null;
+    active_sha256: string | null;
+    stale: boolean | null;
+  } | null;
+  feedback?: {
+    open: number;
+    latest_id: string | null;
+    latest_status: FeedbackStatus | null;
+  } | null;
   archived_at?: string | null;
   created_at: string;
   updated_at: string;
@@ -239,6 +252,56 @@ export interface RuleRef {
   path: string;
 }
 
+export interface RuleVersionRecord {
+  rule_id: string;
+  rule_version: string;
+  sha256: string;
+  parent_version: string | null;
+  status: "candidate" | "active" | "superseded" | "rejected" | "retired";
+  source_build_id: string | null;
+  source_feedback_id: string | null;
+  path: string;
+  created_at: string;
+  activated_at: string | null;
+  activated_by: string | null;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  notes: string | null;
+}
+
+export interface SiteRuleCandidate {
+  rule_version: string;
+  sha256: string;
+  build_id: string | null;
+  validation_status: string | null;
+  created_at: string;
+}
+
+export interface SiteRuleResponse {
+  site_key: string;
+  rule_id: string | null;
+  active: {
+    rule_version: string;
+    sha256: string;
+    path: string;
+    activated_at: string | null;
+  } | null;
+  candidates: SiteRuleCandidate[];
+  stale_tasks: number;
+  open_feedback: number;
+}
+
+export interface RuleActivationResponse {
+  activated?: boolean;
+  rolled_back?: boolean;
+  site: {
+    site_key: string;
+    active?: { rule_version: string; sha256: string; path?: string };
+  };
+  previous: { rule_version: string | null; sha256: string | null };
+  feedback?: FeedbackRecord | null;
+}
+
 export interface BuildSummary {
   build_id: string;
   state: string;
@@ -294,6 +357,12 @@ export interface BuildStatus {
   proxy_configured: boolean;
   error: string | null;
   rule: RuleRef | null;
+  feedback_id?: string | null;
+  source_rule?: { rule_version: string | null; sha256: string | null } | null;
+  candidate_rule?: { rule_version: string | null; sha256: string | null } | null;
+  error_class?: string | null;
+  change_summary?: Record<string, unknown>;
+  validation?: Record<string, unknown>;
   created_at: string;
   updated_at: string;
   started_at: string | null;
@@ -793,6 +862,130 @@ export function triageFeedback(
 ): Promise<FeedbackTriageResponse> {
   return sendJson<FeedbackTriageResponse>(
     `/api/feedback/${encodeURIComponent(feedbackId)}/triage`,
+    "POST",
+    body,
+  );
+}
+
+export interface FeedbackRepairRequest {
+  request_id: string;
+  reason?: string | null;
+  max_products?: number;
+  max_seconds?: number;
+  repair_rounds?: number | null;
+  capture_reasoning?: boolean;
+}
+
+export interface FeedbackRepairResponse {
+  accepted: boolean;
+  build: BuildStatus;
+  feedback: FeedbackRecord;
+}
+
+export function repairFeedback(
+  feedbackId: string,
+  body: FeedbackRepairRequest,
+): Promise<FeedbackRepairResponse> {
+  return sendJson<FeedbackRepairResponse>(
+    `/api/feedback/${encodeURIComponent(feedbackId)}/repair`,
+    "POST",
+    body,
+  );
+}
+
+export interface FeedbackRerunRequest {
+  request_id: string;
+  limits?: {
+    max_products?: number | null;
+    max_urls?: number | null;
+    max_seconds?: number | null;
+    max_attempts?: number;
+  };
+}
+
+export interface FeedbackRerunResponse {
+  accepted: boolean;
+  created: boolean;
+  task: TaskSummary;
+  feedback: FeedbackRecord;
+}
+
+export function rerunFeedback(
+  feedbackId: string,
+  body: FeedbackRerunRequest,
+): Promise<FeedbackRerunResponse> {
+  return sendJson<FeedbackRerunResponse>(
+    `/api/feedback/${encodeURIComponent(feedbackId)}/rerun`,
+    "POST",
+    body,
+  );
+}
+
+export function resolveFeedback(
+  feedbackId: string,
+  body: { request_id: string; resolution: "RESOLVED" | "WONTFIX"; note?: string },
+): Promise<{ feedback: FeedbackRecord }> {
+  return sendJson<{ feedback: FeedbackRecord }>(
+    `/api/feedback/${encodeURIComponent(feedbackId)}/resolve`,
+    "POST",
+    body,
+  );
+}
+
+export function getSiteRule(
+  siteKey: string,
+  signal?: AbortSignal,
+): Promise<SiteRuleResponse> {
+  return getJson<SiteRuleResponse>(
+    `/api/sites/${encodeURIComponent(siteKey)}/rule`,
+    signal,
+  );
+}
+
+export function activateSiteRule(
+  siteKey: string,
+  body: {
+    request_id: string;
+    rule_id?: string | null;
+    rule_version: string;
+    expected_active_version?: string | null;
+    expected_active_sha256?: string | null;
+    feedback_id?: string | null;
+    reason?: string | null;
+  },
+): Promise<RuleActivationResponse> {
+  return sendJson<RuleActivationResponse>(
+    `/api/sites/${encodeURIComponent(siteKey)}/rule/activate`,
+    "POST",
+    body,
+  );
+}
+
+export function rollbackSiteRule(
+  siteKey: string,
+  body: {
+    request_id: string;
+    to_version?: string | null;
+    expected_active_version?: string | null;
+    reason?: string | null;
+  },
+): Promise<RuleActivationResponse> {
+  return sendJson<RuleActivationResponse>(
+    `/api/sites/${encodeURIComponent(siteKey)}/rule/rollback`,
+    "POST",
+    body,
+  );
+}
+
+export function rejectRuleVersion(
+  ruleId: string,
+  ruleVersion: string,
+  body: { reason?: string | null; feedback_id?: string | null; retry?: boolean },
+): Promise<RuleVersionRecord> {
+  return sendJson<RuleVersionRecord>(
+    `/api/rules/${encodeURIComponent(ruleId)}/versions/${encodeURIComponent(
+      ruleVersion,
+    )}/reject`,
     "POST",
     body,
   );

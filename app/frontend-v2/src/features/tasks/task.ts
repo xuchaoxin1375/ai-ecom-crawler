@@ -107,6 +107,10 @@ export function feedbackIsOpen(feedback: FeedbackRecord): boolean {
   return feedback.status === "OPEN" || feedback.status === "TRIAGED";
 }
 
+export function feedbackIsUnclosed(feedback: FeedbackRecord): boolean {
+  return feedback.status !== "RESOLVED" && feedback.status !== "WONTFIX";
+}
+
 export function feedbackNeedsSamples(category: FeedbackCategory): boolean {
   return category !== "BUSINESS_EXPECTATION" && category !== "OTHER";
 }

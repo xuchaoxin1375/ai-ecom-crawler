@@ -1,9 +1,13 @@
 import { useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronDown, Send, ShieldAlert } from "lucide-react";
+import { Check, ChevronDown, Send, ShieldAlert, Wrench } from "lucide-react";
 import {
   createTaskFeedback,
   getTaskFeedback,
+  repairFeedback,
+  rerunFeedback,
+  resolveFeedback,
   triageFeedback,
   type FeedbackCategory,
   type FeedbackRecord,
@@ -21,6 +25,7 @@ import {
   FEEDBACK_TRIAGE_OPTIONS,
   feedbackCategoryLabel,
   feedbackIsOpen,
+  feedbackIsUnclosed,
   feedbackNeedsSamples,
   feedbackStatusLabel,
   feedbackStatusTone,
@@ -59,6 +64,87 @@ function FeedbackCard({ feedback, onChanged }: FeedbackCardProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
+  const [actionBusy, setActionBusy] = useState("");
+  const [actionError, setActionError] = useState("");
+  const [actionMessage, setActionMessage] = useState("");
+  const [rerunTaskId, setRerunTaskId] = useState("");
+
+  const ruleRepair =
+    feedback.status === "TRIAGED"
+      ? feedback.triage === "RULE_REPAIR"
+      : feedback.status === "OPEN" &&
+        feedback.category !== "ACCESS_RUNTIME" &&
+        feedback.category !== "BUSINESS_EXPECTATION";
+  const runtimeBusiness =
+    feedback.status === "TRIAGED" &&
+    (feedback.triage === "RUNTIME" || feedback.triage === "BUSINESS");
+
+  function refresh() {
+    void queryClient.invalidateQueries({
+      queryKey: ["task-feedback", feedback.task_id],
+    });
+    void queryClient.invalidateQueries({
+      queryKey: ["site-rule", feedback.site_key],
+    });
+    onChanged();
+  }
+
+  async function startRepair() {
+    setActionBusy("repair");
+    setActionError("");
+    setActionMessage("");
+    try {
+      const response = await repairFeedback(feedback.feedback_id, {
+        request_id: requestId("fb-repair"),
+        reason: feedback.expectation,
+      });
+      setActionMessage(`修复构建已启动：${response.build.build_id}`);
+      refresh();
+    } catch (exc) {
+      setActionError(exc instanceof Error ? exc.message : String(exc));
+    } finally {
+      setActionBusy("");
+    }
+  }
+
+  async function startRerun() {
+    setActionBusy("rerun");
+    setActionError("");
+    setActionMessage("");
+    try {
+      const response = await rerunFeedback(feedback.feedback_id, {
+        request_id: requestId("fb-rerun"),
+      });
+      setRerunTaskId(response.task.task_id);
+      setActionMessage(`复跑任务已创建：${response.task.task_id}`);
+      refresh();
+    } catch (exc) {
+      setActionError(exc instanceof Error ? exc.message : String(exc));
+    } finally {
+      setActionBusy("");
+    }
+  }
+
+  async function close(resolution: "RESOLVED" | "WONTFIX") {
+    setActionBusy(resolution);
+    setActionError("");
+    setActionMessage("");
+    try {
+      await resolveFeedback(feedback.feedback_id, {
+        request_id: requestId("fb-resolve"),
+        resolution,
+        note: resolution === "RESOLVED" ? "复跑结果确认改善" : "用户确认不再处理",
+      });
+      setActionMessage(
+        resolution === "RESOLVED" ? "反馈已标记为已解决。" : "反馈已标记为不处理。",
+      );
+      refresh();
+    } catch (exc) {
+      setActionError(exc instanceof Error ? exc.message : String(exc));
+    } finally {
+      setActionBusy("");
+    }
+  }
 
   async function submitTriage() {
     setError("");
@@ -152,6 +238,84 @@ function FeedbackCard({ feedback, onChanged }: FeedbackCardProps) {
           </p>
         ) : null}
       </div>
+
+      {actionError ? (
+        <div className="px-4 pb-3">
+          <ErrorNotice title="操作失败" message={actionError} compact />
+        </div>
+      ) : null}
+      {actionMessage ? (
+        <p className="mx-4 mb-3 rounded-control border border-success/20 bg-success-soft px-3 py-2 text-xs leading-5 text-success">
+          {actionMessage}
+          {rerunTaskId ? (
+            <>
+              {" "}
+              <Link
+                className="font-medium underline"
+                to={`/tasks/${encodeURIComponent(rerunTaskId)}`}
+              >
+                打开复跑任务
+              </Link>
+            </>
+          ) : null}
+        </p>
+      ) : null}
+
+      {[
+        "OPEN",
+        "TRIAGED",
+        "AWAITING_ACTIVATION",
+        "AWAITING_RERUN",
+        "RERUN_PENDING",
+      ].includes(feedback.status) || runtimeBusiness ? (
+        <div className="flex flex-wrap items-center gap-2 px-4 pb-3">
+          {ruleRepair && ["OPEN", "TRIAGED"].includes(feedback.status) ? (
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={() => void startRepair()}
+              disabled={Boolean(actionBusy)}
+            >
+              <Wrench size={13} aria-hidden="true" />
+              {actionBusy === "repair" ? "启动中…" : "启动修复"}
+            </Button>
+          ) : null}
+          {feedback.status === "AWAITING_ACTIVATION" ? (
+            <span className="text-xs text-ink-3">
+              等待在站点详情激活候选规则后再复跑。
+            </span>
+          ) : null}
+          {feedback.status === "AWAITING_RERUN" ? (
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={() => void startRerun()}
+              disabled={Boolean(actionBusy)}
+            >
+              {actionBusy === "rerun" ? "创建中…" : "创建复跑任务"}
+            </Button>
+          ) : null}
+          {feedback.status === "RERUN_PENDING" || runtimeBusiness ? (
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={() => void close("RESOLVED")}
+              disabled={Boolean(actionBusy)}
+            >
+              {actionBusy === "RESOLVED" ? "提交中…" : "标记解决"}
+            </Button>
+          ) : null}
+          {!["RESOLVED", "WONTFIX"].includes(feedback.status) ? (
+            <Button
+              size="sm"
+              onClick={() => void close("WONTFIX")}
+              disabled={Boolean(actionBusy)}
+            >
+              {actionBusy === "WONTFIX" ? "提交中…" : "不处理"}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
 
       {saved ? (
         <p
@@ -262,7 +426,7 @@ export function FeedbackPanel({ task }: FeedbackPanelProps) {
 
   const records = query.data?.items ?? [];
   const total = query.data?.total ?? records.length;
-  const openCount = records.filter(feedbackIsOpen).length;
+  const openCount = records.filter(feedbackIsUnclosed).length;
   const taskActive = !["FINISHED", "CANCELLED"].includes(task.state);
 
   async function submit() {

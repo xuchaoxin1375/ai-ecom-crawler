@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { FeedbackRecord, TaskSummary } from "../../lib/api";
 import {
   feedbackIsOpen,
+  feedbackIsUnclosed,
   feedbackNeedsSamples,
   feedbackStatusLabel,
   feedbackStatusTone,
@@ -103,6 +104,8 @@ describe("task helpers", () => {
     expect(feedbackStatusTone("OPEN")).toBe("warning");
     expect(feedbackIsOpen(feedback())).toBe(true);
     expect(feedbackIsOpen(feedback({ status: "RESOLVED" }))).toBe(false);
+    expect(feedbackIsUnclosed(feedback({ status: "AWAITING_RERUN" }))).toBe(true);
+    expect(feedbackIsUnclosed(feedback({ status: "WONTFIX" }))).toBe(false);
     expect(feedbackNeedsSamples("DESCRIPTION")).toBe(true);
     expect(feedbackNeedsSamples("BUSINESS_EXPECTATION")).toBe(false);
   });

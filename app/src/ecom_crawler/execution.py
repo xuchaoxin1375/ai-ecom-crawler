@@ -7,6 +7,7 @@ first version is intentionally single-process and static-only.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -115,6 +116,7 @@ def build_task(
         domain_key=urlparse(rule.entry_url).hostname or "",
         market=str(rule.site.get("market")) if rule.site.get("market") else None,
         rule_path=str(rule_path),
+        rule_sha256=hashlib.sha256(rule_path.read_bytes()).hexdigest(),
     )
 
 

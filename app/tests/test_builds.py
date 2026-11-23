@@ -24,7 +24,13 @@ from ecom_crawler.builds import (
 from ecom_crawler.harness.adapter import BuildSession
 from ecom_crawler.harness.models import BuildTask, HarnessEvent, utc_now
 from ecom_crawler.harness.workspace import BuildWorkspace
-from ecom_crawler.runtime.models import Batch, BatchSite, BuildRecord, Task
+from ecom_crawler.runtime.models import (
+    Batch,
+    BatchSite,
+    BuildRecord,
+    RuleVersion,
+    Task,
+)
 from ecom_crawler.runtime.store import TaskStore
 from ecom_crawler.web.app import create_app
 
@@ -361,6 +367,7 @@ class BuildWorkflowTests(unittest.TestCase):
         max_repair_rounds: int = 0,
         robots_probe: Any | None = None,
         skills_dir: Path | None = None,
+        activation_mode: str = "legacy",
     ) -> BuildManager:
         if validator is None:
 
@@ -390,6 +397,7 @@ class BuildWorkflowTests(unittest.TestCase):
             max_products=2,
             max_repair_rounds=max_repair_rounds,
             repair_seconds=5,
+            activation_mode=activation_mode,
             archive_mode="off",
             robots_probe=robots_probe
             or (lambda entry_url, proxy: ("robots.txt not found", [])),
@@ -815,6 +823,172 @@ class BuildWorkflowTests(unittest.TestCase):
             self.assertEqual(result["state"], "FINISHED")
             self.assertEqual(result["outcome"], "failed")
             self.assertIn("bump rule_version", result["error"])
+
+    def test_candidate_activation_rerun_and_rollback(self) -> None:
+        adapter = FakeBuildAdapter(
+            self.root,
+            rule_payloads=[
+                rule_payload(version="2026.11.23-1"),
+                rule_payload(version="2026.11.23-2"),
+            ],
+        )
+        manager = self._manager(
+            adapter,
+            activation_mode="manual",
+            max_repair_rounds=0,
+        )
+        with self._client(manager) as client:
+            first = client.post(
+                "/api/batches/b-1/sites/example.fr/build",
+                json={},
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(first.status_code, 202, first.text)
+            self._wait_ready(client, first.json()["build"]["build_id"])
+
+            self.store.create_task(
+                Task(
+                    task_id="task-existing",
+                    plan_id="example-fr-build",
+                    plan_version="2026.11.23-1",
+                    task_type="product",
+                    state="FINISHED",
+                    outcome="COMPLETED",
+                    stop_reason="NATURAL_END",
+                    batch_id="b-1",
+                    site_key="example.fr",
+                )
+            )
+            self.store.update_batch_site(
+                "b-1", "example.fr", task_id="task-existing"
+            )
+            feedback = client.post(
+                "/api/tasks/task-existing/feedback",
+                json={
+                    "request_id": "fb-1",
+                    "category": "DESCRIPTION",
+                    "samples": ["https://example.fr/p/1"],
+                    "expectation": "description should contain specs",
+                },
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(feedback.status_code, 201, feedback.text)
+            feedback_id = feedback.json()["feedback"]["feedback_id"]
+
+            repair = client.post(
+                f"/api/feedback/{feedback_id}/repair",
+                json={
+                    "request_id": "fb-repair-1",
+                    "reason": "merge description blocks",
+                },
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(repair.status_code, 202, repair.text)
+            build_id = repair.json()["build"]["build_id"]
+            result = self._wait_ready(client, build_id)
+            self.assertEqual(result["outcome"], "succeeded", result)
+
+            pending = client.get(f"/api/feedback/{feedback_id}").json()
+            self.assertEqual(pending["status"], "AWAITING_ACTIVATION")
+            site_rule = client.get("/api/sites/example.fr/rule").json()
+            self.assertEqual(site_rule["active"]["rule_version"], "2026.11.23-1")
+            self.assertEqual(
+                [item["rule_version"] for item in site_rule["candidates"]],
+                ["2026.11.23-2"],
+            )
+            self.assertEqual(site_rule["stale_tasks"], 0)
+
+            activated = client.post(
+                "/api/sites/example.fr/rule/activate",
+                json={
+                    "request_id": "activate-1",
+                    "rule_version": "2026.11.23-2",
+                    "expected_active_version": "2026.11.23-1",
+                },
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(activated.status_code, 200, activated.text)
+            self.assertTrue(activated.json()["activated"])
+            self.assertEqual(
+                client.get(f"/api/feedback/{feedback_id}").json()["status"],
+                "AWAITING_RERUN",
+            )
+            active_after = client.get("/api/sites/example.fr/rule").json()
+            self.assertEqual(
+                active_after["active"]["rule_version"], "2026.11.23-2"
+            )
+            self.assertEqual(active_after["stale_tasks"], 1)
+
+            rerun = client.post(
+                f"/api/feedback/{feedback_id}/rerun",
+                json={
+                    "request_id": "rerun-1",
+                    "limits": {"max_products": 3, "max_urls": 5, "max_seconds": 60},
+                },
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(rerun.status_code, 202, rerun.text)
+            rerun_task_id = rerun.json()["task"]["task_id"]
+            self.assertEqual(
+                rerun.json()["feedback"]["status"], "RERUN_PENDING"
+            )
+            self.assertEqual(
+                self.store.get_task(rerun_task_id).plan_version, "2026.11.23-2"
+            )
+
+            self.store.update_task(
+                rerun_task_id,
+                state="FINISHED",
+                outcome="COMPLETED",
+                stop_reason="NATURAL_END",
+            )
+            resolved = client.post(
+                f"/api/feedback/{feedback_id}/resolve",
+                json={
+                    "request_id": "resolve-1",
+                    "resolution": "RESOLVED",
+                    "note": "rerun looks good",
+                },
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(resolved.status_code, 200, resolved.text)
+            self.assertEqual(resolved.json()["feedback"]["status"], "RESOLVED")
+            self.assertEqual(self.store.get_task("task-existing").state, "FINISHED")
+
+            rolled_back = client.post(
+                "/api/sites/example.fr/rule/rollback",
+                json={
+                    "request_id": "rollback-1",
+                    "expected_active_version": "2026.11.23-2",
+                },
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(rolled_back.status_code, 200, rolled_back.text)
+            self.assertTrue(rolled_back.json()["rolled_back"])
+            self.assertEqual(
+                client.get("/api/sites/example.fr/rule").json()["active"][
+                    "rule_version"
+                ],
+                "2026.11.23-1",
+            )
+
+            candidate = self.store.create_rule_version(
+                RuleVersion(
+                    rule_id="example-fr-build",
+                    rule_version="2026.11.24-3",
+                    sha256="a" * 64,
+                    path="example-fr-build-2026.11.23-2.yaml",
+                    status="candidate",
+                )
+            )
+            rejected = client.post(
+                f"/api/rules/{candidate.rule_id}/versions/"
+                f"{candidate.rule_version}/reject",
+                json={"reason": "regression", "retry": False},
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(rejected.status_code, 200, rejected.text)
+            self.assertEqual(rejected.json()["status"], "rejected")
 
     def test_content_audit_gap_fails_validation(self) -> None:
         def validator(*_: Any, **__: Any) -> dict[str, Any]:
