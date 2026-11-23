@@ -3,10 +3,14 @@
 
 用法:
     python scripts/check_docs_links.py
+    python scripts/check_docs_links.py --require-tracked
     python scripts/check_docs_links.py --docs docs --verbose
 
 只校验相对路径与文件是否存在，不校验锚点（`#...`）和外部网址。相对链接必须
 落在 docs/ 目录内，指向目录外视为断链，因为导出包要求正文链接全部在包内。
+
+`--require-tracked` 还要求本地链接目标已被 git 跟踪。用于提交前和 CI，避免
+工作区中的未跟踪文件让本地检查通过、干净检出却断链。
 
 需要 Python 3.11+。
 """
@@ -15,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import subprocess
 import sys
 from pathlib import Path
 from urllib.parse import unquote
@@ -41,6 +46,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         epilog=(
             "示例:\n"
             "  python scripts/check_docs_links.py\n"
+            "  python scripts/check_docs_links.py --require-tracked\n"
             "  python scripts/check_docs_links.py --docs docs --verbose\n"
         ),
     )
@@ -48,6 +54,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--docs",
         default=str(DEFAULT_DOCS),
         help="Markdown 根目录，默认 docs/",
+    )
+    parser.add_argument(
+        "--require-tracked",
+        action="store_true",
+        help="要求本地链接目标已被 git 跟踪；用于提交前和 CI",
     )
     parser.add_argument("--verbose", action="store_true", help="逐文件输出检查结果")
     return parser.parse_args(argv)
@@ -91,7 +102,73 @@ def iter_links(text: str) -> list[tuple[int, str, str]]:
     return links
 
 
-def check_target(source: Path, docs_root: Path, target: str) -> str | None:
+def find_git_root(path: Path) -> Path | None:
+    """返回包含 path 的 git 工作树根目录；不在仓库内或 git 不可用时返回 None。"""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            check=False,
+        )
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        return Path(
+            result.stdout.decode("utf-8", errors="surrogateescape").strip()
+        ).resolve()
+    except OSError:
+        return None
+
+
+def load_tracked_paths(git_root: Path) -> tuple[set[str], set[str]] | None:
+    """读取 git 跟踪的文件和目录集合；失败时返回 None。"""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(git_root), "ls-files", "-z"],
+            capture_output=True,
+            check=False,
+        )
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+
+    raw = result.stdout.decode("utf-8", errors="surrogateescape")
+    files = {path for path in raw.split("\0") if path}
+    directories: set[str] = set()
+    for path in files:
+        parts = path.split("/")
+        for index in range(1, len(parts)):
+            directories.add("/".join(parts[:index]))
+    return files, directories
+
+
+def check_tracked(
+    path: Path, git_root: Path, tracked: tuple[set[str], set[str]]
+) -> str | None:
+    """返回未跟踪原因；目标已被 git 跟踪时返回 None。"""
+    try:
+        relative = path.relative_to(git_root).as_posix()
+    except ValueError:
+        return "目标不在 git 工作树内"
+
+    files, directories = tracked
+    if relative in files:
+        return None
+    if path.is_dir() and relative in directories:
+        return None
+    return "目标存在但未被 git 跟踪（提交或 CI 检出后会断链）"
+
+
+def check_target(
+    source: Path,
+    docs_root: Path,
+    target: str,
+    git_root: Path | None = None,
+    tracked: tuple[set[str], set[str]] | None = None,
+) -> str | None:
     """返回断链原因；链接正常时返回 None。"""
     if not target or target.startswith("#"):
         return None
@@ -110,6 +187,8 @@ def check_target(source: Path, docs_root: Path, target: str) -> str | None:
         resolved.relative_to(docs_root)
     except ValueError:
         return "目标在 docs/ 之外，导出包内会断链"
+    if git_root is not None and tracked is not None:
+        return check_tracked(resolved, git_root, tracked)
     return None
 
 
@@ -126,6 +205,21 @@ def main(argv: list[str] | None = None) -> int:
         print(f"错误: 没有找到 Markdown 文件: {docs_root}", file=sys.stderr)
         return 1
 
+    git_root: Path | None = None
+    tracked: tuple[set[str], set[str]] | None = None
+    if args.require_tracked:
+        git_root = find_git_root(docs_root)
+        if git_root is None:
+            print(
+                "错误: --require-tracked 需要 docs 目录位于 git 工作树内，且 git 可用",
+                file=sys.stderr,
+            )
+            return 1
+        tracked = load_tracked_paths(git_root)
+        if tracked is None:
+            print(f"错误: 无法读取 git 跟踪文件列表: {git_root}", file=sys.stderr)
+            return 1
+
     broken: list[tuple[Path, int, str, str, str]] = []
     total_links = 0
     for path in files:
@@ -134,7 +228,7 @@ def main(argv: list[str] | None = None) -> int:
         for number, label, target in iter_links(text):
             count += 1
             total_links += 1
-            reason = check_target(path, docs_root, target)
+            reason = check_target(path, docs_root, target, git_root, tracked)
             if reason is not None:
                 broken.append((path, number, label, target, reason))
         if args.verbose:

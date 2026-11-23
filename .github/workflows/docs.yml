@@ -20,7 +20,7 @@ jobs:
           python-version: "3.13"
 
       - name: Check documentation links
-        run: python scripts/check_docs_links.py
+        run: python scripts/check_docs_links.py --require-tracked
 
       - name: Check example consistency
         run: python scripts/check_examples.py
