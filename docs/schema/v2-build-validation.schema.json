@@ -1,0 +1,162 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schema/v2-build-validation.schema.json",
+  "title": "System v2 build validation result",
+  "description": "Host-generated validation result for a candidate rule. The Agent must not be treated as the source of truth for these fields.",
+  "type": "object",
+  "required": [
+    "status",
+    "issue_checks",
+    "regression",
+    "content_audit",
+    "diff",
+    "evidence_sha256"
+  ],
+  "properties": {
+    "status": {
+      "enum": [
+        "PASSED",
+        "FAILED"
+      ]
+    },
+    "issue_checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "sample",
+          "expected",
+          "passed"
+        ],
+        "properties": {
+          "sample": {
+            "type": "string",
+            "format": "uri"
+          },
+          "expected": {
+            "type": "string"
+          },
+          "observed": {
+            "type": "string"
+          },
+          "passed": {
+            "type": "boolean"
+          },
+          "detail": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "regression": {
+      "type": "object",
+      "required": [
+        "checked",
+        "regressions"
+      ],
+      "properties": {
+        "checked": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "regressions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "field",
+              "sample",
+              "before",
+              "after"
+            ],
+            "properties": {
+              "field": {
+                "type": "string",
+                "minLength": 1
+              },
+              "sample": {
+                "type": "string",
+                "format": "uri"
+              },
+              "before": {},
+              "after": {},
+              "reason": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "content_audit": {
+      "type": "object",
+      "required": [
+        "products_checked",
+        "description_gaps"
+      ],
+      "properties": {
+        "products_checked": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "description_gaps": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "samples": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "diff": {
+      "type": "object",
+      "required": [
+        "changed_fields",
+        "discovery_changed"
+      ],
+      "properties": {
+        "changed_fields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "discovery_changed": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    },
+    "evidence_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "error_class": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "SCHEMA",
+        "SELECTOR",
+        "NETWORK",
+        "CURRENCY",
+        "QUALITY",
+        "TIMEOUT",
+        "CANCELLED",
+        "INTERNAL",
+        null
+      ]
+    }
+  },
+  "additionalProperties": true
+}

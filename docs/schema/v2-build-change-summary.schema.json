@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schema/v2-build-change-summary.schema.json",
+  "title": "System v2 build change summary",
+  "description": "Host-validated summary of what a build or repair changed. The Agent may propose this file, but the host must validate it before recording it.",
+  "type": "object",
+  "required": [
+    "rule_id",
+    "rule_version",
+    "parent_version",
+    "changed_fields",
+    "discovery_changed",
+    "scope_changed",
+    "market_changed",
+    "currency_changed"
+  ],
+  "properties": {
+    "rule_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "rule_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "parent_version": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "changed_fields": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "changed_selectors": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "discovery_changed": {
+      "type": "boolean"
+    },
+    "scope_changed": {
+      "type": "boolean"
+    },
+    "market_changed": {
+      "type": "boolean"
+    },
+    "currency_changed": {
+      "type": "boolean"
+    },
+    "notes": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}
