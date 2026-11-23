@@ -825,12 +825,21 @@ class BuildWorkflowTests(unittest.TestCase):
             self.assertIn("bump rule_version", result["error"])
 
     def test_candidate_activation_rerun_and_rollback(self) -> None:
+        initial_rule = rule_payload(version="2026.11.23-1")
+        repaired_rule = rule_payload(version="2026.11.23-2")
+        repaired_rule["extract"]["fields"]["description_html"] = {
+            "required": False,
+            "fallbacks": [
+                {
+                    "type": "css_text",
+                    "selector": "div.description",
+                    "label": "description",
+                }
+            ],
+        }
         adapter = FakeBuildAdapter(
             self.root,
-            rule_payloads=[
-                rule_payload(version="2026.11.23-1"),
-                rule_payload(version="2026.11.23-2"),
-            ],
+            rule_payloads=[initial_rule, repaired_rule],
         )
         manager = self._manager(
             adapter,
@@ -896,7 +905,36 @@ class BuildWorkflowTests(unittest.TestCase):
                 [item["rule_version"] for item in site_rule["candidates"]],
                 ["2026.11.23-2"],
             )
+            candidate = site_rule["candidates"][0]
+            self.assertEqual(candidate["validation_status"], "PASSED")
+            self.assertEqual(candidate["change_summary"]["parent_version"], "2026.11.23-1")
+            self.assertIn(
+                "extract.fields.description_html",
+                candidate["change_summary"]["changed_fields"],
+            )
+            self.assertIn(
+                "extract.fields.description_html",
+                candidate["change_summary"]["changed_selectors"],
+            )
+            self.assertEqual(candidate["validation"]["status"], "PASSED")
+            self.assertEqual(
+                len(candidate["validation"]["evidence_sha256"]), 64
+            )
+            self.assertEqual(
+                candidate["validation"]["content_audit"]["products_checked"], 0
+            )
             self.assertEqual(site_rule["stale_tasks"], 0)
+
+            version_detail = client.get(
+                "/api/rules/example-fr-build/versions/2026.11.23-2"
+            ).json()
+            self.assertEqual(
+                version_detail["change_summary"], candidate["change_summary"]
+            )
+            self.assertEqual(
+                version_detail["validation"], candidate["validation"]
+            )
+            self.assertTrue(version_detail["source_feedback_id"])
 
             activated = client.post(
                 "/api/sites/example.fr/rule/activate",

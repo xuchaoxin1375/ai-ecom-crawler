@@ -252,6 +252,58 @@ export interface RuleRef {
   path: string;
 }
 
+export interface RuleChangeSummary {
+  rule_id: string;
+  rule_version: string;
+  parent_version: string | null;
+  changed_fields: string[];
+  changed_selectors?: string[];
+  discovery_changed: boolean;
+  scope_changed: boolean;
+  market_changed: boolean;
+  currency_changed: boolean;
+  notes?: string;
+}
+
+export interface RuleIssueCheck {
+  sample: string;
+  expected: string;
+  passed: boolean;
+  observed?: string;
+  detail?: string;
+}
+
+export interface RuleRegression {
+  field: string;
+  sample: string;
+  before?: unknown;
+  after?: unknown;
+  reason?: string;
+}
+
+export interface RuleValidation {
+  status: "PASSED" | "FAILED";
+  issue_checks: RuleIssueCheck[];
+  regression: {
+    checked: number;
+    regressions: RuleRegression[];
+  };
+  content_audit: {
+    products_checked: number;
+    description_gaps: number;
+    samples?: unknown[];
+  };
+  diff: {
+    changed_fields: string[];
+    discovery_changed: boolean;
+  };
+  evidence_sha256: string;
+  valid_products?: number;
+  failed_products?: number;
+  currencies?: Record<string, number>;
+  stop_reason?: string | null;
+}
+
 export interface RuleVersionRecord {
   rule_id: string;
   rule_version: string;
@@ -267,6 +319,8 @@ export interface RuleVersionRecord {
   reviewed_by: string | null;
   reviewed_at: string | null;
   notes: string | null;
+  change_summary?: RuleChangeSummary | null;
+  validation?: RuleValidation | null;
 }
 
 export interface SiteRuleCandidate {
@@ -274,6 +328,8 @@ export interface SiteRuleCandidate {
   sha256: string;
   build_id: string | null;
   validation_status: string | null;
+  change_summary?: RuleChangeSummary | null;
+  validation?: RuleValidation | null;
   created_at: string;
 }
 

@@ -1439,6 +1439,18 @@
             ],
             "title": "Activated By"
           },
+          "change_summary": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Summary"
+          },
           "created_at": {
             "title": "Created At",
             "type": "string"
@@ -1535,6 +1547,18 @@
             ],
             "title": "Status",
             "type": "string"
+          },
+          "validation": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validation"
           }
         },
         "required": [
@@ -1595,6 +1619,18 @@
             ],
             "title": "Build Id"
           },
+          "change_summary": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Summary"
+          },
           "created_at": {
             "title": "Created At",
             "type": "string"
@@ -1606,6 +1642,18 @@
           "sha256": {
             "title": "Sha256",
             "type": "string"
+          },
+          "validation": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validation"
           },
           "validation_status": {
             "anyOf": [

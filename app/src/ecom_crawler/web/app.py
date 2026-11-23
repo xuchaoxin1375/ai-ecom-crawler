@@ -42,6 +42,7 @@ from ..runtime.batch import parse_site_text, parse_sites, rule_domains
 from ..runtime.models import (
     Batch,
     BatchSite,
+    BuildRecord,
     QualityFeedback,
     RuleVersion,
     SiteRule,
@@ -225,6 +226,8 @@ class RuleVersionRecord(BaseModel):
     reviewed_by: str | None = None
     reviewed_at: str | None = None
     notes: str | None = None
+    change_summary: dict[str, Any] | None = None
+    validation: dict[str, Any] | None = None
 
 
 class RuleVersionListResponse(BaseModel):
@@ -244,6 +247,8 @@ class SiteRuleCandidate(BaseModel):
     sha256: str
     build_id: str | None = None
     validation_status: str | None = None
+    change_summary: dict[str, Any] | None = None
+    validation: dict[str, Any] | None = None
     created_at: str
 
 
@@ -762,7 +767,9 @@ def create_app(
             return {"build_id": build.build_id, "build_state": build.state}
         return None
 
-    def rule_version_payload(version: RuleVersion) -> RuleVersionRecord:
+    def rule_version_payload(
+        version: RuleVersion, build: BuildRecord | None = None
+    ) -> RuleVersionRecord:
         return RuleVersionRecord(
             rule_id=version.rule_id,
             rule_version=version.rule_version,
@@ -778,6 +785,8 @@ def create_app(
             reviewed_by=version.reviewed_by,
             reviewed_at=version.reviewed_at,
             notes=version.notes,
+            change_summary=(build.change_summary or None) if build else None,
+            validation=(build.validation or None) if build else None,
         )
 
     def ensure_site_rule(site_key: str) -> SiteRule | None:
@@ -885,6 +894,8 @@ def create_app(
                         if build
                         else None
                     ),
+                    change_summary=(build.change_summary or None) if build else None,
+                    validation=(build.validation or None) if build else None,
                     created_at=item.created_at,
                 )
             )
@@ -2080,7 +2091,12 @@ def create_app(
                 f"unknown rule version: {rule_id}@{rule_version}",
                 404,
             )
-        return rule_version_payload(version)
+        build = (
+            store.get_build(version.source_build_id)
+            if version.source_build_id
+            else None
+        )
+        return rule_version_payload(version, build)
 
     @app.post(
         "/api/rules/{rule_id}/versions/{rule_version}/reject",

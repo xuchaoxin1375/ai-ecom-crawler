@@ -41,6 +41,7 @@ from .harness.adapter import BuildSession
 from .harness.dependencies import DependencyPolicy
 from .harness.trace import build_trace, render_trace_markdown
 from .robots import extract_sitemaps, robots_url_for
+from .rule_diff import build_change_summary, normalize_validation
 from .runtime.archive import prefetch_rule_samples
 from .runtime.batch import normalize_site, rule_domains
 from .runtime.models import (
@@ -1948,11 +1949,13 @@ domain-mismatched, or produces no valid product.
                         f"host validation produced {sorted(currencies)}; "
                         "use a market-localized URL or fix the rule currency"
                     )
-                rule_id, rule_version, rule_name, rule_sha256 = self._install_rule(
-                    rule_path,
-                    record,
-                    counts,
-                    task_result,
+                rule_id, rule_version, rule_name, rule_sha256, change_summary = (
+                    self._install_rule(
+                        rule_path,
+                        record,
+                        counts,
+                        task_result,
+                    )
                 )
             except Exception as exc:  # noqa: BLE001 - rule/validation boundary
                 message = f"{type(exc).__name__}: {exc}"
@@ -1990,6 +1993,7 @@ domain-mismatched, or produces no valid product.
                     "batch_market": batch_market or None,
                 }
             )
+            validation = normalize_validation(validation, change_summary)
             auto_activate = (
                 record.mode == "build" or self.activation_mode == "legacy"
             )
@@ -2054,7 +2058,9 @@ domain-mismatched, or produces no valid product.
                 rule_path=rule_name,
                 target_rule_version=rule_version,
                 target_rule_sha256=rule_sha256,
+                change_summary=change_summary,
                 validation=validation,
+                evidence_sha256=str(validation.get("evidence_sha256") or "") or None,
                 finished_at=utc_now(),
                 error=None,
             )
@@ -2299,19 +2305,49 @@ domain-mismatched, or produces no valid product.
         rule_version = str(payload.get("rule_version") or "").strip()
         if not rule_id or not rule_version:
             raise BuildError("rule_id and rule_version are required")
-        if record.mode == "repair":
-            previous = self.store.get_batch_site(record.batch_id, record.site_key)
-            if previous is not None and previous.rule_id:
-                if rule_id != previous.rule_id:
-                    raise BuildError(
-                        "repair must keep the same rule_id: "
-                        f"{previous.rule_id} != {rule_id}"
-                    )
-                if rule_version == previous.rule_version:
-                    raise BuildError(
-                        "repair must bump rule_version: "
-                        f"{rule_id}@{rule_version} is already installed"
-                    )
+        previous = self.store.get_batch_site(record.batch_id, record.site_key)
+        if record.mode == "repair" and previous is not None and previous.rule_id:
+            if rule_id != previous.rule_id:
+                raise BuildError(
+                    "repair must keep the same rule_id: "
+                    f"{previous.rule_id} != {rule_id}"
+                )
+            if rule_version == previous.rule_version:
+                raise BuildError(
+                    "repair must bump rule_version: "
+                    f"{rule_id}@{rule_version} is already installed"
+                )
+        parent_rule = self.store.get_site_rule(record.site_key)
+        parent_version = (
+            parent_rule.rule_version
+            if parent_rule is not None
+            else (previous.rule_version if previous else None)
+        )
+        parent_path_name = (
+            parent_rule.path
+            if parent_rule is not None
+            else (previous.rule_path if previous else None)
+        )
+        parent_payload: Any = None
+        if parent_path_name:
+            parent_path = self.rules_dir / parent_path_name
+            try:
+                parent_payload = yaml.safe_load(
+                    parent_path.read_text(encoding="utf-8")
+                )
+            except (OSError, yaml.YAMLError):
+                logger.warning(
+                    "parent rule is not readable; skipping field diff: %s",
+                    parent_path_name,
+                    exc_info=True,
+                )
+        change_summary = build_change_summary(
+            parent_payload,
+            payload,
+            rule_id=rule_id,
+            rule_version=rule_version,
+            parent_version=parent_version,
+        )
         self.rules_dir.mkdir(parents=True, exist_ok=True)
         base = f"{_safe_filename(rule_id)}-{_safe_filename(rule_version)}"
         target = self.rules_dir / f"{base}.yaml"
@@ -2328,7 +2364,6 @@ domain-mismatched, or produces no valid product.
         )
         os.replace(temporary, target)
         digest = hashlib.sha256(target.read_bytes()).hexdigest()
-        previous = self.store.get_batch_site(record.batch_id, record.site_key)
         self.store.create_rule_version(
             RuleVersion(
                 rule_id=rule_id,
@@ -2336,13 +2371,13 @@ domain-mismatched, or produces no valid product.
                 sha256=digest,
                 path=target.name,
                 status="candidate",
-                parent_version=previous.rule_version if previous else None,
+                parent_version=parent_version,
                 source_build_id=record.build_id,
                 source_feedback_id=record.feedback_id,
                 created_at=utc_now(),
             )
         )
-        return rule_id, rule_version, target.name, digest
+        return rule_id, rule_version, target.name, digest, change_summary
 
     def _record_failure(self, build_id: str, message: str) -> None:
         record = self.store.get_build(build_id)
