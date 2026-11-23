@@ -94,7 +94,7 @@ OpenCode 的项目技能优先级高于全局技能。使用联接／符号链�
 | 动作 | 当前策略 |
 | --- | --- |
 | `skill` | 全部允许（宿主 skills 只读共享） |
-| `browse_*`／`htmlmini_*`／`opencode_*` | 允许；其他 MCP 动作由 `*_*` 拒绝 |
+| `browse_*`／`htmlmini_*` | 允许；其他 MCP 工具和资源动作由 `*_*` 拒绝 |
 | `question`／`subagent` | 拒绝；构建是无人值守的 |
 | `read` | 允许；工作区外由 `external_directory` 收紧 |
 | `edit`／`write` | `work/`、`out/` 可写；`input/`、`logs/`、`control/`、skills 根拒绝 |

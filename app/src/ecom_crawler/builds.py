@@ -187,7 +187,6 @@ def default_permissions(
             {"action": "*_*", "resource": "*", "effect": "deny"},
             {"action": "browse_*", "resource": "*", "effect": "allow"},
             {"action": "htmlmini_*", "resource": "*", "effect": "allow"},
-            {"action": "opencode_*", "resource": "*", "effect": "allow"},
             {"action": "external_directory", "resource": "*", "effect": "deny"},
             {
                 "action": "external_directory",

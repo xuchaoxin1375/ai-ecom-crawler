@@ -431,7 +431,6 @@ class BuildWorkflowTests(unittest.TestCase):
         self.assertIn(("skill", "*", "allow"), entries)
         self.assertIn(("browse_*", "*", "allow"), entries)
         self.assertIn(("htmlmini_*", "*", "allow"), entries)
-        self.assertIn(("opencode_*", "*", "allow"), entries)
         self.assertIn(("websearch", "*", "allow"), entries)
         self.assertIn(("webfetch", "*", "allow"), entries)
         self.assertIn(("question", "*", "deny"), entries)
