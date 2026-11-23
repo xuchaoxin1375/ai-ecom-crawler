@@ -144,6 +144,21 @@ export function summarizeTasks(tasks: TaskSummary[], total: number): TaskListSum
   return { total, running, attention, archived };
 }
 
+export interface RuleRefLike {
+  rule_id: string;
+  rule_version: string;
+}
+
+export function taskRuleIsStale(
+  task: TaskSummary,
+  siteRule: RuleRefLike | null | undefined,
+): boolean {
+  if (!siteRule) return false;
+  return (
+    siteRule.rule_id !== task.plan_id || siteRule.rule_version !== task.plan_version
+  );
+}
+
 export function siteTaskHref(task: TaskSummary): string | null {
   if (!task.batch_id || !task.site_key) return null;
   return `/batches/${encodeURIComponent(task.batch_id)}/sites/${encodeURIComponent(

@@ -47,6 +47,8 @@ from .runtime.models import Batch, BatchSite, BuildRecord, utc_now
 from .runtime.rule import load_rule
 from .runtime.store import TaskStore
 
+ACTIVE_TASK_STATES = {"DRAFT", "QUEUED", "RUNNING", "PAUSING", "PAUSED"}
+
 ACTIVE_BUILD_STATES = {
     "CREATED",
     "RUNNING",
@@ -383,6 +385,72 @@ def _validation_failure_samples(
         if len(samples) >= limit:
             break
     return samples
+
+
+def _runtime_task_lines(runtime: dict[str, Any]) -> str:
+    if not runtime:
+        return "- No finished task result is recorded for this site yet."
+    counts = runtime.get("counts") if isinstance(runtime.get("counts"), dict) else {}
+    coverage = (
+        runtime.get("coverage") if isinstance(runtime.get("coverage"), dict) else {}
+    )
+    audit = (
+        runtime.get("content_audit")
+        if isinstance(runtime.get("content_audit"), dict)
+        else {}
+    )
+    quality = (
+        runtime.get("quality_exceptions")
+        if isinstance(runtime.get("quality_exceptions"), list)
+        else []
+    )
+    lines = [
+        (
+            f"- Task: `{runtime.get('task_id')}` ({runtime.get('state') or '?'} / "
+            f"{runtime.get('outcome') or '?'})"
+        ),
+        f"- Stop reason: `{runtime.get('stop_reason') or 'unknown'}`",
+        "- Counts: "
+        + ", ".join(
+            f"{key} {counts.get(key)}"
+            for key in (
+                "discovered_urls",
+                "valid_products",
+                "excluded_products",
+                "failed_products",
+            )
+            if counts.get(key) is not None
+        ),
+    ]
+    if coverage:
+        lines.append(
+            "- Coverage: "
+            f"{coverage.get('status') or 'UNKNOWN'} "
+            f"({coverage.get('covered')}/{coverage.get('denominator')})"
+        )
+    if audit:
+        lines.append(
+            "- Content audit: "
+            f"{audit.get('products_checked')} products checked, "
+            f"{audit.get('description_gaps')} description gaps"
+        )
+    if quality:
+        lines.append(
+            f"- Quality exceptions: {runtime.get('quality_exception_count') or len(quality)}"
+        )
+        for item in quality[:3]:
+            if not isinstance(item, dict):
+                continue
+            label = item.get("source_url") or item.get("field") or "item"
+            reason = (
+                item.get("reason")
+                or item.get("partial_reason")
+                or item.get("description_status")
+                or item.get("missing_reasons")
+                or "not acceptable"
+            )
+            lines.append(f"  - `{label}`: {str(reason)[:240]}")
+    return "\n".join(lines)
 
 
 def _validation_error_message(
@@ -752,6 +820,13 @@ class BuildManager:
                 raise BuildError("only a ready site with an installed rule can be repaired")
             if not (self.rules_dir / site.rule_path).is_file():
                 raise BuildError(f"installed rule file not found: {site.rule_path}")
+            if site.task_id:
+                current = self.store.get_task(site.task_id)
+                if current is not None and current.state in ACTIVE_TASK_STATES:
+                    raise BuildError(
+                        "site has an active task; pause, cancel or wait before repairing "
+                        f"the rule: {current.task_id} ({current.state})"
+                    )
         if not self.rules_dir.is_dir():
             raise BuildError("rules directory is not configured")
         entry_url = _entry_url(site)
@@ -1065,19 +1140,21 @@ class BuildManager:
         plan_dir = session.workspace.out_dir / "plan"
         plan_dir.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(existing, plan_dir / "rule.yaml")
+        runtime_task = self._runtime_task_evidence(site)
         context = {
             "previous_readiness": site.readiness,
             "previous_rule_id": site.rule_id,
             "previous_rule_version": site.rule_version,
             "previous_rule_path": site.rule_path,
             "reason": reason,
+            "runtime_task": runtime_task,
         }
         (input_dir / "repair-context.json").write_text(
             json.dumps(context, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
         (input_dir / "repair-brief.md").write_text(
-            self._repair_brief(batch, site, task, reason),
+            self._repair_brief(batch, site, task, reason, runtime_task),
             encoding="utf-8",
         )
         (session.workspace.work_dir / "AGENTS.md").write_text(
@@ -1085,12 +1162,66 @@ class BuildManager:
             encoding="utf-8",
         )
 
+    def _runtime_task_evidence(self, site: BatchSite) -> dict[str, Any]:
+        """Summarize the site's current run so repair starts from real gaps."""
+        if not site.task_id:
+            return {}
+        task = self.store.get_task(site.task_id)
+        if task is None:
+            return {}
+        result: dict[str, Any] = {}
+        result_path = self.out_root / task.task_id / "task-result.json"
+        try:
+            payload = json.loads(result_path.read_text(encoding="utf-8"))
+            if isinstance(payload, dict):
+                result = payload
+        except (OSError, json.JSONDecodeError):
+            pass
+        counts = result.get("counts") if isinstance(result.get("counts"), dict) else {}
+        coverage = (
+            result.get("coverage") if isinstance(result.get("coverage"), dict) else {}
+        )
+        audit = (
+            result.get("content_audit")
+            if isinstance(result.get("content_audit"), dict)
+            else {}
+        )
+        quality = (
+            result.get("quality_exceptions")
+            if isinstance(result.get("quality_exceptions"), list)
+            else []
+        )
+        sample_urls: list[str] = []
+        for item in quality[:10]:
+            if isinstance(item, dict) and item.get("source_url"):
+                sample_urls.append(str(item["source_url"]))
+        for item in result.get("failure_samples") or []:
+            if isinstance(item, dict) and item.get("url"):
+                sample_urls.append(str(item["url"]))
+        sample_urls = list(dict.fromkeys(sample_urls))[:8]
+        return {
+            "task_id": task.task_id,
+            "state": task.state,
+            "outcome": task.outcome,
+            "stop_reason": task.stop_reason,
+            "counts": counts,
+            "coverage": coverage,
+            "content_audit": {
+                "products_checked": audit.get("products_checked"),
+                "description_gaps": audit.get("description_gaps"),
+            },
+            "quality_exceptions": quality[:10],
+            "quality_exception_count": len(quality),
+            "sample_urls": sample_urls,
+        }
+
     def _repair_brief(
         self,
         batch: Batch,
         site: BatchSite,
         task: BuildTask,
         reason: str,
+        runtime_task: dict[str, Any] | None = None,
     ) -> str:
         try:
             payload = yaml.safe_load(
@@ -1099,9 +1230,20 @@ class BuildManager:
         except (OSError, yaml.YAMLError):
             payload = {}
         evidence = payload.get("evidence") if isinstance(payload, dict) else {}
-        samples = evidence.get("sample_urls") if isinstance(evidence, dict) else []
-        sample_lines = "\n".join(f"- {url}" for url in (samples or [])[:8])
+        rule_samples = evidence.get("sample_urls") if isinstance(evidence, dict) else []
+        runtime = runtime_task or {}
+        runtime_samples = runtime.get("sample_urls") if isinstance(runtime, dict) else []
+        sample_urls = list(
+            dict.fromkeys(
+                [
+                    *(str(url) for url in (runtime_samples or [])),
+                    *(str(url) for url in (rule_samples or [])),
+                ]
+            )
+        )[:8]
+        sample_lines = "\n".join(f"- {url}" for url in sample_urls)
         reason_text = reason.strip() or "Host content audit found description or field gaps."
+        runtime_lines = _runtime_task_lines(runtime)
         robots_note = str(task.extra.get("robots_note") or "robots.txt not probed")
         robots_sitemaps = [
             str(url) for url in (task.extra.get("robots_sitemaps") or [])
@@ -1125,6 +1267,10 @@ from scratch. The previous rule is available at
 - Previous rule: `{site.rule_id or "?"}@{site.rule_version or "?"}`
 - Host validation sample: `{task.limits.get("max_products")}` products
 - Repair reason: {reason_text}
+
+## Current task evidence
+
+{runtime_lines}
 
 ## Scope of this repair
 
@@ -1154,7 +1300,7 @@ from scratch. The previous rule is available at
 
 ## Known sample URLs
 
-{sample_lines or "- No sample URLs recorded in the previous rule."}
+{sample_lines or "- No sample URLs recorded in the previous run or rule."}
 
 ## Output
 

@@ -654,9 +654,47 @@ class BuildWorkflowTests(unittest.TestCase):
                     plan_version="2026.11.23-1",
                     task_type="product",
                     state="FINISHED",
+                    outcome="PARTIAL",
+                    stop_reason="QUALITY_BLOCKED",
                     batch_id="b-1",
                     site_key="example.fr",
                 )
+            )
+            task_dir = self.root / "out" / "task-existing"
+            task_dir.mkdir(parents=True)
+            (task_dir / "task-result.json").write_text(
+                json.dumps(
+                    {
+                        "counts": {
+                            "discovered_urls": 12,
+                            "valid_products": 9,
+                            "excluded_products": 1,
+                            "failed_products": 2,
+                        },
+                        "coverage": {
+                            "status": "PARTIAL",
+                            "covered": 9,
+                            "denominator": 12,
+                        },
+                        "content_audit": {
+                            "products_checked": 9,
+                            "description_gaps": 2,
+                        },
+                        "quality_exceptions": [
+                            {
+                                "source_url": "https://example.fr/p/1",
+                                "description_status": "partial",
+                                "partial_reason": "specification block missing",
+                            },
+                            {
+                                "source_url": "https://example.fr/p/2",
+                                "description_status": "partial",
+                                "partial_reason": "promo badge mixed in",
+                            },
+                        ],
+                    }
+                ),
+                encoding="utf-8",
             )
             response = client.post(
                 "/api/batches/b-1/sites/example.fr/build",
@@ -690,7 +728,67 @@ class BuildWorkflowTests(unittest.TestCase):
                 )
             )
             self.assertEqual(context["previous_rule_version"], "2026.11.23-1")
+            runtime = context["runtime_task"]
+            self.assertEqual(runtime["task_id"], "task-existing")
+            self.assertEqual(runtime["state"], "FINISHED")
+            self.assertEqual(runtime["outcome"], "PARTIAL")
+            self.assertEqual(runtime["counts"]["valid_products"], 9)
+            self.assertEqual(runtime["counts"]["failed_products"], 2)
+            self.assertEqual(runtime["quality_exception_count"], 2)
+            self.assertEqual(
+                runtime["sample_urls"],
+                ["https://example.fr/p/1", "https://example.fr/p/2"],
+            )
+            brief = (workspace / "input" / "repair-brief.md").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("## Current task evidence", brief)
+            self.assertIn("task-existing", brief)
+            self.assertIn("valid_products 9", brief)
+            self.assertIn("2 description gaps", brief)
+            self.assertIn("https://example.fr/p/1", brief)
             self.assertTrue((workspace / "out" / "plan" / "rule.yaml").is_file())
+
+    def test_repair_rejects_active_task(self) -> None:
+        adapter = FakeBuildAdapter(
+            self.root,
+            rule_payloads=[
+                rule_payload(version="2026.11.23-1"),
+                rule_payload(version="2026.11.23-2"),
+            ],
+        )
+        manager = self._manager(adapter)
+        with self._client(manager) as client:
+            response = client.post(
+                "/api/batches/b-1/sites/example.fr/build",
+                json={},
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(response.status_code, 202, response.text)
+            self._wait_ready(client, response.json()["build"]["build_id"])
+
+            self.store.update_batch_site(
+                "b-1", "example.fr", task_id="task-running"
+            )
+            self.store.create_task(
+                Task(
+                    task_id="task-running",
+                    plan_id="example-fr-build",
+                    plan_version="2026.11.23-1",
+                    task_type="product",
+                    state="RUNNING",
+                    batch_id="b-1",
+                    site_key="example.fr",
+                )
+            )
+            repair = client.post(
+                "/api/batches/b-1/sites/example.fr/build",
+                json={"mode": "repair", "reason": "description gap"},
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(repair.status_code, 409, repair.text)
+            self.assertEqual(repair.json()["error"]["code"], "BUILD_CONFLICT")
+            self.assertIn("active task", repair.json()["error"]["message"])
 
     def test_content_audit_gap_fails_validation(self) -> None:
         def validator(*_: Any, **__: Any) -> dict[str, Any]:

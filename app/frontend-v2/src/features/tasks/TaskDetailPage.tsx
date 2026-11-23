@@ -18,6 +18,7 @@ import {
 import {
   archiveTask,
   cancelTask,
+  getBatch,
   getTask,
   pauseTask,
   restoreTask,
@@ -48,7 +49,7 @@ import { FeedbackPanel } from "./FeedbackPanel";
 import { ProductPreviewSection } from "./ProductPreviewSection";
 import { QualityExceptionsSection } from "./QualityExceptionsSection";
 import { TaskItemsSection } from "./TaskItemsSection";
-import { batchHref, siteTaskHref, taskTypeLabel } from "./task";
+import { batchHref, siteTaskHref, taskRuleIsStale, taskTypeLabel } from "./task";
 import { useTaskStream } from "./useTaskStream";
 
 function Fact({ label, children }: { label: string; children: ReactNode }) {
@@ -146,9 +147,19 @@ export function TaskDetailPage() {
     void queryClient.invalidateQueries({ queryKey: ["tasks"] });
   }, [queryClient, stream.ended, taskId]);
 
+  const batchQuery = useQuery({
+    queryKey: ["batch", taskQuery.data?.batch_id],
+    queryFn: ({ signal }) => getBatch(taskQuery.data?.batch_id ?? "", signal),
+    enabled: Boolean(taskQuery.data?.batch_id),
+    staleTime: 30_000,
+  });
+
   const task: TaskSummary | undefined = taskQuery.data;
   const active = taskIsActive(task);
   const quality = task?.quality_exceptions ?? [];
+  const site = batchQuery.data?.sites.find((item) => item.site_key === task?.site_key);
+  const siteRule = site?.rule ?? null;
+  const stale = task ? taskRuleIsStale(task, siteRule) : false;
 
   function applyTask(next: TaskSummary) {
     queryClient.setQueryData(["task", taskId], next);
@@ -368,6 +379,15 @@ export function TaskDetailPage() {
                   已归档
                 </Badge>
               ) : null}
+              {stale && siteRule ? (
+                <span
+                  title={`站点当前规则 ${siteRule.rule_id}@${siteRule.rule_version}`}
+                >
+                  <Badge tone="warning" dot={false}>
+                    结果基于旧规则
+                  </Badge>
+                </span>
+              ) : null}
             </div>
             <p className="mt-1 max-w-3xl text-sm leading-6 text-ink-2">
               {stopReasonLabel(task.stop_reason)} · 规则{" "}
@@ -461,6 +481,23 @@ export function TaskDetailPage() {
         </div>
       </header>
 
+      {stale && siteRule ? (
+        <div
+          className="rounded-panel border border-warning/25 bg-warning-soft px-4 py-3 text-sm leading-6 text-warning"
+          role="status"
+        >
+          站点规则已更新到{" "}
+          <code className="font-mono text-xs">
+            {siteRule.rule_id}@{siteRule.rule_version}
+          </code>
+          ，当前结果仍基于{" "}
+          <code className="font-mono text-xs">
+            {task.plan_id}@{task.plan_version}
+          </code>
+          。需要复跑后再判断新规则是否改善。
+        </div>
+      ) : null}
+
       {notice ? (
         <div
           className={cn(
@@ -531,6 +568,20 @@ export function TaskDetailPage() {
                 <code className="font-mono text-[11px]">
                   {task.plan_id}@{task.plan_version}
                 </code>
+              </Fact>
+              <Fact label="站点当前规则">
+                {siteRule ? (
+                  <span>
+                    <code className="font-mono text-[11px]">
+                      {siteRule.rule_id}@{siteRule.rule_version}
+                    </code>
+                    <span className="ml-1 text-ink-3">
+                      {stale ? "（新于结果）" : "（与结果一致）"}
+                    </span>
+                  </span>
+                ) : (
+                  "—"
+                )}
               </Fact>
               <Fact label="市场">{task.market || "—"}</Fact>
               <Fact label="站点">

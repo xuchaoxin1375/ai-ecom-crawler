@@ -9,6 +9,7 @@ import {
   summarizeTasks,
   taskMatchesQuery,
   taskNeedsAttention,
+  taskRuleIsStale,
 } from "./task";
 
 function task(overrides: Partial<TaskSummary> = {}): TaskSummary {
@@ -104,6 +105,20 @@ describe("task helpers", () => {
     expect(feedbackIsOpen(feedback({ status: "RESOLVED" }))).toBe(false);
     expect(feedbackNeedsSamples("DESCRIPTION")).toBe(true);
     expect(feedbackNeedsSamples("BUSINESS_EXPECTATION")).toBe(false);
+  });
+
+  it("marks results stale when the site rule moved on", () => {
+    const item = task();
+    expect(taskRuleIsStale(item, null)).toBe(false);
+    expect(taskRuleIsStale(item, { rule_id: "example", rule_version: "1.0.0" })).toBe(
+      false,
+    );
+    expect(taskRuleIsStale(item, { rule_id: "example", rule_version: "2.0.0" })).toBe(
+      true,
+    );
+    expect(taskRuleIsStale(item, { rule_id: "other", rule_version: "1.0.0" })).toBe(
+      true,
+    );
   });
 
   it("builds site deep links only with both ids", () => {
