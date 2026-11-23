@@ -21,6 +21,7 @@ import {
   getBuild,
   getBuildConfig,
   getBuildMessages,
+  getTasks,
   pauseBuild,
   pauseTask,
   replyBuildDependency,
@@ -254,6 +255,21 @@ export function SiteDetailPage() {
     queryKey: ["build-config"],
     queryFn: ({ signal }) => getBuildConfig(signal),
     staleTime: 60_000,
+  });
+
+  const historyQuery = useQuery({
+    queryKey: ["site-task-history", siteKey],
+    queryFn: ({ signal }) =>
+      getTasks(
+        {
+          siteKey,
+          includeArchived: true,
+          limit: 8,
+        },
+        signal,
+      ),
+    enabled: Boolean(siteKey && site),
+    refetchInterval: site && siteHasActiveWork(site, build) ? 5000 : false,
   });
 
   const taskActive = taskIsActive(task);
@@ -1010,6 +1026,70 @@ export function SiteDetailPage() {
                 <span className="tabular">{formatTime(site.updated_at)}</span>
               </Fact>
             </dl>
+          </section>
+
+          <section className="rounded-panel border border-line bg-surface">
+            <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
+              <h2 className="text-[15px] leading-6 font-semibold text-ink">任务历史</h2>
+              <Link
+                className="text-xs text-accent hover:underline"
+                to={`/tasks?site=${encodeURIComponent(site.site_key)}&archived=1`}
+              >
+                全部任务
+              </Link>
+            </div>
+            {historyQuery.isError ? (
+              <div className="space-y-2 px-4 py-3">
+                <p className="text-xs leading-5 text-danger">
+                  读取任务历史失败：
+                  {historyQuery.error instanceof Error
+                    ? historyQuery.error.message
+                    : "服务暂时不可用。"}
+                </p>
+                <Button size="sm" onClick={() => void historyQuery.refetch()}>
+                  重试
+                </Button>
+              </div>
+            ) : (historyQuery.data?.items.length ?? 0) > 0 ? (
+              <ul className="divide-y divide-line">
+                {historyQuery.data?.items.map((item) => (
+                  <li key={item.task_id}>
+                    <Link
+                      className="block px-4 py-2.5 transition-colors hover:bg-surface-muted"
+                      to={`/tasks/${encodeURIComponent(item.task_id)}`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <code className="truncate font-mono text-[11px] text-ink-2">
+                          {item.task_id}
+                        </code>
+                        <Badge tone={taskStateTone(item.state)} dot={false}>
+                          {taskStateLabel(item.state)}
+                        </Badge>
+                      </div>
+                      <p className="mt-0.5 text-[11px] text-ink-3">
+                        {item.outcome ? outcomeLabel(item.outcome) : "未结束"}
+                        {item.archived_at ? " · 已归档" : ""}
+                        {" · "}
+                        {item.task_type === "discovery" ? "网址" : "有效"}{" "}
+                        {formatNumber(
+                          item.task_type === "discovery"
+                            ? (item.counts.discovered_urls ?? 0)
+                            : (item.counts.valid_products ?? 0),
+                        )}
+                        {" · "}
+                        {formatTime(item.updated_at)}
+                      </p>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="px-4 py-6 text-xs leading-5 text-ink-3">
+                {historyQuery.isPending
+                  ? "正在读取任务历史…"
+                  : "这个站点还没有任务记录。"}
+              </p>
+            )}
           </section>
 
           <section className="rounded-panel border border-line bg-surface">

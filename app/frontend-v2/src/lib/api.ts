@@ -798,6 +798,10 @@ export function triageFeedback(
   );
 }
 
+export function taskEventsUrl(taskId: string): string {
+  return `/api/tasks/${encodeURIComponent(taskId)}/events`;
+}
+
 export function taskExportUrl(taskId: string, partial = true): string {
   return `/api/tasks/${encodeURIComponent(taskId)}/export${
     partial ? "?partial=true" : ""

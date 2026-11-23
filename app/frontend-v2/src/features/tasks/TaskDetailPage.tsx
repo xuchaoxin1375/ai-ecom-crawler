@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -49,6 +49,7 @@ import { ProductPreviewSection } from "./ProductPreviewSection";
 import { QualityExceptionsSection } from "./QualityExceptionsSection";
 import { TaskItemsSection } from "./TaskItemsSection";
 import { batchHref, siteTaskHref, taskTypeLabel } from "./task";
+import { useTaskStream } from "./useTaskStream";
 
 function Fact({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -113,15 +114,37 @@ export function TaskDetailPage() {
   } | null>(null);
   const [error, setError] = useState("");
 
+  const stream = useTaskStream(taskId, Boolean(taskId));
+
   const taskQuery = useQuery({
     queryKey: ["task", taskId],
     queryFn: ({ signal }) => getTask(taskId, signal),
     enabled: Boolean(taskId),
     refetchInterval: (current) => {
       const task = current.state.data;
-      return task && taskIsActive(task) ? 3000 : false;
+      if (!task || !taskIsActive(task) || stream.connected) return false;
+      return 3000;
     },
   });
+
+  useEffect(() => {
+    if (!stream.task || stream.task.task_id !== taskId) return;
+    queryClient.setQueryData(["task", taskId], stream.task);
+  }, [queryClient, stream.task, taskId]);
+
+  useEffect(() => {
+    if (!stream.revision) return;
+    const timer = window.setTimeout(() => {
+      void queryClient.invalidateQueries({ queryKey: ["task", taskId] });
+    }, 600);
+    return () => window.clearTimeout(timer);
+  }, [queryClient, stream.revision, taskId]);
+
+  useEffect(() => {
+    if (!stream.ended) return;
+    void queryClient.invalidateQueries({ queryKey: ["task", taskId] });
+    void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+  }, [queryClient, stream.ended, taskId]);
 
   const task: TaskSummary | undefined = taskQuery.data;
   const active = taskIsActive(task);
@@ -372,6 +395,11 @@ export function TaskDetailPage() {
                 </span>
               ) : null}
               <span>更新 {formatTime(task.updated_at)}</span>
+              {active ? (
+                <span title={stream.error || undefined}>
+                  {stream.connected ? "实时更新" : "轮询更新"}
+                </span>
+              ) : null}
             </div>
           </div>
 
