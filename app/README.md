@@ -32,7 +32,8 @@
 - 构建 harness 适配器：`harness/` 提供 `HarnessAdapter`、`OpenCodeHttpAdapter`、`OpenCodeServer`、构建工作区、HTTP/SSE 客户端和事件归一化；真实 `opencode serve` 的 session／事件／权限探针已跑通。
 - 构建期依赖请求桥：每个工作区写入 `request-dependency` 插件，Agent 调用 `request_dependency` 后写 `control/dependencies/requests/<id>.json`；`DependencyBridge` 在 host 侧按 `DependencyPolicy` 返回基线／allowlist 结果、安装 allowlist 包、挂起一次性审批或取消未决请求，再写 `responses/<id>.json`。安装支持 build 解释器的 `pip` 和 `uv pip --python`，安装后用 `importlib.metadata` 验证版本。
 - 批次工作台阶段 1：`frontend/` 是 Vue 3 + TypeScript + Vite 应用；构建产物存在时 FastAPI 在 `/batch/` 托管，`/batches` 列表／新建／详情、`/batches/{id}/sites/{site_key}` 站点详情和 `/tasks` 任务控制台共用同一外壳。批次／站点对象、导入解析／去重／规则匹配、部分启动、批次级暂停／取消／归档、批次导出和站点下钻已实现；真实批次 `b-586052683409` 两站 14 条有效商品、0 失败，证据在 `experiments/d08/batch-workbench-e2e/`。
-- 站点构建入口：`needs_onboarding` 站点可在站点详情启动构建 Agent；站点进入 `building`，主机验证通过后规则以 `candidate` 安装、站点变为 `ready`，失败则回到 `needs_onboarding`。站点详情提供“详细模式”时间线（思考、工具调用、可见文本按时间合并）、“验证失败后自动修复 1 轮”、“全量目录”和“归档样例页面”；全量目录只提高规则目标商品数，验证仍用少量商品，通过后从批次详情用全量预算启动任务。
+- 站点构建入口：`needs_onboarding` 站点可在站点详情启动构建 Agent；站点进入 `building`，主机验证通过后规则以 `candidate` 安装、站点变为 `ready`，失败则回到 `needs_onboarding`。已 `ready` 的站点可在同一面板使用“重新验证／修复规则”：构建 Agent 读取已安装规则和样例页，修复描述块／字段缺口后重新验证；失败时保留原规则和已有采集数据。站点详情提供“详细模式”时间线（思考、工具调用、可见文本按时间合并）、“验证失败后自动修复 1 轮”、“全量目录”和“归档样例页面”；全量目录只提高规则目标商品数，验证仍用少量商品，通过后从批次详情用全量预算启动任务。
+- 描述块合成与审计：规则可用 `compose` 按 DOM 顺序合并叙事正文、`ul.feature-list`、规格标签页等多个块，块级去重并支持 `exclude_selectors` 排除促销角标；`extract.fields.description_html.audit.blocks` 声明必须进入最终描述的页面块。主机验证会检查 `content_audit.description_gaps`，有缺口时触发自动修复；任务结果的 `content_audit` 记录审计商品数和缺口样例，任务详情显示“内容完整度”。
 - 已采数据预览：站点详情在任务运行中每 3 秒刷新最近有效商品，展示图片、名称、价格、品牌／分类和来源链接；任务结束后保留最近 10 条预览。下方“CSV 表格预览”按导出 9 列结构分页展示（运行中读 `products.jsonl`，结束后读 `products.csv`）；点击主图在弹窗内查看大图并支持缩放、复制 URL、下载和打开原图，点击“查看全文”在弹窗内查看完整描述并支持复制文本／HTML 和打开来源页。
 - 构建 trace：每次构建在 `out/trace.json`／`out/trace.md` 记录阶段、工具调用、输入摘要、截断输出、可见消息、tokens／费用、主机验证结果、自动修复轮次和样例存档统计；默认不保存 reasoning，`ECOM_BUILD_CAPTURE_REASONING=1` 时才保留并截断。模型、provider 和 variant（思考等级）在构建状态和 trace 中标出。验证前先静态编译规则里的 CSS 选择器，避免把 `plan_error` 拖到真实抓取阶段。
 - 出口代理：`ECOM_FETCH_PROXY`／`ECOM_BUILD_PROXY`、`--proxy` 和构建 API `proxy` 支持静态／浏览器出口；构建、验证和批次任务沿用同一出口，规则包不写代理 URL。2026-11-23 用 mihomo US 出口将 `sixmoondesigns.com` 的 CNY 样本修正为 USD 3／3。
@@ -79,6 +80,7 @@ python -m patchright install chromium
 ```powershell
 python -m uv run --project app ecom-crawler --version
 python -m uv run --project app ecom-crawler run --rule /path/to/rule.yaml --db /path/to/tasks.db --out-root /path/to/tasks --task-id sample-001 --task-type product --max-products 6 --proxy http://127.0.0.1:17211
+python -m uv run --project app ecom-crawler audit-content --rule /path/to/rule.yaml --url https://example.com/product/1 --out /path/to/audit
 python -m uv run --project app ecom-crawler submit --rule /path/to/rule.yaml --db /path/to/tasks.db --task-id sample-002 --proxy http://127.0.0.1:17211
 python -m uv run --project app ecom-crawler worker --db /path/to/tasks.db --out-root /path/to/tasks --proxy http://127.0.0.1:17211
 python -m uv run --project app ecom-crawler worker --db /path/to/tasks.db --out-root /path/to/tasks --allow-multi-worker --lease-ttl 30
@@ -94,6 +96,7 @@ python -m uv run --project app ecom-crawler validate --task-result /path/to/task
 ```
 
 - `run` 每次执行一个任务；product 任务完成后自动导出到 `<out-root>/<task-id>/export`，discovery 任务只写运行时 URL 清单和任务结果。
+- `audit-content` 用渲染后的商品区文本和截图抽样核对规则提取覆盖：输出 `visual-audit.json`、未覆盖文本块和整页截图；这是人工审计工具，不替代批量提取。
 - `run` 的退出码表示任务是否实际执行；业务结论看 `task-result.json` 的 `outcome`。计划或用法错误返回 2。
 - `run` 是一次性入口，不提供可恢复的控制；需要暂停／恢复／取消时用 `submit` 入队，再在另一个 shell 运行 `worker`，用 `pause`／`resume`／`cancel` 控制。外部暂停 `run` 任务后，`run` 以 2 退出并提示用 `worker` 恢复。
 - `serve` 只绑定回环地址，默认启动托管 worker（持有 worker 单实例锁）；`--no-worker` 只提供 API／页面，执行由独立 `worker` 进程负责。页面关闭不会停止后台。

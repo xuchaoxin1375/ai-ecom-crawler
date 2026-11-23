@@ -1,10 +1,10 @@
 schema_version: '1.1'
 rule_id: bennytex-fr-build
-rule_version: 2026.11.23-1
+rule_version: 2026.11.23-2
 kind: declarative
 status: candidate
 created_at: '2026-11-23T00:00:00Z'
-updated_at: '2026-11-22T22:39:31Z'
+updated_at: '2026-11-23T00:32:02Z'
 site:
   name: Bennytex
   entry_urls:
@@ -216,6 +216,19 @@ extract:
     description_html:
       required: false
       fallbacks:
+      - type: compose
+        label: composed_description
+        description_status: complete
+        exclude_selectors:
+        - span.unite
+        - span[style*="color:#ffffff"]
+        parts:
+        - label: feature_list
+          selector: ul.feature-list
+        - label: narrative
+          selector: '#tabs-1'
+        - label: specification_tab
+          selector: '#tabs-2'
       - type: json_ld
         path: description
         label: json_ld_description
@@ -223,12 +236,23 @@ extract:
       - type: css_html
         selector: '#tabs-1'
         label: description_tab
-        description_status: complete
+        description_status: partial
       - type: css_attr
         selector: meta[itemprop="description"]
         attr: content
         label: microdata_description
-        description_status: complete
+        description_status: partial
+      audit:
+        blocks:
+        - label: feature_list
+          selector: ul.feature-list
+        - label: narrative
+          selector: '#tabs-1'
+          exclude_selectors:
+          - span.unite
+          - span[style*="color:#ffffff"]
+        - label: specification_tab
+          selector: '#tabs-2'
     category:
       required: false
       fallbacks:
@@ -328,13 +352,23 @@ evidence:
   - https://www.bennytex.fr/11603-molleton-gratte-uni-jaune.html
   - https://www.bennytex.fr/31170-carre-de-soie-en-twill-de-soie-de-luxe-4040-cm-100-soie-fond-orange-imprime.html
   - https://www.bennytex.fr/30865-coupon-velours-de-laine-carreau-fond-fuchia-et-noir-tres-doux.html
+  - https://www.bennytex.fr/30739-fibranne-viscose-fond-vert-eau-poids-noir-marine.html
+  - https://www.bennytex.fr/11607-molleton-gratte-uni-bleu-turquoise.html
   expected:
   - Product fields from the microdata/price block; EUR currency on FR pages.
+  - description_html is composed from the feature list, the description tab and the
+    specification tab in document order, so visible rows survive when the narrative
+    is a one-line ingredient note.
   limitations:
   - No Product JSON-LD on sampled pages; extraction relies on microdata plus CSS.
   - No rel=canonical and no og:image tags; source_url falls back to microdata url.
   - Mercerie (163) and Rouleau (132) category pages render no product grid.
-  - Only three product pages sampled; template variants for other categories are unverified.
+  - The description tab (#tabs-1) is absent on some products (for example 31170),
+    so the compose fallback must tolerate missing blocks; the specification tab carries
+    the data there.
+  - The feature list and the specification tab repeat the same values, so a composed
+    description intentionally shows those rows twice (list block plus tab).
+  - Five product pages sampled; template variants for other categories are unverified.
   - Host validation is a bounded sample, not full-site or long-term coverage.
   host_validation:
     validated_at: '2026-11-22T22:39:31Z'

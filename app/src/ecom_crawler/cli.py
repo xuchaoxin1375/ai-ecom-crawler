@@ -227,6 +227,30 @@ def build_parser() -> argparse.ArgumentParser:
     )
     task_list.add_argument("--json", action="store_true", help="print JSON")
 
+    audit = subparsers.add_parser(
+        "audit-content",
+        help="render sample product pages and report visible content missing from extraction",
+    )
+    audit.add_argument("--rule", required=True, type=Path, help="rule package YAML")
+    audit.add_argument(
+        "--url",
+        action="append",
+        required=True,
+        dest="urls",
+        help="product URL to audit; repeat for multiple pages",
+    )
+    audit.add_argument("--out", required=True, type=Path, help="audit output directory")
+    audit.add_argument(
+        "--headful",
+        action="store_true",
+        help="show the browser window instead of running headless",
+    )
+    audit.add_argument(
+        "--no-screenshots",
+        action="store_true",
+        help="skip full-page screenshots",
+    )
+    audit.add_argument("--timeout-ms", type=int, default=45000)
     serve = subparsers.add_parser(
         "serve",
         help="serve the read-only local web UI and API",
@@ -515,6 +539,31 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         if args.command == "worker":
             return _run_worker(args)
+        if args.command == "audit-content":
+            from .content_audit import audit_urls
+
+            summary = audit_urls(
+                args.rule,
+                args.urls,
+                args.out,
+                headless=not args.headful,
+                screenshots=not args.no_screenshots,
+                timeout_ms=args.timeout_ms,
+            )
+            print(
+                f"audited {summary['pages']} page(s): "
+                f"{summary['pages_with_uncovered']} with uncovered blocks, "
+                f"{summary['errors']} error(s)"
+            )
+            for item in summary["results"]:
+                if item.get("uncovered_blocks"):
+                    print(f"  gap: {item['url']}")
+                    for block in item["uncovered_blocks"][:3]:
+                        print(f"    - {block['text'][:160]}")
+                if item.get("error"):
+                    print(f"  error: {item['url']}: {item['error']}")
+            print(f"report: {Path(args.out) / 'visual-audit.json'}")
+            return 0 if summary["errors"] == 0 else 1
         if args.command == "serve":
             return _serve(args)
         if args.command in {"pause", "resume", "cancel"}:

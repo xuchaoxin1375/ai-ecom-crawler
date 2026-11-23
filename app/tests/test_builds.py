@@ -16,7 +16,7 @@ from ecom_crawler.builds import BuildManager, _live_timeline, _trace_timeline
 from ecom_crawler.harness.adapter import BuildSession
 from ecom_crawler.harness.models import BuildTask, HarnessEvent, utc_now
 from ecom_crawler.harness.workspace import BuildWorkspace
-from ecom_crawler.runtime.models import Batch, BatchSite, BuildRecord
+from ecom_crawler.runtime.models import Batch, BatchSite, BuildRecord, Task
 from ecom_crawler.runtime.store import TaskStore
 from ecom_crawler.web.app import create_app
 
@@ -27,11 +27,13 @@ CLIENT_HEADERS = {
 }
 
 
-def rule_payload(site_key: str = "example.fr") -> dict[str, Any]:
+def rule_payload(
+    site_key: str = "example.fr", version: str = "2026.11.23-1"
+) -> dict[str, Any]:
     return {
         "schema_version": "1.1",
         "rule_id": "example-fr-build",
-        "rule_version": "2026.11.23-1",
+        "rule_version": version,
         "kind": "declarative",
         "status": "candidate",
         "site": {
@@ -173,6 +175,8 @@ class FakeBuildAdapter:
         self.finish = finish
         self.rule_payloads = rule_payloads or []
         self.queue: queue.Queue[HarnessEvent | None] = queue.Queue()
+        self.queues: dict[str, queue.Queue[HarnessEvent | None]] = {}
+        self.current_build: str | None = None
         self.sessions: dict[str, BuildSession] = {}
         self.prompts: list[tuple[str, str]] = []
         self.continued: list[tuple[str, str]] = []
@@ -191,6 +195,8 @@ class FakeBuildAdapter:
             harness={"name": "fake", "version": "1.0", "adapter_version": "fake/1"},
         )
         self.sessions[task.build_id] = session
+        self.current_build = task.build_id
+        self.queues[task.build_id] = queue.Queue()
         return session
 
     def send_prompt(self, build_id: str, text: str) -> dict[str, Any]:
@@ -235,8 +241,9 @@ class FakeBuildAdapter:
         threading.Thread(target=complete, daemon=True).start()
 
     def stream_events(self, build_id: str) -> Iterator[HarnessEvent]:
+        events = self.queues[build_id]
         while True:
-            event = self.queue.get()
+            event = events.get()
             if event is None:
                 return
             yield event
@@ -287,11 +294,22 @@ class FakeBuildAdapter:
         if session.state not in {"CANCELLED"}:
             session.state = "FINISHED"
             session.outcome = "closed"
-        self.queue.put(None)
+        self.queues[build_id].put(None)
         return session
 
     def emit(self, event_type: str, source_type: str, **data: Any) -> None:
-        self.queue.put(
+        if self.current_build is None:
+            self.queue.put(
+                HarnessEvent(
+                    type=event_type,
+                    source_type=source_type,
+                    session_id=None,
+                    data=data,
+                    created_at=utc_now(),
+                )
+            )
+            return
+        self.queues[self.current_build].put(
             HarnessEvent(
                 type=event_type,
                 source_type=source_type,
@@ -450,6 +468,110 @@ class BuildWorkflowTests(unittest.TestCase):
             self.assertEqual(task.input["archive"]["mode"], "sample")
             self.assertEqual(task.input["archive"]["sample_limit"], 5)
             self.assertEqual(task.limits["max_products"], 100)
+
+    def test_repair_ready_site_uses_existing_rule(self) -> None:
+        adapter = FakeBuildAdapter(
+            self.root,
+            rule_payloads=[
+                rule_payload(version="2026.11.23-1"),
+                rule_payload(version="2026.11.23-2"),
+            ],
+        )
+        manager = self._manager(adapter)
+        with self._client(manager) as client:
+            response = client.post(
+                "/api/batches/b-1/sites/example.fr/build",
+                json={},
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(response.status_code, 202, response.text)
+            first_id = response.json()["build"]["build_id"]
+            first = self._wait_ready(client, first_id)
+            self.assertEqual(first["outcome"], "succeeded")
+
+            self.store.update_batch_site(
+                "b-1", "example.fr", task_id="task-existing"
+            )
+            self.store.create_task(
+                Task(
+                    task_id="task-existing",
+                    plan_id="example-fr-build",
+                    plan_version="2026.11.23-1",
+                    task_type="product",
+                    state="FINISHED",
+                    batch_id="b-1",
+                    site_key="example.fr",
+                )
+            )
+            response = client.post(
+                "/api/batches/b-1/sites/example.fr/build",
+                json={
+                    "mode": "repair",
+                    "reason": "description only contains composition",
+                },
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(response.status_code, 202, response.text)
+            repair = response.json()["build"]
+            self.assertEqual(repair["mode"], "repair")
+            result = self._wait_ready(client, repair["build_id"])
+            self.assertEqual(result["state"], "FINISHED")
+            self.assertEqual(result["outcome"], "succeeded")
+
+            batch = client.get("/api/batches/b-1").json()
+            site = batch["sites"][0]
+            self.assertEqual(site["readiness"], "ready")
+            self.assertEqual(site["task_id"], "task-existing")
+            self.assertEqual(site["rule"]["rule_version"], "2026.11.23-2")
+
+            prompt = adapter.prompts[-1][1]
+            self.assertIn("repair-brief.md", prompt)
+            self.assertIn("existing-rule.yaml", prompt)
+            workspace = Path(adapter.sessions[repair["build_id"]].workspace.root)
+            self.assertTrue((workspace / "input" / "existing-rule.yaml").is_file())
+            context = yaml.safe_load(
+                (workspace / "input" / "repair-context.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(context["previous_rule_version"], "2026.11.23-1")
+            self.assertTrue((workspace / "out" / "plan" / "rule.yaml").is_file())
+
+    def test_content_audit_gap_fails_validation(self) -> None:
+        def validator(*_: Any, **__: Any) -> dict[str, Any]:
+            return {
+                "counts": {"valid_products": 2, "failed_products": 0},
+                "outcome": "COMPLETED",
+                "stop_reason": "NATURAL_END",
+                "currencies": {"EUR": 2},
+                "content_audit": {
+                    "products_checked": 2,
+                    "description_gaps": 1,
+                    "samples": [
+                        {
+                            "source_url": "https://example.fr/products/1",
+                            "missing_blocks": ["feature_specs"],
+                        }
+                    ],
+                },
+            }
+
+        adapter = FakeBuildAdapter(self.root)
+        manager = self._manager(adapter, validator=validator)
+        with self._client(manager) as client:
+            response = client.post(
+                "/api/batches/b-1/sites/example.fr/build",
+                json={},
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(response.status_code, 202, response.text)
+            build_id = response.json()["build"]["build_id"]
+            result = self._wait_ready(client, build_id)
+            self.assertEqual(result["state"], "FINISHED")
+            self.assertEqual(result["outcome"], "failed")
+            self.assertIn("content audit", result["error"] or "")
+            batch = client.get("/api/batches/b-1").json()
+            self.assertEqual(batch["sites"][0]["readiness"], "needs_onboarding")
 
     def test_missing_rule_fails_and_releases_site(self) -> None:
         adapter = FakeBuildAdapter(self.root, write_rule=False)

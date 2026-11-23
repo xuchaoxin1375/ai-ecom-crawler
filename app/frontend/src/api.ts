@@ -42,6 +42,11 @@ export interface TaskSummary {
   counts: TaskCounts;
   coverage: { status?: string; [key: string]: unknown };
   quality_exceptions: Array<Record<string, unknown>>;
+  content_audit: {
+    products_checked?: number;
+    description_gaps?: number;
+    samples?: Array<{ source_url: string; missing_blocks: string[] }>;
+  };
   archived_at: string | null;
   created_at: string;
   updated_at: string;
@@ -153,6 +158,7 @@ export interface BatchCounts {
   duplicate: number;
   startable: number;
   tasks: number;
+  task_runs: number;
   draft: number;
   queued: number;
   running: number;
@@ -189,6 +195,7 @@ export interface BuildStatus {
   site_key: string;
   state: string;
   outcome: string | null;
+  mode: "build" | "repair";
   workspace: string | null;
   session_id: string | null;
   model: Record<string, unknown> | null;
@@ -604,6 +611,7 @@ export function startBatch(
     archive_max_bytes?: number;
     archive_reuse?: boolean;
     offline?: boolean;
+    rerun_finished?: boolean;
   },
 ): Promise<BatchActionResponse> {
   return sendJson<BatchActionResponse>(
@@ -639,6 +647,8 @@ export function startSiteBuild(
   batchId: string,
   siteKey: string,
   body: {
+    mode?: "build" | "repair";
+    reason?: string;
     max_products?: number;
     max_seconds?: number;
     proxy?: string;

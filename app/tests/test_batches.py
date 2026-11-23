@@ -246,6 +246,24 @@ class BatchApiTests(unittest.TestCase):
         self.assertEqual(cancelled_payload["batch"]["counts"]["cancelled"], 1)
         self.assertEqual(cancelled_payload["batch"]["status"], "PARTIAL")
 
+        rerun = self.client.post(
+            f"/api/batches/{batch_id}/start",
+            json={"rerun_finished": True},
+        )
+        self.assertEqual(rerun.status_code, 202, rerun.text)
+        rerun_payload = rerun.json()
+        self.assertEqual(len(rerun_payload["accepted"]), 1, rerun_payload)
+        rerun_task_id = rerun_payload["accepted"][0]["task_id"]
+        self.assertNotEqual(rerun_task_id, task_id)
+        self.assertIsNotNone(self.store.get_task(task_id))
+        self.assertIsNotNone(self.store.get_task(rerun_task_id))
+
+        rerun_cancelled = self.client.post(f"/api/batches/{batch_id}/cancel")
+        self.assertEqual(rerun_cancelled.status_code, 202, rerun_cancelled.text)
+        self.assertEqual(
+            rerun_cancelled.json()["accepted"][0]["task_id"], rerun_task_id
+        )
+
         archive = self.client.post(f"/api/batches/{batch_id}/archive")
         self.assertEqual(archive.status_code, 202)
         self.assertEqual(archive.json()["batch"]["status"], "ARCHIVED")

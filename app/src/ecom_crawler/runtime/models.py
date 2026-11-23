@@ -176,6 +176,7 @@ class BuildRecord:
     rule_id: str | None = None
     rule_version: str | None = None
     rule_path: str | None = None
+    mode: str = "build"
     created_at: str = field(default_factory=utc_now)
     updated_at: str = field(default_factory=utc_now)
     started_at: str | None = None
@@ -184,6 +185,8 @@ class BuildRecord:
     def __post_init__(self) -> None:
         if self.state not in BUILD_STATES:
             raise ValueError(f"unsupported build state: {self.state!r}")
+        if self.mode not in {"build", "repair"}:
+            raise ValueError(f"unsupported build mode: {self.mode!r}")
 
 
 @dataclass

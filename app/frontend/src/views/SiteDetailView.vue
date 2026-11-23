@@ -63,6 +63,7 @@ const build = ref<BuildStatus | null>(null);
 const buildError = ref("");
 const buildBusy = ref("");
 const buildProxy = ref("");
+const repairReason = ref("");
 const captureReasoning = ref(false);
 const detailMode = ref(true);
 const autoRepair = ref(true);
@@ -107,6 +108,13 @@ const canStartBuild = computed(
     !buildActive.value &&
     Boolean(site.value) &&
     ["needs_onboarding", "building"].includes(site.value?.readiness || ""),
+);
+const canRepairRule = computed(
+  () =>
+    !taskActive.value &&
+    !buildActive.value &&
+    site.value?.readiness === "ready" &&
+    Boolean(site.value?.rule),
 );
 const canPauseBuild = computed(() => build.value?.state === "RUNNING");
 const canResumeBuild = computed(() =>
@@ -247,6 +255,34 @@ async function startBuild() {
       repair_rounds: autoRepair.value ? 1 : 0,
       catalog_scope: catalogFull.value ? "full" : "sample",
       catalog_products: 3000,
+      archive_mode: archiveSample.value ? "sample" : "off",
+      archive_sample_limit: 20,
+    });
+    build.value = payload.build;
+    await load();
+    await loadBuildOutput(payload.build.build_id);
+    scheduleBuildPolling();
+  } catch (exc) {
+    buildError.value = exc instanceof Error ? exc.message : String(exc);
+  } finally {
+    buildBusy.value = "";
+  }
+}
+
+async function startRepair() {
+  buildBusy.value = "repair";
+  buildError.value = "";
+  try {
+    const payload = await startSiteBuild(props.id, props.siteKey, {
+      mode: "repair",
+      reason:
+        repairReason.value.trim() ||
+        "检查并补齐产品描述块、规格和缺失字段",
+      max_products: 6,
+      max_seconds: 600,
+      proxy: buildProxy.value.trim() || undefined,
+      capture_reasoning: captureReasoning.value,
+      repair_rounds: autoRepair.value ? 1 : 0,
       archive_mode: archiveSample.value ? "sample" : "off",
       archive_sample_limit: 20,
     });
@@ -723,14 +759,18 @@ onMounted(async () => {
     </section>
 
     <section
-      v-if="!task && (site.readiness === 'needs_onboarding' || site.readiness === 'building' || build)"
+      v-if="site.readiness === 'ready' || (!task && (site.readiness === 'needs_onboarding' || site.readiness === 'building' || build))"
       class="panel build-panel"
-      aria-label="方案构建"
+      aria-label="方案构建与规则维护"
     >
       <div class="panel-head">
         <div>
-          <h2>方案构建</h2>
-          <p class="muted">
+          <h2>{{ build?.mode === "repair" ? "规则修复与重新验证" : "方案构建与规则维护" }}</h2>
+          <p v-if="site.readiness === 'ready'" class="muted">
+            当前规则 <code>{{ site.rule?.rule_id }}@{{ site.rule?.rule_version }}</code>。
+            可对已安装规则重新验证并修复描述块、规格和缺失字段；不删除已有采集数据。
+          </p>
+          <p v-else class="muted">
             新站由构建 Agent 生成候选规则；主机完成有界验证后站点才变为可采。
             构建会话与采集任务分开，默认只运行一个构建。
           </p>
@@ -744,6 +784,15 @@ onMounted(async () => {
             @click="startBuild"
           >
             {{ buildBusy === "start" ? "启动中…" : "开始构建方案" }}
+          </button>
+          <button
+            v-if="canRepairRule"
+            class="button button-primary"
+            type="button"
+            :disabled="Boolean(buildBusy)"
+            @click="startRepair"
+          >
+            {{ buildBusy === "repair" ? "启动中…" : "重新验证／修复规则" }}
           </button>
           <button
             v-if="canPauseBuild"
@@ -790,6 +839,20 @@ onMounted(async () => {
         </small>
       </div>
 
+      <div v-if="canRepairRule || build?.mode === 'repair'" class="field">
+        <label for="repair-reason">修复原因（可选）</label>
+        <input
+          id="repair-reason"
+          v-model="repairReason"
+          type="text"
+          placeholder="例如：产品描述只采到成分，缺少规格块"
+          autocomplete="off"
+        />
+        <small class="muted">
+          会作为修复 brief 发给构建 Agent；留空使用默认的“检查并补齐描述块和缺失字段”。
+        </small>
+      </div>
+
       <div class="build-trace-options">
         <label class="check">
           <input
@@ -820,13 +883,15 @@ onMounted(async () => {
         <small v-if="buildConfig && buildConfig.max_repair_rounds < 1" class="muted">
           当前服务端未启用自动修复（<code>ECOM_BUILD_MAX_REPAIR_ROUNDS=0</code>）。
         </small>
-        <label class="check">
-          <input v-model="catalogFull" type="checkbox" />
-          全量目录（按顶层分类和分页生成发现源；验证仍用少量商品）
-        </label>
-        <small class="muted">
-          目标商品数按 3000 写入规则；构建仍只验证 6 个商品，通过后再从批次详情启动全量任务。
-        </small>
+        <template v-if="site.readiness !== 'ready'">
+          <label class="check">
+            <input v-model="catalogFull" type="checkbox" />
+            全量目录（按顶层分类和分页生成发现源；验证仍用少量商品）
+          </label>
+          <small class="muted">
+            目标商品数按 3000 写入规则；构建仍只验证 6 个商品，通过后再从批次详情启动全量任务。
+          </small>
+        </template>
         <label class="check">
           <input v-model="archiveSample" type="checkbox" />
           归档样例页面（入口／分类／商品页，最多 20 页）
@@ -966,8 +1031,14 @@ onMounted(async () => {
       </div>
 
       <p v-if="!build" class="muted">
-        当前没有构建记录。开始构建会调用模型分析站点并生成规则，产生模型费用；
-        构建完成后自动做一次有界验证，通过后站点变为可采。
+        <template v-if="site.readiness === 'ready'">
+          当前没有修复记录。点击“重新验证／修复规则”会把已安装规则和样例页交给构建 Agent，
+          只做定向修复并重新验证；失败保留原规则和已有采集数据。
+        </template>
+        <template v-else>
+          当前没有构建记录。开始构建会调用模型分析站点并生成规则，产生模型费用；
+          构建完成后自动做一次有界验证，通过后站点变为可采。
+        </template>
       </p>
 
       <ol v-if="buildEvents.length" class="build-events">

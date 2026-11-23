@@ -23,7 +23,13 @@ from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 from ecom_crawler.executor.extract import HtmlPage, extract_product
 from ecom_crawler.executor.normalize import csv_safe, format_price
-from ecom_crawler.executor.runner import CSV_COLUMNS, build_record, discover_urls, validate_product
+from ecom_crawler.executor.runner import (
+    CSV_COLUMNS,
+    build_record,
+    discover_urls,
+    summarize_content_audit,
+    validate_product,
+)
 from ecom_crawler.model import OPTIONAL_QUALITY_FIELDS
 
 from .archive import ArchiveMissError
@@ -1607,6 +1613,15 @@ class TaskRunner:
                 "scope": "discovery sources declared by the rule",
             },
             "quality_exceptions": quality_exceptions,
+            "content_audit": summarize_content_audit(
+                [
+                    (
+                        str(product.get("source_url") or ""),
+                        product.get("description_audit") or {},
+                    )
+                    for product in self._products
+                ]
+            ),
             "pricing": {
                 "policy": "Choose the smaller public pretax/gross pair per docs/02.",
                 "products": [
@@ -1850,6 +1865,7 @@ def _record_payload(record: Any) -> dict[str, Any]:
         "price_displayed": record.price_displayed,
         "price_pretax": record.price_pretax,
         "tax_basis": record.tax_basis,
+        "description_audit": record.description_audit,
     }
 
 
@@ -1876,6 +1892,7 @@ def _preview_payload(product: dict[str, Any]) -> dict[str, Any]:
             if key not in OPTIONAL_QUALITY_FIELDS
         },
         "field_sources": product.get("field_sources") or {},
+        "description_audit": product.get("description_audit") or {},
     }
 
 

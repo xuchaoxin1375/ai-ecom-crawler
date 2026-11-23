@@ -33,6 +33,7 @@ describe("BatchesView", () => {
             duplicate: 0,
             startable: 2,
             tasks: 0,
+            task_runs: 0,
             draft: 0,
             queued: 0,
             running: 0,

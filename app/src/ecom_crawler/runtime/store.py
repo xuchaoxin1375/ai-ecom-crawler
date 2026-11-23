@@ -98,6 +98,7 @@ CREATE TABLE IF NOT EXISTS builds (
     rule_id TEXT,
     rule_version TEXT,
     rule_path TEXT,
+    mode TEXT NOT NULL DEFAULT 'build',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     started_at TEXT,
@@ -249,6 +250,10 @@ class TaskStore:
             }
             if "proxy" not in build_columns:
                 connection.execute("ALTER TABLE builds ADD COLUMN proxy TEXT")
+            if "mode" not in build_columns:
+                connection.execute(
+                    "ALTER TABLE builds ADD COLUMN mode TEXT NOT NULL DEFAULT 'build'"
+                )
             if "lease_owner" not in task_columns:
                 connection.execute("ALTER TABLE tasks ADD COLUMN lease_owner TEXT")
             if "lease_token" not in task_columns:
@@ -1335,11 +1340,15 @@ class TaskStore:
             raise BatchNotFoundError(f"unknown batch site: {batch_id}/{site_key}")
         return site
 
-    def create_task_for_site(self, task: Task, *, site_key: str) -> bool:
+    def create_task_for_site(
+        self, task: Task, *, site_key: str, replace_existing: bool = False
+    ) -> bool:
         """Create a task and link it to a batch site in one transaction.
 
         Returns ``False`` when the site already has a task, which makes a
-        repeated batch start idempotent even with concurrent callers.
+        repeated batch start idempotent even with concurrent callers.  With
+        ``replace_existing=True`` a terminal task link may be replaced by a new
+        run; the caller is responsible for checking the old task is terminal.
         """
         if not task.batch_id:
             raise ValueError("task.batch_id is required for batch starts")
@@ -1354,15 +1363,22 @@ class TaskStore:
                     raise BatchNotFoundError(
                         f"unknown batch site: {task.batch_id}/{site_key}"
                     )
-                if row["task_id"]:
+                if row["task_id"] and not replace_existing:
                     connection.rollback()
                     return False
                 self._insert_task(connection, task)
-                cursor = connection.execute(
-                    "UPDATE batch_sites SET task_id = ?, updated_at = ? "
-                    "WHERE batch_id = ? AND site_key = ? AND task_id IS NULL",
-                    (task.task_id, utc_now(), task.batch_id, site_key),
-                )
+                if replace_existing:
+                    cursor = connection.execute(
+                        "UPDATE batch_sites SET task_id = ?, updated_at = ? "
+                        "WHERE batch_id = ? AND site_key = ?",
+                        (task.task_id, utc_now(), task.batch_id, site_key),
+                    )
+                else:
+                    cursor = connection.execute(
+                        "UPDATE batch_sites SET task_id = ?, updated_at = ? "
+                        "WHERE batch_id = ? AND site_key = ? AND task_id IS NULL",
+                        (task.task_id, utc_now(), task.batch_id, site_key),
+                    )
                 if cursor.rowcount != 1:
                     connection.rollback()
                     return False
@@ -1392,8 +1408,8 @@ class TaskStore:
                     INSERT INTO builds (
                         build_id, batch_id, site_key, state, outcome, workspace,
                         session_id, model_json, proxy, error, rule_id, rule_version,
-                        rule_path, created_at, updated_at, started_at, finished_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        rule_path, mode, created_at, updated_at, started_at, finished_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         build.build_id,
@@ -1409,6 +1425,7 @@ class TaskStore:
                         build.rule_id,
                         build.rule_version,
                         build.rule_path,
+                        build.mode,
                         build.created_at,
                         build.updated_at,
                         build.started_at,
@@ -1699,6 +1716,7 @@ def _build_from_row(row: sqlite3.Row) -> BuildRecord:
         rule_id=row["rule_id"],
         rule_version=row["rule_version"],
         rule_path=row["rule_path"],
+        mode=row["mode"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         started_at=row["started_at"],

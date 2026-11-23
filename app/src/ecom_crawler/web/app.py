@@ -105,9 +105,12 @@ class BatchStartRequest(BaseModel):
     archive_max_bytes: int | None = Field(default=None, ge=0)
     archive_reuse: bool = False
     offline: bool = False
+    rerun_finished: bool = False
 
 
 class BuildStartRequest(BaseModel):
+    mode: Literal["build", "repair"] = "build"
+    reason: str | None = Field(default=None, max_length=2000)
     max_products: int = Field(default=6, ge=1, le=50)
     max_seconds: int = Field(default=600, ge=60, le=3600)
     proxy: str | None = Field(default=None, max_length=500)
@@ -191,6 +194,7 @@ def _summary(store: TaskStore, task: Task, out_root: Path) -> dict[str, Any]:
         "counts": _counts(store, task, result),
         "coverage": result.get("coverage") or {"status": "UNKNOWN"},
         "quality_exceptions": result.get("quality_exceptions") or [],
+        "content_audit": result.get("content_audit") or {},
         "archived_at": task.archived_at,
         "created_at": task.created_at,
         "updated_at": task.updated_at,
@@ -703,17 +707,23 @@ def create_app(
             task_id: _summary(store, task, root)
             for task_id, task in tasks.items()
         }
+        current_task_ids = {site.task_id for site in sites if site.task_id}
+        current_summaries = {
+            task_id: summaries[task_id]
+            for task_id in current_task_ids
+            if task_id in summaries
+        }
         readiness = Counter(site.readiness for site in sites)
-        states = Counter(summary["state"] for summary in summaries.values())
+        states = Counter(summary["state"] for summary in current_summaries.values())
         failed_tasks = sum(
             1
-            for summary in summaries.values()
+            for summary in current_summaries.values()
             if summary["state"] == "FINISHED"
             and summary["outcome"] == "FAILED"
         )
         partial_tasks = sum(
             1
-            for summary in summaries.values()
+            for summary in current_summaries.values()
             if summary["state"] == "FINISHED"
             and summary["outcome"] == "PARTIAL"
         )
@@ -729,7 +739,8 @@ def create_app(
                 for site in sites
                 if site.readiness == "ready" and not site.task_id
             ),
-            "tasks": len(summaries),
+            "tasks": len(current_summaries),
+            "task_runs": len(summaries),
             "draft": states.get("DRAFT", 0),
             "queued": states.get("QUEUED", 0),
             "running": sum(
@@ -750,18 +761,18 @@ def create_app(
             "language": batch.language,
             "category": batch.category,
             "note": batch.note,
-            "status": batch_status(batch, sites, summaries),
+            "status": batch_status(batch, sites, current_summaries),
             "archived_at": batch.archived_at,
             "created_at": batch.created_at,
             "updated_at": batch.updated_at,
             "counts": counts,
             "valid_products": sum(
                 int(summary["counts"].get("valid_products", 0))
-                for summary in summaries.values()
+                for summary in current_summaries.values()
             ),
             "failed_products": sum(
                 int(summary["counts"].get("failed_products", 0))
-                for summary in summaries.values()
+                for summary in current_summaries.values()
             ),
         }
         if detail:
@@ -1236,9 +1247,23 @@ def create_app(
                 "domain": site.domain,
                 "task_id": site.task_id,
             }
+            rerun = bool(payload is not None and payload.rerun_finished)
             if site.task_id:
-                skipped.append({**item, "reason": "站点已开始"})
-                continue
+                existing = store.get_task(site.task_id)
+                if not rerun:
+                    skipped.append({**item, "reason": "站点已开始"})
+                    continue
+                if existing is not None and existing.state in ACTIVE_TASK_STATES:
+                    skipped.append({**item, "reason": "站点任务仍在运行"})
+                    continue
+                if existing is not None and existing.state not in {
+                    "FINISHED",
+                    "CANCELLED",
+                }:
+                    skipped.append(
+                        {**item, "reason": f"站点任务状态为 {existing.state}"}
+                    )
+                    continue
             if site.readiness != "ready":
                 skipped.append(
                     {
@@ -1297,7 +1322,9 @@ def create_app(
             task.domain_key = site.site_key
             task.market = batch.market or rule.get("market")
             try:
-                created = store.create_task_for_site(task, site_key=site.site_key)
+                created = store.create_task_for_site(
+                    task, site_key=site.site_key, replace_existing=rerun
+                )
             except BatchNotFoundError:
                 skipped.append({**item, "reason": "站点在批次中不存在"})
                 continue
@@ -1534,21 +1561,37 @@ def create_app(
             raise _error("NOT_FOUND", f"unknown batch site: {site_key}", 404)
         request = payload or BuildStartRequest()
         try:
-            record = build_manager.start(
-                batch,
-                site,
-                max_products=request.max_products,
-                max_seconds=request.max_seconds,
-                proxy=request.proxy,
-                capture_reasoning=request.capture_reasoning,
-                repair_rounds=request.repair_rounds,
-                archive_mode=request.archive_mode,
-                archive_root=request.archive_root,
-                archive_sample_limit=request.archive_sample_limit,
-                archive_max_bytes=request.archive_max_bytes,
-                catalog_scope=request.catalog_scope,
-                catalog_products=request.catalog_products,
-            )
+            if request.mode == "repair":
+                record = build_manager.repair(
+                    batch,
+                    site,
+                    reason=request.reason,
+                    max_products=request.max_products,
+                    max_seconds=request.max_seconds,
+                    proxy=request.proxy,
+                    capture_reasoning=request.capture_reasoning,
+                    repair_rounds=request.repair_rounds,
+                    archive_mode=request.archive_mode,
+                    archive_root=request.archive_root,
+                    archive_sample_limit=request.archive_sample_limit,
+                    archive_max_bytes=request.archive_max_bytes,
+                )
+            else:
+                record = build_manager.start(
+                    batch,
+                    site,
+                    max_products=request.max_products,
+                    max_seconds=request.max_seconds,
+                    proxy=request.proxy,
+                    capture_reasoning=request.capture_reasoning,
+                    repair_rounds=request.repair_rounds,
+                    archive_mode=request.archive_mode,
+                    archive_root=request.archive_root,
+                    archive_sample_limit=request.archive_sample_limit,
+                    archive_max_bytes=request.archive_max_bytes,
+                    catalog_scope=request.catalog_scope,
+                    catalog_products=request.catalog_products,
+                )
         except BuildError as exc:
             raise _error("BUILD_CONFLICT", str(exc), 409) from exc
         return {

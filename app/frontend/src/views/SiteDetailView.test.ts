@@ -81,6 +81,7 @@ describe("SiteDetailView build timeline", () => {
         site_key: "example.fr",
         state: "FINISHED",
         outcome: "failed",
+        mode: "build",
         workspace: null,
         session_id: null,
         model: { providerID: "test", id: "model", variant: "high" },
@@ -178,5 +179,6 @@ describe("SiteDetailView build timeline", () => {
     expect(wrapper.text()).toContain("完成");
     expect(wrapper.text()).toContain("Files are written");
     expect(wrapper.text()).toContain("自动修复 1/1");
+    expect(wrapper.text()).toContain("重新验证／修复规则");
   });
 });

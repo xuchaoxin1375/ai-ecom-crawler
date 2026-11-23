@@ -53,6 +53,7 @@ const actionNotice = ref("");
 const actionSkipped = ref<Array<{ domain: string; reason: string }>>([]);
 const confirm = ref<"" | "cancel" | "archive">("");
 const fullCatalog = ref(false);
+const rerunFinished = ref(false);
 const siteFilter = ref<SiteFilter>("all");
 const importOpen = ref(false);
 const importText = ref("");
@@ -67,6 +68,9 @@ const hasActive = computed(() => {
   return value.running + value.queued + value.draft > 0;
 });
 const canPause = computed(() => (counts.value?.running || 0) > 0);
+const canStart = computed(
+  () => (counts.value?.startable || 0) > 0 || rerunFinished.value,
+);
 const canCancel = computed(() => {
   const value = counts.value;
   if (!value) return false;
@@ -193,9 +197,8 @@ async function runAction(
   actionSkipped.value = [];
   try {
     if (action === "start") {
-      const result = await startBatch(
-        props.id,
-        fullCatalog.value
+      const result = await startBatch(props.id, {
+        ...(fullCatalog.value
           ? {
               limits: {
                 max_urls: 8000,
@@ -206,8 +209,9 @@ async function runAction(
               archive_mode: "sample",
               archive_sample_limit: 20,
             }
-          : undefined,
-      );
+          : {}),
+        rerun_finished: rerunFinished.value,
+      });
       batch.value = result.batch;
       actionNotice.value = `已受理 ${result.accepted.length} 个站点，跳过 ${result.skipped.length} 个。`;
       actionSkipped.value = result.skipped.map((item) => ({
@@ -319,11 +323,15 @@ onBeforeUnmount(() => {
         <button
           class="button button-primary"
           type="button"
-          :disabled="!batch.counts.startable || Boolean(busy)"
-          :title="batch.counts.startable ? '只启动可采且未开始的站点' : '没有未开始的可采站点'"
+          :disabled="!canStart || Boolean(busy)"
+          :title="canStart ? '启动可采且未开始的站点；勾选复跑时也包含已完成站点' : '没有可启动的可采站点'"
           @click="runAction('start')"
         >
-          {{ busy === "start" ? "启动中…" : `启动可采站点 (${batch.counts.startable})` }}
+          {{ busy === "start"
+            ? "启动中…"
+            : rerunFinished
+              ? `复跑可采站点 (${batch.counts.ready})`
+              : `启动可采站点 (${batch.counts.startable})` }}
         </button>
         <button
           class="button"
@@ -350,6 +358,10 @@ onBeforeUnmount(() => {
       <label class="check batch-full-catalog">
         <input v-model="fullCatalog" type="checkbox" />
         全量目录（3000 商品 / 4 小时 / sample 存档）
+      </label>
+      <label class="check batch-full-catalog">
+        <input v-model="rerunFinished" type="checkbox" />
+        复跑已完成站点（保留旧任务，创建新任务）
       </label>
     </div>
 

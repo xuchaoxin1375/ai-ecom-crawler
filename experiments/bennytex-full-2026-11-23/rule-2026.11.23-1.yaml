@@ -1,0 +1,347 @@
+schema_version: '1.1'
+rule_id: bennytex-fr-build
+rule_version: 2026.11.23-1
+kind: declarative
+status: candidate
+created_at: '2026-11-23T00:00:00Z'
+updated_at: '2026-11-22T22:39:31Z'
+site:
+  name: Bennytex
+  entry_urls:
+  - https://www.bennytex.fr/
+  allowed_origins:
+  - https://www.bennytex.fr
+  allowed_path_prefixes:
+  - /
+  market: FR
+  locale: fr-FR
+  currency: EUR
+scope:
+  include: []
+  exclude:
+  - /panier
+  - /mon-compte
+  - /checkout
+  - /content/
+  - /contactez-nous
+  - /plan-site
+  - /recherche
+  - /promotions
+  max_products: 3000
+  max_seconds: 5400
+  notes: 'Full catalog. Top-level product categories were taken from the site map
+    (/plan-site): Enfant, Dentelle, Coupon, Loisir Créatif, Coton, Soierie, Lainage,
+    Polyester, Lin, Maille, Fin de rouleau and the three Nouvelle collection listings.
+    Observed category pagination totals roughly 2,600 listed products before URL deduplication;
+    max_products is set above the 2,000-product catalog target. Mercerie (163) and
+    Rouleau (132) render no product grid and are not used as sources.'
+capabilities:
+  discovery: true
+  product: true
+discovery:
+  strategies:
+  - entry_links
+  entry_url: https://www.bennytex.fr/
+  link_selector: a.product-name
+  product_url_patterns:
+  - /[0-9]+-[a-z0-9-]+\.html$
+  url_identity: canonical
+  sources:
+  - type: listing
+    url: https://www.bennytex.fr/3-coton
+    product_link_selector: a.product-name
+    max_pages: 29
+    advance:
+      type: page_param
+      param: p
+  - type: listing
+    url: https://www.bennytex.fr/4-soierie
+    product_link_selector: a.product-name
+    max_pages: 8
+    advance:
+      type: page_param
+      param: p
+  - type: listing
+    url: https://www.bennytex.fr/5-lainage
+    product_link_selector: a.product-name
+    max_pages: 4
+    advance:
+      type: page_param
+      param: p
+  - type: listing
+    url: https://www.bennytex.fr/6-polyester
+    product_link_selector: a.product-name
+    max_pages: 12
+    advance:
+      type: page_param
+      param: p
+  - type: listing
+    url: https://www.bennytex.fr/8-lin
+    product_link_selector: a.product-name
+    max_pages: 1
+    advance:
+      type: page_param
+      param: p
+  - type: listing
+    url: https://www.bennytex.fr/81-maille
+    product_link_selector: a.product-name
+    max_pages: 1
+    advance:
+      type: page_param
+      param: p
+  - type: listing
+    url: https://www.bennytex.fr/9-dentelle
+    product_link_selector: a.product-name
+    max_pages: 2
+    advance:
+      type: page_param
+      param: p
+  - type: listing
+    url: https://www.bennytex.fr/96-coupon
+    product_link_selector: a.product-name
+    max_pages: 5
+    advance:
+      type: page_param
+      param: p
+  - type: listing
+    url: https://www.bennytex.fr/111-loisir-creatif
+    product_link_selector: a.product-name
+    max_pages: 11
+    advance:
+      type: page_param
+      param: p
+  - type: listing
+    url: https://www.bennytex.fr/127-enfant
+    product_link_selector: a.product-name
+    max_pages: 15
+    advance:
+      type: page_param
+      param: p
+  - type: listing
+    url: https://www.bennytex.fr/119-fin-de-rouleau
+    product_link_selector: a.product-name
+    max_pages: 4
+    advance:
+      type: page_param
+      param: p
+  - type: listing
+    url: https://www.bennytex.fr/176-nouvelle-collection
+    product_link_selector: a.product-name
+    max_pages: 3
+    advance:
+      type: page_param
+      param: p
+  - type: listing
+    url: https://www.bennytex.fr/179-nouvelle-collection-2
+    product_link_selector: a.product-name
+    max_pages: 5
+    advance:
+      type: page_param
+      param: p
+  - type: listing
+    url: https://www.bennytex.fr/181-nouvelle-collection-3
+    product_link_selector: a.product-name
+    max_pages: 12
+    advance:
+      type: page_param
+      param: p
+  notes: PrestaShop listings paginate with ?p=N and show 24 products per page. Each
+    card exposes the product URL twice (grid and list views), so the same href appears
+    twice per page; dedupe by canonical URL if present, otherwise by the request URL.
+fetch:
+  default_engine: static
+  concurrency: 1
+  delay_ms: 1200
+  retry:
+    max_attempts: 2
+    backoff_ms: 1000
+  timeout_ms: 45000
+  browser: false
+  login: false
+  challenge_handling: none; stop and record
+extract:
+  fields:
+    name:
+      required: true
+      fallbacks:
+      - type: json_ld
+        path: name
+        label: json_ld_name
+      - type: css_text
+        selector: h1
+        label: h1
+      - type: css_attr
+        selector: meta[itemprop="name"]
+        attr: content
+        label: microdata_name
+      - type: title
+        label: title
+    price.amount:
+      required: true
+      fallbacks:
+      - type: json_ld
+        path: offers.price
+        label: json_ld_offer_price
+        take: min_positive
+        tax_basis: unspecified
+      - type: css_text
+        selector: '#our_price_display'
+        label: current_price
+      - type: css_attr
+        selector: meta[itemprop="price"]
+        attr: content
+        label: microdata_price
+    price.currency:
+      required: true
+      fallbacks:
+      - type: json_ld
+        path: offers.priceCurrency
+        label: json_ld_currency
+      - type: css_attr
+        selector: meta[itemprop="priceCurrency"]
+        attr: content
+        label: microdata_currency
+    primary_image_url:
+      required: true
+      fallbacks:
+      - type: json_ld
+        path: image
+        label: json_ld_image
+        absolute: true
+      - type: css_attr
+        selector: meta[itemprop="image"]
+        attr: content
+        label: microdata_image
+        absolute: true
+    description_html:
+      required: false
+      fallbacks:
+      - type: json_ld
+        path: description
+        label: json_ld_description
+        description_status: complete
+      - type: css_html
+        selector: '#tabs-1'
+        label: description_tab
+        description_status: complete
+      - type: css_attr
+        selector: meta[itemprop="description"]
+        attr: content
+        label: microdata_description
+        description_status: complete
+    category:
+      required: false
+      fallbacks:
+      - type: json_ld
+        path: category
+        label: json_ld_category
+      - type: breadcrumb
+        selector: div.breadcrumb-box .navigation-page a
+        label: breadcrumb
+        drop_last: false
+      - type: css_attr
+        selector: meta[itemprop="category"]
+        attr: content
+        label: microdata_category
+    brand:
+      required: false
+      fallbacks:
+      - type: json_ld
+        path: brand.name
+        label: json_ld_brand
+      - type: css_attr
+        selector: '[itemprop="brand"] meta[itemprop="name"]'
+        attr: content
+        label: microdata_brand
+    source_url:
+      required: true
+      fallbacks:
+      - type: canonical
+        label: canonical
+      - type: css_attr
+        selector: meta[itemprop="url"]
+        attr: content
+        label: microdata_url
+        absolute: true
+normalize:
+  price:
+    tax_basis: exclusive_or_inclusive
+    choose: smaller_public_pair
+    positive_only: true
+  description:
+    mode: clean_html
+    statuses:
+    - complete
+    - partial
+    - not_provided
+    - failed
+  options:
+    exclude_quantity: true
+    strip_price_delta: true
+validate:
+  required_fields:
+  - name
+  - price.amount
+  - price.currency
+  - primary_image_url
+  - source_url
+  assertions:
+  - field: price.amount
+    op: '>'
+    value: 0
+  - field: price.currency
+    op: matches
+    value: ^[A-Z]{3}$
+  partial_description: allowed_with_flag
+output:
+  url_list:
+    enabled: true
+    columns:
+    - url
+    - source
+    - status
+    - title
+    format: csv
+  product_csv:
+    enabled: true
+    columns: 9
+    format: csv
+  task_result: true
+task_defaults:
+  max_urls: 3000
+  max_products: 3000
+  max_seconds: 5400
+  concurrency:
+    navigation: 1
+    product: 1
+compatibility:
+  os:
+  - windows
+  - linux
+  - wsl2
+  runtime: python>=3.11
+  dependencies:
+  - pyyaml
+  - lxml
+evidence:
+  sample_urls:
+  - https://www.bennytex.fr/11603-molleton-gratte-uni-jaune.html
+  - https://www.bennytex.fr/31170-carre-de-soie-en-twill-de-soie-de-luxe-4040-cm-100-soie-fond-orange-imprime.html
+  - https://www.bennytex.fr/30865-coupon-velours-de-laine-carreau-fond-fuchia-et-noir-tres-doux.html
+  expected:
+  - Product fields from the microdata/price block; EUR currency on FR pages.
+  limitations:
+  - No Product JSON-LD on sampled pages; extraction relies on microdata plus CSS.
+  - No rel=canonical and no og:image tags; source_url falls back to microdata url.
+  - Mercerie (163) and Rouleau (132) category pages render no product grid.
+  - Only three product pages sampled; template variants for other categories are unverified.
+  - Host validation is a bounded sample, not full-site or long-term coverage.
+  host_validation:
+    validated_at: '2026-11-22T22:39:31Z'
+    build_id: build-f23d50810e5f
+    valid_products: 6
+    failed_products: 0
+    stop_reason: NATURAL_END
+    outcome: COMPLETED
+    currencies: {}
+    proxy_configured: false

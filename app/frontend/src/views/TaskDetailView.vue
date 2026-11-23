@@ -596,6 +596,51 @@ onBeforeUnmount(() => {
     <section class="panel">
       <div class="panel-head">
         <div>
+          <h2>内容完整度</h2>
+          <p class="muted">
+            按规则声明的描述块检查页面内容是否进入 description_html；有缺口时任务会标记部分描述。
+          </p>
+        </div>
+      </div>
+      <div
+        v-if="task.content_audit && task.content_audit.products_checked"
+        class="count-grid"
+      >
+        <div class="card">
+          <span>已审计商品</span>
+          <strong>{{ task.content_audit.products_checked }}</strong>
+          <small>声明了描述块审计并成功提取的商品</small>
+        </div>
+        <div class="card">
+          <span>描述缺口</span>
+          <strong>{{ task.content_audit.description_gaps ?? 0 }}</strong>
+          <small>页面存在但未进入 description_html 的块</small>
+        </div>
+      </div>
+      <ul
+        v-if="task.content_audit?.samples?.length"
+        class="quality-list"
+      >
+        <li v-for="(sample, index) in task.content_audit.samples" :key="index">
+          <dl>
+            <dt>来源</dt>
+            <dd><code>{{ sample.source_url }}</code></dd>
+            <dt>缺失块</dt>
+            <dd>{{ sample.missing_blocks.join("、") }}</dd>
+          </dl>
+        </li>
+      </ul>
+      <p v-else-if="task.content_audit?.products_checked" class="muted">
+        本次任务没有描述块缺口。
+      </p>
+      <p v-else class="muted">
+        本次任务没有声明描述块审计；可对规则做一次重新验证来启用。
+      </p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <div>
           <h2>质量异常</h2>
           <p class="muted">
             仅列正文不完整或非可选字段缺失的商品；品牌、分类等可空字段缺失不算异常。

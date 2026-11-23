@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import re
+import unicodedata
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urljoin
@@ -232,6 +235,8 @@ def _run_extractor(
         return _extract_css_attr(page, fallback, label)
     if extractor_type == "css_html":
         return _extract_css_html(page, fallback, label)
+    if extractor_type == "compose":
+        return _extract_compose(page, field_name, fallback, plan, label)
     if extractor_type == "title":
         title = page.first("title")
         if title is None:
@@ -344,6 +349,12 @@ def _extract_css_html(
     element = page.first(fallback["selector"])
     if element is None:
         return None
+    excluded = fallback.get("exclude_selectors") or []
+    if excluded:
+        element = deepcopy(element)
+        for selector in excluded:
+            for child in element.cssselect(selector):
+                child.drop_tree()
     raw = inner_html(element)
     if not raw.strip():
         return None
@@ -352,6 +363,191 @@ def _extract_css_html(
         label,
         {"description_status": fallback.get("description_status", "complete")},
     )
+
+
+def _extract_compose(
+    page: HtmlPage,
+    field_name: str,
+    fallback: dict[str, Any],
+    plan: dict[str, Any],
+    label: str,
+) -> FieldHit | None:
+    blocks: list[str] = []
+    shared_excludes = list(fallback.get("exclude_selectors") or [])
+    for part in fallback.get("parts") or []:
+        part_spec = dict(part)
+        part_spec.setdefault("type", "css_html" if part.get("selector") else "")
+        if shared_excludes:
+            part_spec["exclude_selectors"] = [
+                *list(part.get("exclude_selectors") or []),
+                *shared_excludes,
+            ]
+        hit = _run_extractor(page, field_name, part_spec, plan)
+        if hit is None or not _has_value(hit.value):
+            continue
+        value = hit.value
+        if not isinstance(value, str) or not value.strip():
+            continue
+        if part_spec["type"] in {"css_html", "json_ld"}:
+            blocks.append(value)
+        else:
+            blocks.append(text_to_html(value))
+    if not blocks:
+        return None
+    merged = _merge_description_blocks(
+        blocks,
+        dedupe=bool(fallback.get("dedupe", True)),
+        max_chars=int(fallback.get("max_chars", 50000)),
+    )
+    if not merged.strip():
+        return None
+    return FieldHit(
+        merged,
+        label,
+        {
+            "description_status": fallback.get("description_status", "complete"),
+            "parts": len(blocks),
+        },
+    )
+
+
+def _description_text(value: str) -> str:
+    text = re.sub(r"<[^>]+>", " ", value)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _normalized_for_match(value: str) -> str:
+    text = unicodedata.normalize("NFKD", value)
+    text = "".join(char for char in text if not unicodedata.combining(char))
+    text = text.casefold()
+    return re.sub(r"[^0-9a-z\u4e00-\u9fff]+", "", text)
+
+
+def _merge_description_blocks(
+    blocks: list[str], *, dedupe: bool, max_chars: int
+) -> str:
+    """Merge HTML fragments in DOM order and drop duplicated/contained blocks."""
+    prepared: list[tuple[str, str]] = []
+    for block in blocks:
+        text = _description_text(block)
+        if not text:
+            continue
+        prepared.append((block, text))
+    if dedupe:
+        kept: list[tuple[str, str]] = []
+        for block, text in prepared:
+            normalized = _normalized_for_match(text)
+            replaced = False
+            for index, (existing_block, existing_text) in enumerate(kept):
+                existing_norm = _normalized_for_match(existing_text)
+                if normalized == existing_norm:
+                    replaced = True
+                    break
+                if normalized and normalized in existing_norm:
+                    replaced = True
+                    break
+                if existing_norm and existing_norm in normalized:
+                    kept[index] = (block, text)
+                    replaced = True
+                    break
+            if not replaced:
+                kept.append((block, text))
+        prepared = kept
+    merged: list[str] = []
+    total = 0
+    for block, _text in prepared:
+        if total and total + len(block) > max_chars:
+            break
+        merged.append(block)
+        total += len(block)
+    return "\n".join(merged).strip()
+
+
+def _block_texts(element: etree._Element) -> list[str]:
+    tag = str(element.tag).lower() if isinstance(element.tag, str) else ""
+    if tag in {"ul", "ol"}:
+        items = [
+            re.sub(r"\s+", " ", item.text_content()).strip()
+            for item in element.cssselect("li")
+        ]
+        return [item for item in items if item]
+    text = re.sub(r"\s+", " ", element.text_content()).strip()
+    return [text] if text else []
+
+
+def _text_covered(block: str, description: str) -> bool:
+    block_norm = _normalized_for_match(block)
+    desc_norm = _normalized_for_match(description)
+    if not block_norm:
+        return True
+    if block_norm in desc_norm:
+        return True
+    tokens = [token for token in re.findall(r"[0-9a-z\u4e00-\u9fff]{3,}", block.casefold())]
+    if not tokens:
+        return False
+    present = sum(1 for token in tokens if token in desc_norm)
+    return present / len(tokens) >= 0.8
+
+
+def audit_description_blocks(
+    page: HtmlPage,
+    spec: dict[str, Any],
+    description: str,
+) -> dict[str, Any]:
+    """Check whether declared page blocks are represented in the final HTML."""
+    audit = spec.get("audit") if isinstance(spec, dict) else None
+    if not isinstance(audit, dict):
+        return {}
+    default_min = int(audit.get("min_chars", 20))
+    blocks: list[dict[str, Any]] = []
+    missing: list[str] = []
+    for index, block_spec in enumerate(audit.get("blocks") or []):
+        if not isinstance(block_spec, dict):
+            continue
+        selector = str(block_spec.get("selector") or "")
+        label = str(block_spec.get("label") or selector or f"block_{index}")
+        min_chars = int(block_spec.get("min_chars", default_min))
+        try:
+            elements = page.css(selector)
+        except PlanError:
+            blocks.append(
+                {
+                    "label": label,
+                    "selector": selector,
+                    "error": "invalid_selector",
+                    "covered": False,
+                }
+            )
+            missing.append(label)
+            continue
+        for element in elements:
+            excluded = block_spec.get("exclude_selectors") or []
+            if excluded:
+                element = deepcopy(element)
+                for exclude_selector in excluded:
+                    for child in element.cssselect(exclude_selector):
+                        child.drop_tree()
+            for text in _block_texts(element):
+                if len(text) < min_chars:
+                    continue
+                covered = _text_covered(text, description)
+                blocks.append(
+                    {
+                        "label": label,
+                        "selector": selector,
+                        "chars": len(text),
+                        "covered": covered,
+                    }
+                )
+                if not covered and label not in missing:
+                    missing.append(label)
+    if not blocks:
+        return {"checked": 0, "missing_blocks": []}
+    return {
+        "checked": len(blocks),
+        "missing_blocks": missing,
+        "blocks": blocks,
+    }
 
 
 def _extract_breadcrumb(
@@ -467,6 +663,18 @@ def extract_product(page: HtmlPage, plan: dict[str, Any]) -> ExtractedProduct:
     partial_reason = None
     if status == "partial":
         partial_reason = "Fallback description container used; the full description was not available."
+    description_audit = audit_description_blocks(
+        page, fields.get("description_html", {}), description
+    )
+    missing_blocks = list(description_audit.get("missing_blocks") or [])
+    if missing_blocks and description:
+        status = "partial"
+        partial_reason = (
+            "Description blocks were present on the page but not merged: "
+            + ", ".join(missing_blocks)
+        )
+    if description_audit:
+        extras.setdefault("description_html", {})["audit"] = description_audit
     values["description_html"] = description
 
     values["name"] = clean_name(
@@ -487,6 +695,8 @@ def extract_product(page: HtmlPage, plan: dict[str, Any]) -> ExtractedProduct:
         missing_reasons["category"] = "NOT_FOUND"
     if not description:
         missing_reasons["description_html"] = "NOT_PROVIDED"
+    elif missing_blocks:
+        missing_reasons["description_html"] = "DESCRIPTION_BLOCKS_MISSING"
 
     return ExtractedProduct(
         values=values,

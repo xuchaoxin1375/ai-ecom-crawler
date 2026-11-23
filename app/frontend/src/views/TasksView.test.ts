@@ -76,6 +76,11 @@ describe("TasksView", () => {
           },
           coverage: { status: "KNOWN", covered: 6, denominator: 6 },
           quality_exceptions: [],
+          content_audit: {
+            products_checked: 6,
+            description_gaps: 0,
+            samples: [],
+          },
           archived_at: null,
           created_at: "2026-11-23T01:00:00Z",
           updated_at: "2026-11-23T02:00:00Z",

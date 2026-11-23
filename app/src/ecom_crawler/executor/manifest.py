@@ -20,6 +20,7 @@ SUPPORTED_EXTRACTORS = {
     "css_text",
     "css_attr",
     "css_html",
+    "compose",
     "title",
     "breadcrumb",
     "option_groups",
@@ -33,6 +34,7 @@ KNOWN_FIELDS = CORE_FIELDS | OPTIONAL_FIELDS
 DESCRIPTION_STATUSES = {"complete", "partial", "fallback", "not_provided", "failed"}
 TAKE_VALUES = {"first", "first_positive", "min_positive"}
 ASSERTION_OPS = {">", ">=", "<", "<=", "==", "matches"}
+COMPOSE_PART_TYPES = {"json_ld", "css_text", "css_attr", "css_html"}
 PLAN_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,80}$")
 
 REQUIRED_TOP_LEVEL = {
@@ -235,6 +237,42 @@ def _validate_field_spec(field_name: str, spec: Any) -> None:
         raise PlanError(f"extract.fields.{field_name}.fallbacks must not be empty")
     for index, fallback in enumerate(fallbacks):
         _validate_fallback(field_name, index, fallback)
+    audit = spec.get("audit")
+    if audit is not None:
+        if field_name != "description_html":
+            raise PlanError("extract.fields.*.audit is supported for description_html only")
+        _validate_description_audit(audit)
+
+
+def _validate_description_audit(value: Any) -> None:
+    audit = _require_mapping(value, "extract.fields.description_html.audit")
+    blocks = _require_list(
+        audit.get("blocks"), "extract.fields.description_html.audit.blocks"
+    )
+    if not blocks:
+        raise PlanError(
+            "extract.fields.description_html.audit.blocks must not be empty"
+        )
+    for index, block in enumerate(blocks):
+        path = f"extract.fields.description_html.audit.blocks[{index}]"
+        block = _require_mapping(block, path)
+        _require_string(block.get("selector"), f"{path}.selector")
+        label = block.get("label")
+        if label is not None:
+            _require_string(label, f"{path}.label")
+        min_chars = block.get("min_chars", audit.get("min_chars", 20))
+        if not isinstance(min_chars, int) or isinstance(min_chars, bool) or min_chars < 1:
+            raise PlanError(f"{path}.min_chars must be a positive integer")
+        exclude = block.get("exclude_selectors", [])
+        if not isinstance(exclude, list) or not all(
+            isinstance(item, str) and item.strip() for item in exclude
+        ):
+            raise PlanError(f"{path}.exclude_selectors must be a list of selectors")
+    min_chars = audit.get("min_chars", 20)
+    if not isinstance(min_chars, int) or isinstance(min_chars, bool) or min_chars < 1:
+        raise PlanError(
+            "extract.fields.description_html.audit.min_chars must be a positive integer"
+        )
 
 
 def _validate_fallback(field_name: str, index: int, fallback: Any) -> None:
@@ -248,6 +286,7 @@ def _validate_fallback(field_name: str, index: int, fallback: Any) -> None:
         "css_text": ("selector",),
         "css_attr": ("selector", "attr"),
         "css_html": ("selector",),
+        "compose": ("parts",),
         "breadcrumb": ("selector",),
         "option_groups": ("group_selector",),
         "price_pair": ("gross", "pretax"),
@@ -258,6 +297,19 @@ def _validate_fallback(field_name: str, index: int, fallback: Any) -> None:
     for key in required_keys:
         if fallback.get(key) in (None, ""):
             raise PlanError(f"{path}.{key} is required for {extractor_type}")
+    if extractor_type == "compose":
+        _validate_compose_parts(fallback.get("parts"), path)
+        exclude = fallback.get("exclude_selectors", [])
+        if not isinstance(exclude, list) or not all(
+            isinstance(item, str) and item.strip() for item in exclude
+        ):
+            raise PlanError(f"{path}.exclude_selectors must be a list of selectors")
+        max_chars = fallback.get("max_chars", 50000)
+        if not isinstance(max_chars, int) or isinstance(max_chars, bool) or max_chars < 1:
+            raise PlanError(f"{path}.max_chars must be a positive integer")
+        dedupe = fallback.get("dedupe", True)
+        if not isinstance(dedupe, bool):
+            raise PlanError(f"{path}.dedupe must be a boolean")
     if extractor_type == "price_pair":
         for side in ("gross", "pretax"):
             side_spec = _require_mapping(fallback.get(side), f"{path}.{side}")
@@ -269,6 +321,40 @@ def _validate_fallback(field_name: str, index: int, fallback: Any) -> None:
     status = fallback.get("description_status")
     if status is not None and status not in DESCRIPTION_STATUSES:
         raise PlanError(f"unsupported description_status={status!r} at {path}")
+
+
+def _validate_compose_parts(value: Any, parent_path: str) -> None:
+    parts = _require_list(value, f"{parent_path}.parts")
+    if not parts:
+        raise PlanError(f"{parent_path}.parts must not be empty")
+    required_keys = {
+        "json_ld": ("path",),
+        "css_text": ("selector",),
+        "css_attr": ("selector", "attr"),
+        "css_html": ("selector",),
+    }
+    for index, part in enumerate(parts):
+        path = f"{parent_path}.parts[{index}]"
+        part = _require_mapping(part, path)
+        extractor_type = part.get("type")
+        if extractor_type in (None, ""):
+            extractor_type = "css_html" if part.get("selector") else None
+        if extractor_type not in COMPOSE_PART_TYPES:
+            raise PlanError(
+                f"unsupported compose part type {extractor_type!r} at {path}; "
+                f"use one of {sorted(COMPOSE_PART_TYPES)}"
+            )
+        for key in required_keys[extractor_type]:
+            if part.get(key) in (None, ""):
+                raise PlanError(f"{path}.{key} is required for {extractor_type}")
+        exclude = part.get("exclude_selectors", [])
+        if not isinstance(exclude, list) or not all(
+            isinstance(item, str) and item.strip() for item in exclude
+        ):
+            raise PlanError(f"{path}.exclude_selectors must be a list of selectors")
+        status = part.get("description_status")
+        if status is not None and status not in DESCRIPTION_STATUSES:
+            raise PlanError(f"unsupported description_status={status!r} at {path}")
 
 
 def _validate_normalize(normalize: dict[str, Any]) -> None:

@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import threading
 import time
 import uuid
@@ -536,11 +537,18 @@ class BuildManager:
         archive_max_bytes: int | None = None,
         catalog_scope: str = "sample",
         catalog_products: int | None = None,
+        repair: bool = False,
+        repair_reason: str | None = None,
     ) -> BuildRecord:
         if site.readiness in {"invalid", "duplicate"}:
             raise BuildError("invalid or duplicate sites cannot be built")
-        if site.task_id:
+        if not repair and site.task_id:
             raise BuildError("site already has a task")
+        if repair:
+            if site.readiness != "ready" or not site.rule_path:
+                raise BuildError("only a ready site with an installed rule can be repaired")
+            if not (self.rules_dir / site.rule_path).is_file():
+                raise BuildError(f"installed rule file not found: {site.rule_path}")
         if not self.rules_dir.is_dir():
             raise BuildError("rules directory is not configured")
         with self._lock:
@@ -649,6 +657,7 @@ class BuildManager:
                 model=self.model,
                 proxy=resolved_proxy,
                 workspace=str(self.workspace_root / build_id),
+                mode="repair" if repair else "build",
             )
             self.store.create_build(record)
             self.store.update_batch_site(
@@ -657,19 +666,32 @@ class BuildManager:
                 readiness="building",
                 build_id=build_id,
                 proxy=resolved_proxy,
-                note=f"构建中：{build_id}",
+                note=(
+                    f"规则修复中：{build_id}"
+                    if repair
+                    else f"构建中：{build_id}"
+                ),
             )
             session: BuildSession | None = None
             try:
                 session = self.service.start_build(task)
                 self._write_inputs(session, batch, site, task)
+                if repair:
+                    self._write_repair_inputs(
+                        session, batch, site, task, repair_reason or ""
+                    )
                 self.store.update_build(
                     build_id,
                     workspace=str(session.workspace.root),
                     session_id=session.session_id,
                     state=session.state,
                 )
-                self.service.send_prompt(build_id, self._prompt(site, batch, task))
+                prompt = (
+                    self._repair_run_prompt(site, task)
+                    if repair
+                    else self._prompt(site, batch, task)
+                )
+                self.service.send_prompt(build_id, prompt)
                 self.store.update_build(
                     build_id,
                     state="RUNNING",
@@ -688,6 +710,40 @@ class BuildManager:
                 raise BuildError(message) from exc
             return self.store.get_build(build_id) or record
 
+    def repair(
+        self,
+        batch: Batch,
+        site: BatchSite,
+        *,
+        reason: str | None = None,
+        max_products: int | None = None,
+        max_seconds: int | None = None,
+        proxy: str | None = None,
+        capture_reasoning: bool | None = None,
+        repair_rounds: int | None = None,
+        archive_mode: str | None = None,
+        archive_root: str | Path | None = None,
+        archive_sample_limit: int | None = None,
+        archive_max_bytes: int | None = None,
+    ) -> BuildRecord:
+        """Revalidate and repair an installed rule without clearing task data."""
+        return self.start(
+            batch,
+            site,
+            max_products=max_products,
+            max_seconds=max_seconds,
+            proxy=proxy,
+            capture_reasoning=capture_reasoning,
+            repair_rounds=repair_rounds,
+            archive_mode=archive_mode,
+            archive_root=archive_root,
+            archive_sample_limit=archive_sample_limit,
+            archive_max_bytes=archive_max_bytes,
+            catalog_scope="sample",
+            repair=True,
+            repair_reason=reason,
+        )
+
     def _write_inputs(
         self,
         session: BuildSession,
@@ -704,6 +760,116 @@ class BuildManager:
         (input_dir / "build-brief.md").write_text(
             self._brief(batch, site, task),
             encoding="utf-8",
+        )
+
+    def _write_repair_inputs(
+        self,
+        session: BuildSession,
+        batch: Batch,
+        site: BatchSite,
+        task: BuildTask,
+        reason: str,
+    ) -> None:
+        existing = self.rules_dir / str(site.rule_path)
+        input_dir = session.workspace.input_dir
+        input_rule = input_dir / "existing-rule.yaml"
+        shutil.copyfile(existing, input_rule)
+        plan_dir = session.workspace.out_dir / "plan"
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(existing, plan_dir / "rule.yaml")
+        context = {
+            "previous_readiness": site.readiness,
+            "previous_rule_id": site.rule_id,
+            "previous_rule_version": site.rule_version,
+            "previous_rule_path": site.rule_path,
+            "reason": reason,
+        }
+        (input_dir / "repair-context.json").write_text(
+            json.dumps(context, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        (input_dir / "repair-brief.md").write_text(
+            self._repair_brief(batch, site, task, reason),
+            encoding="utf-8",
+        )
+
+    def _repair_brief(
+        self,
+        batch: Batch,
+        site: BatchSite,
+        task: BuildTask,
+        reason: str,
+    ) -> str:
+        try:
+            payload = yaml.safe_load(
+                (self.rules_dir / str(site.rule_path)).read_text(encoding="utf-8")
+            )
+        except (OSError, yaml.YAMLError):
+            payload = {}
+        evidence = payload.get("evidence") if isinstance(payload, dict) else {}
+        samples = evidence.get("sample_urls") if isinstance(evidence, dict) else []
+        sample_lines = "\n".join(f"- {url}" for url in (samples or [])[:8])
+        reason_text = reason.strip() or "Host content audit found description or field gaps."
+        return f"""# Rule repair brief: {site.site_key}
+
+You are repairing an **installed declarative rule**, not building a new site
+from scratch. The previous rule is available at
+`../input/existing-rule.yaml`; a working copy is already at
+`../out/plan/rule.yaml`.
+
+## Target
+
+- Site key: `{site.site_key}`
+- Entry URL: `{task.site["entry_urls"][0]}`
+- Market / locale: `{batch.market or "unknown"}` / `{batch.language or "unknown"}`
+- Previous rule: `{site.rule_id or "?"}@{site.rule_version or "?"}`
+- Host validation sample: `{task.limits.get("max_products")}` products
+- Repair reason: {reason_text}
+
+## Scope of this repair
+
+- Keep the existing discovery sources, scope, market, locale, currency and
+  five core fields unless the evidence shows a clear bug.
+- Do not enumerate the whole catalog again.
+- Do not read or search host paths outside the build workspace. Only read
+  `../input`, `../out` and the declared sample URLs; do not scan other
+  repositories, user directories or prior run output.
+- Inspect 3–5 representative product pages, including at least one page whose
+  description is split into a narrative block and a specification/feature list.
+- If descriptions are split, use a `compose` fallback to merge the real blocks
+  in DOM order and `exclude_selectors` for promo badges. `compose` uses
+  `parts:` (a list of `{{type: css_html, selector: ...}}`); `audit` uses
+  `blocks:`. Do not confuse the two. Declare every merged block under
+  `extract.fields.description_html.audit.blocks`; the host fails validation
+  when a present block is missing from the final HTML.
+- Keep specification tables in `description_html`; `options`/`attributes` are
+  only for purchasable options.
+- Bump `rule_version` to a new unique value.
+- Write `../out/evidence/build-notes.md` with what changed and the sample URLs
+  you checked.
+
+## Known sample URLs
+
+{sample_lines or "- No sample URLs recorded in the previous rule."}
+
+## Output
+
+- `../out/plan/rule.yaml`
+- `../out/evidence/build-notes.md`
+
+Do not write outside the workspace. Do not install packages. Respect the
+request budget.
+"""
+
+    def _repair_run_prompt(self, site: BatchSite, task: BuildTask) -> str:
+        return (
+            "Read ../input/repair-brief.md and ../input/existing-rule.yaml, then "
+            f"repair the existing rule for {site.site_key}. "
+            f"Entry: {task.site['entry_urls'][0]}. "
+            "Focus on the reported content gap and merge any description blocks "
+            "that are currently missing. Keep discovery and scope unchanged. "
+            "Write ../out/plan/rule.yaml and ../out/evidence/build-notes.md, "
+            "then reply briefly."
         )
 
     def _brief(self, batch: Batch, site: BatchSite, task: BuildTask) -> str:
@@ -817,6 +983,15 @@ Required top-level keys: `schema_version`, `rule_id`, `rule_version`, `kind`,
   `brand`, `options` when available. Every field needs an ordered `fallbacks`
   list with explicit `type` and `label`; put `json_ld` first when the page has
   Product JSON-LD, then CSS/attribute/title fallbacks.
+- Product descriptions are often split across a narrative block and a
+  specification list/table. Do not accept a short microdata summary as the
+  complete description when the page also shows specs. Use a `compose` fallback
+  to merge the real blocks in DOM order, with `exclude_selectors` for promo
+  badges or share controls. `compose` uses `parts:` (a list of
+  `{{type: css_html, selector: ...}}`); the description audit uses `blocks:`.
+  Add `extract.fields.description_html.audit.blocks` for every block used
+  (narrative, feature list, specification tab); the host fails validation when
+  a present block is not represented in the final `description_html`.
 - `normalize.price`: `tax_basis: "exclusive_or_inclusive"`, `choose:
   "smaller_public_pair"`, `positive_only: true`.
 - `validate.required_fields`: the five core fields above; assertions for
@@ -1071,6 +1246,7 @@ domain-mismatched, or produces no valid product.
                     else None,
                     "failure_samples": task_result.get("failure_samples") or [],
                     "currencies": task_result.get("currencies") or {},
+                    "content_audit": task_result.get("content_audit") or {},
                     "archive": {
                         **(
                             {"prefetch": archive_stats}
@@ -1098,6 +1274,22 @@ domain-mismatched, or produces no valid product.
                             valid=valid,
                             failed=failed,
                         )
+                    )
+                audit = validation.get("content_audit") or {}
+                audit_gaps = int(audit.get("description_gaps") or 0)
+                if audit_gaps > 0:
+                    samples = audit.get("samples") or []
+                    sample_text = "; ".join(
+                        f"{item.get('source_url')}: {','.join(item.get('missing_blocks') or [])}"
+                        for item in samples[:3]
+                        if isinstance(item, dict)
+                    )
+                    raise BuildError(
+                        "description content audit found "
+                        f"{audit_gaps} of {audit.get('products_checked') or 0} "
+                        "validated product(s) with page blocks missing from "
+                        f"description_html; merge the declared blocks with compose "
+                        f"or adjust audit.blocks. {sample_text}"
                     )
                 batch = self.store.get_batch(record.batch_id)
                 batch_market = (batch.market or "").strip().upper() if batch else ""
@@ -1464,13 +1656,46 @@ domain-mismatched, or produces no valid product.
         site = self.store.get_batch_site(batch_id, site_key)
         if site is None or site.build_id != build_id:
             return
-        if site.readiness == "building":
+        if site.readiness != "building":
+            return
+        context = self._repair_context(build_id)
+        if context and context.get("previous_readiness") == "ready":
             self.store.update_batch_site(
                 batch_id,
                 site_key,
-                readiness="needs_onboarding",
-                note=note,
+                readiness="ready",
+                rule_id=context.get("previous_rule_id"),
+                rule_version=context.get("previous_rule_version"),
+                rule_path=context.get("previous_rule_path"),
+                note=f"规则修复失败，保留原规则：{note}",
             )
+            return
+        record = self.store.get_build(build_id)
+        if record is not None and record.mode == "repair":
+            self.store.update_batch_site(
+                batch_id,
+                site_key,
+                readiness="ready",
+                note=f"规则修复失败，保留原规则：{note}",
+            )
+            return
+        self.store.update_batch_site(
+            batch_id,
+            site_key,
+            readiness="needs_onboarding",
+            note=note,
+        )
+
+    def _repair_context(self, build_id: str) -> dict[str, Any] | None:
+        record = self.store.get_build(build_id)
+        if record is None or not record.workspace:
+            return None
+        path = Path(record.workspace) / "input" / "repair-context.json"
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        return payload if isinstance(payload, dict) else None
 
     def _close_session(self, build_id: str) -> None:
         try:
@@ -1533,6 +1758,7 @@ domain-mismatched, or produces no valid product.
             "site_key": record.site_key,
             "state": state,
             "outcome": outcome,
+            "mode": record.mode,
             "workspace": record.workspace,
             "session_id": record.session_id,
             "model": record.model,

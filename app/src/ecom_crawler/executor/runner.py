@@ -6,7 +6,7 @@ import csv
 import json
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -69,6 +69,7 @@ class ProductRecord:
     price_displayed: float | None
     price_pretax: float | None
     tax_basis: str
+    description_audit: dict[str, Any] = field(default_factory=dict)
 
     def csv_row(self) -> list[str]:
         return [
@@ -642,6 +643,9 @@ class Runner:
                 "scope": "entry-page sample declared by the plan",
             },
             "quality_exceptions": quality_exceptions,
+            "content_audit": summarize_content_audit(
+                [(record.source_url, record.description_audit) for record in self.records]
+            ),
             "pricing": {
                 "policy": (
                     "Choose the smaller public pretax/gross pair per docs/02; "
@@ -705,6 +709,30 @@ class Runner:
         }
 
 
+def summarize_content_audit(
+    entries: list[tuple[str, dict[str, Any]]], *, limit: int = 10
+) -> dict[str, Any]:
+    """Summarize description-block coverage without bloating the task result."""
+    checked = 0
+    gaps = 0
+    samples: list[dict[str, Any]] = []
+    for source_url, audit in entries:
+        if not isinstance(audit, dict) or not audit:
+            continue
+        checked += 1
+        missing = [str(item) for item in audit.get("missing_blocks") or []]
+        if not missing:
+            continue
+        gaps += 1
+        if len(samples) < limit:
+            samples.append({"source_url": source_url, "missing_blocks": missing})
+    return {
+        "products_checked": checked,
+        "description_gaps": gaps,
+        "samples": samples,
+    }
+
+
 def build_record(product: ExtractedProduct) -> ProductRecord:
     values = product.values
     price = values.get("price.amount")
@@ -728,6 +756,9 @@ def build_record(product: ExtractedProduct) -> ProductRecord:
         price_displayed=_as_float(extras.get("displayed")),
         price_pretax=_as_float(extras.get("pretax")),
         tax_basis=str(extras.get("basis", "unspecified")),
+        description_audit=dict(
+            product.extras.get("description_html", {}).get("audit") or {}
+        ),
     )
 
 
