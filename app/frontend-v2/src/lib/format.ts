@@ -112,3 +112,100 @@ export function formatTime(value: string | null | undefined): string {
 export function formatNumber(value: number): string {
   return new Intl.NumberFormat("zh-CN").format(value);
 }
+
+const BUILD_STATE_LABELS: Record<string, string> = {
+  CREATED: "已创建",
+  RUNNING: "构建中",
+  PAUSING: "暂停中",
+  PAUSED: "已暂停",
+  CANCELLING: "取消中",
+  CANCELLED: "已取消",
+  VALIDATING: "验证中",
+  FINISHED: "已结束",
+};
+
+const BUILD_OUTCOME_LABELS: Record<string, string> = {
+  succeeded: "成功",
+  failed: "失败",
+  cancelled: "已取消",
+  closed: "已关闭",
+  interrupted: "已中断",
+};
+
+export function buildStateLabel(state: string | null | undefined): string {
+  if (!state) return "—";
+  return BUILD_STATE_LABELS[state] ?? state;
+}
+
+export function buildOutcomeLabel(outcome: string | null | undefined): string {
+  if (!outcome) return "";
+  return BUILD_OUTCOME_LABELS[outcome] ?? outcome;
+}
+
+export function buildStateTone(state: string | null | undefined): Tone {
+  if (state === "FINISHED") return "success";
+  if (state === "RUNNING" || state === "VALIDATING" || state === "PAUSING") {
+    return "info";
+  }
+  if (state === "CREATED" || state === "PAUSED") return "warning";
+  if (state === "CANCELLED") return "neutral";
+  return "neutral";
+}
+
+const COVERAGE_LABELS: Record<string, string> = {
+  KNOWN: "已知",
+  PARTIAL: "部分",
+  UNKNOWN: "未知",
+};
+
+export function coverageLabel(status: string | null | undefined): string {
+  if (!status) return "未知";
+  return COVERAGE_LABELS[status.toUpperCase()] ?? status;
+}
+
+const ITEM_STATE_LABELS: Record<string, string> = {
+  PENDING: "待处理",
+  IN_FLIGHT: "进行中",
+  DONE: "完成",
+  EXCLUDED: "排除",
+  FAILED: "失败",
+};
+
+export function itemStateLabel(state: string | null | undefined): string {
+  if (!state) return "—";
+  return ITEM_STATE_LABELS[state] ?? state;
+}
+
+export function itemStateTone(state: string | null | undefined): Tone {
+  if (state === "DONE") return "success";
+  if (state === "FAILED") return "danger";
+  if (state === "IN_FLIGHT") return "info";
+  return "neutral";
+}
+
+const DESCRIPTION_STATUS_LABELS: Record<string, string> = {
+  complete: "完整",
+  partial: "部分",
+  not_provided: "未提供",
+  failed: "失败",
+};
+
+export function descriptionStatusLabel(status: string | null | undefined): string {
+  if (!status) return "";
+  return DESCRIPTION_STATUS_LABELS[status.toLowerCase()] ?? status;
+}
+
+export function descriptionStatusTone(status: string | null | undefined): Tone {
+  if (!status) return "neutral";
+  const value = status.toLowerCase();
+  if (value === "complete") return "success";
+  if (value === "failed") return "danger";
+  return "warning";
+}
+
+export function formatAmount(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "";
+  const number = Number(value);
+  if (!Number.isFinite(number)) return String(value);
+  return number.toFixed(2);
+}

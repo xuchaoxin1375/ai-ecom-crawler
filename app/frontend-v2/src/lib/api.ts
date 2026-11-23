@@ -65,6 +65,28 @@ export interface TaskCounts {
   [key: string]: number | undefined;
 }
 
+export interface TaskCoverage {
+  status?: string;
+  covered?: number | null;
+  denominator?: number | null;
+  [key: string]: unknown;
+}
+
+export interface TaskContentAudit {
+  products_checked?: number;
+  description_gaps?: number;
+  samples?: Array<{ source_url: string; missing_blocks: string[] }>;
+  [key: string]: unknown;
+}
+
+export interface QualityException {
+  source_url?: string;
+  description_status?: string;
+  partial_reason?: string;
+  missing_reasons?: Record<string, unknown> | string | null;
+  [key: string]: unknown;
+}
+
 export interface TaskSummary {
   task_id: string;
   task_type: string;
@@ -78,10 +100,40 @@ export interface TaskSummary {
   outcome: string | null;
   stop_reason: string | null;
   counts: TaskCounts;
+  coverage?: TaskCoverage | null;
+  quality_exceptions?: QualityException[];
+  content_audit?: TaskContentAudit | null;
+  archived_at?: string | null;
   created_at: string;
   updated_at: string;
   started_at: string | null;
   finished_at: string | null;
+}
+
+export interface TaskItem {
+  item_id: string;
+  item_type: string;
+  url: string;
+  state: string;
+  occurred_at: string;
+  attempts: number;
+  failure_class: string | null;
+  result: Record<string, unknown>;
+}
+
+export interface TaskItemPage {
+  total: number;
+  items: TaskItem[];
+}
+
+export interface TaskCsvPage {
+  task_id: string;
+  state: string;
+  live: boolean;
+  columns: string[];
+  rows: Array<Record<string, unknown>>;
+  total: number;
+  source: string | null;
 }
 
 export interface RuleRef {
@@ -98,6 +150,127 @@ export interface BuildSummary {
   error: string | null;
   rule: RuleRef | null;
   updated_at: string;
+}
+
+export interface BuildEvent {
+  type: string;
+  source_type: string;
+  session_id: string | null;
+  data: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface BuildRepair {
+  round: number;
+  error: string;
+  resolved?: boolean;
+  started_at?: string | null;
+  finished_at?: string | null;
+  [key: string]: unknown;
+}
+
+export interface BuildArchiveConfig {
+  mode?: string;
+  root?: string | null;
+  sample_limit?: number;
+  max_bytes?: number | null;
+  [key: string]: unknown;
+}
+
+export interface BuildArchiveStats {
+  pages: number;
+  bytes: number;
+  [key: string]: unknown;
+}
+
+export interface BuildStatus {
+  build_id: string;
+  batch_id: string;
+  site_key: string;
+  state: string;
+  outcome: string | null;
+  mode: "build" | "repair";
+  workspace: string | null;
+  session_id: string | null;
+  model: Record<string, unknown> | null;
+  proxy: string | null;
+  proxy_configured: boolean;
+  error: string | null;
+  rule: RuleRef | null;
+  created_at: string;
+  updated_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  elapsed_seconds: number | null;
+  events: BuildEvent[];
+  pending_permissions: Array<Record<string, unknown>>;
+  pending_dependencies: string[];
+  trace_available: boolean;
+  reasoning_capture_enabled: boolean;
+  reasoning_retained: boolean;
+  repair_limit: number;
+  repair_round: number;
+  repairs: BuildRepair[];
+  archive: BuildArchiveConfig | null;
+  archive_stats: BuildArchiveStats | null;
+  catalog: { catalog_scope?: string; catalog_products?: number } | null;
+}
+
+export interface BuildResponse {
+  accepted?: boolean;
+  build: BuildStatus;
+}
+
+export interface BuildConfig {
+  available: boolean;
+  reasoning_capture_enabled: boolean;
+  max_repair_rounds: number;
+}
+
+export interface BuildMessage {
+  created_at: string;
+  text: string;
+  role?: string;
+}
+
+export interface BuildTimelineItem {
+  kind: "text" | "reasoning" | "tool";
+  created_at: string | null;
+  role?: string;
+  text?: string;
+  name?: string;
+  status?: string;
+  input?: unknown;
+  output?: string | null;
+  duration_ms?: number | null;
+}
+
+export interface BuildMessages {
+  build_id: string;
+  state: string;
+  live: boolean;
+  messages: BuildMessage[];
+  reasoning: BuildMessage[];
+  reasoning_retained: boolean;
+  timeline: BuildTimelineItem[];
+  timeline_truncated: boolean;
+  truncated: boolean;
+}
+
+export interface BuildStartOptions {
+  mode?: "build" | "repair";
+  reason?: string;
+  max_products?: number;
+  max_seconds?: number;
+  proxy?: string;
+  capture_reasoning?: boolean;
+  repair_rounds?: number;
+  archive_mode?: "off" | "sample" | "full";
+  archive_root?: string;
+  archive_sample_limit?: number;
+  archive_max_bytes?: number;
+  catalog_scope?: "sample" | "full";
+  catalog_products?: number;
 }
 
 export interface BatchSite {
@@ -401,4 +574,156 @@ export function batchExportUrl(batchId: string, partial = true): string {
   return `/api/batches/${encodeURIComponent(batchId)}/export${
     partial ? "?partial=true" : ""
   }`;
+}
+
+export function getTask(taskId: string, signal?: AbortSignal): Promise<TaskSummary> {
+  return getJson<TaskSummary>(`/api/tasks/${encodeURIComponent(taskId)}`, signal);
+}
+
+export function getTaskItems(
+  taskId: string,
+  kind: "url" | "product",
+  limit = 50,
+  offset = 0,
+  state?: string,
+  order: "asc" | "desc" = "asc",
+  signal?: AbortSignal,
+): Promise<TaskItemPage> {
+  return getJson<TaskItemPage>(
+    `/api/tasks/${encodeURIComponent(taskId)}/items${query({
+      kind,
+      limit,
+      offset,
+      state,
+      order,
+    })}`,
+    signal,
+  );
+}
+
+export function getTaskCsv(
+  taskId: string,
+  limit = 50,
+  offset = 0,
+  signal?: AbortSignal,
+): Promise<TaskCsvPage> {
+  return getJson<TaskCsvPage>(
+    `/api/tasks/${encodeURIComponent(taskId)}/csv${query({ limit, offset })}`,
+    signal,
+  );
+}
+
+export function pauseTask(taskId: string): Promise<TaskSummary> {
+  return sendJson<TaskSummary>(
+    `/api/tasks/${encodeURIComponent(taskId)}/pause`,
+    "POST",
+  );
+}
+
+export function resumeTask(taskId: string): Promise<TaskSummary> {
+  return sendJson<TaskSummary>(
+    `/api/tasks/${encodeURIComponent(taskId)}/resume`,
+    "POST",
+  );
+}
+
+export function cancelTask(taskId: string): Promise<TaskSummary> {
+  return sendJson<TaskSummary>(
+    `/api/tasks/${encodeURIComponent(taskId)}/cancel`,
+    "POST",
+  );
+}
+
+export function taskExportUrl(taskId: string, partial = true): string {
+  return `/api/tasks/${encodeURIComponent(taskId)}/export${
+    partial ? "?partial=true" : ""
+  }`;
+}
+
+export function startSiteBuild(
+  batchId: string,
+  siteKey: string,
+  body: BuildStartOptions = {},
+): Promise<BuildResponse> {
+  return sendJson<BuildResponse>(
+    `/api/batches/${encodeURIComponent(batchId)}/sites/${encodeURIComponent(
+      siteKey,
+    )}/build`,
+    "POST",
+    body,
+  );
+}
+
+export function getBuild(
+  buildId: string,
+  signal?: AbortSignal,
+): Promise<BuildResponse> {
+  return getJson<BuildResponse>(`/api/builds/${encodeURIComponent(buildId)}`, signal);
+}
+
+export function getBuildMessages(
+  buildId: string,
+  signal?: AbortSignal,
+): Promise<BuildMessages> {
+  return getJson<BuildMessages>(
+    `/api/builds/${encodeURIComponent(buildId)}/messages`,
+    signal,
+  );
+}
+
+export function getBuildConfig(signal?: AbortSignal): Promise<BuildConfig> {
+  return getJson<BuildConfig>("/api/builds/config", signal);
+}
+
+export function pauseBuild(buildId: string): Promise<BuildResponse> {
+  return sendJson<BuildResponse>(
+    `/api/builds/${encodeURIComponent(buildId)}/pause`,
+    "POST",
+  );
+}
+
+export function resumeBuild(buildId: string): Promise<BuildResponse> {
+  return sendJson<BuildResponse>(
+    `/api/builds/${encodeURIComponent(buildId)}/resume`,
+    "POST",
+  );
+}
+
+export function cancelBuild(buildId: string): Promise<BuildResponse> {
+  return sendJson<BuildResponse>(
+    `/api/builds/${encodeURIComponent(buildId)}/cancel`,
+    "POST",
+  );
+}
+
+export function replyBuildDependency(
+  buildId: string,
+  requestId: string,
+  decision: "once" | "reject",
+): Promise<BuildResponse> {
+  return sendJson<BuildResponse>(
+    `/api/builds/${encodeURIComponent(buildId)}/dependencies/${encodeURIComponent(
+      requestId,
+    )}`,
+    "POST",
+    { decision },
+  );
+}
+
+export function replyBuildPermission(
+  buildId: string,
+  requestId: string,
+  decision: "once" | "always" | "reject",
+): Promise<BuildResponse> {
+  return sendJson<BuildResponse>(
+    `/api/builds/${encodeURIComponent(buildId)}/permissions/${encodeURIComponent(
+      requestId,
+    )}`,
+    "POST",
+    { decision },
+  );
+}
+
+export function buildTraceUrl(buildId: string, format: "json" | "md" = "md"): string {
+  return `/api/builds/${encodeURIComponent(buildId)}/trace?format=${format}`;
 }

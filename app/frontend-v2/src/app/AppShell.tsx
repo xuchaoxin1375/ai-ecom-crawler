@@ -121,6 +121,10 @@ function ServicePill() {
 export function AppShell() {
   const location = useLocation();
   const mainRef = useRef<HTMLElement | null>(null);
+  const siteMatch = location.pathname.match(/^\/batches\/([^/]+)\/sites\/[^/]+/);
+  const batchMatch = location.pathname.match(/^\/batches\/([^/]+)/);
+  const isSiteDetail = Boolean(siteMatch);
+  const isBatchDetail = Boolean(batchMatch) && !isSiteDetail;
 
   useEffect(() => {
     mainRef.current?.focus({ preventScroll: true });
@@ -160,8 +164,21 @@ export function AppShell() {
           <span className="text-line-strong" aria-hidden="true">
             /
           </span>
+          {isSiteDetail ? (
+            <>
+              <a
+                className="hover:text-ink"
+                href={`#/batches/${encodeURIComponent(siteMatch?.[1] ?? "")}`}
+              >
+                批次详情
+              </a>
+              <span className="text-line-strong" aria-hidden="true">
+                /
+              </span>
+            </>
+          ) : null}
           <span className="font-medium text-ink">
-            {location.pathname.startsWith("/batches/") ? "批次详情" : "批次列表"}
+            {isSiteDetail ? "站点详情" : isBatchDetail ? "批次详情" : "批次列表"}
           </span>
         </nav>
 
@@ -215,7 +232,8 @@ export function AppShell() {
           <div className="border-t border-line px-4 py-4">
             <p className="text-xs font-medium text-ink-2">v2 前端试点</p>
             <p className="mt-1 text-xs leading-5 text-ink-3">
-              当前覆盖桌面端批次列表、批次详情和新建批次弹窗。旧版已弃用，仅保留站点、任务和构建等未迁移功能。
+              当前覆盖桌面端批次列表、批次详情、站点详情和新建批次弹窗。旧版已弃用，仅保留任务列表／详情与
+              SSE 等未迁移功能。
             </p>
             <a
               className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-accent hover:text-accent-hover hover:underline"

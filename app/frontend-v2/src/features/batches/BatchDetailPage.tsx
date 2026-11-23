@@ -85,16 +85,6 @@ function parseFilter(value: string | null): SiteFilter {
   return FILTERS.includes(value as SiteFilter) ? (value as SiteFilter) : "all";
 }
 
-function oldBatchHref(batchId: string): string {
-  return `/batch/#/batches/${encodeURIComponent(batchId)}`;
-}
-
-function oldSiteHref(batchId: string, siteKey: string): string {
-  return `/batch/#/batches/${encodeURIComponent(batchId)}/sites/${encodeURIComponent(
-    siteKey,
-  )}`;
-}
-
 function backHrefFromState(state: unknown): string {
   if (state && typeof state === "object" && "from" in state) {
     const from = (state as { from?: unknown }).from;
@@ -436,19 +426,15 @@ export function BatchDetailPage() {
       width: "33%",
       cell: (site) => (
         <div className="min-w-0">
-          <a
+          <Link
             className="inline-flex max-w-full items-center gap-1 font-semibold text-ink hover:text-accent hover:underline"
-            href={oldSiteHref(batch.batch_id, site.site_key)}
-            title={`${site.domain}：站点详情暂由旧版处理`}
-            aria-label={`${site.domain} 站点详情（旧版）`}
+            to={`/batches/${encodeURIComponent(
+              batch.batch_id,
+            )}/sites/${encodeURIComponent(site.site_key)}`}
+            title={`${site.domain}：查看站点详情`}
           >
             <span className="truncate">{site.domain}</span>
-            <ExternalLink
-              className="shrink-0 text-ink-3"
-              size={11}
-              aria-hidden="true"
-            />
-          </a>
+          </Link>
           <p
             className="mt-0.5 truncate text-[11px] text-ink-3"
             title={site.note || site.input_value}
@@ -857,9 +843,9 @@ export function BatchDetailPage() {
               )}
               <a
                 className="inline-flex items-center gap-1 pt-1 text-xs font-medium text-accent hover:text-accent-hover hover:underline"
-                href={oldBatchHref(batch.batch_id)}
+                href="/batch/#/tasks"
               >
-                在旧版中查看站点详情
+                在旧版中查看全部任务
                 <ExternalLink size={11} aria-hidden="true" />
               </a>
             </div>
