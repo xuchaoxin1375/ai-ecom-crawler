@@ -790,6 +790,32 @@ class BuildWorkflowTests(unittest.TestCase):
             self.assertEqual(repair.json()["error"]["code"], "BUILD_CONFLICT")
             self.assertIn("active task", repair.json()["error"]["message"])
 
+    def test_repair_rejects_same_rule_version(self) -> None:
+        adapter = FakeBuildAdapter(
+            self.root,
+            rule_payloads=[rule_payload(version="2026.11.23-1")],
+        )
+        manager = self._manager(adapter)
+        with self._client(manager) as client:
+            response = client.post(
+                "/api/batches/b-1/sites/example.fr/build",
+                json={},
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(response.status_code, 202, response.text)
+            self._wait_ready(client, response.json()["build"]["build_id"])
+
+            repair = client.post(
+                "/api/batches/b-1/sites/example.fr/build",
+                json={"mode": "repair", "reason": "description gap"},
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(repair.status_code, 202, repair.text)
+            result = self._wait_ready(client, repair.json()["build"]["build_id"])
+            self.assertEqual(result["state"], "FINISHED")
+            self.assertEqual(result["outcome"], "failed")
+            self.assertIn("bump rule_version", result["error"])
+
     def test_content_audit_gap_fails_validation(self) -> None:
         def validator(*_: Any, **__: Any) -> dict[str, Any]:
             return {

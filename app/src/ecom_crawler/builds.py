@@ -2175,10 +2175,27 @@ domain-mismatched, or produces no valid product.
         rule_version = str(payload.get("rule_version") or "").strip()
         if not rule_id or not rule_version:
             raise BuildError("rule_id and rule_version are required")
+        if record.mode == "repair":
+            previous = self.store.get_batch_site(record.batch_id, record.site_key)
+            if previous is not None and previous.rule_id:
+                if rule_id != previous.rule_id:
+                    raise BuildError(
+                        "repair must keep the same rule_id: "
+                        f"{previous.rule_id} != {rule_id}"
+                    )
+                if rule_version == previous.rule_version:
+                    raise BuildError(
+                        "repair must bump rule_version: "
+                        f"{rule_id}@{rule_version} is already installed"
+                    )
         self.rules_dir.mkdir(parents=True, exist_ok=True)
         base = f"{_safe_filename(rule_id)}-{_safe_filename(rule_version)}"
         target = self.rules_dir / f"{base}.yaml"
         if target.exists():
+            if record.mode == "repair":
+                raise BuildError(
+                    f"rule version already exists: {rule_id}@{rule_version}"
+                )
             target = self.rules_dir / f"{base}-{record.build_id}.yaml"
         temporary = target.with_name(target.name + ".tmp")
         temporary.write_text(
