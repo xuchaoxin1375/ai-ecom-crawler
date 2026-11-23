@@ -34,6 +34,71 @@ export function readinessTone(readiness: Readiness): Tone {
   return "danger";
 }
 
+const TASK_STATE_LABELS: Record<string, string> = {
+  DRAFT: "未开始",
+  QUEUED: "排队中",
+  RUNNING: "运行中",
+  PAUSING: "暂停中",
+  PAUSED: "已暂停",
+  CANCELLING: "取消中",
+  CANCELLED: "已取消",
+  FINISHED: "已结束",
+};
+
+const OUTCOME_LABELS: Record<string, string> = {
+  COMPLETED: "完成",
+  PARTIAL: "部分完成",
+  FAILED: "失败",
+  CANCELLED: "已取消",
+};
+
+const STOP_REASON_LABELS: Record<string, string> = {
+  NATURAL_END: "自然结束",
+  BUDGET_EXHAUSTED: "预算耗尽",
+  ACCESS_DENIED: "访问被拒绝",
+  QUALITY_BLOCKED: "质量问题阻断",
+  ENVIRONMENT_ERROR: "环境错误",
+  PLAN_ERROR: "规则包错误",
+  USER_CANCELLED: "用户取消",
+  ADAPTER_FAILED: "适配器失败",
+  OTHER: "其他原因",
+};
+
+export function taskStateLabel(state: string | null | undefined): string {
+  if (!state) return "—";
+  return TASK_STATE_LABELS[state] ?? state;
+}
+
+export function outcomeLabel(outcome: string | null | undefined): string {
+  if (!outcome) return "";
+  return OUTCOME_LABELS[outcome] ?? outcome;
+}
+
+export function stopReasonLabel(reason: string | null | undefined): string {
+  if (!reason) return "—";
+  return STOP_REASON_LABELS[reason] ?? reason;
+}
+
+export function taskStateTone(state: string | null | undefined): Tone {
+  if (state === "FINISHED") return "success";
+  if (state === "RUNNING" || state === "PAUSING" || state === "CANCELLING") {
+    return "info";
+  }
+  if (state === "PAUSED" || state === "QUEUED" || state === "DRAFT") {
+    return "warning";
+  }
+  return "neutral";
+}
+
+export function siteStatusText(
+  readiness: Readiness,
+  taskState: string | null | undefined,
+): string {
+  if (readiness === "ready" && !taskState) return "未开始";
+  if (readiness === "ready" && taskState) return "已创建任务";
+  return "";
+}
+
 export function formatTime(value: string | null | undefined): string {
   if (!value) return "-";
   const date = new Date(value);

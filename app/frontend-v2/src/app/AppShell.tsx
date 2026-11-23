@@ -160,7 +160,9 @@ export function AppShell() {
           <span className="text-line-strong" aria-hidden="true">
             /
           </span>
-          <span className="font-medium text-ink">批次列表</span>
+          <span className="font-medium text-ink">
+            {location.pathname.startsWith("/batches/") ? "批次详情" : "批次列表"}
+          </span>
         </nav>
 
         <div className="ml-auto flex items-center gap-3">
@@ -213,7 +215,7 @@ export function AppShell() {
           <div className="border-t border-line px-4 py-4">
             <p className="text-xs font-medium text-ink-2">v2 前端试点</p>
             <p className="mt-1 text-xs leading-5 text-ink-3">
-              当前覆盖桌面端批次列表和新建批次弹窗；详情、任务仍由旧版处理。
+              当前覆盖桌面端批次列表、批次详情和新建批次弹窗；站点、任务仍由旧版处理。
             </p>
             <a
               className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-accent hover:text-accent-hover hover:underline"

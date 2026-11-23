@@ -18,6 +18,7 @@ interface DataTableProps<T> {
   loadingRows?: number;
   empty?: ReactNode;
   rowClassName?: string | ((row: T) => string);
+  density?: "default" | "compact";
 }
 
 export function DataTable<T>({
@@ -29,8 +30,11 @@ export function DataTable<T>({
   loadingRows = 6,
   empty,
   rowClassName,
+  density = "default",
 }: DataTableProps<T>) {
   const colSpan = Math.max(columns.length, 1);
+  const cellPadding = density === "compact" ? "px-3 py-2.5" : "px-4 py-3";
+  const headerPadding = density === "compact" ? "px-3 py-2" : "px-4 py-2.5";
 
   return (
     <table
@@ -53,7 +57,8 @@ export function DataTable<T>({
               key={column.key}
               scope="col"
               className={cn(
-                "sticky top-14 z-10 border-b border-line bg-surface-muted px-4 py-2.5 text-xs font-medium text-ink-3",
+                "sticky top-14 z-10 border-b border-line bg-surface-muted text-xs font-medium text-ink-3",
+                headerPadding,
                 column.align === "right" ? "text-right" : "text-left",
               )}
             >
@@ -70,7 +75,7 @@ export function DataTable<T>({
                 className="border-b border-line last:border-0"
               >
                 {columns.map((column, columnIndex) => (
-                  <td key={column.key} className="px-4 py-4">
+                  <td key={column.key} className={cn(cellPadding)}>
                     <div
                       className={cn(
                         "h-3 animate-pulse rounded bg-surface-sunken",
@@ -94,7 +99,8 @@ export function DataTable<T>({
                   <td
                     key={column.key}
                     className={cn(
-                      "px-4 py-3 align-middle",
+                      cellPadding,
+                      "align-middle",
                       column.align === "right" ? "text-right tabular" : "text-left",
                     )}
                   >

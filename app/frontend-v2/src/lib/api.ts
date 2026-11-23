@@ -55,6 +55,72 @@ export interface BatchPage {
   items: BatchSummary[];
 }
 
+export interface TaskCounts {
+  valid_products?: number;
+  failed_products?: number;
+  excluded_products?: number;
+  discovered_urls?: number;
+  pending?: number;
+  in_flight?: number;
+  [key: string]: number | undefined;
+}
+
+export interface TaskSummary {
+  task_id: string;
+  task_type: string;
+  plan_id: string;
+  plan_version: string;
+  site_key: string | null;
+  domain_key: string | null;
+  batch_id: string | null;
+  market: string | null;
+  state: string;
+  outcome: string | null;
+  stop_reason: string | null;
+  counts: TaskCounts;
+  created_at: string;
+  updated_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export interface RuleRef {
+  rule_id: string;
+  rule_version: string;
+  path: string;
+}
+
+export interface BuildSummary {
+  build_id: string;
+  state: string;
+  outcome: string | null;
+  proxy: string | null;
+  error: string | null;
+  rule: RuleRef | null;
+  updated_at: string;
+}
+
+export interface BatchSite {
+  site_key: string;
+  domain: string;
+  input_value: string;
+  readiness: Readiness;
+  note: string | null;
+  rule: RuleRef | null;
+  task_id: string | null;
+  task: TaskSummary | null;
+  build_id: string | null;
+  build: BuildSummary | null;
+  proxy: string | null;
+  proxy_configured: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BatchDetail extends BatchSummary {
+  sites: BatchSite[];
+}
+
 export interface ImportItem {
   input_value: string;
   domain: string;
@@ -126,7 +192,12 @@ export interface BatchActionSkipped {
 export interface BatchActionResponse {
   accepted: BatchActionAccepted[];
   skipped: BatchActionSkipped[];
-  batch: BatchSummary;
+  batch: BatchDetail;
+}
+
+export interface BatchArchiveResponse {
+  accepted: boolean;
+  batch: BatchDetail;
 }
 
 export interface BatchListParams {
@@ -213,6 +284,10 @@ export function getBatches(
   );
 }
 
+export function getBatch(batchId: string, signal?: AbortSignal): Promise<BatchDetail> {
+  return getJson<BatchDetail>(`/api/batches/${encodeURIComponent(batchId)}`, signal);
+}
+
 async function sendJson<T>(
   url: string,
   method: "POST" | "PATCH" | "DELETE",
@@ -244,13 +319,63 @@ export function createBatch(body: BatchDraftRequest): Promise<BatchCreateRespons
   return sendJson<BatchCreateResponse>("/api/batches", "POST", body);
 }
 
+export interface BatchStartOptions {
+  limits?: {
+    max_urls?: number;
+    max_products?: number;
+    max_seconds?: number;
+    max_attempts?: number;
+  };
+  archive_mode?: "off" | "sample" | "full";
+  archive_root?: string;
+  archive_sample_limit?: number;
+  archive_max_bytes?: number;
+  archive_reuse?: boolean;
+  rerun_finished?: boolean;
+  proxy?: string | null;
+}
+
 export function startBatch(
   batchId: string,
-  body: Record<string, unknown> = {},
+  body: BatchStartOptions = {},
 ): Promise<BatchActionResponse> {
   return sendJson<BatchActionResponse>(
     `/api/batches/${encodeURIComponent(batchId)}/start`,
     "POST",
     body,
   );
+}
+
+export function pauseBatch(batchId: string): Promise<BatchActionResponse> {
+  return sendJson<BatchActionResponse>(
+    `/api/batches/${encodeURIComponent(batchId)}/pause`,
+    "POST",
+  );
+}
+
+export function cancelBatch(batchId: string): Promise<BatchActionResponse> {
+  return sendJson<BatchActionResponse>(
+    `/api/batches/${encodeURIComponent(batchId)}/cancel`,
+    "POST",
+  );
+}
+
+export function archiveBatch(batchId: string): Promise<BatchArchiveResponse> {
+  return sendJson<BatchArchiveResponse>(
+    `/api/batches/${encodeURIComponent(batchId)}/archive`,
+    "POST",
+  );
+}
+
+export function restoreBatch(batchId: string): Promise<BatchArchiveResponse> {
+  return sendJson<BatchArchiveResponse>(
+    `/api/batches/${encodeURIComponent(batchId)}/restore`,
+    "POST",
+  );
+}
+
+export function batchExportUrl(batchId: string, partial = true): string {
+  return `/api/batches/${encodeURIComponent(batchId)}/export${
+    partial ? "?partial=true" : ""
+  }`;
 }

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { ArrowUpRight, Plus, RefreshCw, RotateCcw, Search, X } from "lucide-react";
+import { ChevronRight, Plus, RefreshCw, RotateCcw, Search, X } from "lucide-react";
 import { getBatches, type BatchSummary } from "../../lib/api";
 import { formatNumber, formatTime } from "../../lib/format";
 import { summarizeBatches } from "./summary";
@@ -27,7 +27,7 @@ const STATUS_OPTIONS = [
 ];
 
 function batchHref(batchId: string): string {
-  return `/batch/#/batches/${encodeURIComponent(batchId)}`;
+  return `/batches/${encodeURIComponent(batchId)}`;
 }
 
 function FilterField({ label, children }: { label: string; children: ReactNode }) {
@@ -41,6 +41,8 @@ function FilterField({ label, children }: { label: string; children: ReactNode }
 
 export function BatchesPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
+  const from = `${location.pathname}${location.search}`;
   const status = searchParams.get("status") ?? "";
   const country = searchParams.get("country") ?? "";
   const category = searchParams.get("category") ?? "";
@@ -140,13 +142,14 @@ export function BatchesPage() {
       width: "26%",
       cell: (row) => (
         <div className="min-w-0">
-          <a
+          <Link
             className="block truncate font-semibold text-ink hover:text-accent hover:underline"
-            href={batchHref(row.batch_id)}
+            to={batchHref(row.batch_id)}
+            state={{ from }}
             title={row.name}
           >
             {row.name}
-          </a>
+          </Link>
           <span className="mt-0.5 block truncate font-mono text-[11px] text-ink-3">
             {row.batch_id}
           </span>
@@ -243,13 +246,14 @@ export function BatchesPage() {
       width: "92px",
       align: "right",
       cell: (row) => (
-        <a
+        <Link
           className="inline-flex h-8 items-center gap-1 whitespace-nowrap rounded-control border border-line-strong bg-surface px-2.5 text-xs font-medium text-ink hover:bg-surface-muted"
-          href={batchHref(row.batch_id)}
+          to={batchHref(row.batch_id)}
+          state={{ from }}
         >
           查看
-          <ArrowUpRight size={13} aria-hidden="true" />
-        </a>
+          <ChevronRight size={13} aria-hidden="true" />
+        </Link>
       ),
     },
   ];
@@ -272,7 +276,7 @@ export function BatchesPage() {
             onClick={openNewBatch}
           >
             新建批次
-            <ArrowUpRight size={14} aria-hidden="true" />
+            <Plus size={14} aria-hidden="true" />
           </button>
         )
       }
@@ -455,7 +459,7 @@ export function BatchesPage() {
       ) : null}
 
       {showTable ? (
-        <section className="overflow-hidden rounded-panel border border-line bg-surface">
+        <section className="overflow-clip rounded-panel border border-line bg-surface">
           <div className="flex items-center justify-between gap-4 border-b border-line px-6 py-4">
             <div>
               <h2 className="text-[17px] leading-6 font-semibold text-ink">批次列表</h2>
