@@ -177,6 +177,7 @@ export function AppShell() {
   const batchMatch = location.pathname.match(/^\/batches\/([^/]+)/);
   const isSiteDetail = Boolean(siteMatch);
   const isBatchDetail = Boolean(batchMatch) && !isSiteDetail;
+  const showBreadcrumb = isBatchDetail || isSiteDetail;
 
   const visualOpen = pinned || (!suppressed && (hovered || focused));
   const peeking = !pinned && visualOpen;
@@ -259,49 +260,61 @@ export function AppShell() {
         跳到主要内容
       </a>
 
-      <header className="fixed inset-x-0 top-0 z-50 flex h-14 items-center gap-3 border-b border-line bg-surface px-4">
-        <a
-          className="flex items-center gap-2.5 rounded-control px-1.5 py-1 text-ink hover:bg-surface-muted"
-          href="#/batches"
-          aria-label="电商采集首页"
+      <header className="fixed inset-x-0 top-0 z-50 flex h-14 items-center border-b border-line bg-surface pr-8">
+        <div
+          className="flex h-full shrink-0 items-center border-r border-line transition-[width] duration-300 ease-out"
+          style={{ width: slotWidth }}
         >
-          <span className="flex h-7 w-7 items-center justify-center rounded-[7px] bg-accent text-white">
-            <Layers size={16} strokeWidth={1.75} aria-hidden="true" />
-          </span>
-          <span className="text-[15px] font-semibold tracking-[0.01em]">电商采集</span>
-        </a>
-
-        <span className="h-5 w-px bg-line" aria-hidden="true" />
-
-        <nav
-          className="flex min-w-0 items-center gap-2 text-xs text-ink-3"
-          aria-label="面包屑"
-        >
-          <a className="hover:text-ink" href="#/batches">
-            采集批次
-          </a>
-          <span className="text-line-strong" aria-hidden="true">
-            /
-          </span>
-          {isSiteDetail ? (
-            <>
-              <a
-                className="hover:text-ink"
-                href={`#/batches/${encodeURIComponent(siteMatch?.[1] ?? "")}`}
-              >
-                批次详情
-              </a>
-              <span className="text-line-strong" aria-hidden="true">
-                /
+          <a
+            className={cn(
+              "flex h-9 w-full items-center gap-2.5 rounded-control text-ink transition-colors hover:bg-surface-muted",
+              pinned ? "px-[18px]" : "justify-center",
+            )}
+            href="#/batches"
+            aria-label="电商采集首页"
+          >
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] bg-accent text-white">
+              <Layers size={16} strokeWidth={1.75} aria-hidden="true" />
+            </span>
+            {pinned ? (
+              <span className="truncate text-[15px] font-semibold tracking-[0.01em]">
+                电商采集
               </span>
-            </>
-          ) : null}
-          <span className="font-medium text-ink">
-            {isSiteDetail ? "站点详情" : isBatchDetail ? "批次详情" : "批次列表"}
-          </span>
-        </nav>
+            ) : null}
+          </a>
+        </div>
 
-        <div className="ml-auto flex items-center gap-3">
+        {showBreadcrumb ? (
+          <nav
+            className="flex min-w-0 items-center gap-2 px-8 text-xs text-ink-3"
+            aria-label="面包屑"
+          >
+            <a className="hover:text-ink" href="#/batches">
+              采集批次
+            </a>
+            <span className="text-line-strong" aria-hidden="true">
+              /
+            </span>
+            {isSiteDetail ? (
+              <>
+                <a
+                  className="hover:text-ink"
+                  href={`#/batches/${encodeURIComponent(siteMatch?.[1] ?? "")}`}
+                >
+                  批次详情
+                </a>
+                <span className="text-line-strong" aria-hidden="true">
+                  /
+                </span>
+                <span className="font-medium text-ink">站点详情</span>
+              </>
+            ) : (
+              <span className="font-medium text-ink">批次详情</span>
+            )}
+          </nav>
+        ) : null}
+
+        <div className="ml-auto flex shrink-0 items-center gap-3">
           <ServicePill />
         </div>
       </header>
@@ -325,15 +338,6 @@ export function AppShell() {
       >
         <div className="flex h-full flex-col">
           <nav className="flex-1 overflow-y-auto px-3 py-4" aria-label="主导航">
-            <div className="mb-1.5 flex h-4 items-center px-2.5">
-              {visualOpen ? (
-                <p className="text-[11px] font-semibold tracking-[0.08em] text-ink-3">
-                  工作台
-                </p>
-              ) : (
-                <span className="mx-auto h-px w-6 bg-line-strong" aria-hidden="true" />
-              )}
-            </div>
             <div className="space-y-0.5">
               <SidebarLink
                 to="/batches"

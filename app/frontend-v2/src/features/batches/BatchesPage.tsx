@@ -721,7 +721,6 @@ export function BatchesPage() {
   return (
     <div className={cn("space-y-6", selection.selectedCount > 0 && "pb-20")}>
       <PageHeader
-        eyebrow="工作台 / 批次"
         title="采集批次"
         description="按项目组织站点：先导入并匹配规则包，再启动可采站点。未接入站点保留在批次中，不计为失败。"
         actions={
