@@ -110,6 +110,103 @@ export interface TaskSummary {
   finished_at: string | null;
 }
 
+export interface TaskPage {
+  total: number;
+  items: TaskSummary[];
+}
+
+export interface TaskListParams {
+  state?: string;
+  taskType?: string;
+  batchId?: string;
+  siteKey?: string;
+  includeArchived?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
+export type FeedbackCategory =
+  | "DISCOVERY"
+  | "IDENTITY"
+  | "PRICE_CURRENCY_UNIT"
+  | "DESCRIPTION"
+  | "BASIC_FIELDS"
+  | "ACCESS_RUNTIME"
+  | "BUSINESS_EXPECTATION"
+  | "OTHER";
+
+export type FeedbackStatus =
+  | "OPEN"
+  | "TRIAGED"
+  | "REPAIRING"
+  | "AWAITING_ACTIVATION"
+  | "AWAITING_RERUN"
+  | "RERUN_PENDING"
+  | "RESOLVED"
+  | "WONTFIX";
+
+export type FeedbackTriage = "RULE_REPAIR" | "RUNTIME" | "BUSINESS" | "DUPLICATE";
+export type FeedbackResolution = "RESOLVED" | "WONTFIX" | "DUPLICATE";
+
+export interface FeedbackRecord {
+  feedback_id: string;
+  task_id: string;
+  batch_id: string | null;
+  site_key: string | null;
+  category: FeedbackCategory;
+  samples: string[];
+  expectation: string;
+  note: string | null;
+  scope: string;
+  status: FeedbackStatus;
+  triage: FeedbackTriage | null;
+  triage_note: string | null;
+  triage_source: string | null;
+  duplicate_of: string | null;
+  repair_build_id: string | null;
+  rerun_task_id: string | null;
+  resolution: FeedbackResolution | null;
+  resolution_note: string | null;
+  created_by: string;
+  resolved_by: string | null;
+  created_at: string;
+  updated_at: string;
+  closed_at: string | null;
+  rule: { rule_id: string; rule_version: string | null; sha256: string | null } | null;
+}
+
+export interface FeedbackListResponse {
+  total: number;
+  items: FeedbackRecord[];
+}
+
+export interface FeedbackCreateRequest {
+  request_id: string;
+  category: FeedbackCategory;
+  samples?: string[];
+  expectation: string;
+  note?: string | null;
+  scope?: string | null;
+  created_by?: string | null;
+}
+
+export interface FeedbackCreateResponse {
+  created: boolean;
+  feedback: FeedbackRecord;
+}
+
+export interface FeedbackTriageRequest {
+  request_id?: string | null;
+  triage: FeedbackTriage;
+  note?: string | null;
+  duplicate_of?: string | null;
+  actor?: string | null;
+}
+
+export interface FeedbackTriageResponse {
+  feedback: FeedbackRecord;
+}
+
 export interface TaskItem {
   item_id: string;
   item_type: string;
@@ -578,6 +675,24 @@ export function batchExportUrl(batchId: string, partial = true): string {
   }`;
 }
 
+export function getTasks(
+  params: TaskListParams = {},
+  signal?: AbortSignal,
+): Promise<TaskPage> {
+  return getJson<TaskPage>(
+    `/api/tasks${query({
+      state: params.state,
+      task_type: params.taskType,
+      batch_id: params.batchId,
+      site_key: params.siteKey,
+      include_archived: params.includeArchived,
+      limit: params.limit ?? 50,
+      offset: params.offset,
+    })}`,
+    signal,
+  );
+}
+
 export function getTask(taskId: string, signal?: AbortSignal): Promise<TaskSummary> {
   return getJson<TaskSummary>(`/api/tasks/${encodeURIComponent(taskId)}`, signal);
 }
@@ -633,6 +748,53 @@ export function cancelTask(taskId: string): Promise<TaskSummary> {
   return sendJson<TaskSummary>(
     `/api/tasks/${encodeURIComponent(taskId)}/cancel`,
     "POST",
+  );
+}
+
+export function archiveTask(taskId: string): Promise<TaskSummary> {
+  return sendJson<TaskSummary>(
+    `/api/tasks/${encodeURIComponent(taskId)}/archive`,
+    "POST",
+  );
+}
+
+export function restoreTask(taskId: string): Promise<TaskSummary> {
+  return sendJson<TaskSummary>(
+    `/api/tasks/${encodeURIComponent(taskId)}/restore`,
+    "POST",
+  );
+}
+
+export function getTaskFeedback(
+  taskId: string,
+  status?: string,
+  signal?: AbortSignal,
+): Promise<FeedbackListResponse> {
+  return getJson<FeedbackListResponse>(
+    `/api/tasks/${encodeURIComponent(taskId)}/feedback${query({ status })}`,
+    signal,
+  );
+}
+
+export function createTaskFeedback(
+  taskId: string,
+  body: FeedbackCreateRequest,
+): Promise<FeedbackCreateResponse> {
+  return sendJson<FeedbackCreateResponse>(
+    `/api/tasks/${encodeURIComponent(taskId)}/feedback`,
+    "POST",
+    body,
+  );
+}
+
+export function triageFeedback(
+  feedbackId: string,
+  body: FeedbackTriageRequest,
+): Promise<FeedbackTriageResponse> {
+  return sendJson<FeedbackTriageResponse>(
+    `/api/feedback/${encodeURIComponent(feedbackId)}/triage`,
+    "POST",
+    body,
   );
 }
 

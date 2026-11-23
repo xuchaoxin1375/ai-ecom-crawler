@@ -890,6 +890,12 @@ export function BatchDetailPage() {
             >
               {stopReasonLabel(site.task.stop_reason)}
             </p>
+            <Link
+              className="mt-0.5 inline-block text-[11px] text-accent hover:underline"
+              to={`/tasks/${encodeURIComponent(site.task.task_id)}`}
+            >
+              任务详情
+            </Link>
           </div>
         );
       },

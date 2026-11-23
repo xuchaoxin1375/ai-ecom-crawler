@@ -40,9 +40,9 @@ updated: 2026-11-23
 | 按需 | [规则层与爬虫框架边界 ADR](adr/0007-规则层与爬虫框架边界.md) | 规则层／执行层分工、C0～C3 能力分层、hybrid adapter 契约和 load-more 对照计划 |
 | 按需 | [前端技术栈与本地 Web 形态 ADR](adr/0008-前端技术栈与本地Web形态.md) | 原生 ES modules + CSS、FastAPI 静态托管、hash 路由、备选与重选条件；原生 `/` 现为技术兜底 |
 | 按需 | [批次工作台前端技术栈 ADR](adr/0009-批次工作台前端技术栈.md) | Vue 3 + TypeScript + Vite、Vue Router、Pinia、测试与迁移边界；阶段 1 已实现并验收，Provisional |
-| 按需 | [任务控制台并入批次工作台外壳 ADR](adr/0010-任务控制台并入批次工作台外壳.md) | `/tasks` 任务列表／详情、批次站点深链、旧 `/legacy` 兜底和验证边界 |
+| 按需 | [任务控制台并入批次工作台外壳 ADR](adr/0010-任务控制台并入批次工作台外壳.md) | `/tasks` 任务列表／详情、批次站点深链、旧 `/legacy` 兜底和验证边界；v2 对应页面见 ADR 0012 |
 | 按需 | [样式层与 CSS 框架 ADR](adr/0011-样式层与CSS框架.md) | 现有 Vue 应用的手写 CSS + 令牌、不引入 CSS 框架的理由、重新评估条件和迁移边界 |
-| 按需 | [前端 v2 技术栈与设计系统 ADR](adr/0012-前端v2技术栈与设计系统.md) | React + TypeScript + Vite、Tailwind CSS v4、自有组件层、v2 默认入口、旧 Vue 降级并标注弃用；Provisional，功能对等未完成 |
+| 按需 | [前端 v2 技术栈与设计系统 ADR](adr/0012-前端v2技术栈与设计系统.md) | React + TypeScript + Vite、Tailwind CSS v4、自有组件层、v2 默认入口、任务页与结果验收、旧 Vue 降级并标注弃用；Provisional，任务 SSE／历史未迁移 |
 | 按需 | [robots 只探测 Sitemap 行 ADR](adr/0013-robots只探测sitemap行.md) | 所有阶段机会式探测一次，只保留 `Sitemap:` 行；失败不阻塞，不解析其他规则、不保存全文、不作为门禁 |
 | 按需 | [方法指导目录](方法指导/README.md) | Skill提炼的选源、发现、恢复、会话和验收方法 |
 | 按需 | [示例说明](示例/README.md) | 合成产品与任务结果；用于沟通，不是线上采集证据 |

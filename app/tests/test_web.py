@@ -26,7 +26,13 @@ CLIENT_HEADERS = {
 }
 
 
-def make_task(task_id: str, state: str = "FINISHED", task_type: str = "product") -> Task:
+def make_task(
+    task_id: str,
+    state: str = "FINISHED",
+    task_type: str = "product",
+    site_key: str | None = None,
+    batch_id: str | None = None,
+) -> Task:
     return Task(
         task_id=task_id,
         plan_id="fixture-web",
@@ -35,6 +41,8 @@ def make_task(task_id: str, state: str = "FINISHED", task_type: str = "product")
         state=state,
         outcome="COMPLETED" if state == "FINISHED" else None,
         stop_reason="NATURAL_END" if state == "FINISHED" else None,
+        site_key=site_key,
+        batch_id=batch_id,
     )
 
 
@@ -178,6 +186,37 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(detail.json()["plan_id"], "fixture-web")
         self.assertEqual(self.client.get("/api/tasks/missing").status_code, 404)
+
+    def test_list_filters_by_batch_and_site(self) -> None:
+        self.store.create_task(
+            make_task(
+                "task-batch-a",
+                site_key="alpha.test",
+                batch_id="batch-a",
+            )
+        )
+        self.store.create_task(
+            make_task(
+                "task-batch-b",
+                site_key="beta.test",
+                batch_id="batch-b",
+                state="RUNNING",
+            )
+        )
+
+        by_batch = self.client.get("/api/tasks?batch_id=batch-a").json()
+        self.assertEqual([item["task_id"] for item in by_batch["items"]], ["task-batch-a"])
+
+        by_site = self.client.get("/api/tasks?site_key=beta.test").json()
+        self.assertEqual([item["task_id"] for item in by_site["items"]], ["task-batch-b"])
+
+        # Tasks created before site_key existed fall back to plan_id.
+        fallback = self.client.get("/api/tasks?site_key=fixture-web").json()
+        self.assertEqual([item["task_id"] for item in fallback["items"]], ["task-1"])
+
+        self.assertEqual(
+            self.client.get("/api/tasks?batch_id=missing").json()["total"], 0
+        )
 
     def test_items_pagination(self) -> None:
         payload = self.client.get("/api/tasks/task-1/items?kind=product&limit=2").json()

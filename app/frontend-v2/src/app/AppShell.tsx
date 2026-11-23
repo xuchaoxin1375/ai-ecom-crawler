@@ -8,7 +8,14 @@ import {
 } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Layers, LayoutList, PanelLeftClose, PanelLeftOpen, Plus } from "lucide-react";
+import {
+  Layers,
+  LayoutList,
+  ListTodo,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Plus,
+} from "lucide-react";
 import { getHealth } from "../lib/api";
 import { cn } from "../lib/cn";
 
@@ -175,9 +182,10 @@ export function AppShell() {
   const [suppressed, setSuppressed] = useState(false);
   const siteMatch = location.pathname.match(/^\/batches\/([^/]+)\/sites\/[^/]+/);
   const batchMatch = location.pathname.match(/^\/batches\/([^/]+)/);
+  const isTaskDetail = /^\/tasks\/[^/]+/.test(location.pathname);
   const isSiteDetail = Boolean(siteMatch);
   const isBatchDetail = Boolean(batchMatch) && !isSiteDetail;
-  const showBreadcrumb = isBatchDetail || isSiteDetail;
+  const showBreadcrumb = isBatchDetail || isSiteDetail || isTaskDetail;
 
   const visualOpen = pinned || (!suppressed && (hovered || focused));
   const peeking = !pinned && visualOpen;
@@ -192,6 +200,19 @@ export function AppShell() {
   useEffect(() => {
     persistPinned(pinned);
   }, [pinned]);
+
+  useEffect(() => {
+    const title = isTaskDetail
+      ? "任务详情"
+      : isSiteDetail
+        ? "站点详情"
+        : isBatchDetail
+          ? "批次详情"
+          : location.pathname.startsWith("/tasks")
+            ? "全部任务"
+            : "采集批次";
+    document.title = `${title} · 电商采集`;
+  }, [isBatchDetail, isSiteDetail, isTaskDetail, location.pathname]);
 
   useEffect(() => {
     function onPointerDown() {
@@ -289,27 +310,41 @@ export function AppShell() {
             className="flex min-w-0 items-center gap-2 px-8 text-xs text-ink-3"
             aria-label="面包屑"
           >
-            <a className="hover:text-ink" href="#/batches">
-              采集批次
-            </a>
-            <span className="text-line-strong" aria-hidden="true">
-              /
-            </span>
-            {isSiteDetail ? (
+            {isTaskDetail ? (
               <>
-                <a
-                  className="hover:text-ink"
-                  href={`#/batches/${encodeURIComponent(siteMatch?.[1] ?? "")}`}
-                >
-                  批次详情
+                <a className="hover:text-ink" href="#/tasks">
+                  全部任务
                 </a>
                 <span className="text-line-strong" aria-hidden="true">
                   /
                 </span>
-                <span className="font-medium text-ink">站点详情</span>
+                <span className="font-medium text-ink">任务详情</span>
               </>
             ) : (
-              <span className="font-medium text-ink">批次详情</span>
+              <>
+                <a className="hover:text-ink" href="#/batches">
+                  采集批次
+                </a>
+                <span className="text-line-strong" aria-hidden="true">
+                  /
+                </span>
+                {isSiteDetail ? (
+                  <>
+                    <a
+                      className="hover:text-ink"
+                      href={`#/batches/${encodeURIComponent(siteMatch?.[1] ?? "")}`}
+                    >
+                      批次详情
+                    </a>
+                    <span className="text-line-strong" aria-hidden="true">
+                      /
+                    </span>
+                    <span className="font-medium text-ink">站点详情</span>
+                  </>
+                ) : (
+                  <span className="font-medium text-ink">批次详情</span>
+                )}
+              </>
             )}
           </nav>
         ) : null}
@@ -343,6 +378,15 @@ export function AppShell() {
                 to="/batches"
                 icon={<LayoutList size={17} />}
                 label="采集批次"
+                expanded={visualOpen}
+                onPointerNavigate={() => {
+                  if (!pinned) setFocused(false);
+                }}
+              />
+              <SidebarLink
+                to="/tasks"
+                icon={<ListTodo size={17} />}
+                label="全部任务"
                 expanded={visualOpen}
                 onPointerNavigate={() => {
                   if (!pinned) setFocused(false);

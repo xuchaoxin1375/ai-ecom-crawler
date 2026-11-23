@@ -21,7 +21,6 @@ import {
   getBuild,
   getBuildConfig,
   getBuildMessages,
-  getTaskItems,
   pauseBuild,
   pauseTask,
   replyBuildDependency,
@@ -36,19 +35,14 @@ import {
   type BuildMessages,
   type BuildResponse,
   type BuildStatus,
-  type TaskItem,
 } from "../../lib/api";
 import {
   buildOutcomeLabel,
   buildStateLabel,
   buildStateTone,
   coverageLabel,
-  descriptionStatusLabel,
-  descriptionStatusTone,
   formatNumber,
   formatTime,
-  itemStateLabel,
-  itemStateTone,
   outcomeLabel,
   READINESS_LABELS,
   readinessTone,
@@ -59,27 +53,20 @@ import {
 import { cn } from "../../lib/cn";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
-import { DataTable, type DataTableColumn } from "../../components/ui/DataTable";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { ErrorNotice } from "../../components/ui/ErrorNotice";
 import { MetricStrip } from "../../components/ui/MetricStrip";
 import { ConfirmBatchActionDialog } from "../batches/ConfirmBatchActionDialog";
+import { ProductPreviewSection } from "../tasks/ProductPreviewSection";
+import { QualityExceptionsSection } from "../tasks/QualityExceptionsSection";
+import { TaskItemsSection } from "../tasks/TaskItemsSection";
 import { BuildPanel } from "./BuildPanel";
 import { BuildStartDialog } from "./BuildStartDialog";
-import { ProductPreviewDialog } from "./ProductPreviewDialog";
 import { StartSiteDialog } from "./StartSiteDialog";
 import { TaskCsvPreview } from "./TaskCsvPreview";
 import { useBuildStream } from "./useBuildStream";
 import {
   buildIsActive,
-  previewDescriptionStatus,
-  previewDescriptionStatusRaw,
-  previewImage,
-  previewMeta,
-  previewName,
-  previewPrice,
-  productSummary,
-  qualityRows,
   siteHasActiveWork,
   siteNextStep,
   siteStatusSentence,
@@ -89,7 +76,6 @@ import {
 
 type DialogKind =
   "" | "build" | "repair" | "start-site" | "cancel-task" | "cancel-build";
-type TaskTab = "product" | "url";
 
 interface Notice {
   tone: "success" | "warning";
@@ -207,14 +193,10 @@ export function SiteDetailPage() {
   const [confirmError, setConfirmError] = useState("");
   const [taskBusy, setTaskBusy] = useState("");
   const [buildBusy, setBuildBusy] = useState("");
-  const [taskTab, setTaskTab] = useState<TaskTab>("product");
   const [startedBuild, setStartedBuild] = useState<{
     siteKey: string;
     buildId: string;
   } | null>(null);
-  const [previewItem, setPreviewItem] = useState<TaskItem | null>(null);
-  const [previewOpen, setPreviewOpen] = useState(false);
-  const [previewTab, setPreviewTab] = useState<"image" | "description">("image");
 
   const batchQuery = useQuery({
     queryKey: ["batch", batchId],
@@ -275,26 +257,6 @@ export function SiteDetailPage() {
   });
 
   const taskActive = taskIsActive(task);
-
-  const itemsQuery = useQuery({
-    queryKey: ["task-items", task?.task_id, taskTab],
-    queryFn: ({ signal }) =>
-      getTaskItems(task?.task_id ?? "", taskTab, 20, 0, undefined, "asc", signal),
-    enabled: Boolean(task?.task_id),
-    refetchInterval: taskActive ? 3000 : false,
-  });
-
-  const previewQuery = useQuery({
-    queryKey: ["task-preview", task?.task_id],
-    queryFn: ({ signal }) =>
-      getTaskItems(task?.task_id ?? "", "product", 10, 0, "DONE", "desc", signal),
-    enabled: Boolean(task?.task_id),
-    refetchInterval: taskActive ? 3000 : false,
-  });
-
-  const previewItems = (previewQuery.data?.items ?? []).filter(
-    (item) => item.result.product_preview,
-  );
   const step = site ? siteNextStep(site, build) : null;
   const messages: BuildMessages | null = stream.messages ?? messagesQuery.data ?? null;
   const config: BuildConfig | null = configQuery.data ?? null;
@@ -453,12 +415,6 @@ export function SiteDetailPage() {
     });
   }
 
-  function openPreview(item: TaskItem, tab: "image" | "description") {
-    setPreviewItem(item);
-    setPreviewTab(tab);
-    setPreviewOpen(true);
-  }
-
   function handleStep() {
     if (!step) return;
     switch (step.action) {
@@ -595,87 +551,6 @@ export function SiteDetailPage() {
       label: "质量异常",
       value: formatNumber(quality.length),
       hint: "正文不完整或非可选字段缺失",
-    },
-  ];
-
-  const taskColumns: DataTableColumn<TaskItem>[] = [
-    {
-      key: "item",
-      header: taskTab === "product" ? "商品" : "网址",
-      width: "42%",
-      cell: (item) => (
-        <div className="min-w-0">
-          {taskTab === "product" ? (
-            productSummary(item) ? (
-              <p className="truncate text-sm font-medium text-ink">
-                {productSummary(item)}
-              </p>
-            ) : (
-              <code className="block truncate font-mono text-[11px] text-ink-2">
-                {item.url}
-              </code>
-            )
-          ) : (
-            <code className="block truncate font-mono text-[11px] text-ink-2">
-              {item.url}
-            </code>
-          )}
-          {taskTab === "product" && productSummary(item) ? (
-            <p className="mt-0.5 truncate text-[11px] text-ink-3">{item.url}</p>
-          ) : null}
-        </div>
-      ),
-    },
-    {
-      key: "state",
-      header: "状态",
-      width: "18%",
-      cell: (item) => {
-        const descriptionStatus = previewDescriptionStatusRaw(item);
-        return (
-          <div className="flex flex-wrap items-center gap-1">
-            <Badge tone={itemStateTone(item.state)} dot={false}>
-              {itemStateLabel(item.state)}
-            </Badge>
-            {taskTab === "product" &&
-            descriptionStatus &&
-            descriptionStatus.toLowerCase() !== "complete" ? (
-              <Badge tone={descriptionStatusTone(descriptionStatus)} dot={false}>
-                {descriptionStatusLabel(descriptionStatus)}
-              </Badge>
-            ) : null}
-          </div>
-        );
-      },
-    },
-    {
-      key: "attempts",
-      header: "尝试",
-      width: "9%",
-      align: "right",
-      cell: (item) => <span className="text-xs tabular">{item.attempts}</span>,
-    },
-    {
-      key: "failure",
-      header: "失败分类",
-      width: "16%",
-      cell: (item) => (
-        <span className="text-xs text-ink-2">{item.failure_class || "—"}</span>
-      ),
-    },
-    {
-      key: "result",
-      header: "结果",
-      width: "15%",
-      cell: (item) => (
-        <span className="text-xs text-ink-3">
-          {item.result.reason
-            ? String(item.result.reason)
-            : item.result.page
-              ? `第 ${String(item.result.page)} 页`
-              : "—"}
-        </span>
-      ),
     },
   ];
 
@@ -847,6 +722,11 @@ export function SiteDetailPage() {
                     </p>
                   </div>
                   <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                    <Button asChild size="sm">
+                      <Link to={`/tasks/${encodeURIComponent(task.task_id)}`}>
+                        打开任务详情
+                      </Link>
+                    </Button>
                     {task.state === "RUNNING" || task.state === "PAUSING" ? (
                       <Button
                         size="sm"
@@ -915,170 +795,13 @@ export function SiteDetailPage() {
                 </dl>
               </section>
 
-              <section className="rounded-panel border border-line bg-surface">
-                <div className="flex items-start justify-between gap-4 border-b border-line px-5 py-4">
-                  <div>
-                    <h2 className="text-[17px] leading-6 font-semibold text-ink">
-                      已采数据预览
-                    </h2>
-                    <p className="mt-0.5 text-xs leading-5 text-ink-3">
-                      显示最近 {previewItems.length} 条有效商品；共{" "}
-                      {formatNumber(task.counts.valid_products ?? 0)} 条有效。
-                      {taskActive ? "任务运行中每 3 秒刷新。" : ""}
-                    </p>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    <Button
-                      size="sm"
-                      onClick={() => void previewQuery.refetch()}
-                      disabled={previewQuery.isFetching}
-                    >
-                      <RefreshCw
-                        className={previewQuery.isFetching ? "animate-spin" : undefined}
-                        size={13}
-                        aria-hidden="true"
-                      />
-                      刷新预览
-                    </Button>
-                  </div>
-                </div>
+              <ProductPreviewSection
+                taskId={task.task_id}
+                taskActive={taskActive}
+                validCount={task.counts.valid_products ?? 0}
+              />
 
-                {previewQuery.isError ? (
-                  <div className="px-4 pt-4">
-                    <ErrorNotice
-                      title="读取预览失败"
-                      message={
-                        previewQuery.error instanceof Error
-                          ? previewQuery.error.message
-                          : "暂时无法读取商品预览。"
-                      }
-                      compact
-                      onRetry={() => void previewQuery.refetch()}
-                    />
-                  </div>
-                ) : null}
-
-                {previewItems.length ? (
-                  <div className="grid grid-cols-2 gap-4 px-5 py-4 xl:grid-cols-3">
-                    {previewItems.map((item) => {
-                      const image = previewImage(item);
-                      const descriptionStatus = previewDescriptionStatusRaw(item);
-                      return (
-                        <article
-                          key={item.item_id}
-                          className="flex min-w-0 flex-col overflow-hidden rounded-panel border border-line bg-surface"
-                        >
-                          {image ? (
-                            <button
-                              type="button"
-                              className="block aspect-[4/3] overflow-hidden bg-surface-muted"
-                              title={`查看大图：${previewName(item)}`}
-                              onClick={() => openPreview(item, "image")}
-                            >
-                              <img
-                                src={image}
-                                alt={previewName(item)}
-                                className="h-full w-full object-cover transition-transform hover:scale-[1.02]"
-                                loading="lazy"
-                                referrerPolicy="no-referrer"
-                              />
-                            </button>
-                          ) : (
-                            <div className="flex aspect-[4/3] items-center justify-center bg-surface-muted text-xs text-ink-3">
-                              没有主图
-                            </div>
-                          )}
-                          <div className="flex min-w-0 flex-1 flex-col gap-1 px-3 py-3">
-                            <p
-                              className="line-clamp-2 text-sm leading-5 font-medium text-ink"
-                              title={previewName(item)}
-                            >
-                              {previewName(item)}
-                            </p>
-                            <p className="text-sm font-semibold text-ink tabular">
-                              {previewPrice(item)}
-                            </p>
-                            {previewMeta(item) ? (
-                              <p className="truncate text-[11px] text-ink-3">
-                                {previewMeta(item)}
-                              </p>
-                            ) : null}
-                            <div className="mt-auto flex flex-wrap items-center gap-1.5 pt-1">
-                              {descriptionStatus &&
-                              descriptionStatus.toLowerCase() !== "complete" ? (
-                                <Badge
-                                  tone={descriptionStatusTone(descriptionStatus)}
-                                  dot={false}
-                                >
-                                  {previewDescriptionStatus(item)}
-                                </Badge>
-                              ) : null}
-                              <a
-                                className="truncate text-[11px] text-accent hover:underline"
-                                href={item.url}
-                                target="_blank"
-                                rel="noreferrer"
-                              >
-                                来源页
-                              </a>
-                            </div>
-                          </div>
-                        </article>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <p className="px-5 py-8 text-sm text-ink-3">
-                    {previewQuery.isPending
-                      ? "正在读取有效商品…"
-                      : taskActive
-                        ? "还没有完成的有效商品；任务运行中，预览会自动刷新。"
-                        : "本次任务没有可预览的有效商品。"}
-                  </p>
-                )}
-              </section>
-
-              <section className="rounded-panel border border-line bg-surface">
-                <div className="border-b border-line px-5 py-4">
-                  <h2 className="text-[17px] leading-6 font-semibold text-ink">
-                    质量异常
-                  </h2>
-                  <p className="mt-0.5 text-xs leading-5 text-ink-3">
-                    仅列正文不完整或非可选字段缺失的商品；品牌、分类等可空字段缺失不算异常。
-                  </p>
-                </div>
-                {quality.length ? (
-                  <ul className="divide-y divide-line">
-                    {quality.map((exception, index) => (
-                      <li key={index} className="px-5 py-3">
-                        <dl className="grid grid-cols-[88px_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs">
-                          {qualityRows(exception).map(([label, value]) => (
-                            <div key={label} className="contents">
-                              <dt className="text-ink-3">{label}</dt>
-                              <dd className="min-w-0 break-words text-ink-2">
-                                {label === "来源" && value.startsWith("http") ? (
-                                  <a
-                                    className="text-accent hover:underline"
-                                    href={value}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                  >
-                                    {value}
-                                  </a>
-                                ) : (
-                                  value
-                                )}
-                              </dd>
-                            </div>
-                          ))}
-                        </dl>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="px-5 py-8 text-sm text-ink-3">本次没有质量异常。</p>
-                )}
-              </section>
+              <QualityExceptionsSection exceptions={quality} />
 
               <TaskCsvPreview
                 key={task.task_id}
@@ -1086,85 +809,7 @@ export function SiteDetailPage() {
                 live={taskActive}
               />
 
-              <section className="overflow-clip rounded-panel border border-line bg-surface">
-                <div className="flex items-start justify-between gap-4 border-b border-line px-5 py-4">
-                  <div>
-                    <h2 className="text-[17px] leading-6 font-semibold text-ink">
-                      任务明细
-                    </h2>
-                    <p className="mt-0.5 text-xs leading-5 text-ink-3" role="status">
-                      {itemsQuery.isFetching
-                        ? "更新中…"
-                        : `显示前 ${formatNumber(
-                            itemsQuery.data?.items.length ?? 0,
-                          )} 条，共 ${formatNumber(itemsQuery.data?.total ?? 0)} 条`}
-                    </p>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    {(
-                      [
-                        ["product", "商品"],
-                        ["url", "网址"],
-                      ] as const
-                    ).map(([key, label]) => (
-                      <button
-                        key={key}
-                        type="button"
-                        aria-pressed={taskTab === key}
-                        className={cn(
-                          "inline-flex h-7 items-center rounded-full border px-2.5 text-[11px] font-medium",
-                          taskTab === key
-                            ? "border-accent/30 bg-accent-soft text-accent"
-                            : "border-line bg-surface text-ink-2 hover:bg-surface-muted",
-                        )}
-                        onClick={() => setTaskTab(key)}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                    <Button
-                      size="sm"
-                      onClick={() => void itemsQuery.refetch()}
-                      disabled={itemsQuery.isFetching}
-                    >
-                      <RefreshCw
-                        className={itemsQuery.isFetching ? "animate-spin" : undefined}
-                        size={13}
-                        aria-hidden="true"
-                      />
-                      刷新
-                    </Button>
-                  </div>
-                </div>
-                {itemsQuery.isError ? (
-                  <div className="px-4 pt-4">
-                    <ErrorNotice
-                      title="读取任务明细失败"
-                      message={
-                        itemsQuery.error instanceof Error
-                          ? itemsQuery.error.message
-                          : "暂时无法读取任务明细。"
-                      }
-                      compact
-                      onRetry={() => void itemsQuery.refetch()}
-                    />
-                  </div>
-                ) : null}
-                <DataTable
-                  caption="任务明细"
-                  columns={taskColumns}
-                  rows={itemsQuery.data?.items ?? []}
-                  rowKey={(item) => item.item_id}
-                  density="compact"
-                  loading={itemsQuery.isPending}
-                  empty={
-                    <EmptyState
-                      title="没有明细"
-                      description="任务还没有产生这类条目。"
-                    />
-                  }
-                />
-              </section>
+              <TaskItemsSection taskId={task.task_id} taskActive={taskActive} />
             </>
           ) : (
             <section className="rounded-panel border border-line bg-surface">
@@ -1468,14 +1113,6 @@ export function SiteDetailPage() {
           onConfirm={() => void runBuildControl("cancel")}
         />
       ) : null}
-
-      <ProductPreviewDialog
-        key={`${previewItem?.item_id ?? "none"}-${previewTab}-${previewOpen}`}
-        open={previewOpen}
-        item={previewItem}
-        initialTab={previewTab}
-        onOpenChange={setPreviewOpen}
-      />
     </div>
   );
 }

@@ -4,6 +4,8 @@ import { NotFoundPage } from "./NotFoundPage";
 import { BatchesPage } from "../features/batches/BatchesPage";
 import { BatchDetailPage } from "../features/batches/BatchDetailPage";
 import { SiteDetailPage } from "../features/sites/SiteDetailPage";
+import { TasksPage } from "../features/tasks/TasksPage";
+import { TaskDetailPage } from "../features/tasks/TaskDetailPage";
 
 export const router = createHashRouter([
   {
@@ -17,6 +19,8 @@ export const router = createHashRouter([
         path: "batches/:batchId/sites/:siteKey",
         element: <SiteDetailPage />,
       },
+      { path: "tasks", element: <TasksPage /> },
+      { path: "tasks/:taskId", element: <TaskDetailPage /> },
       { path: "*", element: <NotFoundPage /> },
     ],
   },

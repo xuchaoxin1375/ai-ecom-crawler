@@ -1063,6 +1063,8 @@ def create_app(
     def list_tasks(
         state: Annotated[list[str] | None, Query()] = None,
         task_type: Annotated[str | None, Query()] = None,
+        batch_id: Annotated[str | None, Query(max_length=200)] = None,
+        site_key: Annotated[str | None, Query(max_length=200)] = None,
         include_archived: Annotated[bool, Query()] = False,
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         offset: Annotated[int, Query(ge=0)] = 0,
@@ -1075,6 +1077,14 @@ def create_app(
         ]
         if task_type:
             tasks = [task for task in tasks if task.task_type == task_type]
+        if batch_id:
+            tasks = [task for task in tasks if task.batch_id == batch_id]
+        if site_key:
+            tasks = [
+                task
+                for task in tasks
+                if (task.site_key or task.plan_id) == site_key
+            ]
         total = len(tasks)
         return {
             "total": total,
