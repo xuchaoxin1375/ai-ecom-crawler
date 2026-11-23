@@ -28,6 +28,9 @@ Thumbs.db
 dist/
 /storage/
 
+# 实验目录的生成导出包
+experiments/**/task-export.zip
+
 # Python
 __pycache__/
 *.py[cod]

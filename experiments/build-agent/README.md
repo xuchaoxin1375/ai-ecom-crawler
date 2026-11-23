@@ -12,7 +12,7 @@
 - 主机验证：先静态编译规则中的所有 CSS 选择器（`lxml.cssselect`），再在隔离任务账本和输出目录跑一次有界 product 任务；检查规则域名、市场、币种和至少一条有效商品。验证失败时默认把精确错误和失败样例回给同一会话修复 1 轮，再重新预检和验证。
 - 安装：通过后规则以 `candidate` 写入受管规则目录，站点进入 `ready`；修复后仍失败时站点回到 `needs_onboarding`，保留错误、修复轮次和构建记录。
 - 批次启动：正常任务路径使用新规则，运行期零 LLM。
-- 证据只保留规则、构建摘要、任务结果和 9 列 CSV，不保存会话原文、推理或整页 HTML。
+- 证据只保留规则、构建摘要、任务结果和 9 列 CSV，不保存会话原文、推理或整页 HTML；任务导出 zip 由脚本生成，不入库。
 
 ## 2026-11-23 真实运行
 
@@ -21,7 +21,7 @@
 - 批次 `b-1634d0fb5f9e`，站点 `familidoo.fr` 初始 `needs_onboarding`。
 - 构建 `build-d968105688f3`，模型 `opencode-go/deepseek-v4.1-flash`（variant high），约 2 分钟；主机验证约 4 秒。
 - 规则 `familidoo-fr-build@2026.11.23-1` 安装为 `candidate`；批次启动任务 `web-d215abb46732`，3／3 有效、0 失败、0 排除、0 质量异常，`COMPLETED`。
-- 证据：`real-model-2026-11-23-familidoo/`（`rule.yaml`、`build.json`、`batch.json`、`task.json`、`products.csv`、`task-result.json`、`urls.csv`、`task-export.zip`）。
+- 证据：`real-model-2026-11-23-familidoo/`（`rule.yaml`、`build.json`、`batch.json`、`task.json`、`products.csv`、`task-result.json`、`urls.csv`）。
 - 复跑命令：
 
 ```powershell
