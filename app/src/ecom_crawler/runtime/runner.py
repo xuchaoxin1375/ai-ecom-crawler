@@ -31,6 +31,7 @@ from ecom_crawler.executor.runner import (
     validate_product,
 )
 from ecom_crawler.model import OPTIONAL_QUALITY_FIELDS
+from ecom_crawler.robots import extract_sitemaps, robots_url_for
 
 from .archive import ArchiveMissError
 from .atomic import append_jsonl, write_json, write_text
@@ -823,8 +824,7 @@ class TaskRunner:
                 self._seed_adapter(source)
             elif source_type == "sitemap":
                 urls = list(source.get("urls") or [])
-                if source.get("robots") is True:
-                    urls.extend(self._robots_sitemaps)
+                urls.extend(self._robots_sitemaps)
                 for url in dict.fromkeys(urls):
                     self._add_navigation(
                         url,
@@ -1374,26 +1374,21 @@ class TaskRunner:
             return False
         return True
 
-    def _should_probe_robots(self) -> bool:
-        discovery = self.rule.discovery
-        if discovery.get("robots_sitemap") is True:
-            return True
-        sitemap = discovery.get("sitemap")
-        if isinstance(sitemap, dict) and sitemap.get("robots") is True:
-            return True
-        for source in self.rule.sources:
-            if source.get("type") == "sitemap" and source.get("robots") is True:
-                return True
-        strategies = discovery.get("strategies", [])
-        return "sitemap" in strategies and not discovery.get("sitemap_urls")
-
     def _probe_robots_sitemaps(self) -> None:
-        """Read robots only for `Sitemap:` lines; never store or enforce rules."""
-        if not self._should_probe_robots():
+        """Probe robots opportunistically; keep only `Sitemap:` values.
+
+        A missing or unreadable robots.txt is recorded and ignored. Other
+        directives are never parsed, stored or enforced.
+        """
+        try:
+            self._robots_url = robots_url_for(self.rule.entry_url)
+            result = self.fetcher.get(self._robots_url)
+        except Exception as exc:  # noqa: BLE001 - opportunistic probe boundary
+            self._event(
+                "robots_probe_failed",
+                error=f"{type(exc).__name__}: {exc}",
+            )
             return
-        parsed = urlparse(self.rule.entry_url)
-        self._robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
-        result = self.fetcher.get(self._robots_url)
         self._robots_status = result.status
         if not result.ok:
             self._event(
@@ -1403,16 +1398,9 @@ class TaskRunner:
                 error=result.error,
             )
             return
-        text = result.body.decode("utf-8", "replace").removeprefix("\ufeff")
-        for line in text.splitlines():
-            stripped = line.strip()
-            if not stripped.lower().startswith("sitemap:"):
-                continue
-            value = stripped.split(":", 1)[1].strip()
-            if value and value not in self._robots_sitemaps:
-                self._robots_sitemaps.append(value)
-            if len(self._robots_sitemaps) >= 20:
-                break
+        self._robots_sitemaps = extract_sitemaps(
+            result.body, base_url=self.rule.entry_url
+        )
         self._event(
             "robots_sitemaps_probed",
             url=self._robots_url,

@@ -374,8 +374,6 @@ def _validate_sources(value: Any, discovery: dict[str, Any]) -> None:
                 raise RuleError(f"{path}.urls must be a list")
             for url in urls:
                 _require_string(url, f"{path}.urls[]")
-            if not urls and source.get("robots") is not True:
-                raise RuleError(f"{path} needs urls or robots=true")
             if "robots" in source and not isinstance(source["robots"], bool):
                 raise RuleError(f"{path}.robots must be a boolean")
             if "max_sitemaps" in source and (

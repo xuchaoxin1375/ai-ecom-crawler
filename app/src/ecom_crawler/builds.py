@@ -32,7 +32,6 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 import yaml
-from protego import Protego
 
 from .execution import run_task
 from .executor.preflight import check_rule_selectors, format_selector_errors
@@ -40,6 +39,7 @@ from .harness import BuildService, BuildTask, OpenCodeHttpAdapter
 from .harness.adapter import BuildSession
 from .harness.dependencies import DependencyPolicy
 from .harness.trace import build_trace, render_trace_markdown
+from .robots import extract_sitemaps, robots_url_for
 from .runtime.archive import prefetch_rule_samples
 from .runtime.batch import normalize_site, rule_domains
 from .runtime.models import Batch, BatchSite, BuildRecord, utc_now
@@ -87,20 +87,20 @@ ROBOTS_TIMEOUT_SECONDS = 10.0
 logger = logging.getLogger(__name__)
 
 
-def _check_robots(
+def _probe_robots(
     entry_url: str, proxy: str | None = None
-) -> tuple[bool, str]:
-    """Fail closed when the target's robots.txt disallows the entry URL.
+) -> tuple[str, list[str]]:
+    """Fetch robots.txt opportunistically and retain only Sitemap declarations.
 
-    Build-time exploration uses shell/curl tools, so it does not pass through
-    the runtime runner's robots gate.  This preflight applies the same policy
-    before a model call: 404 means allow, a disallow or an unreadable robots
-    file means the build must stop.
+    Build-time exploration uses shell/curl tools, so the host performs this
+    probe once and passes the Sitemap URLs to the agent. A missing or unreadable
+    robots.txt never blocks the build; ``Disallow``/``Crawl-delay`` are not
+    parsed or enforced.
     """
-    parsed = urlsplit(entry_url)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        return False, "entry URL is not HTTP(S)"
-    robots_url = urlunsplit((parsed.scheme, parsed.netloc, "/robots.txt", "", ""))
+    try:
+        robots_url = robots_url_for(entry_url)
+    except ValueError as exc:
+        return f"robots.txt skipped: {exc}", []
     handlers: list[Any] = []
     if proxy:
         handlers.append(
@@ -114,22 +114,17 @@ def _check_robots(
     try:
         with opener.open(request, timeout=ROBOTS_TIMEOUT_SECONDS) as response:
             status = int(getattr(response, "status", 200))
-            body = response.read(1_000_000).decode("utf-8", "replace")
+            body = response.read(1_000_000)
     except urllib.error.HTTPError as exc:
-        if exc.code == 404:
-            return True, "robots.txt not found"
-        return False, f"robots.txt HTTP {exc.code}"
-    except Exception as exc:  # noqa: BLE001 - network boundary
-        return False, f"robots.txt fetch failed: {type(exc).__name__}: {exc}"
+        return f"robots.txt HTTP {exc.code}", []
+    except Exception as exc:  # noqa: BLE001 - opportunistic network boundary
+        return f"robots.txt fetch failed: {type(exc).__name__}: {exc}", []
     if not 200 <= status < 300:
-        return False, f"robots.txt HTTP {status}"
-    try:
-        robots = Protego.parse(body.removeprefix("\ufeff"))
-    except Exception as exc:  # noqa: BLE001 - parser boundary
-        return False, f"cannot parse robots.txt: {exc}"
-    if not robots.can_fetch(entry_url, "*"):
-        return False, "robots.txt disallows the entry URL"
-    return True, "robots.txt allows the entry URL"
+        return f"robots.txt HTTP {status}", []
+    sitemaps = extract_sitemaps(body, base_url=entry_url)
+    if sitemaps:
+        return f"robots.txt sitemap lines: {len(sitemaps)}", sitemaps
+    return "robots.txt has no Sitemap lines", []
 
 
 class BuildError(ValueError):
@@ -515,7 +510,7 @@ class BuildManager:
         default_proxy: str | None = None,
         capture_reasoning: bool | None = None,
         persist_reasoning: bool | None = None,
-        robots_checker: Callable[[str, str | None], tuple[bool, str]] | None = None,
+        robots_probe: Callable[[str, str | None], tuple[str, list[str]]] | None = None,
         max_repair_rounds: int | None = None,
         repair_seconds: int | None = None,
         archive_mode: str | None = None,
@@ -546,7 +541,7 @@ class BuildManager:
             if persist_reasoning is not None
             else os.environ.get("ECOM_BUILD_PERSIST_REASONING") == "1"
         )
-        self.robots_checker = robots_checker or _check_robots
+        self.robots_probe = robots_probe or _probe_robots
         self._trace_reasoning: dict[str, bool] = {}
         self.max_repair_rounds = max(
             0,
@@ -661,15 +656,12 @@ class BuildManager:
         if resolved_proxy:
             _validate_proxy(resolved_proxy)
         try:
-            robots_allowed, robots_reason = self.robots_checker(
+            robots_note, robots_sitemaps = self.robots_probe(
                 entry_url, resolved_proxy
             )
-        except Exception as exc:
-            raise BuildError(
-                f"robots.txt check failed: {type(exc).__name__}: {exc}"
-            ) from exc
-        if not robots_allowed:
-            raise BuildError(f"robots.txt blocks the entry URL: {robots_reason}")
+        except Exception as exc:  # noqa: BLE001 - opportunistic probe boundary
+            robots_note = f"robots.txt probe failed: {type(exc).__name__}: {exc}"
+            robots_sitemaps = []
         with self._lock:
             active = self.service.active_build_id
             if active is not None:
@@ -758,6 +750,8 @@ class BuildManager:
                 ),
                 extra={
                     **({"proxy": resolved_proxy} if resolved_proxy else {}),
+                    "robots_note": robots_note,
+                    "robots_sitemaps": robots_sitemaps,
                     **self._catalog_configs[build_id],
                     **self._archive_configs[build_id],
                 },
@@ -931,6 +925,14 @@ class BuildManager:
         samples = evidence.get("sample_urls") if isinstance(evidence, dict) else []
         sample_lines = "\n".join(f"- {url}" for url in (samples or [])[:8])
         reason_text = reason.strip() or "Host content audit found description or field gaps."
+        robots_note = str(task.extra.get("robots_note") or "robots.txt not probed")
+        robots_sitemaps = [
+            str(url) for url in (task.extra.get("robots_sitemaps") or [])
+        ][:20]
+        robots_lines = (
+            "\n".join(f"- {url}" for url in robots_sitemaps)
+            or "- No Sitemap lines found."
+        )
         return f"""# Rule repair brief: {site.site_key}
 
 You are repairing an **installed declarative rule**, not building a new site
@@ -983,10 +985,16 @@ request budget.
 
 ## Site access and robots
 
-Fetch `/robots.txt` before other site requests. If it disallows the entry URL or
-all agents, stop and record the result in `../out/evidence/build-notes.md`; do
-not write speculative selectors. Respect disallowed paths and crawl-delay. Do
-not use archive.org or caches as a substitute for the live target.
+The host already probed `/robots.txt`; result: {robots_note}.
+
+Sitemap URLs from robots.txt:
+
+{robots_lines}
+
+Use these Sitemap URLs if they help discovery. Do not fetch or read robots.txt
+yourself, and do not analyze `Disallow`, `Allow`, `Crawl-delay` or user-agent
+groups. robots.txt is not a stop signal. Keep the fixed conservative request
+rate. Do not use archive.org or caches as a substitute for the live target.
 """
 
     def _repair_run_prompt(self, site: BatchSite, task: BuildTask) -> str:
@@ -1013,11 +1021,17 @@ Read first, in this order:
 
 ## Site access and robots
 
-- Before any other request to the target, fetch `<entry origin>/robots.txt`.
-- If robots.txt disallows the entry URL or all agents, stop. Record the result
-  in `../out/evidence/build-notes.md`; do not write speculative selectors.
-- Respect `Disallow` and `Crawl-delay` for every path. Never fetch a disallowed
-  URL.
+- The host probes `<entry origin>/robots.txt` before the build and passes only
+  its `Sitemap:` URLs in the brief. Do not fetch, print or read robots.txt
+  yourself.
+- Do not analyze `Disallow`, `Allow`, `Crawl-delay`, user-agent groups or any
+  other robots content. robots.txt is not a stop signal and must not be used to
+  exclude paths or change the request rate.
+- Use the brief's Sitemap URLs when they help discovery; otherwise discover
+  from the entry page.
+- Never fetch a URL outside the allowed origin or path prefix. Keep the fixed
+  conservative rate from the brief; do not raise concurrency because robots.txt
+  looks permissive.
 - Do not use archive.org, caches, search snippets, or a different origin as a
   substitute for the live target.
 - Do not log in, pay, solve captchas, spoof a different user agent, or bypass
@@ -1081,6 +1095,14 @@ candidate; the host validates and installs it.
                 "no product links, inspect one category or sitemap and use `listing`, "
                 "`html_index` or `sitemap`.\n"
             )
+        robots_note = str(task.extra.get("robots_note") or "robots.txt not probed")
+        robots_sitemaps = [
+            str(url) for url in (task.extra.get("robots_sitemaps") or [])
+        ][:20]
+        robots_lines = (
+            "\n".join(f"- {url}" for url in robots_sitemaps)
+            or "- No Sitemap lines found."
+        )
         return f"""# Build brief: {site.site_key}
 
 You are building a **declarative** rule package for one public e-commerce site.
@@ -1110,10 +1132,17 @@ pay, solve captchas or bypass access control. Respect the request budget.
 
 ## Site access and robots
 
-Fetch `/robots.txt` before other site requests. If it disallows the entry URL or
-all agents, stop and record the result in `../out/evidence/build-notes.md`; do
-not write a speculative rule. Respect disallowed paths and crawl-delay. Do not
-use archive.org or caches as a substitute for the live target.
+The host already probed `/robots.txt`; result: {robots_note}.
+
+Sitemap URLs from robots.txt:
+
+{robots_lines}
+
+Use these Sitemap URLs if they help discovery. Do not fetch or read robots.txt
+yourself, and do not analyze `Disallow`, `Allow`, `Crawl-delay` or user-agent
+groups. robots.txt is not a stop signal. Keep the fixed conservative request
+rate in this brief. Do not use archive.org or caches as a substitute for the
+live target.
 
 A generic reference rule is at `../input/reference-rule.yaml`; adapt it, do not
 copy its site or selectors blindly.

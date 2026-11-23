@@ -12,9 +12,9 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin, urlparse, urlunparse
 
-from protego import Protego
 from scrapling.fetchers import FetcherSession
 
+from ..robots import extract_sitemaps, robots_url_for
 from .errors import (
     AccessDenied,
     BudgetExhausted,
@@ -325,9 +325,10 @@ class Runner:
         self.stop_reason = "NATURAL_END"
         self.stop_detail = "entry-page sample exhausted"
         self.entry_fetched = False
-        self.robots: Protego | None = None
-        self.robots_text = ""
         self.robots_url = ""
+        self.robots_status = 0
+        self.robots_sitemaps: list[str] = []
+        self.robots_note = ""
         self.client: Pacer | None = None
         self.seen_canonical: set[str] = set()
         self._allowed_origins = {
@@ -375,24 +376,25 @@ class Runner:
         return 0 if self.records else 2
 
     def _fetch_robots(self) -> None:
-        parsed = urlparse(self.entry_url)
-        self.robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
+        self.robots_url = robots_url_for(self.entry_url)
         assert self.client is not None
         try:
-            response = self.client.get(self.robots_url, purpose="robots", allow_status=(404,))
-        except HttpStatusError as exc:
-            raise EnvironmentFailure(f"robots.txt HTTP {exc.status}") from exc
-        except TransportError as exc:
-            raise EnvironmentFailure(f"robots.txt transport error: {exc}") from exc
-        status = int(getattr(response, "status", 0) or 0)
-        self.robots_text = _response_body(response).decode("utf-8", "replace")
-        if status != 404:
-            try:
-                self.robots = Protego.parse(self.robots_text.removeprefix("\ufeff"))
-            except Exception as exc:
-                raise PlanError(f"cannot parse robots.txt: {exc}") from exc
-            if not self.robots.can_fetch(self.entry_url, "*"):
-                raise AccessDenied("robots.txt disallows the entry URL")
+            response = self.client.get(self.robots_url, purpose="robots")
+        except AccessDenied as exc:
+            self.robots_note = f"robots.txt access denied: {exc}"
+            return
+        except (HttpStatusError, TransportError) as exc:
+            self.robots_note = f"robots.txt fetch failed: {exc}"
+            return
+        self.robots_status = int(getattr(response, "status", 0) or 0)
+        self.robots_sitemaps = extract_sitemaps(
+            _response_body(response), base_url=self.entry_url
+        )
+        self.robots_note = (
+            f"robots.txt sitemap lines: {len(self.robots_sitemaps)}"
+            if self.robots_sitemaps
+            else "robots.txt has no Sitemap lines"
+        )
 
     def _fetch_entry(self) -> HtmlPage:
         assert self.client is not None
@@ -419,10 +421,6 @@ class Runner:
             self._process_one(url)
 
     def _process_one(self, url: str) -> None:
-        if self.robots is not None and not self.robots.can_fetch(url, "*"):
-            self._audit(url, "excluded", "robots_disallowed")
-            return
-
         assert self.client is not None
         try:
             response = self.client.get(url, purpose="product")
@@ -514,7 +512,11 @@ class Runner:
 
     def _write_all(self) -> None:
         self.diagnostics.mkdir(parents=True, exist_ok=True)
-        (self.diagnostics / "robots.txt").write_text(self.robots_text, encoding="utf-8")
+        (self.diagnostics / "robots_sitemaps.txt").write_text(
+            "\n".join(self.robots_sitemaps)
+            + ("\n" if self.robots_sitemaps else ""),
+            encoding="utf-8",
+        )
         (self.diagnostics / "discovered_urls.txt").write_text(
             "\n".join(self.discovered) + ("\n" if self.discovered else ""),
             encoding="utf-8",
@@ -671,6 +673,10 @@ class Runner:
             "access": {
                 "entry_url": self.entry_url,
                 "robots_url": self.robots_url,
+                "robots_status": self.robots_status,
+                "robots_sitemaps": self.robots_sitemaps,
+                "robots_note": self.robots_note,
+                "robots_policy": "sitemap_line_only",
                 "client": "scrapling.FetcherSession impersonate=chrome",
                 "delay_s": max(int(self.plan["fetch"]["delay_ms"]), 1000) / 1000,
                 "max_products": self.options.max_products,

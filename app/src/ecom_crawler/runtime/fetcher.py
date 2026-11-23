@@ -191,6 +191,9 @@ class HybridFetcher:
         )
 
     def get(self, url: str, *, item_type: str | None = None) -> FetchResult:
+        if urlparse(url).path.rstrip("/") == "/robots.txt" and "static" in self.builders:
+            # robots.txt is plain text; do not launch a browser just to probe it.
+            return self._fetcher("static").get(url, item_type=item_type)
         engine = self._engine_for(item_type)
         fetcher = self._fetcher(engine)
         return fetcher.get(url, item_type=item_type)

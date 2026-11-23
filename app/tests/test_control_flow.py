@@ -178,6 +178,8 @@ class StaticFetcher:
         return False
 
     def get(self, url: str, *, item_type: str | None = None) -> FetchResult:
+        if url.rstrip("/").endswith("/robots.txt"):
+            return FetchResult(status=404, url=url, body=b"")
         self.requests += 1
         if url.rstrip("/") == "https://fixture.test":
             return FetchResult(status=200, url=url, body=ENTRY_HTML.encode("utf-8"))
@@ -234,6 +236,8 @@ class GateFetcher:
         return False
 
     def get(self, url: str, *, item_type: str | None = None) -> FetchResult:
+        if url.rstrip("/").endswith("/robots.txt"):
+            return FetchResult(status=404, url=url, body=b"")
         if url.rstrip("/") == f"https://fixture.test/{self.prefix}":
             return FetchResult(
                 status=200,

@@ -33,7 +33,7 @@ capabilities:
 discovery:
   sources:
     - type: "sitemap"
-      robots: true
+      # urls 省略：运行时自动使用 robots 的 Sitemap: 行
       sitemap_patterns: ["sitemap_products"]
       max_sitemaps: 1
   product_url_patterns: ['^/products/[^/]+$']

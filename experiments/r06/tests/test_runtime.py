@@ -406,6 +406,8 @@ class RobotsTests(unittest.TestCase):
             self.assertEqual(task_result["outcome"], "COMPLETED")
             rows = read_csv(root / "tasks" / task.task_id / "urls.csv")
             self.assertEqual(len(rows), 2)
+            self.assertIn(ROBOTS, fetcher.calls)
+            self.assertEqual(task_result["access"]["robots_status"], 200)
             self.assertFalse(
                 (root / "tasks" / task.task_id / "robots.txt").exists(),
                 "full robots.txt must not be retained",
@@ -416,7 +418,6 @@ class RobotsTests(unittest.TestCase):
             root = Path(tmp)
             store = TaskStore(root / "tasks.db")
             rule = load_rule(PLAN)
-            rule.raw["discovery"]["robots_sitemap"] = True
             task = make_task("discovery", "robots-sitemap")
             store.create_task(task)
             sitemap = "https://www.familidoo.fr/sitemap.xml"
@@ -585,7 +586,7 @@ class SitemapTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             store = TaskStore(root / "tasks.db")
-            rule = sources_rule(root, [{"type": "sitemap", "robots": True}])
+            rule = sources_rule(root, [{"type": "sitemap"}])
             task = make_task("discovery", "sitemap-robots")
             store.create_task(task)
             fetcher = FakeFetcher(

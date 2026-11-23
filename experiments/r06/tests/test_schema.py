@@ -60,11 +60,11 @@ class SchemaTests(unittest.TestCase):
         }
         self._assert_valid(rule)
 
-    def test_robots_sitemap_source_matches_schema(self) -> None:
+    def test_sitemap_source_without_urls_matches_schema(self) -> None:
         rule = copy.deepcopy(self.rule)
         rule["schema_version"] = "1.1"
         rule["discovery"] = {
-            "sources": [{"type": "sitemap", "robots": True}],
+            "sources": [{"type": "sitemap"}],
             "product_url_patterns": ["/fr/.*\\.html$"],
         }
         self._assert_valid(rule)

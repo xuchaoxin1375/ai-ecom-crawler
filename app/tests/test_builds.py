@@ -13,11 +13,10 @@ import yaml
 from fastapi.testclient import TestClient
 
 from ecom_crawler.builds import (
-    BuildError,
     BuildManager,
-    _check_robots,
     _live_timeline,
     _merge_reasoning_timeline,
+    _probe_robots,
     _trace_timeline,
 )
 from ecom_crawler.harness.adapter import BuildSession
@@ -358,7 +357,7 @@ class BuildWorkflowTests(unittest.TestCase):
         currencies: dict[str, int] | None = None,
         validator: Any | None = None,
         max_repair_rounds: int = 0,
-        robots_checker: Any | None = None,
+        robots_probe: Any | None = None,
     ) -> BuildManager:
         if validator is None:
 
@@ -389,8 +388,8 @@ class BuildWorkflowTests(unittest.TestCase):
             max_repair_rounds=max_repair_rounds,
             repair_seconds=5,
             archive_mode="off",
-            robots_checker=robots_checker
-            or (lambda entry_url, proxy: (True, "allowed in tests")),
+            robots_probe=robots_probe
+            or (lambda entry_url, proxy: ("robots.txt not found", [])),
         )
 
     def _client(self, manager: BuildManager) -> TestClient:
@@ -617,29 +616,41 @@ class BuildWorkflowTests(unittest.TestCase):
             self.assertEqual(site["readiness"], "needs_onboarding")
             self.assertIn("构建失败", site["note"])
 
-    def test_build_rejects_robots_disallowed_entry(self) -> None:
+    def test_build_continues_when_robots_disallows(self) -> None:
         adapter = FakeBuildAdapter(self.root)
         manager = self._manager(
             adapter,
-            robots_checker=lambda entry_url, proxy: (
-                False,
+            robots_probe=lambda entry_url, proxy: (
                 "robots.txt disallows the entry URL",
+                ["https://example.fr/sitemap.xml"],
             ),
         )
         site = self.store.get_batch_site("b-1", "example.fr")
-        with self.assertRaises(BuildError) as raised:
-            manager.start(self.batch, site)
-        self.assertIn("robots.txt blocks the entry URL", str(raised.exception))
-        self.assertEqual(adapter.sessions, {})
-        self.assertEqual(adapter.prompts, [])
+        record = manager.start(self.batch, site)
+        self.assertIn(record.build_id, adapter.sessions)
+        self.assertEqual(len(adapter.prompts), 1)
+        workspace = Path(adapter.sessions[record.build_id].workspace.root)
+        brief = (workspace / "input" / "build-brief.md").read_text(encoding="utf-8")
+        agents = (workspace / "work" / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertIn("https://example.fr/sitemap.xml", brief)
+        self.assertIn("Do not fetch or read robots.txt", brief)
+        self.assertIn("Do not analyze", agents)
+        self.assertNotIn("If it disallows", brief)
+        manager.shutdown()
 
-    def test_robots_preflight_parses_disallow(self) -> None:
+    def test_robots_probe_extracts_sitemap_lines(self) -> None:
         from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self) -> None:
                 if self.path == "/robots.txt":
-                    body = b"User-agent: *\nDisallow: /\n"
+                    body = (
+                        b"User-agent: *\n"
+                        b"Disallow: /\n"
+                        b"Crawl-delay: 10\n"
+                        b"Sitemap: https://example.test/sitemap.xml\n"
+                        b"Sitemap: /sitemap-products.xml\n"
+                    )
                     self.send_response(200)
                     self.send_header("Content-Type", "text/plain")
                     self.send_header("Content-Length", str(len(body)))
@@ -655,14 +666,22 @@ class BuildWorkflowTests(unittest.TestCase):
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
-            allowed, reason = _check_robots(
+            note, sitemaps = _probe_robots(
                 f"http://127.0.0.1:{server.server_port}/"
             )
         finally:
             server.shutdown()
             server.server_close()
-        self.assertFalse(allowed)
-        self.assertIn("disallows", reason)
+        self.assertIn("2", note)
+        self.assertEqual(
+            sitemaps,
+            [
+                "https://example.test/sitemap.xml",
+                f"http://127.0.0.1:{server.server_port}/sitemap-products.xml",
+            ],
+        )
+        self.assertNotIn("Disallow", note)
+        self.assertNotIn("Crawl-delay", note)
 
     def test_cancel_releases_site(self) -> None:
         adapter = FakeBuildAdapter(self.root, finish=False)

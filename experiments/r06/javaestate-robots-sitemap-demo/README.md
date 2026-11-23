@@ -11,7 +11,7 @@
 `../plans/javaestate-robots-sitemap-runtime.yaml`（`javaestate-robots-sitemap-runtime`，`schema_version: 1.1`）：
 
 - `discovery.sources`：`sitemap`；
-- `robots: true`，没有显式 `urls`；
+- 没有显式 `urls`；运行时总是机会式探测 robots 并并入 `Sitemap:` 行；
 - `sitemap_patterns: ["sitemap_products"]`；
 - `max_sitemaps: 1`；
 - 商品 URL 正则：`^/products/[^/]+$`；

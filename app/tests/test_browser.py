@@ -363,6 +363,30 @@ class HybridRoutingTests(unittest.TestCase):
         router.close()
         self.assertTrue(all(fetcher.closed for fetcher in fetchers.values()))
 
+    def test_robots_txt_is_fetched_with_static_engine(self) -> None:
+        calls: list[tuple[str, str, str | None]] = []
+        fetchers: dict[str, Any] = {}
+
+        def build(engine: str) -> Any:
+            if engine not in fetchers:
+                fetchers[engine] = self._fetcher(engine, calls)
+            return fetchers[engine]
+
+        router = HybridFetcher(
+            default_engine="browser",
+            overrides={},
+            builders={
+                "static": lambda: build("static"),
+                "browser": lambda: build("browser"),
+            },
+        )
+        router.get("https://example.test/robots.txt")
+        self.assertEqual(
+            [(engine, item) for engine, _, item in calls],
+            [("static", None)],
+        )
+        router.close()
+
 
 @unittest.skipUnless(BROWSER_AVAILABLE, "Patchright Chromium is not installed")
 class BrowserIntegrationTests(unittest.TestCase):
