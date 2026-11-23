@@ -174,6 +174,18 @@ export interface BatchCreateResponse {
   import: ImportReport;
 }
 
+export interface BatchImportRequest {
+  name?: string;
+  sites?: string[];
+  sites_text?: string;
+}
+
+export interface BatchImportResponse {
+  batch_id: string;
+  import: ImportReport;
+  batch: BatchDetail;
+}
+
 export interface BatchActionAccepted {
   site_key: string;
   domain: string;
@@ -317,6 +329,17 @@ export function previewBatch(body: BatchDraftRequest): Promise<BatchPreviewRespo
 
 export function createBatch(body: BatchDraftRequest): Promise<BatchCreateResponse> {
   return sendJson<BatchCreateResponse>("/api/batches", "POST", body);
+}
+
+export function importBatch(
+  batchId: string,
+  body: BatchImportRequest,
+): Promise<BatchImportResponse> {
+  return sendJson<BatchImportResponse>(
+    `/api/batches/${encodeURIComponent(batchId)}/import`,
+    "POST",
+    body,
+  );
 }
 
 export interface BatchStartOptions {

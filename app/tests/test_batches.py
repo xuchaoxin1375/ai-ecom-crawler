@@ -218,6 +218,24 @@ class BatchApiTests(unittest.TestCase):
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(len(detail.json()["sites"]), 6)
 
+    def test_import_appends_sites_to_existing_batch(self) -> None:
+        batch = self._create()["batch"]
+        before = batch["counts"]["sites"]
+        response = self.client.post(
+            f"/api/batches/{batch['batch_id']}/import",
+            json={
+                "sites_text": "https://another-boutique.example/\nbad",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        summary = payload["import"]["summary"]
+        self.assertEqual(summary["needs_onboarding"], 1)
+        self.assertEqual(summary["invalid"], 1)
+        self.assertEqual(payload["batch"]["counts"]["sites"], before + 2)
+        detail = self.client.get(f"/api/batches/{batch['batch_id']}").json()
+        self.assertEqual(len(detail["sites"]), before + 2)
+
     def test_start_pause_cancel_and_archive(self) -> None:
         batch = self._create()["batch"]
         batch_id = batch["batch_id"]

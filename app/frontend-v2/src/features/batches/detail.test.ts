@@ -199,6 +199,12 @@ describe("batch next step", () => {
     const step = nextStepFor(batch({ status: "ARCHIVED" }));
     expect(step.action).toEqual({ kind: "restore" });
   });
+
+  it("offers import when the batch has no sites", () => {
+    const step = nextStepFor(batch({ counts: { ...EMPTY_COUNTS } }));
+    expect(step.action).toEqual({ kind: "import" });
+    expect(step.actionLabel).toBe("继续导入站点");
+  });
 });
 
 describe("active task detection", () => {

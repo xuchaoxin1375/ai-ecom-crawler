@@ -7,6 +7,7 @@ import {
   Ban,
   Download,
   ExternalLink,
+  FileUp,
   Pause,
   Play,
   RefreshCw,
@@ -23,6 +24,7 @@ import {
   restoreBatch,
   type BatchActionResponse,
   type BatchDetail,
+  type BatchImportResponse,
   type BatchSite,
 } from "../../lib/api";
 import {
@@ -47,6 +49,7 @@ import { Input } from "../../components/ui/Input";
 import { BatchNextStep } from "./BatchNextStep";
 import { BatchStatusBand } from "./BatchStatusBand";
 import { ConfirmBatchActionDialog } from "./ConfirmBatchActionDialog";
+import { ImportSitesDialog } from "./ImportSitesDialog";
 import { StartBatchDialog } from "./StartBatchDialog";
 import {
   batchHasActiveTasks,
@@ -57,7 +60,7 @@ import {
   type SiteFilter,
 } from "./detail";
 
-type DialogKind = "" | "start" | "cancel" | "archive";
+type DialogKind = "" | "start" | "import" | "cancel" | "archive";
 type BusyKind = "" | "pause" | "cancel" | "archive" | "restore";
 
 interface Notice {
@@ -285,6 +288,10 @@ export function BatchDetailPage() {
     setDialog("start");
   }
 
+  function openImport() {
+    setDialog("import");
+  }
+
   function resetFilters() {
     setSearchParams(new URLSearchParams(), { replace: true });
   }
@@ -346,6 +353,10 @@ export function BatchDetailPage() {
     setNotice(actionNotice("启动请求已受理", response));
   }
 
+  function handleImported(response: BatchImportResponse) {
+    applyBatch(response.batch);
+  }
+
   function handleNextAction() {
     if (!batch || !step) return;
     switch (step.action.kind) {
@@ -363,6 +374,9 @@ export function BatchDetailPage() {
         break;
       case "pause":
         void runBatchAction("pause");
+        break;
+      case "import":
+        openImport();
         break;
       case "none":
         break;
@@ -537,11 +551,9 @@ export function BatchDetailPage() {
             重置筛选
           </Button>
         ) : (
-          <Button asChild size="sm">
-            <a href={oldBatchHref(batch.batch_id)}>
-              在旧版中导入站点
-              <ExternalLink size={12} aria-hidden="true" />
-            </a>
+          <Button size="sm" onClick={openImport}>
+            <FileUp size={14} aria-hidden="true" />
+            继续导入站点
           </Button>
         )
       }
@@ -622,6 +634,12 @@ export function BatchDetailPage() {
               <Button onClick={() => openStart(true)}>
                 <RotateCcw size={14} aria-hidden="true" />
                 复跑站点
+              </Button>
+            ) : null}
+            {batch.status !== "ARCHIVED" ? (
+              <Button onClick={openImport}>
+                <FileUp size={14} aria-hidden="true" />
+                继续导入
               </Button>
             ) : null}
 
@@ -841,7 +859,7 @@ export function BatchDetailPage() {
                 className="inline-flex items-center gap-1 pt-1 text-xs font-medium text-accent hover:text-accent-hover hover:underline"
                 href={oldBatchHref(batch.batch_id)}
               >
-                在旧版中继续导入或查看站点
+                在旧版中查看站点详情
                 <ExternalLink size={11} aria-hidden="true" />
               </a>
             </div>
@@ -858,6 +876,17 @@ export function BatchDetailPage() {
             if (!next) setDialog("");
           }}
           onStarted={handleStarted}
+        />
+      ) : null}
+
+      {dialog === "import" ? (
+        <ImportSitesDialog
+          open
+          batch={batch}
+          onOpenChange={(next) => {
+            if (!next) setDialog("");
+          }}
+          onImported={handleImported}
         />
       ) : null}
 

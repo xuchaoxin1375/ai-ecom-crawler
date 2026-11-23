@@ -3,6 +3,7 @@ import {
   ArrowRight,
   CheckCircle2,
   Circle,
+  FileUp,
   PauseCircle,
   RotateCcw,
 } from "lucide-react";
@@ -24,6 +25,7 @@ function StepIcon({ step }: { step: NextStep }) {
   if (step.tone === "warning") return <AlertTriangle {...props} />;
   if (step.action.kind === "pause") return <PauseCircle {...props} />;
   if (step.action.kind === "restore") return <RotateCcw {...props} />;
+  if (step.action.kind === "import") return <FileUp {...props} />;
   if (step.action.kind === "start") return <ArrowRight {...props} />;
   return <Circle {...props} />;
 }

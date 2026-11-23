@@ -29,6 +29,7 @@ export interface NextStep {
     | { kind: "export" }
     | { kind: "restore" }
     | { kind: "pause" }
+    | { kind: "import" }
     | { kind: "none" };
   actionLabel?: string;
 }
@@ -164,7 +165,8 @@ export function nextStepFor(batch: BatchDetail): NextStep {
       tone: "warning",
       title: "还没有站点",
       description: "先导入站点并匹配规则包，再回到这里启动采集。",
-      action: { kind: "none" },
+      action: { kind: "import" },
+      actionLabel: "继续导入站点",
     };
   }
 
