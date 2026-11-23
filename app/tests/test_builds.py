@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import queue
 import tempfile
 import threading
@@ -9,6 +10,7 @@ import unittest
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 import yaml
 from fastapi.testclient import TestClient
@@ -824,6 +826,31 @@ class BuildWorkflowTests(unittest.TestCase):
             self.assertEqual(result["outcome"], "failed")
             self.assertIn("bump rule_version", result["error"])
 
+    def test_read_only_build_preview_keeps_build_history(self) -> None:
+        with mock.patch.dict(os.environ, {"ECOM_BUILD_DISABLED": "1"}):
+            app = create_app(
+                self.root / "tasks.db",
+                self.root / "out",
+                self.rules,
+                manage_worker=False,
+            )
+            with TestClient(app, headers=CLIENT_HEADERS) as client:
+                listing = client.get("/api/builds")
+                self.assertEqual(listing.status_code, 200, listing.text)
+                self.assertEqual(listing.json()["builds"], [])
+                config = client.get("/api/builds/config").json()
+                self.assertFalse(config["available"])
+                response = client.post(
+                    "/api/batches/b-1/sites/example.fr/build",
+                    json={},
+                    headers=CLIENT_HEADERS,
+                )
+                self.assertEqual(response.status_code, 409, response.text)
+                self.assertEqual(
+                    response.json()["error"]["code"], "BUILD_UNAVAILABLE"
+                )
+                self.assertIn("disabled", response.json()["error"]["message"])
+
     def test_candidate_activation_rerun_and_rollback(self) -> None:
         initial_rule = rule_payload(version="2026.11.23-1")
         repaired_rule = rule_payload(version="2026.11.23-2")
@@ -896,6 +923,15 @@ class BuildWorkflowTests(unittest.TestCase):
             build_id = repair.json()["build"]["build_id"]
             result = self._wait_ready(client, build_id)
             self.assertEqual(result["outcome"], "succeeded", result)
+            listing = client.get(
+                "/api/builds?site_key=example.fr&limit=10"
+            ).json()["builds"]
+            self.assertTrue(
+                any(
+                    item["build_id"] == build_id and item["mode"] == "repair"
+                    for item in listing
+                )
+            )
 
             pending = client.get(f"/api/feedback/{feedback_id}").json()
             self.assertEqual(pending["status"], "AWAITING_ACTIVATION")

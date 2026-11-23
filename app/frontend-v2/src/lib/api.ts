@@ -417,8 +417,8 @@ export interface BuildStatus {
   source_rule?: { rule_version: string | null; sha256: string | null } | null;
   candidate_rule?: { rule_version: string | null; sha256: string | null } | null;
   error_class?: string | null;
-  change_summary?: Record<string, unknown>;
-  validation?: Record<string, unknown>;
+  change_summary?: RuleChangeSummary | null;
+  validation?: RuleValidation | null;
   created_at: string;
   updated_at: string;
   started_at: string | null;
@@ -442,6 +442,10 @@ export interface BuildStatus {
 export interface BuildResponse {
   accepted?: boolean;
   build: BuildStatus;
+}
+
+export interface BuildListResponse {
+  builds: BuildStatus[];
 }
 
 export interface BuildConfig {
@@ -1076,6 +1080,24 @@ export function getBuild(
   signal?: AbortSignal,
 ): Promise<BuildResponse> {
   return getJson<BuildResponse>(`/api/builds/${encodeURIComponent(buildId)}`, signal);
+}
+
+export function getBuilds(
+  params: {
+    batchId?: string;
+    siteKey?: string;
+    state?: string;
+    limit?: number;
+  } = {},
+  signal?: AbortSignal,
+): Promise<BuildListResponse> {
+  const search = new URLSearchParams();
+  if (params.batchId) search.set("batch_id", params.batchId);
+  if (params.siteKey) search.set("site_key", params.siteKey);
+  if (params.state) search.set("state", params.state);
+  if (params.limit) search.set("limit", String(params.limit));
+  const query = search.toString();
+  return getJson<BuildListResponse>(`/api/builds${query ? `?${query}` : ""}`, signal);
 }
 
 export function getBuildMessages(

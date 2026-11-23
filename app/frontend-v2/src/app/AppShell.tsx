@@ -15,6 +15,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
+  Wrench,
 } from "lucide-react";
 import { getHealth } from "../lib/api";
 import { cn } from "../lib/cn";
@@ -183,9 +184,10 @@ export function AppShell() {
   const siteMatch = location.pathname.match(/^\/batches\/([^/]+)\/sites\/[^/]+/);
   const batchMatch = location.pathname.match(/^\/batches\/([^/]+)/);
   const isTaskDetail = /^\/tasks\/[^/]+/.test(location.pathname);
+  const isBuildDetail = /^\/builds\/[^/]+/.test(location.pathname);
   const isSiteDetail = Boolean(siteMatch);
   const isBatchDetail = Boolean(batchMatch) && !isSiteDetail;
-  const showBreadcrumb = isBatchDetail || isSiteDetail || isTaskDetail;
+  const showBreadcrumb = isBatchDetail || isSiteDetail || isTaskDetail || isBuildDetail;
 
   const visualOpen = pinned || (!suppressed && (hovered || focused));
   const peeking = !pinned && visualOpen;
@@ -204,15 +206,19 @@ export function AppShell() {
   useEffect(() => {
     const title = isTaskDetail
       ? "任务详情"
-      : isSiteDetail
-        ? "站点详情"
-        : isBatchDetail
-          ? "批次详情"
-          : location.pathname.startsWith("/tasks")
-            ? "全部任务"
-            : "采集批次";
+      : isBuildDetail
+        ? "构建详情"
+        : isSiteDetail
+          ? "站点详情"
+          : isBatchDetail
+            ? "批次详情"
+            : location.pathname.startsWith("/tasks")
+              ? "全部任务"
+              : location.pathname.startsWith("/builds")
+                ? "构建记录"
+                : "采集批次";
     document.title = `${title} · 电商采集`;
-  }, [isBatchDetail, isSiteDetail, isTaskDetail, location.pathname]);
+  }, [isBatchDetail, isBuildDetail, isSiteDetail, isTaskDetail, location.pathname]);
 
   useEffect(() => {
     function onPointerDown() {
@@ -320,6 +326,16 @@ export function AppShell() {
                 </span>
                 <span className="font-medium text-ink">任务详情</span>
               </>
+            ) : isBuildDetail ? (
+              <>
+                <a className="hover:text-ink" href="#/builds">
+                  构建记录
+                </a>
+                <span className="text-line-strong" aria-hidden="true">
+                  /
+                </span>
+                <span className="font-medium text-ink">构建详情</span>
+              </>
             ) : (
               <>
                 <a className="hover:text-ink" href="#/batches">
@@ -387,6 +403,15 @@ export function AppShell() {
                 to="/tasks"
                 icon={<ListTodo size={17} />}
                 label="全部任务"
+                expanded={visualOpen}
+                onPointerNavigate={() => {
+                  if (!pinned) setFocused(false);
+                }}
+              />
+              <SidebarLink
+                to="/builds"
+                icon={<Wrench size={17} />}
+                label="构建记录"
                 expanded={visualOpen}
                 onPointerNavigate={() => {
                   if (!pinned) setFocused(false);

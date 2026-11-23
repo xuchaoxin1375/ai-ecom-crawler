@@ -66,6 +66,10 @@ export function buildModelLabel(build: BuildStatus | null): string {
   return variant ? `${base} (variant ${variant})` : base;
 }
 
+export function buildModeLabel(mode: string | null | undefined): string {
+  return mode === "repair" ? "规则修复" : "方案构建";
+}
+
 export function toolStatusLabel(status: string | undefined): string {
   if (!status) return "未知";
   if (status === "completed" || status === "success") return "完成";

@@ -6,6 +6,8 @@ import { BatchDetailPage } from "../features/batches/BatchDetailPage";
 import { SiteDetailPage } from "../features/sites/SiteDetailPage";
 import { TasksPage } from "../features/tasks/TasksPage";
 import { TaskDetailPage } from "../features/tasks/TaskDetailPage";
+import { BuildsPage } from "../features/builds/BuildsPage";
+import { BuildDetailPage } from "../features/builds/BuildDetailPage";
 
 export const router = createHashRouter([
   {
@@ -21,6 +23,8 @@ export const router = createHashRouter([
       },
       { path: "tasks", element: <TasksPage /> },
       { path: "tasks/:taskId", element: <TaskDetailPage /> },
+      { path: "builds", element: <BuildsPage /> },
+      { path: "builds/:buildId", element: <BuildDetailPage /> },
       { path: "*", element: <NotFoundPage /> },
     ],
   },

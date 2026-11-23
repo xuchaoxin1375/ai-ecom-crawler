@@ -672,11 +672,8 @@ def create_app(
     root = Path(out_root)
     root.mkdir(parents=True, exist_ok=True)
     rules = Path(rules_dir).resolve() if rules_dir is not None else None
-    if (
-        build_manager is None
-        and rules is not None
-        and os.environ.get("ECOM_BUILD_DISABLED") != "1"
-    ):
+    builds_disabled = os.environ.get("ECOM_BUILD_DISABLED") == "1"
+    if build_manager is None and rules is not None:
         build_manager = BuildManager(store, root, rules, default_proxy=proxy)
 
     @asynccontextmanager
@@ -1842,6 +1839,12 @@ def create_app(
                 "build agent is not configured; start serve with --rules-dir",
                 409,
             )
+        if builds_disabled:
+            raise _error(
+                "BUILD_UNAVAILABLE",
+                "build agent is disabled in read-only preview",
+                409,
+            )
         feedback = store.get_feedback(feedback_id)
         if feedback is None:
             raise _error("FEEDBACK_NOT_FOUND", f"unknown feedback: {feedback_id}", 404)
@@ -2718,6 +2721,12 @@ def create_app(
                 "build agent is not configured; start serve with --rules-dir",
                 409,
             )
+        if builds_disabled:
+            raise _error(
+                "BUILD_UNAVAILABLE",
+                "build agent is disabled in read-only preview",
+                409,
+            )
         batch = require_batch(batch_id)
         site = store.get_batch_site(batch_id, site_key)
         if site is None:
@@ -2813,7 +2822,7 @@ def create_app(
                 "max_repair_rounds": 0,
             }
         return {
-            "available": True,
+            "available": not builds_disabled,
             "reasoning_capture_enabled": build_manager.reasoning_capture_enabled,
             "max_repair_rounds": build_manager.max_repair_rounds,
         }

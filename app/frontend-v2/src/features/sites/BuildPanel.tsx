@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Link } from "react-router-dom";
 import {
   CheckCircle2,
   Download,
@@ -123,6 +124,11 @@ export function BuildPanel({
             >
               <Wrench size={13} aria-hidden="true" />
               修复规则
+            </Button>
+          ) : null}
+          {build ? (
+            <Button asChild size="sm">
+              <Link to={`/builds/${encodeURIComponent(build.build_id)}`}>构建详情</Link>
             </Button>
           ) : null}
           <Button size="sm" variant="ghost" onClick={onRefresh} disabled={refreshing}>
