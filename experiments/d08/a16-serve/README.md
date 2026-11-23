@@ -17,6 +17,8 @@ app/.venv/Scripts/python.exe -m ecom_crawler serve `
   --per-domain-rps 0.4
 ```
 
+运行产物写在仓库外私有证据库：默认 `C:\repos\ai-ecom-crawler-evidence\experiments\d08\a16-serve`，可用 `ECOM_EVIDENCE_ROOT` 覆盖。本目录只保留 README 和复跑脚本。
+
 `serve` 默认启动托管 worker，并持有 `<db>.worker.lock`。API 流程：
 
 - `GET /api/rules` 选择 `familidoo-fr-d03@2026.11.21-1`。
@@ -44,12 +46,18 @@ app/.venv/Scripts/python.exe -m ecom_crawler serve `
 
 ## 文件
 
+仓库内（可提交）：
+
+- `README.md`：本页。
+- `run_a16.py`、`run_cancel.py`：API 驱动脚本，默认写证据库。
+
+私有证据库（不提交）：
+
 - `evidence.json`：规则、时间线、最终计数、归档结果、items 总数和导出文件清单。
 - `cancel-evidence.json`：真实站点取消和迟到结果拒收。
 - `close-evidence.json`：页面关闭后继续执行的任务。
 - `task-result.json`、`products.csv`、`products.jsonl`：6 个商品的导出与内部记录。
 - `ui-list.png`、`ui-detail.png`：1505×867 的真实页面截图。
-- `run_a16.py`、`run_cancel.py`：API 驱动脚本。
 
 ## 限制
 

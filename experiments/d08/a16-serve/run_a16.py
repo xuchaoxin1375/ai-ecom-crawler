@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 import urllib.error
 import urllib.request
@@ -8,7 +9,11 @@ import zipfile
 from pathlib import Path
 
 BASE = "http://127.0.0.1:8769"
-ROOT = Path(__file__).resolve().parent
+EVIDENCE_ROOT = Path(
+    os.environ.get("ECOM_EVIDENCE_ROOT", r"C:\repos\ai-ecom-crawler-evidence")
+)
+ROOT = EVIDENCE_ROOT / "experiments" / "d08" / "a16-serve"
+ROOT.mkdir(parents=True, exist_ok=True)
 
 
 def request(method: str, path: str, body: dict | None = None) -> dict:
