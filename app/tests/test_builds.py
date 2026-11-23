@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import queue
 import tempfile
 import threading
@@ -18,6 +19,7 @@ from ecom_crawler.builds import (
     _merge_reasoning_timeline,
     _probe_robots,
     _trace_timeline,
+    default_permissions,
 )
 from ecom_crawler.harness.adapter import BuildSession
 from ecom_crawler.harness.models import BuildTask, HarnessEvent, utc_now
@@ -358,6 +360,7 @@ class BuildWorkflowTests(unittest.TestCase):
         validator: Any | None = None,
         max_repair_rounds: int = 0,
         robots_probe: Any | None = None,
+        skills_dir: Path | None = None,
     ) -> BuildManager:
         if validator is None:
 
@@ -390,6 +393,9 @@ class BuildWorkflowTests(unittest.TestCase):
             archive_mode="off",
             robots_probe=robots_probe
             or (lambda entry_url, proxy: ("robots.txt not found", [])),
+            skills_dir=skills_dir
+            if skills_dir is not None
+            else self.root / "skills",
         )
 
     def _client(self, manager: BuildManager) -> TestClient:
@@ -413,6 +419,109 @@ class BuildWorkflowTests(unittest.TestCase):
                 break
             time.sleep(0.05)
         return last
+
+    def test_build_permissions_are_workspace_scoped(self) -> None:
+        workspace = self.root / "out" / "build-permissions"
+        rules = default_permissions(
+            workspace,
+            allowed_origins=[
+                "https://www.example.fr",
+                "https://cdn.example.fr/",
+                "https://www.example.fr",
+            ],
+        )
+        entries = {
+            (str(rule["action"]), str(rule["resource"]), str(rule["effect"]))
+            for rule in rules
+        }
+        self.assertIn(("skill", "*", "deny"), entries)
+        self.assertIn(("skill", "product-crawl-workflow", "allow"), entries)
+        self.assertIn(("browse_*", "*", "deny"), entries)
+        self.assertIn(("htmlmini_*", "*", "deny"), entries)
+        self.assertIn(("websearch", "*", "deny"), entries)
+        self.assertIn(("question", "*", "deny"), entries)
+        self.assertIn(("*_*", "*", "deny"), entries)
+        self.assertIn(("external_directory", "*", "deny"), entries)
+        root = workspace.resolve().as_posix().rstrip("/")
+        self.assertIn(("external_directory", f"{root}/input/*", "allow"), entries)
+        self.assertIn(("external_directory", f"{root}/out/*", "allow"), entries)
+        self.assertIn(("edit", f"{root}/input/*", "deny"), entries)
+        self.assertIn(("read", f"{root}/control/*", "deny"), entries)
+        self.assertIn(("read", f"{root}/logs/*", "deny"), entries)
+        self.assertIn(("webfetch", "*", "deny"), entries)
+        self.assertIn(
+            ("webfetch", "https://www.example.fr/*", "allow"),
+            entries,
+        )
+        self.assertIn(
+            ("webfetch", "https://cdn.example.fr/*", "allow"),
+            entries,
+        )
+        self.assertNotIn(
+            ("webfetch", "https://other.example.fr/*", "allow"),
+            entries,
+        )
+        without_skill = default_permissions(workspace, allowed_skills=[])
+        self.assertNotIn(
+            ("skill", "product-crawl-workflow", "allow"),
+            {
+                (str(rule["action"]), str(rule["resource"]), str(rule["effect"]))
+                for rule in without_skill
+            },
+        )
+
+    def test_build_installs_allowlisted_skill(self) -> None:
+        skills = self.root / "skills"
+        skill = skills / "product-crawl-workflow"
+        (skill / "references").mkdir(parents=True)
+        (skill / "SKILL.md").write_text(
+            "---\nname: Product crawl workflow\n---\n\nUse the workflow.\n",
+            encoding="utf-8",
+        )
+        (skill / "references" / "stage-strategy.md").write_text(
+            "stages\n", encoding="utf-8"
+        )
+        unrelated = skills / "unrelated"
+        unrelated.mkdir(parents=True)
+        (unrelated / "SKILL.md").write_text("not copied\n", encoding="utf-8")
+
+        adapter = FakeBuildAdapter(self.root)
+        manager = self._manager(adapter, skills_dir=skills)
+        with self._client(manager) as client:
+            response = client.post(
+                "/api/batches/b-1/sites/example.fr/build",
+                json={},
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(response.status_code, 202, response.text)
+            build_id = response.json()["build"]["build_id"]
+            result = self._wait_ready(client, build_id)
+            self.assertEqual(result["outcome"], "succeeded")
+            workspace = Path(result["workspace"])
+            copied = workspace / "work" / ".opencode" / "skills"
+            self.assertTrue((copied / "product-crawl-workflow" / "SKILL.md").is_file())
+            self.assertTrue(
+                (
+                    copied
+                    / "product-crawl-workflow"
+                    / "references"
+                    / "stage-strategy.md"
+                ).is_file()
+            )
+            self.assertFalse((copied / "unrelated").exists())
+            task_payload = json.loads(
+                (workspace / "input" / "build-task.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(task_payload["skills"][0]["id"], "product-crawl-workflow")
+            self.assertEqual(len(task_payload["skills"][0]["sha256"]), 64)
+            self.assertIn(
+                {
+                    "action": "skill",
+                    "resource": "product-crawl-workflow",
+                    "effect": "allow",
+                },
+                task_payload["permissions"],
+            )
 
     def test_build_site_then_batch_start(self) -> None:
         adapter = FakeBuildAdapter(self.root)
@@ -451,6 +560,39 @@ class BuildWorkflowTests(unittest.TestCase):
             self.assertEqual(site["readiness"], "ready")
             self.assertEqual(site["rule"]["rule_id"], "example-fr-build")
             workspace = Path(result["workspace"])
+            task_payload = json.loads(
+                (workspace / "input" / "build-task.json").read_text(encoding="utf-8")
+            )
+            permissions = task_payload["permissions"]
+            self.assertIn(
+                {"action": "skill", "resource": "*", "effect": "deny"},
+                permissions,
+            )
+            root = Path(task_payload["workspace"]).resolve().as_posix().rstrip("/")
+            self.assertIn(
+                {
+                    "action": "external_directory",
+                    "resource": f"{root}/input/*",
+                    "effect": "allow",
+                },
+                permissions,
+            )
+            self.assertIn(
+                {
+                    "action": "edit",
+                    "resource": f"{root}/input/*",
+                    "effect": "deny",
+                },
+                permissions,
+            )
+            agents = (workspace / "work" / "AGENTS.md").read_text(encoding="utf-8")
+            brief = (workspace / "input" / "build-brief.md").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("Other skills and MCP tools are disabled", agents)
+            self.assertIn("product-crawl-workflow", agents)
+            self.assertIn("Read local files only", agents)
+            self.assertIn("Read local files only", brief)
             self.assertIn(
                 "robots.txt",
                 (workspace / "input" / "build-brief.md").read_text(

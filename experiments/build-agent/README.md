@@ -8,7 +8,7 @@
 
 - 批次导入：站点没有匹配规则时进入 `needs_onboarding`。
 - 站点详情：`开始构建方案` 调用构建 API，站点进入 `building`。
-- 构建 Agent：读取 `input/build-brief.md` 和 `input/reference-rule.yaml`，用 shell／静态请求观察站点，写 `out/plan/rule.yaml` 与 `out/evidence/build-notes.md`。
+- 构建 Agent：读取 `input/build-brief.md` 和 `input/reference-rule.yaml`，用 shell／静态请求观察站点，写 `out/plan/rule.yaml` 与 `out/evidence/build-notes.md`。构建会话默认禁用全局 skills／MCP，只把 `product-crawl-workflow` 复制到 `work/.opencode/skills/`；本地只读 `input/`、`out/` 和 `work/`，工作区外读取拒绝；需要业务文档时由 host 复制到 `input/docs/`。Skill 源为 `ECOM_BUILD_SKILLS_DIR`（优先）或 `~/.config/opencode/skills`，`SKILL.md` 哈希写入 `build-task.json`。
 - 主机验证：先静态编译规则中的所有 CSS 选择器（`lxml.cssselect`），再在隔离任务账本和输出目录跑一次有界 product 任务；检查规则域名、市场、币种和至少一条有效商品。验证失败时默认把精确错误和失败样例回给同一会话修复 1 轮，再重新预检和验证。
 - 安装：通过后规则以 `candidate` 写入受管规则目录，站点进入 `ready`；修复后仍失败时站点回到 `needs_onboarding`，保留错误、修复轮次和构建记录。
 - 批次启动：正常任务路径使用新规则，运行期零 LLM。

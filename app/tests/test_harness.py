@@ -100,6 +100,7 @@ class FakeHandler(BaseHTTPRequestHandler):
                 "title": body.get("title"),
                 "location": body.get("location"),
                 "model": body.get("model"),
+                "permissions": body.get("permissions"),
             }
             self._json(200, {"data": self.state.session})
             return
@@ -391,6 +392,14 @@ class HarnessTests(unittest.TestCase):
         result = json.loads(session.workspace.result_path.read_text(encoding="utf-8"))
         self.assertEqual(result["state"], "CANCELLED")
         self.assertTrue(result["artifacts"])
+
+    def test_adapter_uses_task_permissions(self) -> None:
+        adapter = OpenCodeHttpAdapter(self.root / "sessions", client=self.client)
+        task = self._task("build-permissions")
+        permissions = [{"action": "skill", "resource": "*", "effect": "deny"}]
+        task.extra["permissions"] = permissions
+        adapter.start_build(task)
+        self.assertEqual(FakeHandler.state.session["permissions"], permissions)
 
     def test_adapter_rejects_prompt_while_paused_and_unknown_build(self) -> None:
         adapter = OpenCodeHttpAdapter(self.root / "sessions", client=self.client)

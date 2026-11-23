@@ -234,12 +234,15 @@ class OpenCodeHttpAdapter(HarnessAdapter):
                 dependency_tool=self.dependency_tool,
             )
             client = self._ensure_client(cwd=workspace.work_dir)
+            permissions = task.extra.get("permissions")
+            if not isinstance(permissions, list):
+                permissions = self.permissions
             try:
                 created = client.create_session(
                     directory=str(workspace.work_dir),
                     title=f"Build {task.build_id}",
                     model=task.model or self.model,
-                    permissions=self.permissions,
+                    permissions=permissions,
                 )
             except Exception as exc:
                 workspace.update_result(

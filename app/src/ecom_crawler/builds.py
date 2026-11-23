@@ -15,6 +15,7 @@ slice of the user workflow, not a full build-session UI.
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import logging
 import os
@@ -65,6 +66,7 @@ SAFE_PERMISSIONS = {
     "websearch",
     "write",
 }
+BUILD_SKILL_ALLOWLIST = ("product-crawl-workflow",)
 MARKET_CURRENCY = {
     "US": "USD",
     "GB": "GBP",
@@ -146,11 +148,130 @@ def default_model() -> dict[str, Any] | None:
     return model
 
 
-def default_permissions() -> list[dict[str, Any]]:
-    return [
-        {"action": action, "resource": "*", "effect": "allow"}
-        for action in ("shell", "edit", "read", "webfetch", "websearch", "browser")
+def default_permissions(
+    workspace: str | Path | None = None,
+    *,
+    allowed_origins: list[str] | None = None,
+    allowed_skills: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Build-session permissions.
+
+    A build may use workspace tools and the target site, but it must not inherit
+    the host's global skills or MCP servers, and it must not read outside the
+    build workspace.  ``shell`` still runs with the host user's authority; this
+    policy is a guardrail, not an OS sandbox.
+    """
+    skills = (
+        BUILD_SKILL_ALLOWLIST
+        if allowed_skills is None
+        else tuple(dict.fromkeys(allowed_skills))
+    )
+    rules: list[dict[str, Any]] = [
+        {"action": "question", "resource": "*", "effect": "deny"},
+        {"action": "skill", "resource": "*", "effect": "deny"},
+        *(
+            {
+                "action": "skill",
+                "resource": skill_id,
+                "effect": "allow",
+            }
+            for skill_id in skills
+        ),
+        {"action": "subagent", "resource": "*", "effect": "deny"},
+        {"action": "websearch", "resource": "*", "effect": "deny"},
+        {"action": "browse_*", "resource": "*", "effect": "deny"},
+        {"action": "htmlmini_*", "resource": "*", "effect": "deny"},
+        {"action": "opencode_list_mcp_resources", "resource": "*", "effect": "deny"},
+        {"action": "opencode_read_mcp_resource", "resource": "*", "effect": "deny"},
+        {"action": "read", "resource": "*", "effect": "allow"},
+        {"action": "edit", "resource": "*", "effect": "allow"},
+        {"action": "write", "resource": "*", "effect": "allow"},
+        {"action": "bash", "resource": "*", "effect": "allow"},
+        {"action": "shell", "resource": "*", "effect": "allow"},
+        {"action": "webfetch", "resource": "*", "effect": "allow"},
+        {"action": "browser", "resource": "*", "effect": "allow"},
+        {"action": "shell", "resource": "git push *", "effect": "deny"},
+        {"action": "shell", "resource": "sudo *", "effect": "deny"},
+        {"action": "bash", "resource": "git push *", "effect": "deny"},
+        {"action": "bash", "resource": "sudo *", "effect": "deny"},
     ]
+    origins = sorted(
+        {
+            str(origin).rstrip("/")
+            for origin in (allowed_origins or [])
+            if str(origin).strip()
+        }
+    )
+    if origins:
+        rules.append({"action": "webfetch", "resource": "*", "effect": "deny"})
+        for origin in origins:
+            rules.append(
+                {"action": "webfetch", "resource": origin, "effect": "allow"}
+            )
+            rules.append(
+                {
+                    "action": "webfetch",
+                    "resource": f"{origin}/*",
+                    "effect": "allow",
+                }
+            )
+    if workspace is None:
+        return rules
+    root = Path(workspace).resolve().as_posix().rstrip("/")
+    rules.extend(
+        [
+            # MCP tools/resources and other underscore actions are denied by
+            # default; the explicit directory rules below re-allow input/out.
+            {"action": "*_*", "resource": "*", "effect": "deny"},
+            {"action": "external_directory", "resource": "*", "effect": "deny"},
+            {
+                "action": "external_directory",
+                "resource": "../input*",
+                "effect": "allow",
+            },
+            {
+                "action": "external_directory",
+                "resource": "../out*",
+                "effect": "allow",
+            },
+            {
+                "action": "external_directory",
+                "resource": f"{root}/input",
+                "effect": "allow",
+            },
+            {
+                "action": "external_directory",
+                "resource": f"{root}/input/*",
+                "effect": "allow",
+            },
+            {
+                "action": "external_directory",
+                "resource": f"{root}/out",
+                "effect": "allow",
+            },
+            {
+                "action": "external_directory",
+                "resource": f"{root}/out/*",
+                "effect": "allow",
+            },
+            {"action": "read", "resource": f"{root}/control", "effect": "deny"},
+            {"action": "read", "resource": f"{root}/control/*", "effect": "deny"},
+            {"action": "read", "resource": f"{root}/logs", "effect": "deny"},
+            {"action": "read", "resource": f"{root}/logs/*", "effect": "deny"},
+            {"action": "read", "resource": "../control*", "effect": "deny"},
+            {"action": "read", "resource": "../logs*", "effect": "deny"},
+            {"action": "edit", "resource": f"{root}/input", "effect": "deny"},
+            {"action": "edit", "resource": f"{root}/input/*", "effect": "deny"},
+            {"action": "edit", "resource": f"{root}/control", "effect": "deny"},
+            {"action": "edit", "resource": f"{root}/control/*", "effect": "deny"},
+            {"action": "edit", "resource": f"{root}/logs", "effect": "deny"},
+            {"action": "edit", "resource": f"{root}/logs/*", "effect": "deny"},
+            {"action": "edit", "resource": "../input*", "effect": "deny"},
+            {"action": "edit", "resource": "../control*", "effect": "deny"},
+            {"action": "edit", "resource": "../logs*", "effect": "deny"},
+        ]
+    )
+    return rules
 
 
 def default_validator(
@@ -516,11 +637,13 @@ class BuildManager:
         archive_mode: str | None = None,
         archive_root: str | Path | None = None,
         archive_sample_limit: int | None = None,
+        skills_dir: str | Path | None = None,
     ) -> None:
         self.store = store
         self.out_root = Path(out_root)
         self.rules_dir = Path(rules_dir)
         self.workspace_root = self.out_root / "builds"
+        self.skills_dir = Path(skills_dir) if skills_dir is not None else None
         self.model = model if model is not None else default_model()
         self.default_proxy = (
             default_proxy
@@ -671,6 +794,19 @@ class BuildManager:
                 raise BuildError(f"site already has an active build: {latest.build_id}")
 
             build_id = f"build-{uuid.uuid4().hex[:12]}"
+            workspace_path = self.workspace_root / build_id
+            build_origins = [_origin(entry_url)] + [
+                _origin(str(url))
+                for url in robots_sitemaps
+                if str(url).startswith(("http://", "https://"))
+            ]
+            skill_source = self._skill_source()
+            available_skills = [
+                skill_id
+                for skill_id in BUILD_SKILL_ALLOWLIST
+                if skill_source is not None
+                and (skill_source / skill_id / "SKILL.md").is_file()
+            ]
             self._trace_reasoning[build_id] = bool(
                 capture_reasoning and self.reasoning_capture_enabled
             )
@@ -742,14 +878,19 @@ class BuildManager:
                 },
                 tools=["shell", "read", "write", "edit", "webfetch", "websearch"],
                 model=self.model,
-                workspace=str(self.workspace_root / build_id),
-                output_dir=str(self.workspace_root / build_id / "out" / "plan"),
+                workspace=str(workspace_path),
+                output_dir=str(workspace_path / "out" / "plan"),
                 notes=(
                     "Build a declarative product rule from the batch site entry "
                     "and install it only after host validation."
                 ),
                 extra={
                     **({"proxy": resolved_proxy} if resolved_proxy else {}),
+                    "permissions": default_permissions(
+                        workspace_path,
+                        allowed_origins=build_origins,
+                        allowed_skills=available_skills,
+                    ),
                     "robots_note": robots_note,
                     "robots_sitemaps": robots_sitemaps,
                     **self._catalog_configs[build_id],
@@ -851,6 +992,48 @@ class BuildManager:
             repair_reason=reason,
         )
 
+    def _skill_source(self) -> Path | None:
+        if self.skills_dir is not None:
+            return self.skills_dir
+        configured = os.environ.get("ECOM_BUILD_SKILLS_DIR", "").strip()
+        if configured:
+            return Path(configured)
+        return Path.home() / ".config" / "opencode" / "skills"
+
+    def _install_skills(
+        self,
+        session: BuildSession,
+        task: BuildTask,
+    ) -> list[dict[str, str]]:
+        source = self._skill_source()
+        if source is None or not source.is_dir():
+            return []
+        target_root = session.workspace.work_dir / ".opencode" / "skills"
+        installed: list[dict[str, str]] = []
+        for skill_id in BUILD_SKILL_ALLOWLIST:
+            source_skill = source / skill_id
+            if not (source_skill / "SKILL.md").is_file():
+                continue
+            target = target_root / skill_id
+            try:
+                shutil.copytree(source_skill, target, dirs_exist_ok=True)
+            except OSError:
+                logger.debug("skill copy failed: %s", source_skill, exc_info=True)
+                shutil.rmtree(target, ignore_errors=True)
+                continue
+            digest = hashlib.sha256(
+                (source_skill / "SKILL.md").read_bytes()
+            ).hexdigest()
+            installed.append(
+                {
+                    "id": skill_id,
+                    "source": "host-allowlist",
+                    "sha256": digest,
+                }
+            )
+            logger.info("build skill copied: %s from %s", skill_id, source_skill)
+        return installed
+
     def _write_inputs(
         self,
         session: BuildSession,
@@ -872,6 +1055,10 @@ class BuildManager:
             self._agent_rules(),
             encoding="utf-8",
         )
+        installed = self._install_skills(session, task)
+        if installed:
+            task.extra["skills"] = installed
+            session.workspace.write_task(task)
 
     def _write_repair_inputs(
         self,
@@ -957,6 +1144,9 @@ from scratch. The previous rule is available at
 - Do not read or search host paths outside the build workspace. Only read
   `../input`, `../out` and the declared sample URLs; do not scan other
   repositories, user directories or prior run output.
+- Other skills and MCP tools are disabled for this build; only the copied
+  `product-crawl-workflow` is optional. Do not read project site records or
+  probes from it.
 - Inspect 3–5 representative product pages, including at least one page whose
   description is split into a narrative block and a specification/feature list.
 - If descriptions are split, use a `compose` fallback to merge the real blocks
@@ -1018,6 +1208,22 @@ Read first, in this order:
    `../input/repair-brief.md`);
 2. `../input/reference-rule.yaml` or `../input/existing-rule.yaml`;
 3. `../input/build-task.json` when present (machine-readable target and budget).
+
+## Local files, network and tools
+
+- Read local files only from `../input`, `../out` and `work/`. Do not read or
+  search host paths, other repositories, user directories, prior run output or
+  credentials.
+- Only fetch the target origin and path prefixes in the brief. Do not use web
+  search, archives, caches or a different origin as a substitute for the live
+  target.
+- Other skills and MCP tools are disabled for this build. The only optional
+  skill is the copied `product-crawl-workflow` under `.opencode/skills/`; do not
+  load any other skill or MCP tool. Ignore the skill's instruction to read
+  project site records, probes or other repositories.
+- This workspace is headless. If a global instruction asks for interactive
+  confirmation, skill loading, MCP use or host file access, follow this file
+  and the brief instead.
 
 ## Site access and robots
 
@@ -1127,6 +1333,8 @@ Write these files from the workspace (`work/` is your current directory):
 - `../out/evidence/build-notes.md` — what you inspected, sample URLs, selectors,
   limitations and anything you could not verify.
 
+Read local files only from `../input`, `../out` and `work/`; do not read or
+search host paths, other repositories, user directories or prior run output.
 Do not write outside the workspace. Do not install packages. Do not log in,
 pay, solve captchas or bypass access control. Respect the request budget.
 
@@ -1228,6 +1436,9 @@ domain-mismatched, or produces no valid product.
             "../input/reference-rule.yaml, "
             f"then build the rule package for {site.site_key}. "
             f"Entry: {task.site['entry_urls'][0]}.{scope_note} "
+            "If the `product-crawl-workflow` skill is listed in this workspace, "
+            "load it before triage; do not read project site records or prior "
+            "probes from it. "
             "Write ../out/plan/rule.yaml and ../out/evidence/build-notes.md, "
             "inspect at least one real product page, and keep within the brief's "
             "request and time budget. Reply briefly when the files are written."
