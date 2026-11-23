@@ -41,6 +41,9 @@ from .rule import RulePackage
 from .store import LeaseLostError, TaskStore
 
 RUNTIME_VERSION = "r06-runtime/0.3"
+UNLIMITED_ITEMS = 2**31 - 1
+UNLIMITED_BATCHES = 100000
+ADAPTER_SAFETY_SECONDS = 7 * 24 * 3600
 
 
 class StopTask(Exception):
@@ -895,12 +898,20 @@ class TaskRunner:
         max_items = self._remaining_product_limit()
         if max_items <= 0:
             return
-        task_seconds = max(1, int(self.task.limits.get("max_seconds", 180)))
+        raw_seconds = self.task.limits.get("max_seconds")
+        task_seconds = (
+            ADAPTER_SAFETY_SECONDS
+            if raw_seconds is None
+            else max(1, int(raw_seconds))
+        )
         source_seconds = source.get("max_seconds")
         max_seconds = (
             min(task_seconds, int(source_seconds)) if source_seconds else task_seconds
         )
         max_batches = int(source.get("max_batches", advance.get("max_batches", 10)))
+        item_key = "max_urls" if self.task.task_type == "discovery" else "max_products"
+        if self.task.limits.get(item_key) is None:
+            max_batches = max(max_batches, UNLIMITED_BATCHES)
         source_browser = source.get("browser")
         browser_config = (
             source_browser
@@ -1427,7 +1438,10 @@ class TaskRunner:
     def _remaining_product_limit(self) -> int:
         key = "max_urls" if self.task.task_type == "discovery" else "max_products"
         default = self.rule.task_defaults.get(key, 100)
-        limit = int(self.task.limits.get(key, default))
+        raw = self.task.limits.get(key, default)
+        if raw is None:
+            return UNLIMITED_ITEMS
+        limit = int(raw)
         return max(limit - self.store.count_items(self.task.task_id, "product"), 0)
 
     def _concurrency(self) -> int:

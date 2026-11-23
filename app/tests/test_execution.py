@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import tempfile
 import threading
+import time
+import types
 import unittest
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -10,7 +12,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from ecom_crawler.cli import main
-from ecom_crawler.execution import run_and_export, run_task
+from ecom_crawler.execution import build_task, run_and_export, run_task
+from ecom_crawler.runtime.runner import UNLIMITED_ITEMS, TaskRunner
 from ecom_crawler.runtime.store import TaskStore
 from ecom_crawler.validate import validate_run
 
@@ -433,6 +436,53 @@ class ExecutionTests(unittest.TestCase):
             export = root / "tasks" / "cli-fixture" / "export"
             self.assertTrue((export / "products.csv").is_file())
             self.assertEqual(validate_run(export), [])
+
+
+class UnlimitedLimitTests(unittest.TestCase):
+    def test_build_task_persists_unbounded_limits(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary, fixture_server() as base:
+            rule = Path(temporary) / "rule.yaml"
+            rule.write_text(
+                RULE_TEMPLATE.replace("__BASE__", base),
+                encoding="utf-8",
+            )
+            task = build_task(
+                rule_path=rule,
+                task_id="unbounded",
+                task_type="product",
+                max_urls=None,
+                max_products=None,
+                max_seconds=None,
+                max_attempts=1,
+            )
+            self.assertIsNone(task.limits["max_urls"])
+            self.assertIsNone(task.limits["max_products"])
+            self.assertIsNone(task.limits["max_seconds"])
+            self.assertEqual(task.limits["max_attempts"], 1)
+
+    def test_unbounded_item_limits_use_runtime_sentinel(self) -> None:
+        for task_type, key in (
+            ("product", "max_products"),
+            ("discovery", "max_urls"),
+        ):
+            fake = types.SimpleNamespace(
+                task=types.SimpleNamespace(task_type=task_type, limits={key: None}),
+                rule=types.SimpleNamespace(task_defaults={}),
+                store=None,
+            )
+            self.assertEqual(
+                TaskRunner._remaining_product_limit(fake),
+                UNLIMITED_ITEMS,
+            )
+
+    def test_unbounded_seconds_does_not_expire(self) -> None:
+        fake = types.SimpleNamespace(
+            task=types.SimpleNamespace(
+                limits={"max_seconds": None, "max_requests": None}
+            ),
+            _started_monotonic=time.monotonic() - 10_000,
+        )
+        self.assertFalse(TaskRunner._budget_exceeded(fake))
 
 
 if __name__ == "__main__":

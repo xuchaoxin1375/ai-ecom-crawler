@@ -289,6 +289,19 @@ code {
   background: var(--danger);
 }
 
+.deprecation-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border: 1px solid #e5c98c;
+  border-radius: 999px;
+  background: var(--warning-soft);
+  color: var(--warning);
+  font-size: 12px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
 .app-body {
   display: flex;
   flex: 1;
@@ -490,6 +503,36 @@ code {
   max-width: var(--content-max);
   margin: 0 auto;
   padding: 28px 32px 64px;
+}
+
+.deprecation-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+  padding: 12px 14px;
+  border: 1px solid #e5c98c;
+  border-radius: var(--radius);
+  background: var(--warning-soft);
+  color: var(--text);
+}
+
+.deprecation-copy p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.deprecation-copy .deprecation-title {
+  margin-bottom: 2px;
+  color: var(--warning);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.deprecation-banner .button {
+  flex: 0 0 auto;
 }
 
 .drawer-layer {
@@ -1584,6 +1627,10 @@ tr:last-child td {
     padding: 20px 16px 48px;
   }
 
+  .deprecation-pill {
+    display: none;
+  }
+
   .page-head {
     flex-direction: column;
   }
@@ -1602,6 +1649,11 @@ tr:last-child td {
 @media (max-width: 640px) {
   .content {
     padding: 16px 12px 48px;
+  }
+
+  .deprecation-banner {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .app-topbar {

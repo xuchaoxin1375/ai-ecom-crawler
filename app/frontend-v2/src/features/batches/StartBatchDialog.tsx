@@ -41,9 +41,9 @@ export function StartBatchDialog({
         ...(fullCatalog
           ? {
               limits: {
-                max_urls: 8000,
-                max_products: 3000,
-                max_seconds: 14400,
+                max_urls: null,
+                max_products: null,
+                max_seconds: null,
                 max_attempts: 2,
               },
               archive_mode: "sample" as const,
@@ -76,7 +76,7 @@ export function StartBatchDialog({
                 启动可采站点
               </Dialog.Title>
               <Dialog.Description className="mt-1 text-sm text-ink-2">
-                任务会进入队列，并按当前规则包和默认预算执行。待接入、无效和重复站点不会被启动。
+                任务会进入队列；待接入、无效和重复站点不会被启动。默认使用规则包预算，勾选全量采集时不设数量或时长上限。
               </Dialog.Description>
             </div>
             <Dialog.Close asChild>
@@ -118,11 +118,12 @@ export function StartBatchDialog({
                   className="block text-sm font-medium text-ink"
                   htmlFor="start-full-catalog"
                 >
-                  全量目录
+                  全量采集
                 </label>
                 <p className="mt-0.5 text-xs leading-5 text-ink-3">
-                  把上限提高到 8000 个 URL、3000 个商品、单任务 4 小时，并按 sample
-                  模式存档页面；耗时和存储会明显增加。
+                  不设
+                  URL／商品数量或时长上限，由站点目录和规则包自然结束；仍保留重试次数与进程安全超时。页面按
+                  sample 模式存档 20 页。任务可能运行很久，请用暂停或取消控制。
                 </p>
               </div>
             </div>

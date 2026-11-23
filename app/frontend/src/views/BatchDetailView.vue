@@ -201,9 +201,9 @@ async function runAction(
         ...(fullCatalog.value
           ? {
               limits: {
-                max_urls: 8000,
-                max_products: 3000,
-                max_seconds: 14400,
+                max_urls: null,
+                max_products: null,
+                max_seconds: null,
                 max_attempts: 2,
               },
               archive_mode: "sample",
@@ -357,7 +357,7 @@ onBeforeUnmount(() => {
       </div>
       <label class="check batch-full-catalog">
         <input v-model="fullCatalog" type="checkbox" />
-        全量目录（3000 商品 / 4 小时 / sample 存档）
+        全量采集（不额外设服务层数量／时长上限；sample 存档 20 页）
       </label>
       <label class="check batch-full-catalog">
         <input v-model="rerunFinished" type="checkbox" />

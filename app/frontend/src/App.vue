@@ -15,6 +15,9 @@ import SidebarNav from "./components/SidebarNav.vue";
 const HEALTH_POLL_MS = 30_000;
 const SIDEBAR_KEY = "ecom.sidebar.pinned";
 const DESKTOP_QUERY = "(min-width: 1024px)";
+const V2_URL = import.meta.env.DEV
+  ? "http://127.0.0.1:5175/next/"
+  : "/next/";
 
 const route = useRoute();
 const health = ref<Health | null>(null);
@@ -300,6 +303,12 @@ onBeforeUnmount(() => {
 
       <div class="topbar-right">
         <span
+          class="deprecation-pill"
+          title="旧版界面已弃用，新界面为默认入口"
+        >
+          旧版已弃用
+        </span>
+        <span
           class="service-pill"
           :class="serviceTone"
           :title="serviceTitle"
@@ -342,6 +351,17 @@ onBeforeUnmount(() => {
         :aria-hidden="drawerOpen ? 'true' : undefined"
       >
         <div class="content">
+          <section class="deprecation-banner" aria-label="旧版界面弃用提示">
+            <div class="deprecation-copy">
+              <p class="deprecation-title">旧版界面已弃用</p>
+              <p>
+                未迁移的站点、任务和构建功能暂时保留；日常批次操作请使用新版工作台。
+              </p>
+            </div>
+            <a class="button button-primary" :href="V2_URL">
+              前往新版工作台
+            </a>
+          </section>
           <RouterView />
         </div>
       </main>

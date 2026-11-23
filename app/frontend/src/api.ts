@@ -604,7 +604,7 @@ export function importSites(
 export function startBatch(
   batchId: string,
   body?: {
-    limits?: Record<string, number>;
+    limits?: Record<string, number | null>;
     archive_mode?: "off" | "sample" | "full";
     archive_root?: string;
     archive_sample_limit?: number;

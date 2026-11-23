@@ -31,9 +31,9 @@
 - `task_resources` 资源登记：登记子进程 PID 和 profile／临时目录；任务结束、取消或过期接管时按租约令牌回收，避免误删新持有者的资源。
 - 构建 harness 适配器：`harness/` 提供 `HarnessAdapter`、`OpenCodeHttpAdapter`、`OpenCodeServer`、构建工作区、HTTP/SSE 客户端和事件归一化；真实 `opencode serve` 的 session／事件／权限探针已跑通。
 - 构建期依赖请求桥：每个工作区写入 `request-dependency` 插件，Agent 调用 `request_dependency` 后写 `control/dependencies/requests/<id>.json`；`DependencyBridge` 在 host 侧按 `DependencyPolicy` 返回基线／allowlist 结果、安装 allowlist 包、挂起一次性审批或取消未决请求，再写 `responses/<id>.json`。安装支持 build 解释器的 `pip` 和 `uv pip --python`，安装后用 `importlib.metadata` 验证版本。
-- 批次工作台阶段 1：`frontend/` 是 Vue 3 + TypeScript + Vite 应用；构建产物存在时 FastAPI 在 `/batch/` 托管，`/batches` 列表／新建／详情、`/batches/{id}/sites/{site_key}` 站点详情和 `/tasks` 任务控制台共用同一外壳。批次／站点对象、导入解析／去重／规则匹配、部分启动、批次级暂停／取消／归档、批次导出和站点下钻已实现；真实批次 `b-586052683409` 两站 14 条有效商品、0 失败，证据在 `experiments/d08/batch-workbench-e2e/`。
-- 前端 v2 桌面端试点：`frontend-v2/` 是 React 19 + TypeScript + Vite + Tailwind CSS v4 应用，已覆盖应用外壳、批次列表、列表页内“新建批次”弹窗和批次详情，接真实 `/api/batches`／`/api/batches/{id}`／`/api/health`；详情支持状态带筛选、启动弹窗、暂停、归档／恢复、取消确认和 ZIP 导出入口；继续导入、站点、任务、SSE 和构建面板仍跳转旧版 `/batch/`。它尚未挂载到 FastAPI，也没有进入生产导航；当前只做桌面端 1280／1440，窄屏和移动抽屉后置。验证记录见 `app/frontend-v2/README.md` 和 `docs/35`。
-- 站点构建入口：`needs_onboarding` 站点可在站点详情启动构建 Agent；站点进入 `building`，主机验证通过后规则以 `candidate` 安装、站点变为 `ready`，失败则回到 `needs_onboarding`。已 `ready` 的站点可在同一面板使用“重新验证／修复规则”：构建 Agent 读取已安装规则和样例页，修复描述块／字段缺口后重新验证；失败时保留原规则和已有采集数据。站点详情提供“详细模式”时间线（思考、工具调用、可见文本按时间合并）、“验证失败后自动修复 1 轮”、“全量目录”和“归档样例页面”；全量目录只提高规则目标商品数，验证仍用少量商品，通过后从批次详情用全量预算启动任务。
+- 批次工作台阶段 1（旧版，已弃用）：`frontend/` 是 Vue 3 + TypeScript + Vite 应用；构建产物存在时 FastAPI 在 `/batch/` 托管，`/batches` 列表／新建／详情、`/batches/{id}/sites/{site_key}` 站点详情和 `/tasks` 任务控制台共用同一外壳。批次／站点对象、导入解析／去重／规则匹配、部分启动、批次级暂停／取消／归档、批次导出和站点下钻已实现；真实批次 `b-586052683409` 两站 14 条有效商品、0 失败，证据在 `experiments/d08/batch-workbench-e2e/`。旧版只保留未迁移功能，页内已标注弃用。
+- 前端 v2 默认入口：`frontend-v2/` 是 React 19 + TypeScript + Vite + Tailwind CSS v4 应用，已覆盖应用外壳、批次列表、列表页内“新建批次”弹窗和批次详情，接真实 `/api/batches`／`/api/batches/{id}`／`/api/health`；详情支持状态带筛选、启动弹窗、暂停、归档／恢复、取消确认和 ZIP 导出入口；全量采集不额外设服务层商品数或时长上限。继续导入、站点、任务、SSE 和构建面板仍跳转旧版 `/batch/`。FastAPI 根路径 307 到 `/next/`，v2 构建挂载在 `/next/`；当前只做桌面端 1280／1440，窄屏和移动抽屉后置。验证记录见 `app/frontend-v2/README.md` 和 `docs/35`。
+- 站点构建入口：`needs_onboarding` 站点可在站点详情启动构建 Agent；站点进入 `building`，主机验证通过后规则以 `candidate` 安装、站点变为 `ready`，失败则回到 `needs_onboarding`。已 `ready` 的站点可在同一面板使用“重新验证／修复规则”：构建 Agent 读取已安装规则和样例页，修复描述块／字段缺口后重新验证；失败时保留原规则和已有采集数据。站点详情提供“详细模式”时间线（思考、工具调用、可见文本按时间合并）、“验证失败后自动修复 1 轮”、“全量目录”和“归档样例页面”；全量目录只提高规则目标商品数，验证仍用少量商品，通过后从批次详情启动全量采集，不设商品数或时长上限。
 - 描述块合成与审计：规则可用 `compose` 按 DOM 顺序合并叙事正文、`ul.feature-list`、规格标签页等多个块，块级去重并支持 `exclude_selectors` 排除促销角标；`extract.fields.description_html.audit.blocks` 声明必须进入最终描述的页面块。主机验证会检查 `content_audit.description_gaps`，有缺口时触发自动修复；任务结果的 `content_audit` 记录审计商品数和缺口样例，任务详情显示“内容完整度”。
 - 已采数据预览：站点详情在任务运行中每 3 秒刷新最近有效商品，展示图片、名称、价格、品牌／分类和来源链接；任务结束后保留最近 10 条预览。下方“CSV 表格预览”按导出 9 列结构分页展示（运行中读 `products.jsonl`，结束后读 `products.csv`）；点击主图在弹窗内查看大图并支持缩放、复制 URL、下载和打开原图，点击“查看全文”在弹窗内查看完整描述并支持复制文本／HTML 和打开来源页。
 - 构建 trace：每次构建在 `out/trace.json`／`out/trace.md` 记录阶段、工具调用、输入摘要、截断输出、可见消息、tokens／费用、主机验证结果、自动修复轮次和样例存档统计；默认不保存 reasoning，`ECOM_BUILD_CAPTURE_REASONING=1` 时才保留并截断。模型、provider 和 variant（思考等级）在构建状态和 trace 中标出。验证前先静态编译规则里的 CSS 选择器，避免把 `plan_error` 拖到真实抓取阶段。
@@ -54,8 +54,8 @@
 - `src/ecom_crawler/`：应用代码。
 - `src/ecom_crawler/runtime/`、`executor/`：从 R06 抽取的静态运行时和提取器；`runtime/browser.py` 是 Patchright CDP 浏览器 fetcher。
 - `src/ecom_crawler/web/`：本地 FastAPI 应用和静态页面。
-- `frontend/`：批次工作台与任务控制台 Vue 3 + TypeScript + Vite 应用；构建产物 `dist/` 不提交，存在时由 FastAPI 挂到 `/batch/`。
-- `frontend-v2/`：React 19 + TypeScript + Vite + Tailwind v4 的桌面端试点（应用外壳 + 批次列表 + 新建批次弹窗 + 批次详情）；尚未挂载 FastAPI，也不进入生产导航；设计依据见 `docs/35` 和 ADR 0012。
+- `frontend/`：旧版批次工作台与任务控制台 Vue 3 + TypeScript + Vite 应用，已弃用；构建产物 `dist/` 不提交，存在时由 FastAPI 挂到 `/batch/`，只承接未迁移功能。
+- `frontend-v2/`：React 19 + TypeScript + Vite + Tailwind v4 的默认前端（应用外壳 + 批次列表 + 新建批次弹窗 + 批次详情）；构建产物挂载 `/next/`，根路径默认跳转；设计依据见 `docs/35` 和 ADR 0012。
 - `src/ecom_crawler/execution.py`、`bridge.py`：执行入口与 R06→D02 转换。
 - `schemas/`：候选输入、内部商品记录和任务结果的 JSON Schema。
 - `tests/`：T1 契约／单元测试和本地 fixture 集成测试，无外部网络。
@@ -251,7 +251,7 @@ runtime:
 - `GET /api/tasks/{id}/events` 是 SSE：连接先发 `snapshot`，再转发 `events.ndjson` 增量，终态发 `end`；断线重连以快照为准。
 - 导出 zip 只允许 `products.csv`、`task-result.json`、`records.jsonl` 和 `diagnostics/` 下的排除／失败文件；`partial=true` 才允许导出未结束任务。
 - 页面支持列表（状态、结果／覆盖、质量异常数）、创建（市场／语言由规则包确定并显示）、详情、控制按钮、计数（7 张主卡 + 完整计数行）、质量异常、商品预览（价格、币种、正文状态、缺失字段、可展开字段来源）、items 和导出；页首显示服务／worker 状态，`QUEUED` 详情显示排队原因；控制请求显示“已受理”，最终状态以账本为准；取消需二次确认。真实案例走查见 `experiments/d08/ui-preview/`（`web-946474de5cf1`，familidoo 6／6、0 失败、0 条质量异常；暂停／恢复／取消、归档／还原、导出和错误提示通过）。
-- `frontend/` 构建后由 FastAPI 在 `/batch/` 提供 Vue 批次工作台和任务控制台；根路径 `/` 会 307 跳到 `/batch/`，旧原生任务控制台移到 `/legacy`。未构建时 `/batch/` 不存在，`/` 直接显示旧页面。批次工作台入口是 `http://127.0.0.1:<port>/batch/#/batches`。
+- `frontend-v2/` 构建后由 FastAPI 在 `/next/` 提供默认 React 前端，`frontend/` 构建后由 FastAPI 在 `/batch/` 提供旧 Vue 工作台；根路径 `/` 会 307 跳到 `/next/`，旧原生任务控制台移到 `/legacy`。v2 入口是 `http://127.0.0.1:<port>/next/#/batches`，旧版入口是 `http://127.0.0.1:<port>/batch/#/batches` 并显示弃用提示。未构建时对应路径不存在，`/` 回退到旧静态页面。
 - 托管 worker 在服务生命周期内执行 `QUEUED` 任务；服务退出时先停止领取新任务，再等待已启动任务结束。
 - `--no-worker` 时创建／启动的任务保持 `QUEUED`，需要另跑 `ecom-crawler worker`；设计门已于 2026-11-22 通过，A16 1280 已于 2026-11-23 验收；跨浏览器／读屏未测。
 - 证据：`tests/test_web.py` 覆盖健康、规则目录、列表筛选、详情、items 分页、创建幂等、控制转移、归档／还原、SSE、导出白名单和错误码。
@@ -379,4 +379,4 @@ CSV 对以 `=`、`+`、`-`、`@` 开头的文本单元格加单引号，防止�
 - `discovered_urls`、待处理数和导航数由调用方或运行时提供；导出层不构造全站分母。
 - `outcome` 是推导值，不接受调用方直接覆盖。
 - `schemas/` 目前随仓库分发，尚未打进 wheel；安装包与 schema 分发在 R14 处理。
-- 批次工作台阶段 1 已实现并验收；阶段 2／3（批次自动构建、完整构建会话 UI、整批合并 CSV 等）未实现。构建 Agent 已接入批次站点详情，一次一个构建；验证失败默认自动修复 1 轮，仍失败后再人工重试。站点详情已提供思考／工具／文本合并的详细时间线；trace 默认不含 reasoning，只有显式开启才保留。`frontend/dist/` 不提交，部署前需 `npm run build`；Node 建议 24.15+（本机 24.14.1 有 EBADENGINE 警告但构建通过）。
+- 批次工作台阶段 1 已实现并验收；阶段 2／3（批次自动构建、完整构建会话 UI、整批合并 CSV 等）未实现。构建 Agent 已接入批次站点详情，一次一个构建；验证失败默认自动修复 1 轮，仍失败后再人工重试。站点详情已提供思考／工具／文本合并的详细时间线；trace 默认不含 reasoning，只有显式开启才保留。`frontend/dist/` 和 `frontend-v2/dist/` 不提交，部署前需分别 `npm run build`；Node 建议 24.15+（本机 24.14.1 有 EBADENGINE 警告但构建通过）。

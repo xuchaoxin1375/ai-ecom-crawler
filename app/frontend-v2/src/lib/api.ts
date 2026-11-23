@@ -321,9 +321,9 @@ export function createBatch(body: BatchDraftRequest): Promise<BatchCreateRespons
 
 export interface BatchStartOptions {
   limits?: {
-    max_urls?: number;
-    max_products?: number;
-    max_seconds?: number;
+    max_urls?: number | null;
+    max_products?: number | null;
+    max_seconds?: number | null;
     max_attempts?: number;
   };
   archive_mode?: "off" | "sample" | "full";

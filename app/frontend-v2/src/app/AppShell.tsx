@@ -167,7 +167,7 @@ export function AppShell() {
 
         <div className="ml-auto flex items-center gap-3">
           <Badge tone="info" dot={false}>
-            桌面端试点
+            新版默认
           </Badge>
           <ServicePill />
         </div>
@@ -189,7 +189,7 @@ export function AppShell() {
                   icon={<ListChecks size={17} />}
                   external
                 >
-                  全部任务
+                  全部任务（旧版）
                 </SidebarLink>
                 <SidebarAction href="#/batches?new=1" icon={<Plus size={17} />}>
                   新建批次
@@ -203,7 +203,7 @@ export function AppShell() {
               </p>
               <div className="space-y-0.5">
                 <SidebarLink to="/batch/" icon={<ExternalLink size={17} />} external>
-                  旧版工作台
+                  旧版工作台（弃用）
                 </SidebarLink>
                 <SidebarLink to="/legacy" icon={<ExternalLink size={17} />} external>
                   技术兜底入口
@@ -215,7 +215,7 @@ export function AppShell() {
           <div className="border-t border-line px-4 py-4">
             <p className="text-xs font-medium text-ink-2">v2 前端试点</p>
             <p className="mt-1 text-xs leading-5 text-ink-3">
-              当前覆盖桌面端批次列表、批次详情和新建批次弹窗；站点、任务仍由旧版处理。
+              当前覆盖桌面端批次列表、批次详情和新建批次弹窗。旧版已弃用，仅保留站点、任务和构建等未迁移功能。
             </p>
             <a
               className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-accent hover:text-accent-hover hover:underline"

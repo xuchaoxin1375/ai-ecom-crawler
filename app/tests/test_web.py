@@ -12,7 +12,12 @@ from fastapi.testclient import TestClient
 
 from ecom_crawler.runtime.models import Task, WorkItem
 from ecom_crawler.runtime.store import TaskStore
-from ecom_crawler.web.app import create_app
+from ecom_crawler.web.app import (
+    BATCH_DIST_DIR,
+    V2_DIST_DIR,
+    Limits,
+    create_app,
+)
 
 CLIENT_HEADERS = {
     "Host": "127.0.0.1:8765",
@@ -119,11 +124,30 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(legacy.status_code, 200)
         self.assertIn("采集", legacy.text)
         index = self.client.get("/", follow_redirects=False)
-        if index.status_code in {307, 308}:
+        if (V2_DIST_DIR / "index.html").is_file():
+            self.assertEqual(index.status_code, 307)
+            self.assertEqual(index.headers["location"], "/next/")
+            next_ui = self.client.get("/next/")
+            self.assertEqual(next_ui.status_code, 200)
+            self.assertIn("采集", next_ui.text)
+        elif (BATCH_DIST_DIR / "index.html").is_file():
+            self.assertEqual(index.status_code, 307)
             self.assertEqual(index.headers["location"], "/batch/")
         else:
             self.assertEqual(index.status_code, 200)
             self.assertIn("采集", index.text)
+
+    def test_limits_accept_unbounded_full_catalog(self) -> None:
+        limits = Limits(
+            max_urls=None,
+            max_products=None,
+            max_seconds=None,
+            max_attempts=2,
+        )
+        self.assertIsNone(limits.max_urls)
+        self.assertIsNone(limits.max_products)
+        self.assertIsNone(limits.max_seconds)
+        self.assertEqual(limits.max_attempts, 2)
 
     def test_managed_worker_lifespan(self) -> None:
         app = create_app(

@@ -54,6 +54,7 @@ logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).with_name("static")
 BATCH_DIST_DIR = Path(__file__).resolve().parents[3] / "frontend" / "dist"
+V2_DIST_DIR = Path(__file__).resolve().parents[3] / "frontend-v2" / "dist"
 EXPORT_FILES = (
     "products.csv",
     "task-result.json",
@@ -64,9 +65,9 @@ EXPORT_FILES = (
 
 
 class Limits(BaseModel):
-    max_urls: int = Field(default=100, ge=1, le=100000)
-    max_products: int = Field(default=20, ge=1, le=10000)
-    max_seconds: int = Field(default=180, ge=1, le=86400)
+    max_urls: int | None = Field(default=100, ge=1, le=100000)
+    max_products: int | None = Field(default=20, ge=1, le=10000)
+    max_seconds: int | None = Field(default=180, ge=1, le=86400)
     max_attempts: int = Field(default=2, ge=1, le=10)
 
 
@@ -849,6 +850,8 @@ def create_app(
 
     @app.get("/", include_in_schema=False)
     def index() -> Response:
+        if (V2_DIST_DIR / "index.html").is_file():
+            return RedirectResponse(url="/next/", status_code=307)
         if (BATCH_DIST_DIR / "index.html").is_file():
             return RedirectResponse(url="/batch/", status_code=307)
         return FileResponse(STATIC_DIR / "index.html")
@@ -1716,6 +1719,12 @@ def create_app(
         return {"accepted": True, "build": result}
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+    if (V2_DIST_DIR / "index.html").is_file():
+        app.mount(
+            "/next",
+            StaticFiles(directory=V2_DIST_DIR, html=True),
+            name="next",
+        )
     if (BATCH_DIST_DIR / "index.html").is_file():
         app.mount(
             "/batch",
