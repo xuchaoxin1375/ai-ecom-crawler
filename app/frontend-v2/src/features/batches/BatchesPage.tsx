@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { ArrowUpRight, Plus, RefreshCw, RotateCcw, Search } from "lucide-react";
+import { ArrowUpRight, Plus, RefreshCw, RotateCcw, Search, X } from "lucide-react";
 import { getBatches, type BatchSummary } from "../../lib/api";
 import { formatNumber, formatTime } from "../../lib/format";
 import { summarizeBatches } from "./summary";
+import { NewBatchDialog } from "./NewBatchDialog";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { MetricStrip } from "../../components/ui/MetricStrip";
 import { BatchStatusBadge } from "../../components/ui/BatchStatusBadge";
@@ -45,7 +46,12 @@ export function BatchesPage() {
   const category = searchParams.get("category") ?? "";
   const queryParam = searchParams.get("q") ?? "";
   const includeArchived = searchParams.get("archived") === "1";
+  const isNewOpen = searchParams.get("new") === "1";
 
+  const [notice, setNotice] = useState<{
+    tone: "success" | "warning";
+    text: string;
+  } | null>(null);
   const [countryDraft, setCountryDraft] = useState(country);
   const [categoryDraft, setCategoryDraft] = useState(category);
   const [queryDraft, setQueryDraft] = useState(queryParam);
@@ -75,6 +81,18 @@ export function BatchesPage() {
     setCountryDraft("");
     setCategoryDraft("");
     setQueryDraft("");
+  }
+
+  function openNewBatch() {
+    const next = new URLSearchParams(searchParams);
+    next.set("new", "1");
+    setSearchParams(next, { replace: true });
+  }
+
+  function closeNewBatch() {
+    const next = new URLSearchParams(searchParams);
+    next.delete("new");
+    setSearchParams(next, { replace: true });
   }
 
   const query = useQuery({
@@ -248,13 +266,14 @@ export function BatchesPage() {
         hasFilters ? (
           <Button onClick={resetFilters}>重置筛选</Button>
         ) : (
-          <a
+          <button
             className="inline-flex items-center gap-1 text-sm font-medium text-accent hover:text-accent-hover hover:underline"
-            href="/batch/#/batches/new"
+            type="button"
+            onClick={openNewBatch}
           >
             新建批次
             <ArrowUpRight size={14} aria-hidden="true" />
-          </a>
+          </button>
         )
       }
     />
@@ -267,14 +286,41 @@ export function BatchesPage() {
         title="采集批次"
         description="按项目组织站点：先导入并匹配规则包，再启动可采站点。未接入站点保留在批次中，不计为失败。"
         actions={
-          <Button asChild variant="primary">
-            <a href="/batch/#/batches/new" title="当前由旧版工作台处理">
-              <Plus size={15} aria-hidden="true" />
-              新建批次
-            </a>
+          <Button variant="primary" onClick={openNewBatch}>
+            <Plus size={15} aria-hidden="true" />
+            新建批次
           </Button>
         }
       />
+
+      {notice ? (
+        <div
+          className={
+            notice.tone === "success"
+              ? "flex items-start justify-between gap-4 rounded-panel border border-success/25 bg-success-soft px-4 py-3"
+              : "flex items-start justify-between gap-4 rounded-panel border border-warning/25 bg-warning-soft px-4 py-3"
+          }
+          role="status"
+        >
+          <p
+            className={
+              notice.tone === "success"
+                ? "text-sm text-success"
+                : "text-sm text-warning"
+            }
+          >
+            {notice.text}
+          </p>
+          <button
+            type="button"
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-ink-3 hover:bg-surface/60 hover:text-ink"
+            aria-label="关闭提示"
+            onClick={() => setNotice(null)}
+          >
+            <X size={14} aria-hidden="true" />
+          </button>
+        </div>
+      ) : null}
 
       <MetricStrip
         items={[
@@ -444,6 +490,14 @@ export function BatchesPage() {
             empty={emptyState}
           />
         </section>
+      ) : null}
+
+      {isNewOpen ? (
+        <NewBatchDialog
+          open
+          onOpenChange={(next) => (next ? openNewBatch() : closeNewBatch())}
+          onSaved={(value) => setNotice(value)}
+        />
       ) : null}
     </div>
   );

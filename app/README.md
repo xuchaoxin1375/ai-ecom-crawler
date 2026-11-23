@@ -32,7 +32,7 @@
 - 构建 harness 适配器：`harness/` 提供 `HarnessAdapter`、`OpenCodeHttpAdapter`、`OpenCodeServer`、构建工作区、HTTP/SSE 客户端和事件归一化；真实 `opencode serve` 的 session／事件／权限探针已跑通。
 - 构建期依赖请求桥：每个工作区写入 `request-dependency` 插件，Agent 调用 `request_dependency` 后写 `control/dependencies/requests/<id>.json`；`DependencyBridge` 在 host 侧按 `DependencyPolicy` 返回基线／allowlist 结果、安装 allowlist 包、挂起一次性审批或取消未决请求，再写 `responses/<id>.json`。安装支持 build 解释器的 `pip` 和 `uv pip --python`，安装后用 `importlib.metadata` 验证版本。
 - 批次工作台阶段 1：`frontend/` 是 Vue 3 + TypeScript + Vite 应用；构建产物存在时 FastAPI 在 `/batch/` 托管，`/batches` 列表／新建／详情、`/batches/{id}/sites/{site_key}` 站点详情和 `/tasks` 任务控制台共用同一外壳。批次／站点对象、导入解析／去重／规则匹配、部分启动、批次级暂停／取消／归档、批次导出和站点下钻已实现；真实批次 `b-586052683409` 两站 14 条有效商品、0 失败，证据在 `experiments/d08/batch-workbench-e2e/`。
-- 前端 v2 桌面端试点：`frontend-v2/` 是 React 19 + TypeScript + Vite + Tailwind CSS v4 应用，已覆盖应用外壳和批次列表，接真实 `/api/batches`／`/api/health`；详情、新建、站点、任务、SSE 和导出仍跳转旧版 `/batch/`。它尚未挂载到 FastAPI，也没有进入生产导航；当前只做桌面端 1280／1440，窄屏和移动抽屉后置。验证记录见 `app/frontend-v2/README.md` 和 `docs/35`。
+- 前端 v2 桌面端试点：`frontend-v2/` 是 React 19 + TypeScript + Vite + Tailwind CSS v4 应用，已覆盖应用外壳、批次列表和列表页内“新建批次”弹窗，接真实 `/api/batches`／`/api/health`；详情、站点、任务、SSE 和导出仍跳转旧版 `/batch/`。它尚未挂载到 FastAPI，也没有进入生产导航；当前只做桌面端 1280／1440，窄屏和移动抽屉后置。验证记录见 `app/frontend-v2/README.md` 和 `docs/35`。
 - 站点构建入口：`needs_onboarding` 站点可在站点详情启动构建 Agent；站点进入 `building`，主机验证通过后规则以 `candidate` 安装、站点变为 `ready`，失败则回到 `needs_onboarding`。已 `ready` 的站点可在同一面板使用“重新验证／修复规则”：构建 Agent 读取已安装规则和样例页，修复描述块／字段缺口后重新验证；失败时保留原规则和已有采集数据。站点详情提供“详细模式”时间线（思考、工具调用、可见文本按时间合并）、“验证失败后自动修复 1 轮”、“全量目录”和“归档样例页面”；全量目录只提高规则目标商品数，验证仍用少量商品，通过后从批次详情用全量预算启动任务。
 - 描述块合成与审计：规则可用 `compose` 按 DOM 顺序合并叙事正文、`ul.feature-list`、规格标签页等多个块，块级去重并支持 `exclude_selectors` 排除促销角标；`extract.fields.description_html.audit.blocks` 声明必须进入最终描述的页面块。主机验证会检查 `content_audit.description_gaps`，有缺口时触发自动修复；任务结果的 `content_audit` 记录审计商品数和缺口样例，任务详情显示“内容完整度”。
 - 已采数据预览：站点详情在任务运行中每 3 秒刷新最近有效商品，展示图片、名称、价格、品牌／分类和来源链接；任务结束后保留最近 10 条预览。下方“CSV 表格预览”按导出 9 列结构分页展示（运行中读 `products.jsonl`，结束后读 `products.csv`）；点击主图在弹窗内查看大图并支持缩放、复制 URL、下载和打开原图，点击“查看全文”在弹窗内查看完整描述并支持复制文本／HTML 和打开来源页。
@@ -55,7 +55,7 @@
 - `src/ecom_crawler/runtime/`、`executor/`：从 R06 抽取的静态运行时和提取器；`runtime/browser.py` 是 Patchright CDP 浏览器 fetcher。
 - `src/ecom_crawler/web/`：本地 FastAPI 应用和静态页面。
 - `frontend/`：批次工作台与任务控制台 Vue 3 + TypeScript + Vite 应用；构建产物 `dist/` 不提交，存在时由 FastAPI 挂到 `/batch/`。
-- `frontend-v2/`：React 19 + TypeScript + Vite + Tailwind v4 的桌面端单页试点（应用外壳 + 批次列表）；尚未挂载 FastAPI，也不进入生产导航；设计依据见 `docs/35` 和 ADR 0012。
+- `frontend-v2/`：React 19 + TypeScript + Vite + Tailwind v4 的桌面端单页试点（应用外壳 + 批次列表 + 新建批次弹窗）；尚未挂载 FastAPI，也不进入生产导航；设计依据见 `docs/35` 和 ADR 0012。
 - `src/ecom_crawler/execution.py`、`bridge.py`：执行入口与 R06→D02 转换。
 - `schemas/`：候选输入、内部商品记录和任务结果的 JSON Schema。
 - `tests/`：T1 契约／单元测试和本地 fixture 集成测试，无外部网络。

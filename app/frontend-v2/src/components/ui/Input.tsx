@@ -1,4 +1,8 @@
-import type { InputHTMLAttributes, SelectHTMLAttributes } from "react";
+import type {
+  InputHTMLAttributes,
+  SelectHTMLAttributes,
+  TextareaHTMLAttributes,
+} from "react";
 import { cn } from "../../lib/cn";
 
 export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElement>) {
@@ -39,6 +43,21 @@ export function Checkbox({
     <input
       type="checkbox"
       className={cn("h-4 w-4 rounded border-line-strong accent-accent", className)}
+      {...props}
+    />
+  );
+}
+
+export function Textarea({
+  className,
+  ...props
+}: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  return (
+    <textarea
+      className={cn(
+        "w-full rounded-control border border-line-strong bg-surface px-3 py-2 text-sm leading-6 text-ink placeholder:text-ink-3 focus:border-accent",
+        className,
+      )}
       {...props}
     />
   );

@@ -55,6 +55,80 @@ export interface BatchPage {
   items: BatchSummary[];
 }
 
+export interface ImportItem {
+  input_value: string;
+  domain: string;
+  site_key: string | null;
+  readiness: Readiness;
+  reason: string;
+  stored: boolean;
+}
+
+export interface ImportSummary {
+  total: number;
+  ready: number;
+  needs_onboarding: number;
+  duplicate: number;
+  invalid: number;
+  accepted: number;
+  stored: number;
+}
+
+export interface ImportReport {
+  summary: ImportSummary;
+  items: ImportItem[];
+}
+
+export interface BatchDraftRequest {
+  name: string;
+  country?: string | null;
+  market?: string | null;
+  language?: string | null;
+  category?: string | null;
+  note?: string | null;
+  sites?: string[];
+  sites_text?: string;
+}
+
+export interface BatchPreviewResponse {
+  created: false;
+  preview: {
+    name: string;
+    country: string | null;
+    market: string | null;
+    language: string | null;
+    category: string | null;
+    import: ImportReport;
+  };
+}
+
+export interface BatchCreateResponse {
+  created: true;
+  batch: BatchSummary;
+  import: ImportReport;
+}
+
+export interface BatchActionAccepted {
+  site_key: string;
+  domain: string;
+  task_id: string;
+  state?: string;
+  outcome?: string | null;
+}
+
+export interface BatchActionSkipped {
+  site_key: string;
+  domain: string;
+  task_id: string | null;
+  reason: string;
+}
+
+export interface BatchActionResponse {
+  accepted: BatchActionAccepted[];
+  skipped: BatchActionSkipped[];
+  batch: BatchSummary;
+}
+
 export interface BatchListParams {
   status?: string;
   country?: string;
@@ -136,5 +210,47 @@ export function getBatches(
       offset: params.offset,
     })}`,
     signal,
+  );
+}
+
+async function sendJson<T>(
+  url: string,
+  method: "POST" | "PATCH" | "DELETE",
+  body?: unknown,
+): Promise<T> {
+  const response = await fetch(url, {
+    method,
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      "X-Requested-With": "XMLHttpRequest",
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!response.ok) {
+    throw new ApiError(await errorMessage(response), response.status);
+  }
+  return (await response.json()) as T;
+}
+
+export function previewBatch(body: BatchDraftRequest): Promise<BatchPreviewResponse> {
+  return sendJson<BatchPreviewResponse>("/api/batches", "POST", {
+    ...body,
+    preview: true,
+  });
+}
+
+export function createBatch(body: BatchDraftRequest): Promise<BatchCreateResponse> {
+  return sendJson<BatchCreateResponse>("/api/batches", "POST", body);
+}
+
+export function startBatch(
+  batchId: string,
+  body: Record<string, unknown> = {},
+): Promise<BatchActionResponse> {
+  return sendJson<BatchActionResponse>(
+    `/api/batches/${encodeURIComponent(batchId)}/start`,
+    "POST",
+    body,
   );
 }

@@ -2,6 +2,8 @@ import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
+const API_TARGET = "http://127.0.0.1:8775";
+
 export default defineConfig({
   base: "/next/",
   plugins: [react(), tailwindcss()],
@@ -13,9 +15,17 @@ export default defineConfig({
     host: "127.0.0.1",
     port: 5175,
     proxy: {
-      "/api": "http://127.0.0.1:8775",
-      "/batch": "http://127.0.0.1:8775",
-      "/legacy": "http://127.0.0.1:8775",
+      "/api": {
+        target: API_TARGET,
+        changeOrigin: true,
+        headers: {
+          // The backend enforces Origin == Host for writes. Keep both on the
+          // API origin while the UI runs on the Vite dev origin.
+          Origin: API_TARGET,
+        },
+      },
+      "/batch": API_TARGET,
+      "/legacy": API_TARGET,
     },
   },
   test: {

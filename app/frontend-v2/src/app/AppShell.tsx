@@ -53,6 +53,31 @@ function SidebarLink({
   );
 }
 
+function SidebarAction({
+  href,
+  icon,
+  children,
+}: {
+  href: string;
+  icon: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <a
+      className="flex h-9 items-center gap-2.5 rounded-control px-2.5 text-sm text-ink-2 transition-colors hover:bg-surface-muted hover:text-ink"
+      href={href}
+    >
+      <span
+        className="flex h-5 w-5 items-center justify-center text-ink-3"
+        aria-hidden="true"
+      >
+        {icon}
+      </span>
+      <span>{children}</span>
+    </a>
+  );
+}
+
 function ServicePill() {
   const health = useQuery({
     queryKey: ["health"],
@@ -164,13 +189,9 @@ export function AppShell() {
                 >
                   全部任务
                 </SidebarLink>
-                <SidebarLink
-                  to="/batch/#/batches/new"
-                  icon={<Plus size={17} />}
-                  external
-                >
+                <SidebarAction href="#/batches?new=1" icon={<Plus size={17} />}>
                   新建批次
-                </SidebarLink>
+                </SidebarAction>
               </div>
             </div>
 
@@ -192,7 +213,7 @@ export function AppShell() {
           <div className="border-t border-line px-4 py-4">
             <p className="text-xs font-medium text-ink-2">v2 前端试点</p>
             <p className="mt-1 text-xs leading-5 text-ink-3">
-              当前只覆盖桌面端批次列表；详情、任务和新建仍由旧版处理。
+              当前覆盖桌面端批次列表和新建批次弹窗；详情、任务仍由旧版处理。
             </p>
             <a
               className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-accent hover:text-accent-hover hover:underline"
