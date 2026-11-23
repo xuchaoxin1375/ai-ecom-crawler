@@ -69,6 +69,7 @@ function build(overrides: Partial<BuildStatus> = {}): BuildStatus {
     pending_dependencies: [],
     trace_available: false,
     reasoning_capture_enabled: false,
+    reasoning_live: false,
     reasoning_retained: false,
     repair_limit: 1,
     repair_round: 0,
@@ -134,10 +135,10 @@ describe("siteNextStep", () => {
     ).toBe("repair");
   });
 
-  it("sends ready sites without a task back to the batch", () => {
+  it("offers a direct collection start for ready sites without a task", () => {
     const step = siteNextStep(site(), null);
-    expect(step.action).toBe("batch");
-    expect(step.actionLabel).toBe("回批次启动");
+    expect(step.action).toBe("start");
+    expect(step.actionLabel).toBe("启动采集");
   });
 
   it("does not offer collection for invalid or duplicate entries", () => {

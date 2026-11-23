@@ -207,6 +207,7 @@ export interface BuildStatus {
   pending_dependencies: string[];
   trace_available: boolean;
   reasoning_capture_enabled: boolean;
+  reasoning_live: boolean;
   reasoning_retained: boolean;
   repair_limit: number;
   repair_round: number;
@@ -516,6 +517,7 @@ export function importBatch(
 }
 
 export interface BatchStartOptions {
+  site_keys?: string[];
   limits?: {
     max_urls?: number | null;
     max_products?: number | null;
@@ -669,6 +671,10 @@ export function getBuildMessages(
     `/api/builds/${encodeURIComponent(buildId)}/messages`,
     signal,
   );
+}
+
+export function buildEventsUrl(buildId: string): string {
+  return `/api/builds/${encodeURIComponent(buildId)}/events`;
 }
 
 export function getBuildConfig(signal?: AbortSignal): Promise<BuildConfig> {

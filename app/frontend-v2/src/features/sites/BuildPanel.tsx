@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 import {
   CheckCircle2,
-  ChevronDown,
   Download,
   FileText,
   RefreshCw,
@@ -24,24 +23,17 @@ import {
 } from "../../lib/format";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
-import { Checkbox } from "../../components/ui/Input";
 import { ErrorNotice } from "../../components/ui/ErrorNotice";
 import {
   activeRepair,
   buildEventText,
   buildEventTone,
   buildModelLabel,
-  buildOutputText,
-  buildReasoningText,
   formatBytes,
-  formatTimelineValue,
   permissionItems,
-  reasoningSummary,
-  timelineTime,
-  toolStatusLabel,
-  toolStatusTone,
   visibleBuildEvents,
 } from "./build";
+import { BuildTimeline } from "./BuildTimeline";
 import { buildIsActive, taskIsActive } from "./site";
 
 interface BuildPanelProps {
@@ -49,11 +41,12 @@ interface BuildPanelProps {
   build: BuildStatus | null;
   messages: BuildMessages | null;
   config: BuildConfig | null;
-  detailMode: boolean;
   busy: string;
   error: string;
   refreshing: boolean;
-  onToggleDetail: (next: boolean) => void;
+  streamConnected: boolean;
+  streamError: string;
+  streamEnded: boolean;
   onOpenStart: (mode: "build" | "repair") => void;
   onReplyDependency: (requestId: string, decision: "once" | "reject") => void;
   onReplyPermission: (
@@ -77,11 +70,12 @@ export function BuildPanel({
   build,
   messages,
   config,
-  detailMode,
   busy,
   error,
   refreshing,
-  onToggleDetail,
+  streamConnected,
+  streamError,
+  streamEnded,
   onOpenStart,
   onReplyDependency,
   onReplyPermission,
@@ -98,9 +92,6 @@ export function BuildPanel({
   const events = visibleBuildEvents(build);
   const permissions = permissionItems(build);
   const repair = activeRepair(build);
-  const outputText = buildOutputText(messages);
-  const reasoningText = buildReasoningText(messages);
-  const timeline = messages?.timeline || [];
 
   if (!build && !canStartBuild && !canRepair) return null;
 
@@ -209,11 +200,13 @@ export function BuildPanel({
                 : "—"}
             </MetaItem>
             <MetaItem label="思考">
-              {build.reasoning_retained
-                ? "已保留"
-                : build.reasoning_capture_enabled
-                  ? "未保留"
-                  : "服务端未开启"}
+              {!build.reasoning_capture_enabled
+                ? "服务端未开启"
+                : build.reasoning_retained
+                  ? "实时 + trace"
+                  : build.reasoning_live
+                    ? "实时，不写 trace"
+                    : "已开启，等待输出"}
             </MetaItem>
           </dl>
 
@@ -338,136 +331,14 @@ export function BuildPanel({
             </ol>
           ) : null}
 
-          <div className="border-t border-line pt-4">
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <h3 className="text-[15px] leading-6 font-semibold text-ink">
-                  模型输出
-                </h3>
-                <p className="text-xs text-ink-3">
-                  {messages?.live ? "流式输出，随轮询追加" : "阶段性输出"}
-                  {messages?.timeline_truncated ? "；时间线只显示最近 200 条" : ""}
-                </p>
-              </div>
-              <label
-                className="flex items-center gap-2 text-xs text-ink-2"
-                htmlFor="build-detail-mode"
-              >
-                <Checkbox
-                  id="build-detail-mode"
-                  checked={detailMode}
-                  onChange={(event) => onToggleDetail(event.target.checked)}
-                />
-                详细模式
-              </label>
-            </div>
-
-            {detailMode ? (
-              <div className="mt-3 space-y-2">
-                {!messages?.reasoning_retained ? (
-                  <p className="text-xs leading-5 text-ink-3">
-                    本次构建未保留思考过程；构建前勾选“保留思考过程”且服务端开启
-                    <code className="mx-1 rounded bg-surface-muted px-1 font-mono text-[11px]">
-                      ECOM_BUILD_CAPTURE_REASONING=1
-                    </code>
-                    才会显示。
-                  </p>
-                ) : null}
-                {timeline.length ? (
-                  timeline.map((item, index) => (
-                    <details
-                      key={`${item.kind}-${index}-${item.created_at || ""}`}
-                      className="group rounded-control border border-line bg-surface-muted"
-                    >
-                      <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-xs text-ink-2 [&::-webkit-details-marker]:hidden">
-                        <ChevronDown
-                          className="shrink-0 text-ink-3 transition-transform group-open:rotate-180"
-                          size={13}
-                          aria-hidden="true"
-                        />
-                        {item.kind === "reasoning" ? (
-                          <span>{reasoningSummary(item)}</span>
-                        ) : item.kind === "tool" ? (
-                          <>
-                            <span className="font-medium text-ink">
-                              工具 {item.name || "unknown"}
-                            </span>
-                            <Badge tone={toolStatusTone(item.status)} dot={false}>
-                              {toolStatusLabel(item.status)}
-                            </Badge>
-                            <span className="text-ink-3">{timelineTime(item)}</span>
-                            {item.duration_ms != null ? (
-                              <span className="text-ink-3">{item.duration_ms} ms</span>
-                            ) : null}
-                          </>
-                        ) : (
-                          <>
-                            <Badge tone="neutral" dot={false}>
-                              {item.role === "user" ? "用户" : "模型"}
-                            </Badge>
-                            <span className="text-ink-3">{timelineTime(item)}</span>
-                          </>
-                        )}
-                      </summary>
-                      <div className="border-t border-line px-3 py-2">
-                        {item.kind === "tool" ? (
-                          <>
-                            {formatTimelineValue(item.input) ? (
-                              <div className="mb-2">
-                                <p className="mb-1 text-[11px] text-ink-3">入参</p>
-                                <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded bg-surface p-2 font-mono text-[11px] leading-5 text-ink-2">
-                                  {formatTimelineValue(item.input)}
-                                </pre>
-                              </div>
-                            ) : null}
-                            {item.output ? (
-                              <div>
-                                <p className="mb-1 text-[11px] text-ink-3">输出</p>
-                                <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded bg-surface p-2 font-mono text-[11px] leading-5 text-ink-2">
-                                  {item.output}
-                                </pre>
-                              </div>
-                            ) : null}
-                            {!formatTimelineValue(item.input) && !item.output ? (
-                              <p className="text-xs text-ink-3">
-                                工具完成后可在 trace 查看输出。
-                              </p>
-                            ) : null}
-                          </>
-                        ) : (
-                          <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded bg-surface p-2 font-sans text-xs leading-5 text-ink-2">
-                            {item.text}
-                          </pre>
-                        )}
-                      </div>
-                    </details>
-                  ))
-                ) : (
-                  <p className="text-xs text-ink-3">还没有可见模型输出。</p>
-                )}
-              </div>
-            ) : (
-              <div className="mt-3 space-y-2">
-                {outputText ? (
-                  <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-control border border-line bg-surface-muted p-3 font-sans text-xs leading-5 text-ink-2">
-                    {outputText}
-                  </pre>
-                ) : (
-                  <p className="text-xs text-ink-3">还没有可见模型输出。</p>
-                )}
-                {reasoningText ? (
-                  <details className="rounded-control border border-line bg-surface-muted">
-                    <summary className="cursor-pointer px-3 py-2 text-xs text-ink-2">
-                      思考过程（已保留，仅本地复盘）
-                    </summary>
-                    <pre className="max-h-72 overflow-auto whitespace-pre-wrap border-t border-line p-3 font-sans text-xs leading-5 text-ink-2">
-                      {reasoningText}
-                    </pre>
-                  </details>
-                ) : null}
-              </div>
-            )}
-          </div>
+          <BuildTimeline
+            build={build}
+            messages={messages}
+            live={active}
+            connected={streamConnected}
+            streamError={streamError}
+            ended={streamEnded}
+          />
 
           {build.state === "FINISHED" && build.outcome === "succeeded" ? (
             <p className="flex items-start gap-2 rounded-control border border-success/25 bg-success-soft px-3 py-2 text-xs leading-5 text-success">

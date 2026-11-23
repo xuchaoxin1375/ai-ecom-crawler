@@ -33,7 +33,9 @@ export function BuildStartDialog({
   const [mode] = useState<"build" | "repair">(initialMode);
   const [proxy, setProxy] = useState("");
   const [reason, setReason] = useState("");
-  const [captureReasoning, setCaptureReasoning] = useState(false);
+  const [captureReasoning, setCaptureReasoning] = useState(
+    Boolean(config?.reasoning_capture_enabled),
+  );
   const [autoRepair, setAutoRepair] = useState(true);
   const [catalogFull, setCatalogFull] = useState(false);
   const [archiveSample, setArchiveSample] = useState(true);
@@ -184,11 +186,10 @@ export function BuildStartDialog({
                   onChange={(event) => setCaptureReasoning(event.target.checked)}
                 />
                 <span>
-                  <span className="block text-sm font-medium text-ink">
-                    保留思考过程
-                  </span>
+                  <span className="block text-sm font-medium text-ink">实时思考</span>
                   <span className="mt-0.5 block text-xs leading-5 text-ink-3">
-                    仅本地复盘，默认关闭；需服务端以
+                    在构建时间线里实时显示模型思考；默认只用于本次展示，不写入
+                    trace。需服务端以
                     <code className="mx-1 rounded bg-surface px-1 font-mono text-[11px]">
                       ECOM_BUILD_CAPTURE_REASONING=1
                     </code>

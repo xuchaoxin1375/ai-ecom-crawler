@@ -22,6 +22,8 @@ import re
 import shutil
 import threading
 import time
+import urllib.error
+import urllib.request
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -30,6 +32,7 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 import yaml
+from protego import Protego
 
 from .execution import run_task
 from .executor.preflight import check_rule_selectors, format_selector_errors
@@ -79,7 +82,54 @@ MARKET_CURRENCY = {
 }
 RULE_NAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
 TIMELINE_LIMIT = 200
+ROBOTS_USER_AGENT = "ecom-crawler-build/0.1"
+ROBOTS_TIMEOUT_SECONDS = 10.0
 logger = logging.getLogger(__name__)
+
+
+def _check_robots(
+    entry_url: str, proxy: str | None = None
+) -> tuple[bool, str]:
+    """Fail closed when the target's robots.txt disallows the entry URL.
+
+    Build-time exploration uses shell/curl tools, so it does not pass through
+    the runtime runner's robots gate.  This preflight applies the same policy
+    before a model call: 404 means allow, a disallow or an unreadable robots
+    file means the build must stop.
+    """
+    parsed = urlsplit(entry_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return False, "entry URL is not HTTP(S)"
+    robots_url = urlunsplit((parsed.scheme, parsed.netloc, "/robots.txt", "", ""))
+    handlers: list[Any] = []
+    if proxy:
+        handlers.append(
+            urllib.request.ProxyHandler({"http": proxy, "https": proxy})
+        )
+    opener = urllib.request.build_opener(*handlers)
+    request = urllib.request.Request(
+        robots_url,
+        headers={"User-Agent": ROBOTS_USER_AGENT, "Accept": "text/plain,*/*"},
+    )
+    try:
+        with opener.open(request, timeout=ROBOTS_TIMEOUT_SECONDS) as response:
+            status = int(getattr(response, "status", 200))
+            body = response.read(1_000_000).decode("utf-8", "replace")
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return True, "robots.txt not found"
+        return False, f"robots.txt HTTP {exc.code}"
+    except Exception as exc:  # noqa: BLE001 - network boundary
+        return False, f"robots.txt fetch failed: {type(exc).__name__}: {exc}"
+    if not 200 <= status < 300:
+        return False, f"robots.txt HTTP {status}"
+    try:
+        robots = Protego.parse(body.removeprefix("\ufeff"))
+    except Exception as exc:  # noqa: BLE001 - parser boundary
+        return False, f"cannot parse robots.txt: {exc}"
+    if not robots.can_fetch(entry_url, "*"):
+        return False, "robots.txt disallows the entry URL"
+    return True, "robots.txt allows the entry URL"
 
 
 class BuildError(ValueError):
@@ -309,6 +359,48 @@ def _trace_timeline(
     return entries[-limit:], truncated
 
 
+def _merge_reasoning_timeline(
+    trace_timeline: list[dict[str, Any]],
+    live_timeline: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Keep live reasoning visible after a build falls back to its trace.
+
+    Reasoning is not persisted by default, so the trace timeline has no
+    reasoning entries.  While the build session is still in memory we can merge
+    the captured reasoning back into the trace timeline for display without
+    writing it to ``trace.json``.
+    """
+    reasoning = [
+        item
+        for item in live_timeline
+        if item.get("kind") == "reasoning" and item.get("text")
+    ]
+    if not reasoning:
+        return trace_timeline
+    seen = {
+        (item.get("created_at"), item.get("text"))
+        for item in trace_timeline
+        if item.get("kind") == "reasoning"
+    }
+    merged = list(trace_timeline)
+    for item in reasoning:
+        key = (item.get("created_at"), item.get("text"))
+        if key in seen:
+            continue
+        seen.add(key)
+        timestamp = item.get("created_at") or ""
+        inserted = False
+        for index, existing in enumerate(merged):
+            existing_timestamp = existing.get("created_at") or ""
+            if timestamp and existing_timestamp and existing_timestamp > timestamp:
+                merged.insert(index, item)
+                inserted = True
+                break
+        if not inserted:
+            merged.append(item)
+    return merged
+
+
 def _live_timeline(
     events: list[Any], *, limit: int = TIMELINE_LIMIT
 ) -> tuple[list[dict[str, Any]], bool]:
@@ -422,6 +514,8 @@ class BuildManager:
         event_timeout: float | None = None,
         default_proxy: str | None = None,
         capture_reasoning: bool | None = None,
+        persist_reasoning: bool | None = None,
+        robots_checker: Callable[[str, str | None], tuple[bool, str]] | None = None,
         max_repair_rounds: int | None = None,
         repair_seconds: int | None = None,
         archive_mode: str | None = None,
@@ -444,6 +538,15 @@ class BuildManager:
             if capture_reasoning is not None
             else os.environ.get("ECOM_BUILD_CAPTURE_REASONING") == "1"
         )
+        # Live reasoning is useful for the build timeline; persisting it into
+        # trace.json is a separate, explicit decision because the trace is kept
+        # as local evidence and may contain page or prompt content.
+        self.persist_reasoning_enabled = (
+            persist_reasoning
+            if persist_reasoning is not None
+            else os.environ.get("ECOM_BUILD_PERSIST_REASONING") == "1"
+        )
+        self.robots_checker = robots_checker or _check_robots
         self._trace_reasoning: dict[str, bool] = {}
         self.max_repair_rounds = max(
             0,
@@ -551,6 +654,22 @@ class BuildManager:
                 raise BuildError(f"installed rule file not found: {site.rule_path}")
         if not self.rules_dir.is_dir():
             raise BuildError("rules directory is not configured")
+        entry_url = _entry_url(site)
+        product_budget = max(1, int(max_products or self.max_products))
+        second_budget = max(60, int(max_seconds or self.max_seconds))
+        resolved_proxy = (proxy or site.proxy or self.default_proxy or "").strip() or None
+        if resolved_proxy:
+            _validate_proxy(resolved_proxy)
+        try:
+            robots_allowed, robots_reason = self.robots_checker(
+                entry_url, resolved_proxy
+            )
+        except Exception as exc:
+            raise BuildError(
+                f"robots.txt check failed: {type(exc).__name__}: {exc}"
+            ) from exc
+        if not robots_allowed:
+            raise BuildError(f"robots.txt blocks the entry URL: {robots_reason}")
         with self._lock:
             active = self.service.active_build_id
             if active is not None:
@@ -559,12 +678,6 @@ class BuildManager:
             if latest is not None and latest.state in ACTIVE_BUILD_STATES:
                 raise BuildError(f"site already has an active build: {latest.build_id}")
 
-            entry_url = _entry_url(site)
-            product_budget = max(1, int(max_products or self.max_products))
-            second_budget = max(60, int(max_seconds or self.max_seconds))
-            resolved_proxy = (proxy or site.proxy or self.default_proxy or "").strip() or None
-            if resolved_proxy:
-                _validate_proxy(resolved_proxy)
             build_id = f"build-{uuid.uuid4().hex[:12]}"
             self._trace_reasoning[build_id] = bool(
                 capture_reasoning and self.reasoning_capture_enabled
@@ -761,6 +874,10 @@ class BuildManager:
             self._brief(batch, site, task),
             encoding="utf-8",
         )
+        (session.workspace.work_dir / "AGENTS.md").write_text(
+            self._agent_rules(),
+            encoding="utf-8",
+        )
 
     def _write_repair_inputs(
         self,
@@ -790,6 +907,10 @@ class BuildManager:
         )
         (input_dir / "repair-brief.md").write_text(
             self._repair_brief(batch, site, task, reason),
+            encoding="utf-8",
+        )
+        (session.workspace.work_dir / "AGENTS.md").write_text(
+            self._agent_rules(),
             encoding="utf-8",
         )
 
@@ -859,11 +980,19 @@ from scratch. The previous rule is available at
 
 Do not write outside the workspace. Do not install packages. Respect the
 request budget.
+
+## Site access and robots
+
+Fetch `/robots.txt` before other site requests. If it disallows the entry URL or
+all agents, stop and record the result in `../out/evidence/build-notes.md`; do
+not write speculative selectors. Respect disallowed paths and crawl-delay. Do
+not use archive.org or caches as a substitute for the live target.
 """
 
     def _repair_run_prompt(self, site: BatchSite, task: BuildTask) -> str:
         return (
-            "Read ../input/repair-brief.md and ../input/existing-rule.yaml, then "
+            "Read AGENTS.md, ../input/repair-brief.md and "
+            "../input/existing-rule.yaml, then "
             f"repair the existing rule for {site.site_key}. "
             f"Entry: {task.site['entry_urls'][0]}. "
             "Focus on the reported content gap and merge any description blocks "
@@ -871,6 +1000,35 @@ request budget.
             "Write ../out/plan/rule.yaml and ../out/evidence/build-notes.md, "
             "then reply briefly."
         )
+
+    def _agent_rules(self) -> str:
+        return """# Build agent operating rules
+
+Read first, in this order:
+
+1. the brief named in the prompt (`../input/build-brief.md` or
+   `../input/repair-brief.md`);
+2. `../input/reference-rule.yaml` or `../input/existing-rule.yaml`;
+3. `../input/build-task.json` when present (machine-readable target and budget).
+
+## Site access and robots
+
+- Before any other request to the target, fetch `<entry origin>/robots.txt`.
+- If robots.txt disallows the entry URL or all agents, stop. Record the result
+  in `../out/evidence/build-notes.md`; do not write speculative selectors.
+- Respect `Disallow` and `Crawl-delay` for every path. Never fetch a disallowed
+  URL.
+- Do not use archive.org, caches, search snippets, or a different origin as a
+  substitute for the live target.
+- Do not log in, pay, solve captchas, spoof a different user agent, or bypass
+  access control.
+- Stay within the brief's request and time budget; do not crawl the whole site.
+
+## Outputs
+
+Write only the files named in the brief. The rule must remain a declarative
+candidate; the host validates and installs it.
+"""
 
     def _brief(self, batch: Batch, site: BatchSite, task: BuildTask) -> str:
         entry = task.site["entry_urls"][0]
@@ -949,6 +1107,13 @@ Write these files from the workspace (`work/` is your current directory):
 
 Do not write outside the workspace. Do not install packages. Do not log in,
 pay, solve captchas or bypass access control. Respect the request budget.
+
+## Site access and robots
+
+Fetch `/robots.txt` before other site requests. If it disallows the entry URL or
+all agents, stop and record the result in `../out/evidence/build-notes.md`; do
+not write a speculative rule. Respect disallowed paths and crawl-delay. Do not
+use archive.org or caches as a substitute for the live target.
 
 A generic reference rule is at `../input/reference-rule.yaml`; adapt it, do not
 copy its site or selectors blindly.
@@ -1030,7 +1195,8 @@ domain-mismatched, or produces no valid product.
             else ""
         )
         return (
-            "Read ../input/build-brief.md and ../input/reference-rule.yaml, "
+            "Read AGENTS.md, ../input/build-brief.md and "
+            "../input/reference-rule.yaml, "
             f"then build the rule package for {site.site_key}. "
             f"Entry: {task.site['entry_urls'][0]}.{scope_note} "
             "Write ../out/plan/rule.yaml and ../out/evidence/build-notes.md, "
@@ -1560,7 +1726,10 @@ domain-mismatched, or produces no valid product.
             repairs=list(self._repairs.get(build_id, [])),
             repair_limit=self._repair_limits.get(build_id, 0),
             error=error,
-            capture_reasoning=self._trace_reasoning.get(build_id, False),
+            capture_reasoning=(
+                self._trace_reasoning.get(build_id, False)
+                and self.persist_reasoning_enabled
+            ),
         )
         out_dir = session.workspace.out_dir
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -1790,8 +1959,8 @@ domain-mismatched, or produces no valid product.
                 and (Path(record.workspace) / "out" / "trace.json").is_file()
             ),
             "reasoning_capture_enabled": self.reasoning_capture_enabled,
-            "reasoning_retained": self._trace_reasoning.get(build_id, False)
-            or bool(trace_meta.get("reasoning_retained")),
+            "reasoning_live": bool(self._trace_reasoning.get(build_id, False)),
+            "reasoning_retained": bool(trace_meta.get("reasoning_retained")),
             "repair_limit": repair_limit,
             "repair_round": len(repairs),
             "repairs": repairs,
@@ -1821,6 +1990,20 @@ domain-mismatched, or produces no valid product.
             except (OSError, json.JSONDecodeError):
                 trace = {}
             timeline, timeline_truncated = _trace_timeline(trace)
+            if not trace.get("reasoning_retained"):
+                try:
+                    live_events = self.service.event_log(build_id)
+                except KeyError:
+                    live_events = []
+                if live_events:
+                    live_timeline, _ = _live_timeline(live_events)
+                    merged = _merge_reasoning_timeline(timeline, live_timeline)
+                    if merged is not timeline:
+                        timeline_truncated = (
+                            timeline_truncated
+                            or len(merged) > TIMELINE_LIMIT
+                        )
+                        timeline = merged[-TIMELINE_LIMIT:]
             return {
                 "build_id": build_id,
                 "state": record.state,

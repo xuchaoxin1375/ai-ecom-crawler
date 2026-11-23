@@ -99,6 +99,7 @@ class BatchImportRequest(BaseModel):
 
 class BatchStartRequest(BaseModel):
     limits: Limits = Field(default_factory=Limits)
+    site_keys: list[str] = Field(default_factory=list, max_length=200)
     proxy: str | None = Field(default=None, max_length=500)
     archive_mode: Literal["off", "sample", "full"] = "off"
     archive_root: str | None = Field(default=None, max_length=1000)
@@ -1242,9 +1243,22 @@ def create_app(
                 422,
             )
         entries = _rule_entries(rules)
+        sites = store.list_batch_sites(batch_id)
+        wanted = set(payload.site_keys) if payload is not None else set()
+        if wanted:
+            known = {site.site_key for site in sites}
+            missing = sorted(wanted - known)
+            if missing:
+                raise _error(
+                    "NOT_FOUND",
+                    f"unknown batch site: {missing[0]}",
+                    404,
+                )
         accepted: list[dict[str, Any]] = []
         skipped: list[dict[str, Any]] = []
-        for site in store.list_batch_sites(batch_id):
+        for site in sites:
+            if wanted and site.site_key not in wanted:
+                continue
             item = {
                 "site_key": site.site_key,
                 "domain": site.domain,
@@ -1627,6 +1641,56 @@ def create_app(
             return build_manager.messages(build_id)
         except KeyError as exc:
             raise _error("NOT_FOUND", str(exc), 404) from exc
+
+    @app.get("/api/builds/{build_id}/events")
+    async def build_events(build_id: str, request: Request) -> StreamingResponse:
+        """Stream the visible build timeline as it grows.
+
+        The payload is the same shape as ``/messages``; the first frame is a
+        ``snapshot`` and later changes are ``timeline`` frames.  This keeps the
+        build view live without making the browser poll a large timeline every
+        few seconds.
+        """
+        require_build(build_id)
+
+        async def stream() -> Any:
+            last_fingerprint = ""
+            last_heartbeat = time.monotonic()
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    payload = await asyncio.to_thread(
+                        build_manager.messages, build_id
+                    )
+                except KeyError:
+                    yield _sse("error", {"message": "build disappeared"})
+                    break
+                fingerprint = hashlib.sha256(
+                    json.dumps(
+                        payload, ensure_ascii=False, sort_keys=True
+                    ).encode("utf-8")
+                ).hexdigest()
+                if fingerprint != last_fingerprint:
+                    event = "snapshot" if not last_fingerprint else "timeline"
+                    last_fingerprint = fingerprint
+                    yield _sse(event, payload)
+                record = store.get_build(build_id)
+                if record is None:
+                    break
+                if record.state in {"FINISHED", "CANCELLED"}:
+                    yield _sse("end", {"state": record.state})
+                    break
+                if time.monotonic() - last_heartbeat >= 15:
+                    yield ": keep-alive\n\n"
+                    last_heartbeat = time.monotonic()
+                await asyncio.sleep(0.3)
+
+        return StreamingResponse(
+            stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     @app.get("/api/builds/{build_id}/trace")
     def get_build_trace(

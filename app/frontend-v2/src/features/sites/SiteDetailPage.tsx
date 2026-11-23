@@ -31,6 +31,7 @@ import {
   resumeBuild,
   resumeTask,
   taskExportUrl,
+  type BatchActionResponse,
   type BatchDetail,
   type BatchSite,
   type BuildConfig,
@@ -68,7 +69,9 @@ import { ConfirmBatchActionDialog } from "../batches/ConfirmBatchActionDialog";
 import { BuildPanel } from "./BuildPanel";
 import { BuildStartDialog } from "./BuildStartDialog";
 import { ProductPreviewDialog } from "./ProductPreviewDialog";
+import { StartSiteDialog } from "./StartSiteDialog";
 import { TaskCsvPreview } from "./TaskCsvPreview";
+import { useBuildStream } from "./useBuildStream";
 import {
   buildIsActive,
   previewDescriptionStatus,
@@ -86,7 +89,8 @@ import {
   type SiteActionKind,
 } from "./site";
 
-type DialogKind = "" | "build" | "repair" | "cancel-task" | "cancel-build";
+type DialogKind =
+  "" | "build" | "repair" | "start-site" | "cancel-task" | "cancel-build";
 type TaskTab = "product" | "url";
 
 interface Notice {
@@ -124,6 +128,7 @@ function StepIcon({ action }: { action: SiteActionKind }) {
   if (action === "cancel-build" || action === "cancel-task") {
     return <Ban {...props} />;
   }
+  if (action === "start") return <Play {...props} />;
   if (action === "export") return <Download {...props} />;
   if (action === "batch") return <ArrowRight {...props} />;
   if (action === "none") return <Circle {...props} />;
@@ -219,7 +224,6 @@ export function SiteDetailPage() {
     siteKey: string;
     buildId: string;
   } | null>(null);
-  const [detailMode, setDetailMode] = useState(true);
   const [previewItem, setPreviewItem] = useState<TaskItem | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewTab, setPreviewTab] = useState<"image" | "description">("image");
@@ -262,11 +266,18 @@ export function SiteDetailPage() {
     void queryClient.invalidateQueries({ queryKey: ["batch", batchId] });
   }, [build, batchId, queryClient]);
 
+  const stream = useBuildStream(buildId, Boolean(buildId));
+  const streamHealthy = stream.connected || stream.ended;
+
   const messagesQuery = useQuery({
     queryKey: ["build-messages", buildId],
     queryFn: ({ signal }) => getBuildMessages(buildId ?? "", signal),
     enabled: Boolean(buildId),
-    refetchInterval: build && buildIsActive(build) ? 2000 : false,
+    refetchInterval: streamHealthy
+      ? false
+      : build && buildIsActive(build)
+        ? 2000
+        : false,
   });
 
   const configQuery = useQuery({
@@ -297,9 +308,14 @@ export function SiteDetailPage() {
     (item) => item.result.product_preview,
   );
   const step = site ? siteNextStep(site, build) : null;
-  const messages: BuildMessages | null = messagesQuery.data ?? null;
+  const messages: BuildMessages | null = stream.messages ?? messagesQuery.data ?? null;
   const config: BuildConfig | null = configQuery.data ?? null;
   const quality = task?.quality_exceptions ?? [];
+
+  function applyBatch(next: BatchDetail) {
+    queryClient.setQueryData(["batch", batchId], next);
+    void queryClient.invalidateQueries({ queryKey: ["batches"] });
+  }
 
   function invalidateBatch() {
     void queryClient.invalidateQueries({ queryKey: ["batch", batchId] });
@@ -436,6 +452,19 @@ export function SiteDetailPage() {
     });
   }
 
+  function handleStartedTask(response: BatchActionResponse) {
+    applyBatch(response.batch);
+    setDialog("");
+    const accepted = response.accepted.length;
+    const skipped = response.skipped[0];
+    setNotice({
+      tone: accepted ? "success" : "warning",
+      text: accepted
+        ? `启动请求已受理：${response.accepted[0]?.domain ?? site?.domain ?? "站点"}。`
+        : `没有站点被受理${skipped ? `：${skipped.reason}` : "。"}`,
+    });
+  }
+
   function openPreview(item: TaskItem, tab: "image" | "description") {
     setPreviewItem(item);
     setPreviewTab(tab);
@@ -460,6 +489,9 @@ export function SiteDetailPage() {
       case "cancel-build":
         setConfirmError("");
         setDialog("cancel-build");
+        break;
+      case "start":
+        setDialog("start-site");
         break;
       case "pause-task":
         void runTaskControl("pause");
@@ -671,11 +703,12 @@ export function SiteDetailPage() {
       build={build}
       messages={messages}
       config={config}
-      detailMode={detailMode}
       busy={buildBusy}
       error={buildActionError}
       refreshing={buildQuery.isFetching || messagesQuery.isFetching}
-      onToggleDetail={setDetailMode}
+      streamConnected={stream.connected}
+      streamError={stream.error}
+      streamEnded={stream.ended}
       onOpenStart={openBuild}
       onReplyDependency={(requestId, decision) =>
         void replyDependency(requestId, decision)
@@ -1168,7 +1201,7 @@ export function SiteDetailPage() {
                 }
                 description={
                   site.readiness === "ready"
-                    ? "回批次详情，启动可采站点即可创建任务。"
+                    ? "可以直接在当前页启动这个站点，任务会进入队列。"
                     : site.readiness === "needs_onboarding"
                       ? "没有匹配到受管规则包；在上方启动构建 Agent，验证通过后站点自动变为可采。"
                       : site.readiness === "building"
@@ -1176,11 +1209,18 @@ export function SiteDetailPage() {
                         : "无效和重复条目只保留在批次记录中，不创建任务、不计为失败。"
                 }
                 action={
-                  <Button asChild size="sm">
-                    <Link to={`/batches/${encodeURIComponent(batch.batch_id)}`}>
-                      返回批次详情
-                    </Link>
-                  </Button>
+                  site.readiness === "ready" ? (
+                    <Button size="sm" onClick={() => setDialog("start-site")}>
+                      <Play size={14} aria-hidden="true" />
+                      启动采集
+                    </Button>
+                  ) : (
+                    <Button asChild size="sm">
+                      <Link to={`/batches/${encodeURIComponent(batch.batch_id)}`}>
+                        返回批次详情
+                      </Link>
+                    </Button>
+                  )
                 }
               />
             </section>
@@ -1424,6 +1464,18 @@ export function SiteDetailPage() {
             if (!next) setDialog("");
           }}
           onStarted={handleStartedBuild}
+        />
+      ) : null}
+
+      {dialog === "start-site" ? (
+        <StartSiteDialog
+          open
+          batchId={batch.batch_id}
+          site={site}
+          onOpenChange={(next) => {
+            if (!next) setDialog("");
+          }}
+          onStarted={handleStartedTask}
         />
       ) : null}
 

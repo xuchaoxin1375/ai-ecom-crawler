@@ -20,6 +20,7 @@ export type SiteActionKind =
   | "pause-build"
   | "resume-build"
   | "cancel-build"
+  | "start"
   | "pause-task"
   | "resume-task"
   | "cancel-task"
@@ -181,7 +182,7 @@ export function siteNextStep(
       return {
         tone: "warning",
         title: "任务等待启动",
-        description: "排队任务不能暂停；可以取消后回批次详情重新启动。",
+        description: "排队任务不能暂停；可以取消后在当前页重新启动。",
         action: "cancel-task",
         actionLabel: "取消任务",
       };
@@ -237,9 +238,9 @@ export function siteNextStep(
     return {
       tone: "info",
       title: "站点可采，尚未启动",
-      description: "站点级不单独创建任务；回批次详情启动可采站点即可创建采集任务。",
-      action: "batch",
-      actionLabel: "回批次启动",
+      description: "在当前页启动这个站点，任务会进入队列；其他站点不受影响。",
+      action: "start",
+      actionLabel: "启动采集",
     };
   }
 

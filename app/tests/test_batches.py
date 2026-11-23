@@ -12,7 +12,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from ecom_crawler.runtime.batch import parse_site_text, parse_sites
-from ecom_crawler.runtime.models import Batch, BatchSite, Task
+from ecom_crawler.runtime.models import Batch, BatchSite, BuildRecord, Task
 from ecom_crawler.runtime.store import TaskStore
 from ecom_crawler.web.app import create_app
 
@@ -148,6 +148,14 @@ class BatchApiTests(unittest.TestCase):
             / "familidoo-d03.yaml"
         )
         shutil.copy(self.rule_source, self.rules_dir / "familidoo.yaml")
+        shutil.copy(
+            Path(__file__).parents[2]
+            / "experiments"
+            / "d03"
+            / "decohappy"
+            / "decohappy-a08.yaml",
+            self.rules_dir / "decohappy.yaml",
+        )
         self.client = TestClient(
             create_app(self.db_path, self.out_root, self.rules_dir),
             headers=CLIENT_HEADERS,
@@ -235,6 +243,69 @@ class BatchApiTests(unittest.TestCase):
         self.assertEqual(payload["batch"]["counts"]["sites"], before + 2)
         detail = self.client.get(f"/api/batches/{batch['batch_id']}").json()
         self.assertEqual(len(detail["sites"]), before + 2)
+
+    def test_start_selected_sites(self) -> None:
+        batch = self._create(
+            sites=[
+                "https://www.familidoo.fr/fr/",
+                "https://decohappy.com/fr",
+            ]
+        )["batch"]
+        batch_id = batch["batch_id"]
+        response = self.client.post(
+            f"/api/batches/{batch_id}/start",
+            json={"site_keys": ["decohappy.com"]},
+        )
+        self.assertEqual(response.status_code, 202)
+        payload = response.json()
+        self.assertEqual(len(payload["accepted"]), 1)
+        self.assertEqual(payload["accepted"][0]["site_key"], "decohappy.com")
+        detail = self.client.get(f"/api/batches/{batch_id}").json()
+        by_key = {site["site_key"]: site for site in detail["sites"]}
+        self.assertIsNotNone(by_key["decohappy.com"]["task_id"])
+        self.assertIsNone(by_key["familidoo.fr"]["task_id"])
+
+        missing = self.client.post(
+            f"/api/batches/{batch_id}/start",
+            json={"site_keys": ["missing.example"]},
+        )
+        self.assertEqual(missing.status_code, 404)
+
+        second = self.client.post(
+            f"/api/batches/{batch_id}/start",
+            json={"site_keys": ["familidoo.fr"]},
+        )
+        self.assertEqual(second.status_code, 202)
+        self.assertEqual(len(second.json()["accepted"]), 1)
+        self.assertEqual(
+            second.json()["accepted"][0]["site_key"], "familidoo.fr"
+        )
+
+    def test_build_events_stream_snapshot_and_end(self) -> None:
+        batch = self._create()["batch"]
+        build_id = "build-events"
+        self.store.create_build(
+            BuildRecord(
+                build_id=build_id,
+                batch_id=batch["batch_id"],
+                site_key="familidoo.fr",
+                state="FINISHED",
+                outcome="succeeded",
+            )
+        )
+        lines: list[str] = []
+        with self.client.stream(
+            "GET", f"/api/builds/{build_id}/events"
+        ) as response:
+            self.assertEqual(response.status_code, 200)
+            for line in response.iter_lines():
+                lines.append(line)
+                if line == "event: end":
+                    break
+        text = "\n".join(lines)
+        self.assertIn("event: snapshot", text)
+        self.assertIn("event: end", text)
+        self.assertIn('"build_id": "build-events"', text)
 
     def test_start_pause_cancel_and_archive(self) -> None:
         batch = self._create()["batch"]
