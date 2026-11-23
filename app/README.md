@@ -275,15 +275,16 @@ runtime:
 
 - `serve` 用 FastAPI 托管 `/api/*` 和 `static/`，默认 `127.0.0.1:8765`，拒绝非回环地址；`--rules-dir` 指向受管规则包目录。
 - 默认启动托管 worker（`--max-tasks` 默认 1），持有 `<db>.worker.lock`；`--no-worker` 可只读启动，便于另跑 `worker`。
-- 只读 API：`GET /api/health`、`GET /api/rules`、`GET /api/tasks`、`GET /api/tasks/{id}`、`GET /api/tasks/{id}/items?kind=url|product`、`GET /api/tasks/{id}/export`；批次与构建：`GET /api/batches`、`/api/batches/{id}`、`/api/builds`、`/api/builds/config`、`/api/builds/{id}`、`/api/builds/{id}/messages`、`/api/builds/{id}/trace`。
-- 写 API：`POST /api/tasks`（`DRAFT` + `request_id` 幂等）、`start`、`pause`、`resume`、`cancel`、`archive`、`restore`；批次与构建：`POST /api/batches`、`/api/batches/{id}/import|start|pause|cancel|archive|restore`、`/api/batches/{id}/sites/{site_key}/build`、`/api/builds/{id}/pause|resume|cancel`、`/api/builds/{id}/permissions|dependencies/{request_id}`。
+- 只读 API：`GET /api/health`、`GET /api/rules`、`GET /api/tasks`、`GET /api/tasks/{id}`、`GET /api/tasks/{id}/items?kind=url|product`、`GET /api/tasks/{id}/export`；质量反馈：`GET /api/tasks/{id}/feedback`、`GET /api/feedback`、`GET /api/feedback/{id}`；批次与构建：`GET /api/batches`、`/api/batches/{id}`、`/api/builds`、`/api/builds/config`、`/api/builds/{id}`、`/api/builds/{id}/messages`、`/api/builds/{id}/events`、`/api/builds/{id}/trace`。
+- 写 API：`POST /api/tasks`（`DRAFT` + `request_id` 幂等）、`start`、`pause`、`resume`、`cancel`、`archive`、`restore`；质量反馈：`POST /api/tasks/{id}/feedback`、`POST /api/feedback/{id}/triage`；批次与构建：`POST /api/batches`、`/api/batches/{id}/import|start|pause|cancel|archive|restore`、`/api/batches/{id}/sites/{site_key}/build`、`/api/builds/{id}/pause|resume|cancel`、`/api/builds/{id}/permissions|dependencies/{request_id}`。
+- `GET /api/openapi.json` 暴露 FastAPI OpenAPI；提交快照为 `app/schemas/openapi.json`，用 `python -m uv run --project app python app/tools/export_openapi.py` 重新生成，`tests/test_feedback.py` 会校验快照。前端用 `openapi-typescript` 从 `../schemas/openapi.json` 生成类型，不手写第二份接口契约；生成物不手改。
 - `GET /api/tasks/{id}/events` 是 SSE：连接先发 `snapshot`，再转发 `events.ndjson` 增量，终态发 `end`；断线重连以快照为准。
 - 导出 zip 只允许 `products.csv`、`task-result.json`、`records.jsonl` 和 `diagnostics/` 下的排除／失败文件；`partial=true` 才允许导出未结束任务。
 - 页面支持列表（状态、结果／覆盖、质量异常数）、创建（市场／语言由规则包确定并显示）、详情、控制按钮、计数（7 张主卡 + 完整计数行）、质量异常、商品预览（价格、币种、正文状态、缺失字段、可展开字段来源）、items 和导出；页首显示服务／worker 状态，`QUEUED` 详情显示排队原因；控制请求显示“已受理”，最终状态以账本为准；取消需二次确认。真实案例走查见 `experiments/d08/ui-preview/`（`web-946474de5cf1`，familidoo 6／6、0 失败、0 条质量异常；暂停／恢复／取消、归档／还原、导出和错误提示通过）。
 - `frontend-v2/` 构建后由 FastAPI 在 `/next/` 提供默认 React 前端，`frontend/` 构建后由 FastAPI 在 `/batch/` 提供旧 Vue 工作台；根路径 `/` 会 307 跳到 `/next/`，旧原生任务控制台移到 `/legacy`。v2 入口是 `http://127.0.0.1:<port>/next/#/batches`；`/batch/` 和 `/legacy` 只保留服务端直访兜底，不在 v2 导航中提供入口。未构建时对应路径不存在，`/` 回退到旧静态页面。
 - 托管 worker 在服务生命周期内执行 `QUEUED` 任务；服务退出时先停止领取新任务，再等待已启动任务结束。
 - `--no-worker` 时创建／启动的任务保持 `QUEUED`，需要另跑 `ecom-crawler worker`；设计门已于 2026-11-22 通过，A16 1280 已于 2026-11-23 验收；跨浏览器／读屏未测。
-- 证据：`tests/test_web.py` 覆盖健康、规则目录、列表筛选、详情、items 分页、创建幂等、控制转移、归档／还原、SSE、导出白名单和错误码。
+- 证据：`tests/test_web.py` 覆盖健康、规则目录、列表筛选、详情、items 分页、创建幂等、控制转移、归档／还原、SSE、导出白名单和错误码；`tests/test_feedback.py` 覆盖质量反馈创建幂等、终态守卫、查询／筛选、分诊和 422 envelope。
 
 ## 输入契约
 

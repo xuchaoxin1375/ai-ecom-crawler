@@ -14,6 +14,7 @@ from .models import (
     BatchSite,
     BuildRecord,
     Lease,
+    QualityFeedback,
     Task,
     WorkItem,
     json_dumps,
@@ -108,6 +109,46 @@ CREATE TABLE IF NOT EXISTS builds (
 CREATE INDEX IF NOT EXISTS idx_builds_batch_site
     ON builds(batch_id, site_key, created_at);
 
+CREATE TABLE IF NOT EXISTS quality_feedback (
+    feedback_id TEXT PRIMARY KEY,
+    request_id TEXT NOT NULL UNIQUE,
+    task_id TEXT NOT NULL,
+    batch_id TEXT,
+    site_key TEXT,
+    rule_id TEXT,
+    rule_version TEXT,
+    rule_sha256 TEXT,
+    category TEXT NOT NULL,
+    samples_json TEXT NOT NULL DEFAULT '[]',
+    expectation TEXT NOT NULL,
+    note TEXT,
+    scope TEXT NOT NULL DEFAULT 'Task-scoped review.',
+    status TEXT NOT NULL,
+    triage TEXT,
+    triage_note TEXT,
+    triage_source TEXT,
+    duplicate_of TEXT,
+    repair_build_id TEXT,
+    rerun_task_id TEXT,
+    resolution TEXT,
+    resolution_note TEXT,
+    created_by TEXT NOT NULL DEFAULT 'local-user',
+    resolved_by TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    closed_at TEXT,
+    request_json TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE INDEX IF NOT EXISTS idx_quality_feedback_task
+    ON quality_feedback(task_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_quality_feedback_site
+    ON quality_feedback(site_key, status, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_quality_feedback_status
+    ON quality_feedback(status, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS task_items (
     task_id TEXT NOT NULL,
     item_id TEXT NOT NULL,
@@ -196,6 +237,18 @@ class BatchNotFoundError(ValueError):
 
 class BatchTransitionError(ValueError):
     """Raised when a batch command is invalid for the batch's current members."""
+
+
+class FeedbackNotFoundError(ValueError):
+    """Raised when a feedback command targets an unknown feedback record."""
+
+
+class FeedbackTransitionError(ValueError):
+    """Raised when a feedback action is invalid for its current status."""
+
+
+class FeedbackRequestConflictError(ValueError):
+    """Raised when a feedback request_id is reused with a different body."""
 
 
 class TaskStore:
@@ -1568,6 +1621,212 @@ class TaskStore:
         if batch is None:
             raise BatchNotFoundError(f"unknown batch: {batch_id}")
         return batch
+
+    def create_feedback(
+        self, feedback: QualityFeedback
+    ) -> tuple[QualityFeedback, bool]:
+        """Insert feedback once per request_id and return (record, created)."""
+        with self._connect() as connection:
+            try:
+                connection.execute(
+                    """
+                    INSERT INTO quality_feedback (
+                        feedback_id, request_id, task_id, batch_id, site_key,
+                        rule_id, rule_version, rule_sha256, category, samples_json,
+                        expectation, note, scope, status, triage, triage_note,
+                        triage_source, duplicate_of, repair_build_id, rerun_task_id,
+                        resolution, resolution_note, created_by, resolved_by,
+                        created_at, updated_at, closed_at, request_json
+                    ) VALUES (
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    )
+                    """,
+                    (
+                        feedback.feedback_id,
+                        feedback.request_id,
+                        feedback.task_id,
+                        feedback.batch_id,
+                        feedback.site_key,
+                        feedback.rule_id,
+                        feedback.rule_version,
+                        feedback.rule_sha256,
+                        feedback.category,
+                        json_dumps(feedback.samples),
+                        feedback.expectation,
+                        feedback.note,
+                        feedback.scope,
+                        feedback.status,
+                        feedback.triage,
+                        feedback.triage_note,
+                        feedback.triage_source,
+                        feedback.duplicate_of,
+                        feedback.repair_build_id,
+                        feedback.rerun_task_id,
+                        feedback.resolution,
+                        feedback.resolution_note,
+                        feedback.created_by,
+                        feedback.resolved_by,
+                        feedback.created_at,
+                        feedback.updated_at,
+                        feedback.closed_at,
+                        feedback.request_json,
+                    ),
+                )
+            except sqlite3.IntegrityError:
+                row = connection.execute(
+                    "SELECT * FROM quality_feedback WHERE request_id = ?",
+                    (feedback.request_id,),
+                ).fetchone()
+                if row is None:
+                    raise
+                existing = _feedback_from_row(row)
+                if existing.request_json != feedback.request_json:
+                    raise FeedbackRequestConflictError(
+                        f"request_id {feedback.request_id!r} was used with a different body"
+                    )
+                return existing, False
+        return feedback, True
+
+    def get_feedback(self, feedback_id: str) -> QualityFeedback | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM quality_feedback WHERE feedback_id = ?",
+                (feedback_id,),
+            ).fetchone()
+        return _feedback_from_row(row) if row else None
+
+    def list_feedback(
+        self,
+        *,
+        task_id: str | None = None,
+        batch_id: str | None = None,
+        site_key: str | None = None,
+        status: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[QualityFeedback], int]:
+        clauses: list[str] = []
+        values: list[Any] = []
+        for column, value in (
+            ("task_id", task_id),
+            ("batch_id", batch_id),
+            ("site_key", site_key),
+            ("status", status),
+        ):
+            if value is not None:
+                clauses.append(f"{column} = ?")
+                values.append(value)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        with self._connect() as connection:
+            total = int(
+                connection.execute(
+                    f"SELECT COUNT(*) FROM quality_feedback{where}", values
+                ).fetchone()[0]
+            )
+            rows = connection.execute(
+                f"""
+                SELECT * FROM quality_feedback{where}
+                ORDER BY created_at DESC, feedback_id DESC
+                LIMIT ? OFFSET ?
+                """,
+                (*values, max(1, int(limit)), max(0, int(offset))),
+            ).fetchall()
+        return [_feedback_from_row(row) for row in rows], total
+
+    def triage_feedback(
+        self,
+        feedback_id: str,
+        *,
+        triage: str,
+        note: str | None = None,
+        duplicate_of: str | None = None,
+        actor: str = "local-user",
+        triage_source: str = "api",
+    ) -> QualityFeedback:
+        now = utc_now()
+        if triage == "DUPLICATE":
+            status = "WONTFIX"
+            resolution = "DUPLICATE"
+            resolved_by = actor
+            closed_at = now
+        else:
+            status = "TRIAGED"
+            resolution = None
+            resolved_by = None
+            closed_at = None
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE quality_feedback
+                SET status = ?, triage = ?, triage_note = ?, triage_source = ?,
+                    duplicate_of = ?, resolution = ?, resolved_by = ?,
+                    closed_at = ?, updated_at = ?
+                WHERE feedback_id = ? AND status IN ('OPEN', 'TRIAGED')
+                """,
+                (
+                    status,
+                    triage,
+                    note,
+                    triage_source,
+                    duplicate_of if triage == "DUPLICATE" else None,
+                    resolution,
+                    resolved_by,
+                    closed_at,
+                    now,
+                    feedback_id,
+                ),
+            )
+            if cursor.rowcount != 1:
+                exists = connection.execute(
+                    "SELECT 1 FROM quality_feedback WHERE feedback_id = ?",
+                    (feedback_id,),
+                ).fetchone()
+                if exists is None:
+                    raise FeedbackNotFoundError(f"unknown feedback: {feedback_id}")
+                raise FeedbackTransitionError(
+                    f"feedback {feedback_id} is not open for triage"
+                )
+        feedback = self.get_feedback(feedback_id)
+        if feedback is None:
+            raise FeedbackNotFoundError(f"unknown feedback: {feedback_id}")
+        return feedback
+
+
+def _feedback_from_row(row: sqlite3.Row) -> QualityFeedback:
+    samples = json_loads(row["samples_json"], [])
+    if not isinstance(samples, list):
+        samples = []
+    return QualityFeedback(
+        feedback_id=row["feedback_id"],
+        request_id=row["request_id"],
+        task_id=row["task_id"],
+        batch_id=row["batch_id"],
+        site_key=row["site_key"],
+        rule_id=row["rule_id"],
+        rule_version=row["rule_version"],
+        rule_sha256=row["rule_sha256"],
+        category=row["category"],
+        samples=[str(value) for value in samples],
+        expectation=row["expectation"],
+        note=row["note"],
+        scope=row["scope"],
+        status=row["status"],
+        triage=row["triage"],
+        triage_note=row["triage_note"],
+        triage_source=row["triage_source"],
+        duplicate_of=row["duplicate_of"],
+        repair_build_id=row["repair_build_id"],
+        rerun_task_id=row["rerun_task_id"],
+        resolution=row["resolution"],
+        resolution_note=row["resolution_note"],
+        created_by=row["created_by"],
+        resolved_by=row["resolved_by"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+        closed_at=row["closed_at"],
+        request_json=row["request_json"],
+    )
 
 
 def _lease_valid(

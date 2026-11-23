@@ -130,6 +130,31 @@ BUILD_STATES = {
     "FINISHED",
 }
 
+FEEDBACK_STATUSES = {
+    "OPEN",
+    "TRIAGED",
+    "REPAIRING",
+    "AWAITING_ACTIVATION",
+    "AWAITING_RERUN",
+    "RERUN_PENDING",
+    "RESOLVED",
+    "WONTFIX",
+}
+
+FEEDBACK_CATEGORIES = {
+    "DISCOVERY",
+    "IDENTITY",
+    "PRICE_CURRENCY_UNIT",
+    "DESCRIPTION",
+    "BASIC_FIELDS",
+    "ACCESS_RUNTIME",
+    "BUSINESS_EXPECTATION",
+    "OTHER",
+}
+
+FEEDBACK_TRIAGE = {"RULE_REPAIR", "RUNTIME", "BUSINESS", "DUPLICATE"}
+FEEDBACK_RESOLUTIONS = {"RESOLVED", "WONTFIX", "DUPLICATE"}
+
 
 @dataclass
 class BatchSite:
@@ -187,6 +212,50 @@ class BuildRecord:
             raise ValueError(f"unsupported build state: {self.state!r}")
         if self.mode not in {"build", "repair"}:
             raise ValueError(f"unsupported build mode: {self.mode!r}")
+
+
+@dataclass
+class QualityFeedback:
+    """A user's recorded judgement that a task result is not acceptable."""
+
+    feedback_id: str
+    request_id: str
+    task_id: str
+    category: str
+    expectation: str
+    status: str = "OPEN"
+    batch_id: str | None = None
+    site_key: str | None = None
+    rule_id: str | None = None
+    rule_version: str | None = None
+    rule_sha256: str | None = None
+    samples: list[str] = field(default_factory=list)
+    note: str | None = None
+    scope: str = "Task-scoped review."
+    triage: str | None = None
+    triage_note: str | None = None
+    triage_source: str | None = None
+    duplicate_of: str | None = None
+    repair_build_id: str | None = None
+    rerun_task_id: str | None = None
+    resolution: str | None = None
+    resolution_note: str | None = None
+    created_by: str = "local-user"
+    resolved_by: str | None = None
+    created_at: str = field(default_factory=utc_now)
+    updated_at: str = field(default_factory=utc_now)
+    closed_at: str | None = None
+    request_json: str = ""
+
+    def __post_init__(self) -> None:
+        if self.status not in FEEDBACK_STATUSES:
+            raise ValueError(f"unsupported feedback status: {self.status!r}")
+        if self.category not in FEEDBACK_CATEGORIES:
+            raise ValueError(f"unsupported feedback category: {self.category!r}")
+        if self.triage is not None and self.triage not in FEEDBACK_TRIAGE:
+            raise ValueError(f"unsupported feedback triage: {self.triage!r}")
+        if self.resolution is not None and self.resolution not in FEEDBACK_RESOLUTIONS:
+            raise ValueError(f"unsupported feedback resolution: {self.resolution!r}")
 
 
 @dataclass

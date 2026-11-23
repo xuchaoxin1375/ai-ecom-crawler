@@ -21,6 +21,7 @@ from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import (
     FileResponse,
     JSONResponse,
@@ -38,11 +39,21 @@ from ..executor.runner import CSV_COLUMNS
 from ..harness.adapter import HarnessStateError
 from ..model import ContractError
 from ..runtime.batch import parse_site_text, parse_sites, rule_domains
-from ..runtime.models import Batch, BatchSite, Task, WorkItem, utc_now
+from ..runtime.models import (
+    Batch,
+    BatchSite,
+    QualityFeedback,
+    Task,
+    WorkItem,
+    utc_now,
+)
 from ..runtime.rule import RuleError, load_rule
 from ..runtime.store import (
     BatchNotFoundError,
     BatchTransitionError,
+    FeedbackNotFoundError,
+    FeedbackRequestConflictError,
+    FeedbackTransitionError,
     RequestConflictError,
     TaskNotFoundError,
     TaskStore,
@@ -78,6 +89,95 @@ class CreateTaskRequest(BaseModel):
     task_type: Literal["product", "discovery"] = "product"
     limits: Limits = Field(default_factory=Limits)
     proxy: str | None = Field(default=None, max_length=500)
+
+
+FeedbackCategory = Literal[
+    "DISCOVERY",
+    "IDENTITY",
+    "PRICE_CURRENCY_UNIT",
+    "DESCRIPTION",
+    "BASIC_FIELDS",
+    "ACCESS_RUNTIME",
+    "BUSINESS_EXPECTATION",
+    "OTHER",
+]
+FeedbackStatus = Literal[
+    "OPEN",
+    "TRIAGED",
+    "REPAIRING",
+    "AWAITING_ACTIVATION",
+    "AWAITING_RERUN",
+    "RERUN_PENDING",
+    "RESOLVED",
+    "WONTFIX",
+]
+FeedbackTriage = Literal["RULE_REPAIR", "RUNTIME", "BUSINESS", "DUPLICATE"]
+FeedbackResolution = Literal["RESOLVED", "WONTFIX", "DUPLICATE"]
+
+
+class FeedbackCreateRequest(BaseModel):
+    request_id: str = Field(min_length=1, max_length=200)
+    category: FeedbackCategory
+    samples: list[str] = Field(default_factory=list, max_length=50)
+    expectation: str = Field(min_length=1, max_length=2000)
+    note: str | None = Field(default=None, max_length=2000)
+    scope: str | None = Field(default=None, max_length=500)
+    created_by: str | None = Field(default=None, max_length=120)
+
+
+class FeedbackTriageRequest(BaseModel):
+    request_id: str | None = Field(default=None, max_length=200)
+    triage: FeedbackTriage
+    note: str | None = Field(default=None, max_length=2000)
+    duplicate_of: str | None = Field(default=None, max_length=200)
+    actor: str | None = Field(default=None, max_length=120)
+
+
+class FeedbackRuleRef(BaseModel):
+    rule_id: str
+    rule_version: str | None = None
+    sha256: str | None = None
+
+
+class FeedbackRecord(BaseModel):
+    feedback_id: str
+    task_id: str
+    batch_id: str | None = None
+    site_key: str | None = None
+    category: FeedbackCategory
+    samples: list[str]
+    expectation: str
+    note: str | None = None
+    scope: str
+    status: FeedbackStatus
+    triage: FeedbackTriage | None = None
+    triage_note: str | None = None
+    triage_source: str | None = None
+    duplicate_of: str | None = None
+    repair_build_id: str | None = None
+    rerun_task_id: str | None = None
+    resolution: FeedbackResolution | None = None
+    resolution_note: str | None = None
+    created_by: str
+    resolved_by: str | None = None
+    created_at: str
+    updated_at: str
+    closed_at: str | None = None
+    rule: FeedbackRuleRef | None = None
+
+
+class FeedbackCreateResponse(BaseModel):
+    created: bool
+    feedback: FeedbackRecord
+
+
+class FeedbackListResponse(BaseModel):
+    total: int
+    items: list[FeedbackRecord]
+
+
+class FeedbackTriageResponse(BaseModel):
+    feedback: FeedbackRecord
 
 
 class BatchCreateRequest(BaseModel):
@@ -148,6 +248,61 @@ def _mask_proxy(value: str | None) -> str | None:
         port = f":{parsed.port}" if parsed.port else ""
         return f"{parsed.scheme}://***@{host}{port}"
     return value
+
+
+def _valid_http_url(value: str) -> bool:
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return False
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def _rule_sha256(rules_dir: Path | None, rule_path: str | None) -> str | None:
+    if rules_dir is None or not rule_path:
+        return None
+    root = rules_dir.resolve()
+    path = (rules_dir / rule_path).resolve()
+    if not path.is_relative_to(root) or not path.is_file():
+        return None
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _feedback_payload(feedback: QualityFeedback) -> FeedbackRecord:
+    return FeedbackRecord(
+        feedback_id=feedback.feedback_id,
+        task_id=feedback.task_id,
+        batch_id=feedback.batch_id,
+        site_key=feedback.site_key,
+        category=feedback.category,
+        samples=list(feedback.samples),
+        expectation=feedback.expectation,
+        note=feedback.note,
+        scope=feedback.scope,
+        status=feedback.status,
+        triage=feedback.triage,
+        triage_note=feedback.triage_note,
+        triage_source=feedback.triage_source,
+        duplicate_of=feedback.duplicate_of,
+        repair_build_id=feedback.repair_build_id,
+        rerun_task_id=feedback.rerun_task_id,
+        resolution=feedback.resolution,
+        resolution_note=feedback.resolution_note,
+        created_by=feedback.created_by,
+        resolved_by=feedback.resolved_by,
+        created_at=feedback.created_at,
+        updated_at=feedback.updated_at,
+        closed_at=feedback.closed_at,
+        rule=(
+            FeedbackRuleRef(
+                rule_id=feedback.rule_id,
+                rule_version=feedback.rule_version,
+                sha256=feedback.rule_sha256,
+            )
+            if feedback.rule_id
+            else None
+        ),
+    )
 
 
 def _load_result(out_root: Path, task_id: str) -> dict[str, Any]:
@@ -416,7 +571,7 @@ def create_app(
         version=__version__,
         docs_url=None,
         redoc_url=None,
-        openapi_url=None,
+        openapi_url="/api/openapi.json",
         lifespan=lifespan,
     )
     app.state.store = store
@@ -449,6 +604,29 @@ def create_app(
                     "code": detail.get("code", "ERROR"),
                     "message": detail.get("message", str(exc.detail)),
                     "details": {},
+                }
+            },
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        errors = [
+            {
+                "loc": list(error.get("loc", [])),
+                "msg": str(error.get("msg", "")),
+                "type": str(error.get("type", "")),
+            }
+            for error in exc.errors()
+        ]
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": {
+                    "code": "VALIDATION_ERROR",
+                    "message": "request validation failed",
+                    "details": {"errors": errors},
                 }
             },
         )
@@ -1124,6 +1302,171 @@ def create_app(
             media_type="application/zip",
             headers=headers,
         )
+
+    @app.post(
+        "/api/tasks/{task_id}/feedback",
+        status_code=201,
+        response_model=FeedbackCreateResponse,
+        responses={200: {"model": FeedbackCreateResponse}},
+    )
+    def create_task_feedback(
+        task_id: str, payload: FeedbackCreateRequest, response: Response
+    ) -> FeedbackCreateResponse:
+        task = require_task(task_id)
+        if task.state not in {"FINISHED", "CANCELLED"}:
+            raise _error(
+                "INVALID_TASK_STATE",
+                "feedback requires a finished or cancelled task",
+                409,
+            )
+        samples = [sample.strip() for sample in payload.samples]
+        if any(not sample or not _valid_http_url(sample) for sample in samples):
+            raise _error(
+                "VALIDATION_ERROR",
+                "samples must be non-empty http or https URLs",
+                400,
+            )
+        expectation = payload.expectation.strip()
+        if not expectation:
+            raise _error("VALIDATION_ERROR", "expectation must not be empty", 400)
+        if not samples and payload.category not in {"BUSINESS_EXPECTATION", "OTHER"}:
+            raise _error(
+                "VALIDATION_ERROR",
+                "this category requires at least one sample URL",
+                400,
+            )
+        now = utc_now()
+        request_json = json.dumps(
+            {"task_id": task_id, **payload.model_dump()},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        feedback = QualityFeedback(
+            feedback_id=f"fb-{uuid.uuid4().hex[:12]}",
+            request_id=payload.request_id,
+            task_id=task_id,
+            category=payload.category,
+            expectation=expectation,
+            batch_id=task.batch_id,
+            site_key=task.site_key,
+            rule_id=task.plan_id,
+            rule_version=task.plan_version,
+            rule_sha256=_rule_sha256(rules, task.rule_path),
+            samples=samples,
+            note=payload.note,
+            scope=payload.scope or "Task-scoped review.",
+            created_by=payload.created_by or "local-user",
+            created_at=now,
+            updated_at=now,
+            request_json=request_json,
+        )
+        try:
+            record, created = store.create_feedback(feedback)
+        except FeedbackRequestConflictError as exc:
+            raise _error("CONFLICT", str(exc), 409) from exc
+        response.status_code = 201 if created else 200
+        return FeedbackCreateResponse(
+            created=created,
+            feedback=_feedback_payload(record),
+        )
+
+    @app.get(
+        "/api/tasks/{task_id}/feedback",
+        response_model=FeedbackListResponse,
+    )
+    def list_task_feedback(
+        task_id: str,
+        status: Annotated[str | None, Query(max_length=30)] = None,
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+        offset: Annotated[int, Query(ge=0)] = 0,
+    ) -> FeedbackListResponse:
+        require_task(task_id)
+        items, total = store.list_feedback(
+            task_id=task_id,
+            status=status.strip().upper() if status else None,
+            limit=limit,
+            offset=offset,
+        )
+        return FeedbackListResponse(
+            total=total,
+            items=[_feedback_payload(item) for item in items],
+        )
+
+    @app.get("/api/feedback", response_model=FeedbackListResponse)
+    def list_feedback(
+        task_id: Annotated[str | None, Query(max_length=200)] = None,
+        batch_id: Annotated[str | None, Query(max_length=200)] = None,
+        site_key: Annotated[str | None, Query(max_length=200)] = None,
+        status: Annotated[str | None, Query(max_length=30)] = None,
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+        offset: Annotated[int, Query(ge=0)] = 0,
+    ) -> FeedbackListResponse:
+        items, total = store.list_feedback(
+            task_id=task_id,
+            batch_id=batch_id,
+            site_key=site_key,
+            status=status.strip().upper() if status else None,
+            limit=limit,
+            offset=offset,
+        )
+        return FeedbackListResponse(
+            total=total,
+            items=[_feedback_payload(item) for item in items],
+        )
+
+    @app.get("/api/feedback/{feedback_id}", response_model=FeedbackRecord)
+    def get_feedback(feedback_id: str) -> FeedbackRecord:
+        feedback = store.get_feedback(feedback_id)
+        if feedback is None:
+            raise _error("FEEDBACK_NOT_FOUND", f"unknown feedback: {feedback_id}", 404)
+        return _feedback_payload(feedback)
+
+    @app.post(
+        "/api/feedback/{feedback_id}/triage",
+        response_model=FeedbackTriageResponse,
+    )
+    def triage_feedback(
+        feedback_id: str, payload: FeedbackTriageRequest
+    ) -> FeedbackTriageResponse:
+        if payload.triage == "DUPLICATE":
+            if not payload.duplicate_of:
+                raise _error(
+                    "VALIDATION_ERROR",
+                    "duplicate_of is required for DUPLICATE triage",
+                    400,
+                )
+            if payload.duplicate_of == feedback_id:
+                raise _error(
+                    "VALIDATION_ERROR",
+                    "feedback cannot duplicate itself",
+                    400,
+                )
+            if store.get_feedback(payload.duplicate_of) is None:
+                raise _error(
+                    "VALIDATION_ERROR",
+                    f"unknown duplicate_of feedback: {payload.duplicate_of}",
+                    400,
+                )
+        elif payload.duplicate_of:
+            raise _error(
+                "VALIDATION_ERROR",
+                "duplicate_of is only allowed with DUPLICATE triage",
+                400,
+            )
+        try:
+            feedback = store.triage_feedback(
+                feedback_id,
+                triage=payload.triage,
+                note=payload.note,
+                duplicate_of=payload.duplicate_of,
+                actor=payload.actor or "local-user",
+            )
+        except FeedbackNotFoundError as exc:
+            raise _error("FEEDBACK_NOT_FOUND", str(exc), 404) from exc
+        except FeedbackTransitionError as exc:
+            raise _error("INVALID_FEEDBACK_STATE", str(exc), 409) from exc
+        return FeedbackTriageResponse(feedback=_feedback_payload(feedback))
 
     @app.get("/api/batches")
     def list_batches(
