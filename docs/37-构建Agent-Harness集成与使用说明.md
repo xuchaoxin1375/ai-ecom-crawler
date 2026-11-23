@@ -1,7 +1,7 @@
 ---
 title: 构建 Agent Harness 集成与使用说明
 document_type: technical-guide
-status: active
+status: provisional
 updated: 2026-11-23
 ---
 
