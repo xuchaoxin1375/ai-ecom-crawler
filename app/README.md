@@ -77,6 +77,35 @@ python -m patchright install chromium
 
 `real_chrome: true` 时使用系统 Chrome／Edge，不依赖 Patchright 的 Chromium 下载。
 
+## 启动项目
+
+本地入口同时提供 Web UI、API 和托管 worker；`serve` 默认绑定 `127.0.0.1:8765`，端口固定使用 8765，不要为绕开占用换端口。`--db` 和 `--out-root` 必填；`--rules-dir` 用于规则匹配、任务创建和站点构建，不配置时页面只能查看已有任务。
+
+前置：
+
+- Python 3.11+ 与 `uv`；本项目命令统一用 `python -m uv`，不假设 `uv` 在 PATH。
+- `frontend-v2/dist` 不提交；没有构建产物时 `/next/` 不存在，`/` 回退旧静态页。
+- 浏览器采集需要 Chromium：`python -m patchright install chromium`；只跑静态规则时可不装。
+
+首次或前端代码变更后构建 v2：
+
+```powershell
+cd app/frontend-v2
+npm install
+npm run build
+cd ..\..
+```
+
+启动服务（数据放仓库外，路径替换为本机证据库）：
+
+```powershell
+$data = "C:\path\to\evidence\workbench"
+New-Item -ItemType Directory -Force -Path $data, "$data\out", "$data\rules" | Out-Null
+python -m uv run --project app ecom-crawler serve --db "$data\tasks.db" --out-root "$data\out" --rules-dir "$data\rules" --port 8765
+```
+
+打开 `http://127.0.0.1:8765/next/#/batches`。根路径 `/` 在 v2 构建产物存在时 307 跳到 `/next/`，旧 Vue 工作台在 `/batch/`（已弃用），旧原生控制台在 `/legacy`。停止用 `Ctrl+C`；重启前先停旧实例并继续使用 8765。服务启动后才构建 `frontend-v2/dist` 时，`/next/` 要重启服务才可用。
+
 ## CLI
 
 ```powershell
