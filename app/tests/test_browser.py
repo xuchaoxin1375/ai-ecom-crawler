@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import threading
 import unittest
@@ -390,6 +391,47 @@ class HybridRoutingTests(unittest.TestCase):
 
 @unittest.skipUnless(BROWSER_AVAILABLE, "Patchright Chromium is not installed")
 class BrowserIntegrationTests(unittest.TestCase):
+    def _assert_valid_products(
+        self, result: Any, root: Path, expected: int = 1
+    ) -> None:
+        task_result = result.task_result
+        counts = task_result.get("counts") or {}
+        if counts.get("valid_products") == expected:
+            return
+        store = TaskStore(root / "tasks.db")
+        detail = {
+            "counts": counts,
+            "state": task_result.get("state"),
+            "outcome": task_result.get("outcome"),
+            "stop_reason": task_result.get("stop_reason"),
+            "failure_classes": task_result.get("failure_classes"),
+            "runtime": task_result.get("runtime"),
+            "navigation": [
+                {
+                    "url": item.url,
+                    "state": item.state,
+                    "attempts": item.attempts,
+                    "failure_class": item.failure_class,
+                    "result": item.result,
+                }
+                for item in store.items("browser-fixture", "navigation")
+            ],
+            "products": [
+                {
+                    "url": item.url,
+                    "state": item.state,
+                    "attempts": item.attempts,
+                    "failure_class": item.failure_class,
+                    "result": item.result,
+                }
+                for item in store.items("browser-fixture", "product")
+            ],
+        }
+        self.fail(
+            f"valid_products={counts.get('valid_products')} != {expected}: "
+            + json.dumps(detail, ensure_ascii=False, sort_keys=True)
+        )
+
     def test_javascript_product_runs_through_browser_and_cleans_up(self) -> None:
         with tempfile.TemporaryDirectory() as temporary, fixture_server() as base:
             root = Path(temporary)
@@ -414,7 +456,7 @@ class BrowserIntegrationTests(unittest.TestCase):
             )
             task_result = result.task_result
             self.assertEqual(task_result["state"], "FINISHED")
-            self.assertEqual(task_result["counts"]["valid_products"], 1)
+            self._assert_valid_products(result, root)
             self.assertEqual(task_result["stop_reason"], "NATURAL_END")
             self.assertTrue(task_result["runtime"]["browser"]["launched"])
             self.assertEqual(task_result["runtime"]["fetch_engines"], ["browser"])
