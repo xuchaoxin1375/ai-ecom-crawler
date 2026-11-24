@@ -42,7 +42,7 @@ npm run format:check
 
 - FastAPI 根路径 307 到 `/next/`；`/next/` 返回 v2 构建。v2 导航已移除旧版工作台、旧版任务列表、技术兜底和“返回旧版”入口；`/batch/`、`/legacy` 仅保留为服务端直访兜底，不在 v2 界面出现。
 - 全量启动通过浏览器请求拦截核对：启动请求的 `limits` 为 `{max_urls:null, max_products:null, max_seconds:null, max_attempts:2}`，不再发送 8000／3000／14400；`archive_mode=sample`、`archive_sample_limit=20`。后端 `test_web`／`test_execution`、`test_batches` 和 `test_feedback` 用例通过，覆盖 `Limits` 空值、`build_task` 持久化、无上限运行器哨兵、继续导入写入、单站点启动、构建 SSE 快照／结束、任务批次／站点过滤和反馈分诊。
-- `lint`、`typecheck`、`test`（46 个用例）、`build`、`format:check` 通过；首屏 JS 约 218 KB gzip，Vite 仍提示单 chunk 超过 500 KB。
+- `lint`、`typecheck`、`test`（47 个用例）、`build`、`format:check` 通过；首屏 JS 约 218 KB gzip，Vite 仍提示单 chunk 超过 500 KB。
 - 本地临时账本 10+ 个批次（合成站点列表，仅用于布局和状态走查，未入库）：1280／1440 无页面级横向溢出；列表筛选“草稿”后 4 行，搜索“德国”后 1 行；筛选写入 URL。
 - 加载骨架、空态、读取失败、重试、刷新和“包含归档”状态已走查；错误态不再显示“还没有批次”。
 - 新建批次弹窗：`?new=1` 可打开并聚焦名称；空名称校验聚焦首错；预览 2 可采／1 待接入／1 无效；保存草稿后关闭弹窗、留在列表、刷新并显示提示；保存并启动受理 1 个站点；Esc 可关闭。

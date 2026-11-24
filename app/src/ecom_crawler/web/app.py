@@ -436,19 +436,51 @@ def _load_result(out_root: Path, task_id: str) -> dict[str, Any]:
 def _counts(store: TaskStore, task: Task, result: dict[str, Any]) -> dict[str, int]:
     raw = result.get("counts")
     if isinstance(raw, dict) and raw:
-        return {
+        counts = {
             str(key): int(value)
             for key, value in raw.items()
             if isinstance(value, int) and not isinstance(value, bool)
         }
-    items = store.item_counts(task.task_id)
-    return {
-        "pending": items.get("PENDING", 0),
-        "in_flight": items.get("IN_FLIGHT", 0),
-        "valid_products": items.get("DONE", 0),
-        "excluded": items.get("EXCLUDED", 0),
-        "failed": items.get("FAILED", 0),
-    }
+    else:
+        items = store.item_counts(task.task_id)
+        navigation = store.item_counts(task.task_id, "navigation")
+        products = store.item_counts(task.task_id, "product")
+        product_total = sum(products.values())
+        pending = products.get("PENDING", 0) + products.get("IN_FLIGHT", 0)
+        processed = (
+            products.get("DONE", 0)
+            + products.get("EXCLUDED", 0)
+            + products.get("FAILED", 0)
+        )
+        if task.task_type == "discovery":
+            counts = {
+                "navigation_urls": sum(navigation.values()),
+                "discovered_urls": sum(items.values()),
+                "url_candidates": product_total,
+                "pending_urls": pending,
+                "valid_urls": products.get("DONE", 0),
+                "excluded_urls": products.get("EXCLUDED", 0),
+                "failed_urls": products.get("FAILED", 0),
+            }
+        else:
+            counts = {
+                "navigation_urls": sum(navigation.values()),
+                "discovered_urls": sum(items.values()),
+                "product_candidates": product_total,
+                "pending_products": pending,
+                "in_flight_products": products.get("IN_FLIGHT", 0),
+                "processed_products": processed,
+                "valid_products": products.get("DONE", 0),
+                "excluded_products": products.get("EXCLUDED", 0),
+                "failed_products": products.get("FAILED", 0),
+                "partial_description_products": 0,
+            }
+    # The retired Vue console reads the short aliases; v2 reads canonical names.
+    counts.setdefault("pending", counts.get("pending_products", 0))
+    counts.setdefault("in_flight", counts.get("in_flight_products", 0))
+    counts.setdefault("excluded", counts.get("excluded_products", 0))
+    counts.setdefault("failed", counts.get("failed_products", 0))
+    return counts
 
 
 def _summary(store: TaskStore, task: Task, out_root: Path) -> dict[str, Any]:

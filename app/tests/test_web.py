@@ -206,6 +206,90 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(detail.json()["plan_id"], "fixture-web")
         self.assertEqual(self.client.get("/api/tasks/missing").status_code, 404)
 
+    def test_live_task_counts_use_canonical_keys(self) -> None:
+        self.store.create_task(make_task("task-running", state="RUNNING"))
+        for index, state in enumerate(
+            ("DONE", "PENDING", "IN_FLIGHT", "EXCLUDED", "FAILED")
+        ):
+            self.store.add_item(
+                WorkItem(
+                    task_id="task-running",
+                    item_id=f"running-product-{index}",
+                    item_type="product",
+                    url=f"https://fixture.test/live/{index}.html",
+                    normalized_url=f"https://fixture.test/live/{index}.html",
+                    state=state,
+                    stage="product",
+                )
+            )
+        self.store.add_item(
+            WorkItem(
+                task_id="task-running",
+                item_id="running-nav",
+                item_type="navigation",
+                url="https://fixture.test/live",
+                normalized_url="https://fixture.test/live",
+                state="DONE",
+                stage="discover",
+            )
+        )
+        counts = self.client.get("/api/tasks/task-running").json()["counts"]
+        self.assertEqual(counts["navigation_urls"], 1)
+        self.assertEqual(counts["discovered_urls"], 6)
+        self.assertEqual(counts["product_candidates"], 5)
+        self.assertEqual(counts["pending_products"], 2)
+        self.assertEqual(counts["in_flight_products"], 1)
+        self.assertEqual(counts["processed_products"], 3)
+        self.assertEqual(counts["valid_products"], 1)
+        self.assertEqual(counts["excluded_products"], 1)
+        self.assertEqual(counts["failed_products"], 1)
+        self.assertEqual(counts["partial_description_products"], 0)
+        self.assertEqual(counts["pending"], 2)
+        self.assertEqual(counts["in_flight"], 1)
+        self.assertEqual(counts["excluded"], 1)
+        self.assertEqual(counts["failed"], 1)
+
+        self.store.create_task(
+            make_task(
+                "task-discovery-running",
+                state="RUNNING",
+                task_type="discovery",
+            )
+        )
+        for index, state in enumerate(("DONE", "PENDING", "EXCLUDED", "FAILED")):
+            self.store.add_item(
+                WorkItem(
+                    task_id="task-discovery-running",
+                    item_id=f"running-url-{index}",
+                    item_type="product",
+                    url=f"https://fixture.test/discovery/{index}.html",
+                    normalized_url=f"https://fixture.test/discovery/{index}.html",
+                    state=state,
+                    stage="discover",
+                )
+            )
+        self.store.add_item(
+            WorkItem(
+                task_id="task-discovery-running",
+                item_id="discovery-nav",
+                item_type="navigation",
+                url="https://fixture.test/discovery",
+                normalized_url="https://fixture.test/discovery",
+                state="DONE",
+                stage="discover",
+            )
+        )
+        discovery = self.client.get(
+            "/api/tasks/task-discovery-running"
+        ).json()["counts"]
+        self.assertEqual(discovery["navigation_urls"], 1)
+        self.assertEqual(discovery["discovered_urls"], 5)
+        self.assertEqual(discovery["url_candidates"], 4)
+        self.assertEqual(discovery["pending_urls"], 1)
+        self.assertEqual(discovery["valid_urls"], 1)
+        self.assertEqual(discovery["excluded_urls"], 1)
+        self.assertEqual(discovery["failed_urls"], 1)
+
     def test_list_filters_by_batch_and_site(self) -> None:
         self.store.create_task(
             make_task(

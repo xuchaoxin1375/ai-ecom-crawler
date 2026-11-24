@@ -868,39 +868,37 @@ export function getTaskCsv(
   );
 }
 
-export function pauseTask(taskId: string): Promise<TaskSummary> {
-  return sendJson<TaskSummary>(
-    `/api/tasks/${encodeURIComponent(taskId)}/pause`,
+async function controlTask(
+  taskId: string,
+  action: "pause" | "resume" | "cancel" | "archive" | "restore",
+): Promise<TaskSummary> {
+  await sendJson<{ accepted?: boolean; state?: string }>(
+    `/api/tasks/${encodeURIComponent(taskId)}/${action}`,
     "POST",
   );
+  // Control endpoints return an acknowledgement, not the task summary. Read
+  // the task back so callers can keep using the full counts/rule payload.
+  return getTask(taskId);
+}
+
+export function pauseTask(taskId: string): Promise<TaskSummary> {
+  return controlTask(taskId, "pause");
 }
 
 export function resumeTask(taskId: string): Promise<TaskSummary> {
-  return sendJson<TaskSummary>(
-    `/api/tasks/${encodeURIComponent(taskId)}/resume`,
-    "POST",
-  );
+  return controlTask(taskId, "resume");
 }
 
 export function cancelTask(taskId: string): Promise<TaskSummary> {
-  return sendJson<TaskSummary>(
-    `/api/tasks/${encodeURIComponent(taskId)}/cancel`,
-    "POST",
-  );
+  return controlTask(taskId, "cancel");
 }
 
 export function archiveTask(taskId: string): Promise<TaskSummary> {
-  return sendJson<TaskSummary>(
-    `/api/tasks/${encodeURIComponent(taskId)}/archive`,
-    "POST",
-  );
+  return controlTask(taskId, "archive");
 }
 
 export function restoreTask(taskId: string): Promise<TaskSummary> {
-  return sendJson<TaskSummary>(
-    `/api/tasks/${encodeURIComponent(taskId)}/restore`,
-    "POST",
-  );
+  return controlTask(taskId, "restore");
 }
 
 export function getTaskFeedback(
