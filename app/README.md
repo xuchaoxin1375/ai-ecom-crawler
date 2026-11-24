@@ -46,7 +46,7 @@
 
 - 虚拟列表、任意点击序列和 POST／GraphQL；当前 `load_more`／`infinite_scroll` 只支持追加型列表，内部滚动容器（`container`）的追加型列表已有本地 fixture。
 - 跨进程 A20 的真实资源配额和浏览器实例配额；跨机租约为 v1 外，当前租约在单机 SQLite 上验证。
-- 永久移除、异步残留回收、跨重启构建会话恢复；站点级构建入口、验证失败自动修复 1 轮、构建记录列表／详情、失败构建手动继续和权限／依赖审批已接入。真实 OpenCode 模型循环中的 `request_dependency` 工具调用仍未验证。A16 1280 已于 2026-11-23 验收，跨浏览器／读屏未测。
+- 永久移除、异步残留回收、跨重启构建会话恢复；站点级构建入口、验证失败自动修复 1 轮、构建记录列表／详情、失败构建手动继续和权限／依赖审批已接入。真实模型 `request_dependency` 调用已走查，生产安装器仍需显式 opt-in。A16 1280 已于 2026-11-23 验收；Chromium／Edge／Firefox／Playwright WebKit 四引擎已自验，真实 Safari／读屏未测。
 - 跨机浏览器孤儿回收为 v1 外；本机强杀 worker 后的租约接管已演练，浏览器进程和 profile 会被回收。
 
 ## 布局
@@ -286,7 +286,7 @@ runtime:
 - 页面支持列表（状态、结果／覆盖、质量异常数）、创建（市场／语言由规则包确定并显示）、详情、控制按钮、计数（7 张主卡 + 完整计数行）、质量异常、商品预览（价格、币种、正文状态、缺失字段、可展开字段来源）、items 和导出；页首显示服务／worker 状态，`QUEUED` 详情显示排队原因；控制请求显示“已受理”，最终状态以账本为准；取消需二次确认。真实案例走查见 `experiments/d08/ui-preview/`（`web-946474de5cf1`，familidoo 6／6、0 失败、0 条质量异常；暂停／恢复／取消、归档／还原、导出和错误提示通过）。
 - `frontend-v2/` 构建后由 FastAPI 在 `/next/` 提供默认 React 前端；`frontend/` 与旧原生控制台默认下线，`ECOM_LEGACY_UI=on` 时才在 `/batch/`、`/legacy` 恢复直访回退。v2 入口是 `http://127.0.0.1:<port>/next/#/batches`，任务入口是 `/next/#/tasks`，构建记录是 `/next/#/builds`；`/batch/` 和 `/legacy` 不在 v2 导航中提供入口。v2 未构建且旧版关闭时，`/` 返回 503 `UI_NOT_BUILT`，提示先构建 `frontend-v2/dist`。
 - 托管 worker 在服务生命周期内执行 `QUEUED` 任务；服务退出时先停止领取新任务，再等待已启动任务结束。
-- `--no-worker` 时创建／启动的任务保持 `QUEUED`，需要另跑 `ecom-crawler worker`；设计门已于 2026-11-22 通过，A16 1280 已于 2026-11-23 验收；跨浏览器／读屏未测。
+- `--no-worker` 时创建／启动的任务保持 `QUEUED`，需要另跑 `ecom-crawler worker`；设计门已于 2026-11-22 通过，A16 1280 已于 2026-11-23 验收；四引擎跨浏览器已自验，真实 Safari／读屏未测。
 - 证据：`tests/test_web.py` 覆盖健康、规则目录、列表筛选、详情、items 分页、创建幂等、控制转移、归档／还原、SSE、导出白名单和错误码；`tests/test_feedback.py` 覆盖质量反馈创建幂等、终态守卫、查询／筛选、分诊和 422 envelope；v2 任务页的筛选、导出、归档和反馈逻辑由 `src/features/tasks/task.test.ts` 与浏览器实机走查覆盖。
 
 ## 输入契约
