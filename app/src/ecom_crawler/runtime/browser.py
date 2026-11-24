@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 import socket
 import subprocess
@@ -577,6 +578,14 @@ class BrowserFetcher:
         ]
         if self.config.launch.headless:
             args.insert(1, "--headless=new")
+        if (
+            os.environ.get("GITHUB_ACTIONS") == "true"
+            and self._browser_name == "chromium"
+        ):
+            # GitHub Actions' Ubuntu 24.04 AppArmor policy blocks the user
+            # namespaces Playwright's bundled Chromium needs for its sandbox.
+            # Keep the sandbox outside CI; CI only fetches local fixtures.
+            args.insert(1, "--no-sandbox")
         if self.config.launch.locale:
             locale = self.config.launch.locale
             args.extend([f"--lang={locale}", f"--accept-lang={locale}"])
@@ -759,8 +768,6 @@ def _free_port() -> int:
 
 
 def _system_browser_candidates() -> list[Path]:
-    import os
-
     candidates: list[Path] = []
     for env_name in ("ECOM_CHROME_PATH", "CHROME_PATH"):
         value = os.environ.get(env_name)
