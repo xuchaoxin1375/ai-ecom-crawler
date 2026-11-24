@@ -2,7 +2,7 @@
 title: 电商采集项目核心
 document_type: business-core
 status: active
-updated: 2026-11-23
+updated: 2026-11-25
 ---
 
 ## 用途与适用范围
@@ -72,6 +72,7 @@ updated: 2026-11-23
 | 参考 | [编号与代号索引](36-编号与代号索引.md) | D／A／R／S／T／C／J／G、文档序号、ADR、实验目录和运行期编号的集中解释、定义出处与易混对照；不记录完成状态 |
 | 按需 | [构建 Agent Harness 集成与使用说明](37-构建Agent-Harness集成与使用说明.md) | 当前 OpenCode 集成、工作区、skills／MCP／网络、权限、使用注意和排障；Provisional |
 | 按需 | [未见站构建试点计划](38-未见站构建试点计划.md) | 3 个未见站的固定模型、预算、执行步骤、失败分类、成功判据和成本记录口径；Proposed，待费用和隔离确认 |
+| 按需 | [站点详情改版设计](39-站点详情改版设计.md) | 推广计划阶段 2 的首屏线框、操作位置、状态表、视图去向、深链接和待确认决策；Proposed，确认后才实施 |
 | 按需 | [方案 manifest JSON Schema](schema/manifest.schema.json) | 规则包（`rule_*`）与方案包（`plan_*`）的机器可校验结构；跨字段约束仍由执行器校验 |
 | 按需 | [系统 v2 规则／反馈 DDL](schema/v2-rules-feedback.sql) | 质量反馈、规则版本、站点规则指针和激活审计的 SQLite 建表／加列参考；迁移由 `TaskStore._init_schema()` 条件执行 |
 | 按需 | [系统 v2 构建变更摘要 Schema](schema/v2-build-change-summary.schema.json) | 修复构建 `change_summary` 的机器可校验结构；主机验证后记录 |
