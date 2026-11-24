@@ -6,6 +6,7 @@ import {
   batchCanResume,
   batchCanStart,
   batchExportIsPartial,
+  batchExportLabel,
   batchIsArchived,
   siteCanCancelTask,
   siteCanExport,
@@ -13,6 +14,7 @@ import {
   siteCanResumeTask,
   siteExportIsPartial,
   siteStartMode,
+  taskExportLabel,
 } from "./actions";
 
 const COUNTS: BatchCounts = {
@@ -129,6 +131,44 @@ describe("batch action availability", () => {
       },
     });
     expect(batchExportIsPartial(value)).toBe(false);
+  });
+
+  it.each(["draft", "queued", "running", "paused"] as const)(
+    "labels a batch with a %s task as a partial export",
+    (state) => {
+      const counts: BatchCounts = {
+        ...COUNTS,
+        draft: 0,
+        queued: 0,
+        running: 0,
+        paused: 0,
+        [state]: 1,
+      };
+      expect(batchExportLabel(batch({ counts }))).toBe("导出部分结果");
+    },
+  );
+
+  it("labels a batch with only terminal tasks as a full export", () => {
+    expect(
+      batchExportLabel(
+        batch({
+          counts: {
+            ...COUNTS,
+            startable: 0,
+            ready: 0,
+            queued: 0,
+            running: 0,
+            paused: 0,
+            finished: 2,
+          },
+        }),
+      ),
+    ).toBe("导出批次 ZIP");
+  });
+
+  it("labels task exports as the current task", () => {
+    expect(taskExportLabel(true)).toBe("导出当前任务（部分结果）");
+    expect(taskExportLabel(false)).toBe("导出当前任务 ZIP");
   });
 });
 

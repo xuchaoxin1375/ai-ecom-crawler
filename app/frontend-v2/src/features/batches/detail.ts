@@ -244,7 +244,7 @@ export function nextStepFor(batch: BatchDetail): NextStep {
       title: "批次已完成",
       description: "结果可以导出；如需更新数据，可复跑已完成站点。",
       action: { kind: "export" },
-      actionLabel: "导出批次 ZIP",
+      actionLabel: "查看导出入口",
     };
   }
 

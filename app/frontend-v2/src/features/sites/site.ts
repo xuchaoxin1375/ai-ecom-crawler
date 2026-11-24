@@ -47,7 +47,14 @@ const BUILD_ACTIVE_STATES = new Set([
   "VALIDATING",
 ]);
 
-const TASK_ACTIVE_STATES = new Set(["DRAFT", "QUEUED", "RUNNING", "PAUSING", "PAUSED"]);
+const TASK_ACTIVE_STATES = new Set([
+  "DRAFT",
+  "QUEUED",
+  "RUNNING",
+  "PAUSING",
+  "PAUSED",
+  "CANCELLING",
+]);
 
 type BuildLike = BuildStatus | BuildSummary;
 
@@ -226,6 +233,15 @@ export function siteNextStep(
         actionLabel: "继续任务",
       };
     }
+    if (task.state === "CANCELLING") {
+      return {
+        tone: "neutral",
+        title: "正在取消任务",
+        description:
+          "取消完成后任务进入已取消；已产生的部分结果保留，可继续导出部分结果。",
+        action: "none",
+      };
+    }
     if (task.state === "QUEUED" || task.state === "DRAFT") {
       return {
         tone: "warning",
@@ -240,9 +256,9 @@ export function siteNextStep(
         return {
           tone: "success",
           title: "采集完成",
-          description: "导出站点结果，或回批次详情复跑该站点。",
+          description: "导出当前任务结果，或回批次详情复跑该站点。",
           action: "export",
-          actionLabel: "导出站点 ZIP",
+          actionLabel: "导出当前任务 ZIP",
         };
       }
       if (task.outcome === "CANCELLED") {

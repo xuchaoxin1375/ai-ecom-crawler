@@ -46,8 +46,11 @@ interface TaskCsvPreviewProps {
 export function TaskCsvPreview({ taskId, live }: TaskCsvPreviewProps) {
   const [page, setPage] = useState(0);
 
+  // The live and final snapshots come from different files. Use separate query
+  // keys so a task turning terminal triggers one final read instead of keeping
+  // the last live snapshot until a manual refresh.
   const query = useQuery({
-    queryKey: ["task-csv", taskId, page],
+    queryKey: ["task-csv", taskId, page, live ? "live" : "final"],
     queryFn: ({ signal }) => getTaskCsv(taskId, PAGE_SIZE, page * PAGE_SIZE, signal),
     enabled: Boolean(taskId),
     refetchInterval: live ? 3000 : false,
@@ -174,7 +177,9 @@ export function TaskCsvPreview({ taskId, live }: TaskCsvPreviewProps) {
       ) : (
         <p className="px-5 py-8 text-sm text-ink-3">
           {query.isPending
-            ? "正在读取 CSV…"
+            ? live
+              ? "正在读取 CSV…"
+              : "任务已结束，正在更新结果…"
             : live
               ? "还没有可预览的 CSV 行；任务运行中会自动刷新。"
               : "本次任务没有 CSV 数据。"}

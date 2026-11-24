@@ -275,6 +275,18 @@ describe("siteNextStep", () => {
     ).toBe("repair");
   });
 
+  it("shows a cancelling task without offering another collection", () => {
+    const step = siteNextStep(
+      site({
+        task_id: "t-1",
+        task: task({ state: "CANCELLING" }),
+      }),
+      null,
+    );
+    expect(step.action).toBe("none");
+    expect(step.title).toBe("正在取消任务");
+  });
+
   it("offers a direct collection start for ready sites without a task", () => {
     const step = siteNextStep(site(), null);
     expect(step.action).toBe("start");
@@ -293,6 +305,7 @@ describe("active state helpers", () => {
     expect(buildIsActive(build({ state: "QUEUED" }))).toBe(true);
     expect(buildIsActive(build({ state: "FINISHED" }))).toBe(false);
     expect(taskIsActive(task({ state: "PAUSED" }))).toBe(true);
+    expect(taskIsActive(task({ state: "CANCELLING" }))).toBe(true);
     expect(taskIsActive(task({ state: "FINISHED" }))).toBe(false);
   });
 });

@@ -71,12 +71,14 @@ import { StartBatchDialog } from "./StartBatchDialog";
 import { StartSiteDialog } from "../sites/StartSiteDialog";
 import { noticeFor, type BulkNotice } from "./notice";
 import {
+  batchExportLabel,
   siteCanCancelTask,
   siteCanExport,
   siteCanPauseTask,
   siteCanResumeTask,
   siteExportIsPartial,
   siteStartMode,
+  taskExportLabel,
 } from "./actions";
 import {
   batchHasActiveTasks,
@@ -268,6 +270,7 @@ export function BatchDetailPage() {
   const queryClient = useQueryClient();
   const { toast, showToast, dismissToast } = useToast();
   const siteListRef = useRef<HTMLElement>(null);
+  const exportSectionRef = useRef<HTMLElement>(null);
   const backHref = backHrefFromState(location.state);
 
   const filter = parseFilter(searchParams.get("site"));
@@ -349,6 +352,19 @@ export function BatchDetailPage() {
 
   function focusSiteList() {
     siteListRef.current?.focus();
+  }
+
+  function focusExportPanel() {
+    const section = exportSectionRef.current;
+    if (!section) return;
+    const reduceMotion = window.matchMedia?.(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
+    section.scrollIntoView({
+      block: "center",
+      behavior: reduceMotion ? "auto" : "smooth",
+    });
+    section.querySelector<HTMLButtonElement>("button")?.focus({ preventScroll: true });
   }
 
   function applyBatch(next: BatchDetail) {
@@ -713,7 +729,7 @@ export function BatchDetailPage() {
       groups.push([
         {
           key: "export",
-          label: "导出站点 ZIP",
+          label: taskExportLabel(siteExportIsPartial(site)),
           icon: <Download size={14} />,
           onSelect: () => downloadSite(site),
         },
@@ -733,7 +749,7 @@ export function BatchDetailPage() {
         setFilter(step.action.filter);
         break;
       case "export":
-        downloadBatch(partialExport);
+        focusExportPanel();
         break;
       case "restore":
         void runBatchAction("restore");
@@ -781,9 +797,7 @@ export function BatchDetailPage() {
         ? "start"
         : batch.counts.running > 0
           ? "pause"
-          : batch.counts.finished > 0
-            ? "export"
-            : "";
+          : "";
   const finishedOrCancelled = batch.counts.finished + batch.counts.cancelled;
 
   const stepDisabled =
@@ -1071,12 +1085,6 @@ export function BatchDetailPage() {
                 {busy === "pause" ? "暂停中…" : "暂停批次"}
               </Button>
             ) : null}
-            {primaryKind === "export" ? (
-              <Button variant="primary" onClick={() => downloadBatch(partialExport)}>
-                <Download size={14} aria-hidden="true" />
-                导出 ZIP
-              </Button>
-            ) : null}
             {batch.status !== "ARCHIVED" &&
             batch.counts.startable === 0 &&
             finishedOrCancelled > 0 ? (
@@ -1099,12 +1107,6 @@ export function BatchDetailPage() {
               >
                 <Pause size={14} aria-hidden="true" />
                 暂停
-              </Button>
-            ) : null}
-            {canExport && primaryKind !== "export" ? (
-              <Button onClick={() => downloadBatch(partialExport)}>
-                <Download size={14} aria-hidden="true" />
-                导出 ZIP
               </Button>
             ) : null}
           </div>
@@ -1265,7 +1267,11 @@ export function BatchDetailPage() {
             </dl>
           </section>
 
-          <section className="rounded-panel border border-line bg-surface">
+          <section
+            ref={exportSectionRef}
+            aria-label="导出与批次管理"
+            className="rounded-panel border border-line bg-surface"
+          >
             <div className="border-b border-line px-4 py-3">
               <h2 className="text-[15px] leading-6 font-semibold text-ink">
                 导出与批次管理
@@ -1279,7 +1285,7 @@ export function BatchDetailPage() {
                   onClick={() => downloadBatch(partialExport)}
                 >
                   <Download size={14} aria-hidden="true" />
-                  {partialExport ? "导出部分结果" : "导出批次 ZIP"}
+                  {batchExportLabel(batch)}
                 </Button>
               ) : (
                 <p className="text-xs leading-5 text-ink-3">
@@ -1287,7 +1293,9 @@ export function BatchDetailPage() {
                 </p>
               )}
               <p className="text-xs leading-5 text-ink-3">
-                导出包含当前任务的有效商品和失败记录；批次仍在运行时会使用部分导出。
+                {partialExport
+                  ? "批次仍有未结束任务。导出当前已生成的部分结果；压缩包清单会标出未开始、运行中、失败和部分完成的站点。"
+                  : "所有任务已结束。导出批次 ZIP；压缩包清单仍会区分失败、部分完成和未启动的站点，不代表每个站点都采集成功。"}
               </p>
             </div>
 

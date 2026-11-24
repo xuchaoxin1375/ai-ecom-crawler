@@ -39,6 +39,7 @@ import {
   batchCanResume,
   batchCanStart,
   batchExportIsPartial,
+  batchExportLabel,
   batchIsArchived,
 } from "./actions";
 import { PageHeader } from "../../components/ui/PageHeader";
@@ -478,7 +479,7 @@ export function BatchesPage() {
       groups.push([
         {
           key: "export",
-          label: "导出批次 ZIP",
+          label: batchExportLabel(batch),
           icon: <Download size={14} />,
           onSelect: () => downloadBatch(batch),
         },

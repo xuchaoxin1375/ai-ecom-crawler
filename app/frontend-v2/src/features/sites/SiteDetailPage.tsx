@@ -62,6 +62,7 @@ import { EmptyState } from "../../components/ui/EmptyState";
 import { ErrorNotice } from "../../components/ui/ErrorNotice";
 import { MetricStrip } from "../../components/ui/MetricStrip";
 import { ConfirmBatchActionDialog } from "../batches/ConfirmBatchActionDialog";
+import { taskExportLabel } from "../batches/actions";
 import { ProductPreviewSection } from "../tasks/ProductPreviewSection";
 import { QualityExceptionsSection } from "../tasks/QualityExceptionsSection";
 import { TaskItemsSection } from "../tasks/TaskItemsSection";
@@ -780,7 +781,7 @@ export function SiteDetailPage() {
             {task && step?.action !== "export" ? (
               <Button onClick={downloadTask}>
                 <Download size={14} aria-hidden="true" />
-                导出站点 ZIP
+                {taskExportLabel(taskActive)}
               </Button>
             ) : null}
             <Button
@@ -1326,11 +1327,11 @@ export function SiteDetailPage() {
                   onClick={downloadTask}
                 >
                   <Download size={14} aria-hidden="true" />
-                  {taskActive ? "导出部分结果" : "导出站点 ZIP"}
+                  {taskExportLabel(taskActive)}
                 </Button>
               ) : (
                 <p className="text-xs leading-5 text-ink-3">
-                  还没有任务结果。启动可采站点后可导出站点 ZIP。
+                  还没有任务结果。启动可采站点后可导出当前任务的结果。
                 </p>
               )}
               <Button asChild className="w-full justify-start" size="sm">
@@ -1340,7 +1341,13 @@ export function SiteDetailPage() {
                 </Link>
               </Button>
               <p className="text-xs leading-5 text-ink-3">
-                导出包含当前任务的有效商品和失败记录；任务仍在运行时会使用部分导出。
+                导出对象是当前任务
+                {task ? (
+                  <>
+                    （<code className="font-mono text-[11px]">{task.task_id}</code>）
+                  </>
+                ) : null}
+                ，包含该任务的有效商品和失败记录，不包含这个站点的其他历史任务；任务仍在运行时使用部分导出。
               </p>
             </div>
           </section>

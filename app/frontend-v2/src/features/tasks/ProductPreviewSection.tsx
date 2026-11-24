@@ -31,8 +31,11 @@ export function ProductPreviewSection({
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewTab, setPreviewTab] = useState<"image" | "description">("image");
 
+  // A task that just became terminal must not keep the last live snapshot:
+  // switch to a fresh query key so the final products.jsonl / products.csv
+  // snapshot is read before the empty or partial state is treated as final.
   const previewQuery = useQuery({
-    queryKey: ["task-preview", taskId],
+    queryKey: ["task-preview", taskId, taskActive ? "live" : "final"],
     queryFn: ({ signal }) =>
       getTaskItems(taskId, "product", 10, 0, "DONE", "desc", signal),
     enabled: Boolean(taskId),
@@ -165,7 +168,9 @@ export function ProductPreviewSection({
         ) : (
           <p className="px-5 py-8 text-sm text-ink-3">
             {previewQuery.isPending
-              ? "正在读取有效商品…"
+              ? taskActive
+                ? "正在读取有效商品…"
+                : "任务已结束，正在更新结果…"
               : taskActive
                 ? "还没有完成的有效商品；任务运行中，预览会自动刷新。"
                 : "本次任务没有可预览的有效商品。"}

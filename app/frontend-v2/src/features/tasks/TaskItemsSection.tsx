@@ -30,8 +30,10 @@ export function TaskItemsSection({ taskId, taskActive }: TaskItemsSectionProps) 
   const [taskTab, setTaskTab] = useState<TaskTab>("product");
   const [page, setPage] = useState(0);
 
+  // Keep live polling and the terminal read on separate keys so the final
+  // items are fetched once the task settles.
   const itemsQuery = useQuery({
-    queryKey: ["task-items", taskId, taskTab, page],
+    queryKey: ["task-items", taskId, taskTab, page, taskActive ? "live" : "final"],
     queryFn: ({ signal }) =>
       getTaskItems(
         taskId,
@@ -136,9 +138,11 @@ export function TaskItemsSection({ taskId, taskActive }: TaskItemsSectionProps) 
         <div>
           <h2 className="text-[17px] leading-6 font-semibold text-ink">任务明细</h2>
           <p className="mt-0.5 text-xs leading-5 text-ink-3" role="status">
-            {itemsQuery.isFetching
-              ? "更新中…"
-              : `共 ${formatNumber(total)} 条${taskActive ? "，运行中每 3 秒刷新" : ""}`}
+            {itemsQuery.isPending && !taskActive
+              ? "任务已结束，正在更新结果…"
+              : itemsQuery.isFetching
+                ? "更新中…"
+                : `共 ${formatNumber(total)} 条${taskActive ? "，运行中每 3 秒刷新" : ""}`}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">

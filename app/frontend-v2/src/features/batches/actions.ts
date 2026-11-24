@@ -38,6 +38,14 @@ export function batchExportIsPartial(batch: BatchSummary): boolean {
   return counts.draft + counts.queued + counts.running + counts.paused > 0;
 }
 
+export function batchExportLabel(batch: BatchSummary): string {
+  return batchExportIsPartial(batch) ? "导出部分结果" : "导出批次 ZIP";
+}
+
+export function taskExportLabel(partial: boolean): string {
+  return partial ? "导出当前任务（部分结果）" : "导出当前任务 ZIP";
+}
+
 /**
  * Only a ready site without an active link can start. A finished or cancelled
  * task is replaced (rerun); other linked states are skipped by the API.
