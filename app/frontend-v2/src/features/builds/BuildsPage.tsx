@@ -70,6 +70,7 @@ export function BuildsPage() {
     [builds, mode, queryParam, state],
   );
   const activeCount = builds.filter(buildIsActive).length;
+  const queuedCount = builds.filter((build) => build.state === "QUEUED").length;
   const succeeded = builds.filter((build) => build.outcome === "succeeded").length;
   const failed = builds.filter((build) => build.outcome === "failed").length;
   const cancelled = builds.filter(
@@ -152,7 +153,9 @@ export function BuildsPage() {
             <span className="mt-0.5 block truncate font-mono text-[11px] text-ink-3">
               {build.rule
                 ? `${build.rule.rule_id}@${build.rule.rule_version}`
-                : "尚未安装规则"}
+                : build.mode === "repair" && build.source_rule?.rule_version
+                  ? `源规则 @${build.source_rule.rule_version}`
+                  : "尚未安装规则"}
             </span>
           </div>
         );
@@ -184,14 +187,18 @@ export function BuildsPage() {
             ) : null}
           </div>
           <p className="text-xs text-ink-3">
-            {build.repair_round
-              ? `自动修复 ${build.repair_round}/${build.repair_limit}`
-              : "未触发自动修复"}
-            {build.validation?.status === "PASSED"
-              ? " · 验证通过"
-              : build.validation?.status === "FAILED"
-                ? " · 验证未通过"
-                : ""}
+            {build.state === "QUEUED" && build.queue_position
+              ? `队列第 ${build.queue_position} 位`
+              : build.repair_round
+                ? `自动修复 ${build.repair_round}/${build.repair_limit}`
+                : "未触发自动修复"}
+            {build.state === "QUEUED"
+              ? ""
+              : build.validation?.status === "PASSED"
+                ? " · 验证通过"
+                : build.validation?.status === "FAILED"
+                  ? " · 验证未通过"
+                  : ""}
           </p>
         </div>
       ),
@@ -206,7 +213,11 @@ export function BuildsPage() {
           <p className="mt-0.5">
             {build.elapsed_seconds !== null
               ? `耗时 ${Math.round(build.elapsed_seconds)} 秒`
-              : "尚未结束"}
+              : build.finished_at
+                ? "未启动"
+                : build.state === "QUEUED"
+                  ? "等待开始"
+                  : "尚未结束"}
           </p>
         </div>
       ),
@@ -253,7 +264,11 @@ export function BuildsPage() {
             value: builds.length,
             hint: builds.length >= LIMIT ? `仅显示最近 ${LIMIT} 条` : "全部记录",
           },
-          { label: "进行中", value: activeCount, hint: "含暂停与等待审批" },
+          {
+            label: "进行中",
+            value: activeCount,
+            hint: `排队 ${queuedCount} · 含暂停与审批`,
+          },
           { label: "成功", value: succeeded, hint: "主机验证通过" },
           {
             label: "未成功",
@@ -298,6 +313,7 @@ export function BuildsPage() {
             >
               <option value="">全部状态</option>
               <option value="active">进行中</option>
+              <option value="QUEUED">排队中</option>
               <option value="FINISHED">已结束</option>
               <option value="CANCELLED">已取消</option>
             </Select>

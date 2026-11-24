@@ -44,11 +44,13 @@ CLIENT_HEADERS = {
 
 
 def rule_payload(
-    site_key: str = "example.fr", version: str = "2026.11.23-1"
+    site_key: str = "example.fr",
+    version: str = "2026.11.23-1",
+    rule_id: str = "example-fr-build",
 ) -> dict[str, Any]:
     return {
         "schema_version": "1.1",
-        "rule_id": "example-fr-build",
+        "rule_id": rule_id,
         "rule_version": version,
         "kind": "declarative",
         "status": "candidate",
@@ -185,15 +187,18 @@ class FakeBuildAdapter:
         write_rule: bool = True,
         finish: bool = True,
         rule_payloads: list[dict[str, Any]] | None = None,
+        gate: threading.Event | None = None,
     ) -> None:
         self.root = root
         self.write_rule = write_rule
         self.finish = finish
         self.rule_payloads = rule_payloads or []
+        self.gate = gate
         self.queue: queue.Queue[HarnessEvent | None] = queue.Queue()
         self.queues: dict[str, queue.Queue[HarnessEvent | None]] = {}
         self.current_build: str | None = None
         self.sessions: dict[str, BuildSession] = {}
+        self.started: list[str] = []
         self.prompts: list[tuple[str, str]] = []
         self.continued: list[tuple[str, str]] = []
         self.closed: list[str] = []
@@ -212,6 +217,7 @@ class FakeBuildAdapter:
         )
         self.sessions[task.build_id] = session
         self.current_build = task.build_id
+        self.started.append(task.build_id)
         self.queues[task.build_id] = queue.Queue()
         return session
 
@@ -234,6 +240,8 @@ class FakeBuildAdapter:
 
         def complete() -> None:
             time.sleep(0.05)
+            if self.gate is not None:
+                self.gate.wait(timeout=10)
             session = self.sessions[build_id]
             if self.write_rule:
                 plan = session.workspace.out_dir / "plan"
@@ -1687,6 +1695,329 @@ class BuildWorkflowTests(unittest.TestCase):
         self.assertEqual(timeline[0]["text"], "first second")
         self.assertEqual(timeline[1]["status"], "success")
         self.assertEqual(timeline[2]["text"], "done")
+
+    def test_second_build_waits_in_queue_then_starts(self) -> None:
+        gate = threading.Event()
+        adapter = FakeBuildAdapter(
+            self.root,
+            rule_payloads=[
+                rule_payload("example.fr"),
+                rule_payload(
+                    "example2.fr",
+                    version="2026.11.23-2",
+                    rule_id="example2-fr-build",
+                ),
+            ],
+            gate=gate,
+        )
+        manager = self._manager(adapter)
+        self.store.add_batch_sites(
+            [
+                BatchSite(
+                    batch_id="b-1",
+                    site_key="example2.fr",
+                    domain="example2.fr",
+                    input_value="https://example2.fr/",
+                    readiness="needs_onboarding",
+                )
+            ]
+        )
+        with self._client(manager) as client:
+            first = client.post(
+                "/api/batches/b-1/sites/example.fr/build",
+                json={"max_products": 3},
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(first.status_code, 202, first.text)
+            first_build = first.json()["build"]
+            self.assertEqual(first_build["state"], "RUNNING")
+
+            second = client.post(
+                "/api/batches/b-1/sites/example2.fr/build",
+                json={"max_products": 3},
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(second.status_code, 202, second.text)
+            second_build = second.json()["build"]
+            self.assertEqual(second_build["state"], "QUEUED")
+            self.assertEqual(second_build["queue_position"], 1)
+            self.assertEqual(adapter.started, [first_build["build_id"]])
+
+            queued = self.store.get_build(second_build["build_id"])
+            assert queued is not None
+            self.assertEqual(queued.request["max_products"], 3)
+            self.assertEqual(queued.request["catalog"]["catalog_scope"], "sample")
+
+            gate.set()
+            first_done = self._wait_ready(client, first_build["build_id"])
+            self.assertEqual(first_done["outcome"], "succeeded", first_done.get("error"))
+            second_done = self._wait_ready(client, second_build["build_id"])
+            self.assertEqual(
+                second_done["outcome"], "succeeded", second_done.get("error")
+            )
+            self.assertEqual(
+                adapter.started,
+                [first_build["build_id"], second_build["build_id"]],
+            )
+
+    def test_cancel_queued_build_releases_site_and_starts_next(self) -> None:
+        gate = threading.Event()
+        adapter = FakeBuildAdapter(
+            self.root,
+            rule_payloads=[
+                rule_payload("example.fr"),
+                rule_payload("example3.fr", version="2026.11.23-2", rule_id="example3-fr-build"),
+            ],
+            gate=gate,
+        )
+        manager = self._manager(adapter)
+        self.store.add_batch_sites(
+            [
+                BatchSite(
+                    batch_id="b-1",
+                    site_key="example2.fr",
+                    domain="example2.fr",
+                    input_value="https://example2.fr/",
+                    readiness="needs_onboarding",
+                ),
+                BatchSite(
+                    batch_id="b-1",
+                    site_key="example3.fr",
+                    domain="example3.fr",
+                    input_value="https://example3.fr/",
+                    readiness="needs_onboarding",
+                ),
+            ]
+        )
+        with self._client(manager) as client:
+            first = client.post(
+                "/api/batches/b-1/sites/example.fr/build",
+                json={},
+                headers=CLIENT_HEADERS,
+            ).json()["build"]
+            second = client.post(
+                "/api/batches/b-1/sites/example2.fr/build",
+                json={},
+                headers=CLIENT_HEADERS,
+            ).json()["build"]
+            third = client.post(
+                "/api/batches/b-1/sites/example3.fr/build",
+                json={},
+                headers=CLIENT_HEADERS,
+            ).json()["build"]
+            self.assertEqual(second["state"], "QUEUED")
+            self.assertEqual(second["queue_position"], 1)
+            self.assertEqual(third["state"], "QUEUED")
+            self.assertEqual(third["queue_position"], 2)
+
+            canceled = client.post(
+                f"/api/builds/{second['build_id']}/cancel",
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(canceled.status_code, 202, canceled.text)
+            self.assertEqual(canceled.json()["build"]["state"], "CANCELLED")
+            site = self.store.get_batch_site("b-1", "example2.fr")
+            assert site is not None
+            self.assertEqual(site.readiness, "needs_onboarding")
+            remaining = client.get(f"/api/builds/{third['build_id']}").json()["build"]
+            self.assertEqual(remaining["queue_position"], 1)
+
+            gate.set()
+            self.assertEqual(
+                self._wait_ready(client, first["build_id"])["outcome"], "succeeded"
+            )
+            done = self._wait_ready(client, third["build_id"])
+            self.assertEqual(done["outcome"], "succeeded", done.get("error"))
+            self.assertEqual(
+                adapter.started, [first["build_id"], third["build_id"]]
+            )
+
+    def test_reconcile_resumes_queued_build_after_restart(self) -> None:
+        gate = threading.Event()
+        adapter = FakeBuildAdapter(
+            self.root,
+            rule_payloads=[
+                rule_payload("example.fr"),
+                rule_payload(
+                    "example2.fr",
+                    version="2026.11.23-2",
+                    rule_id="example2-fr-build",
+                ),
+            ],
+            gate=gate,
+        )
+        manager = self._manager(adapter)
+        self.store.add_batch_sites(
+            [
+                BatchSite(
+                    batch_id="b-1",
+                    site_key="example2.fr",
+                    domain="example2.fr",
+                    input_value="https://example2.fr/",
+                    readiness="needs_onboarding",
+                )
+            ]
+        )
+        with self._client(manager) as client:
+            first = client.post(
+                "/api/batches/b-1/sites/example.fr/build",
+                json={},
+                headers=CLIENT_HEADERS,
+            ).json()["build"]
+            second = client.post(
+                "/api/batches/b-1/sites/example2.fr/build",
+                json={},
+                headers=CLIENT_HEADERS,
+            ).json()["build"]
+            self.assertEqual(second["state"], "QUEUED")
+        manager.shutdown()
+
+        interrupted = self.store.get_build(first["build_id"])
+        assert interrupted is not None
+        self.assertEqual(interrupted.state, "FINISHED")
+        queued = self.store.get_build(second["build_id"])
+        assert queued is not None
+        self.assertEqual(queued.state, "QUEUED")
+        site = self.store.get_batch_site("b-1", "example2.fr")
+        assert site is not None
+        self.assertEqual(site.readiness, "building")
+
+        restarted_adapter = FakeBuildAdapter(
+            self.root,
+            rule_payloads=[
+                rule_payload(
+                    "example2.fr",
+                    version="2026.11.23-2",
+                    rule_id="example2-fr-build",
+                )
+            ],
+        )
+        restarted = self._manager(restarted_adapter)
+        with self._client(restarted) as client:
+            done = self._wait_ready(client, second["build_id"])
+            self.assertEqual(done["outcome"], "succeeded", done.get("error"))
+        self.assertEqual(restarted_adapter.started, [second["build_id"]])
+
+    def test_queued_repair_fails_when_source_rule_changes(self) -> None:
+        gate = threading.Event()
+        adapter = FakeBuildAdapter(
+            self.root,
+            rule_payloads=[
+                rule_payload("example.fr"),
+                rule_payload(
+                    "example2.fr",
+                    version="2026.11.23-2",
+                    rule_id="example2-fr-build",
+                ),
+            ],
+            gate=gate,
+        )
+        manager = self._manager(adapter)
+        self.store.add_batch_sites(
+            [
+                BatchSite(
+                    batch_id="b-1",
+                    site_key="example2.fr",
+                    domain="example2.fr",
+                    input_value="https://example2.fr/",
+                    readiness="needs_onboarding",
+                )
+            ]
+        )
+        with self._client(manager) as client:
+            built = client.post(
+                "/api/batches/b-1/sites/example.fr/build",
+                json={},
+                headers=CLIENT_HEADERS,
+            ).json()["build"]
+            gate.set()
+            self.assertEqual(self._wait_ready(client, built["build_id"])["outcome"], "succeeded")
+            gate.clear()
+
+            blocking = client.post(
+                "/api/batches/b-1/sites/example2.fr/build",
+                json={},
+                headers=CLIENT_HEADERS,
+            ).json()["build"]
+            self.assertEqual(blocking["state"], "RUNNING")
+            repair = client.post(
+                "/api/batches/b-1/sites/example.fr/build",
+                json={"mode": "repair", "reason": "queued repair"},
+                headers=CLIENT_HEADERS,
+            ).json()["build"]
+            self.assertEqual(repair["state"], "QUEUED")
+
+            site = self.store.get_batch_site("b-1", "example.fr")
+            assert site is not None and site.rule_path
+            rule_file = self.rules / site.rule_path
+            rule_file.write_text(
+                rule_file.read_text(encoding="utf-8") + "\n# changed while queued\n",
+                encoding="utf-8",
+            )
+
+            canceled = client.post(
+                f"/api/builds/{blocking['build_id']}/cancel",
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(canceled.status_code, 202, canceled.text)
+            failed = self._wait_ready(client, repair["build_id"])
+            self.assertEqual(failed["state"], "FINISHED")
+            self.assertEqual(failed["outcome"], "failed")
+            self.assertIn("源规则文件在排队期间发生变化", failed["error"] or "")
+            site = self.store.get_batch_site("b-1", "example.fr")
+            assert site is not None
+            self.assertEqual(site.readiness, "ready")
+            self.assertEqual(site.rule_path, rule_file.name)
+
+    def test_continue_rejected_while_another_build_runs(self) -> None:
+        gate = threading.Event()
+        adapter = FakeBuildAdapter(self.root, write_rule=False, gate=gate)
+        manager = self._manager(adapter, max_repair_rounds=0)
+        self.store.add_batch_sites(
+            [
+                BatchSite(
+                    batch_id="b-1",
+                    site_key="example2.fr",
+                    domain="example2.fr",
+                    input_value="https://example2.fr/",
+                    readiness="needs_onboarding",
+                )
+            ]
+        )
+        with self._client(manager) as client:
+            failed = client.post(
+                "/api/batches/b-1/sites/example.fr/build",
+                json={},
+                headers=CLIENT_HEADERS,
+            ).json()["build"]
+            gate.set()
+            failed_result = self._wait_ready(client, failed["build_id"])
+            self.assertEqual(failed_result["outcome"], "failed")
+            gate.clear()
+
+            running = client.post(
+                "/api/batches/b-1/sites/example2.fr/build",
+                json={},
+                headers=CLIENT_HEADERS,
+            ).json()["build"]
+            self.assertEqual(running["state"], "RUNNING")
+
+            response = client.post(
+                f"/api/builds/{failed['build_id']}/continue",
+                json={
+                    "request_id": "continue-busy",
+                    "message": "fix the failed rule",
+                },
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(response.status_code, 409, response.text)
+            self.assertEqual(response.json()["error"]["code"], "BUILD_CONFLICT")
+            self.assertIn("another build is still active", response.text)
+
+            client.post(
+                f"/api/builds/{running['build_id']}/cancel",
+                headers=CLIENT_HEADERS,
+            )
 
     def test_reconcile_interrupts_stale_build(self) -> None:
         self.store.create_build(

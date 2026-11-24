@@ -37,6 +37,7 @@ export interface SiteNextStep {
 }
 
 const BUILD_ACTIVE_STATES = new Set([
+  "QUEUED",
   "CREATED",
   "RUNNING",
   "PAUSING",
@@ -66,7 +67,18 @@ export function siteHasActiveWork(
   );
 }
 
-function buildStep(state: string): SiteNextStep | null {
+function buildStep(state: string, queuePosition?: number | null): SiteNextStep | null {
+  if (state === "QUEUED") {
+    return {
+      tone: "warning",
+      title: "构建排队中",
+      description: queuePosition
+        ? `当前已有构建在运行，这个站点排在第 ${queuePosition} 位，会在前一个构建结束后自动开始；也可以取消排队。`
+        : "当前已有构建在运行，这个站点会在前一个构建结束后自动开始；也可以取消排队。",
+      action: "cancel-build",
+      actionLabel: "取消排队",
+    };
+  }
   if (state === "RUNNING") {
     return {
       tone: "info",
@@ -130,7 +142,7 @@ export function siteNextStep(
   const activeBuild = build ?? site.build;
   const buildState = activeBuild?.state;
   if (buildState) {
-    const step = buildStep(buildState);
+    const step = buildStep(buildState, activeBuild?.queue_position);
     if (step) return step;
   }
 

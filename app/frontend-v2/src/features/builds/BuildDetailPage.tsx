@@ -169,7 +169,10 @@ export function BuildDetailPage() {
   });
   const buildConfig = configQuery.data ?? null;
 
-  const stream = useBuildStream(buildId, Boolean(buildId));
+  const stream = useBuildStream(
+    buildId,
+    Boolean(buildId && build && build.state !== "QUEUED"),
+  );
   const streamHealthy = stream.connected || stream.ended;
   const messagesQuery = useQuery({
     queryKey: ["build-messages", buildId],
@@ -177,7 +180,7 @@ export function BuildDetailPage() {
     enabled: Boolean(buildId),
     refetchInterval: streamHealthy
       ? false
-      : build && buildIsActive(build)
+      : build && build.state !== "QUEUED" && buildIsActive(build)
         ? 2000
         : false,
   });
@@ -282,6 +285,7 @@ export function BuildDetailPage() {
   }
 
   const active = build ? buildIsActive(build) : false;
+  const queued = build?.state === "QUEUED";
   const canContinue = build?.state === "FINISHED" && build.outcome === "failed";
   const continuations = build?.continuations ?? [];
   const continueDisabled = continueBusy || !buildConfig?.available;
@@ -387,6 +391,11 @@ export function BuildDetailPage() {
                 </Link>
               ) : null}
               <span>更新 {formatTime(build.updated_at)}</span>
+              {queued && build.queue_position ? (
+                <span className="font-medium text-ink-2">
+                  队列第 {build.queue_position} 位
+                </span>
+              ) : null}
               {build.rule ? (
                 <span className="font-mono">
                   {build.rule.rule_id}@{build.rule.rule_version}
@@ -428,7 +437,7 @@ export function BuildDetailPage() {
                 disabled={Boolean(busy)}
               >
                 <X size={13} aria-hidden="true" />
-                取消构建
+                {queued ? "取消排队" : "取消构建"}
               </Button>
             ) : null}
             <Button
@@ -780,7 +789,7 @@ export function BuildDetailPage() {
       <BuildTimeline
         build={build}
         messages={messages}
-        live={active}
+        live={active && !queued}
         connected={stream.connected}
         streamError={stream.error}
         ended={stream.ended}
@@ -788,14 +797,18 @@ export function BuildDetailPage() {
 
       <ConfirmBatchActionDialog
         open={confirmCancel}
-        title="取消这次构建？"
-        description={`构建 ${build.build_id} 会停止；已产生的会话记录和输出保留。`}
+        title={queued ? "取消这次排队？" : "取消这次构建？"}
+        description={
+          queued
+            ? `构建 ${build.build_id} 还在排队，取消后不会启动模型会话。`
+            : `构建 ${build.build_id} 会停止；已产生的会话记录和输出保留。`
+        }
         consequence={
           build.mode === "repair"
             ? "取消后原规则继续生效，已有采集数据不变。"
             : "取消后站点回到待接入；可重新发起构建。"
         }
-        confirmLabel="确认取消构建"
+        confirmLabel={queued ? "确认取消排队" : "确认取消构建"}
         tone="danger"
         busy={busy === "cancel"}
         error={confirmError}

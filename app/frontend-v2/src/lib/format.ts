@@ -114,6 +114,7 @@ export function formatNumber(value: number): string {
 }
 
 const BUILD_STATE_LABELS: Record<string, string> = {
+  QUEUED: "排队中",
   CREATED: "已创建",
   RUNNING: "构建中",
   PAUSING: "暂停中",
@@ -147,7 +148,9 @@ export function buildStateTone(state: string | null | undefined): Tone {
   if (state === "RUNNING" || state === "VALIDATING" || state === "PAUSING") {
     return "info";
   }
-  if (state === "CREATED" || state === "PAUSED") return "warning";
+  if (state === "CREATED" || state === "PAUSED" || state === "QUEUED") {
+    return "warning";
+  }
   if (state === "CANCELLED") return "neutral";
   return "neutral";
 }

@@ -108,6 +108,7 @@ CREATE TABLE IF NOT EXISTS builds (
     mode TEXT NOT NULL DEFAULT 'build',
     feedback_id TEXT,
     request_id TEXT,
+    request_json TEXT NOT NULL DEFAULT '{}',
     source_rule_version TEXT,
     source_rule_sha256 TEXT,
     target_rule_version TEXT,
@@ -426,7 +427,7 @@ class TaskStore:
             ):
                 if column not in build_columns:
                     connection.execute(f"ALTER TABLE builds ADD COLUMN {column} TEXT")
-            for column in ("change_summary_json", "validation_json"):
+            for column in ("request_json", "change_summary_json", "validation_json"):
                 if column not in build_columns:
                     connection.execute(
                         f"ALTER TABLE builds ADD COLUMN {column} TEXT NOT NULL DEFAULT '{{}}'"
@@ -1598,14 +1599,14 @@ class TaskStore:
                     INSERT INTO builds (
                         build_id, batch_id, site_key, state, outcome, workspace,
                         session_id, model_json, proxy, error, rule_id, rule_version,
-                        rule_path, mode, feedback_id, request_id,
+                        rule_path, mode, feedback_id, request_id, request_json,
                         source_rule_version, source_rule_sha256,
                         target_rule_version, target_rule_sha256, error_class,
                         change_summary_json, validation_json, evidence_sha256,
                         created_at, updated_at, started_at, finished_at
                     ) VALUES (
                         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                     )
                     """,
                     (
@@ -1625,6 +1626,7 @@ class TaskStore:
                         build.mode,
                         build.feedback_id,
                         build.request_id,
+                        json_dumps(build.request or {}),
                         build.source_rule_version,
                         build.source_rule_sha256,
                         build.target_rule_version,
@@ -1754,6 +1756,7 @@ class TaskStore:
         feedback_id: str | None = None,
         states: set[str] | None = None,
         limit: int = 50,
+        oldest_first: bool = False,
     ) -> list[BuildRecord]:
         query = "SELECT * FROM builds"
         clauses: list[str] = []
@@ -1773,7 +1776,10 @@ class TaskStore:
             values.extend(sorted(states))
         if clauses:
             query += " WHERE " + " AND ".join(clauses)
-        query += " ORDER BY created_at DESC, build_id DESC LIMIT ?"
+        if oldest_first:
+            query += " ORDER BY rowid ASC LIMIT ?"
+        else:
+            query += " ORDER BY created_at DESC, rowid DESC LIMIT ?"
         values.append(max(1, int(limit)))
         with self._connect() as connection:
             rows = connection.execute(query, values).fetchall()
@@ -1785,7 +1791,7 @@ class TaskStore:
         with self._connect() as connection:
             row = connection.execute(
                 "SELECT * FROM builds WHERE batch_id = ? AND site_key = ? "
-                "ORDER BY created_at DESC, build_id DESC LIMIT 1",
+                "ORDER BY created_at DESC, rowid DESC LIMIT 1",
                 (batch_id, site_key),
             ).fetchone()
         return _build_from_row(row) if row else None
@@ -1804,6 +1810,7 @@ class TaskStore:
             "rule_path",
             "feedback_id",
             "request_id",
+            "request",
             "source_rule_version",
             "source_rule_sha256",
             "target_rule_version",
@@ -1826,6 +1833,9 @@ class TaskStore:
                 values.append(json_dumps(value or {}))
             elif key in {"change_summary", "validation"}:
                 assignments.append(f"{key}_json = ?")
+                values.append(json_dumps(value or {}))
+            elif key == "request":
+                assignments.append("request_json = ?")
                 values.append(json_dumps(value or {}))
             else:
                 assignments.append(f"{key} = ?")
@@ -2681,6 +2691,7 @@ def _build_from_row(row: sqlite3.Row) -> BuildRecord:
         mode=row["mode"],
         feedback_id=row["feedback_id"],
         request_id=row["request_id"],
+        request=json_loads(row["request_json"], {}),
         source_rule_version=row["source_rule_version"],
         source_rule_sha256=row["source_rule_sha256"],
         target_rule_version=row["target_rule_version"],

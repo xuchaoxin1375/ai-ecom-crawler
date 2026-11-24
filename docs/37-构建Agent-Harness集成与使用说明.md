@@ -110,7 +110,7 @@ OpenCode 的项目技能优先级高于全局技能。使用联接／符号链�
 
 ## 事件、trace 与验证
 
-构建会话使用独立状态：`CREATED`、`RUNNING`、`PAUSING`、`PAUSED`、`CANCELLING`、`CANCELLED`、`FINISHED`。它不映射为采集任务状态。
+构建会话使用独立状态：`QUEUED`、`CREATED`、`RUNNING`、`PAUSING`、`PAUSED`、`CANCELLING`、`CANCELLED`、`FINISHED`。它不映射为采集任务状态；`QUEUED` 只表示请求已持久化、等待全局单运行槽位，尚未创建 Harness 会话。
 
 事件写入 `out/session.ndjson`；trace 写入 `out/trace.json`／`trace.md`，包含工具调用、命令／路径摘要、截断输出、可见消息、tokens／费用、主机验证和修复轮次。reasoning 默认不保存；需要时用 `ECOM_BUILD_CAPTURE_REASONING=1` 或构建请求的 `capture_reasoning=true` 显式开启，并按截断策略保留。
 
@@ -146,7 +146,7 @@ python -m uv run --project app ecom-crawler serve `
 | `ECOM_BUILD_MAX_REPAIR_ROUNDS` | 自动修复轮次 |
 | `ECOM_BUILD_REPAIR_SECONDS` | 每轮修复额外时间 |
 
-入口：`http://127.0.0.1:8765/next/#/batches`。站点详情可以启动构建、查看时间线、暂停／恢复／取消、处理权限和依赖请求。同一时间只允许一个构建。
+入口：`http://127.0.0.1:8765/next/#/batches`。站点详情可以启动构建、查看时间线、暂停／恢复／取消、处理权限和依赖请求。同一时间只允许一个构建运行；其他站点提交后进入 `QUEUED` 队列，构建列表／详情显示排队位置并支持取消排队。重启会保留排队项，但不会恢复已创建的会话。
 
 ## 注意事项与已知限制
 
@@ -159,7 +159,7 @@ python -m uv run --project app ecom-crawler serve `
 - **模型调用有费用**。一次构建可能持续数分钟；先用小预算和单站验证，再放大。
 - **出口与市场必须一致**。浏览器样本、静态请求和主机验证走不同出口时，币种／促销价可能不同；换出口视为新的市场上下文。
 - **robots 只取 Sitemap 行**。不要读整份 robots、不解析 `Disallow`／`Crawl-delay`，也不要把它当停止信号。
-- **一次只支持一个构建**。并发构建、完整多轮会话 UI、权限／依赖审批页面和真实模型多轮修复仍未完成。
+- **一次只支持一个运行中的构建**。不同站点会进入 FIFO 队列，但没有优先级；并发构建、完整多轮会话 UI、权限／依赖审批页面和真实模型多轮修复仍未完成；跨重启只恢复排队项，不恢复运行中的会话。
 - **跨平台差异**。Windows 的进程树回收、浏览器 profile 锁、目录联接和路径大小写需要单独验证；WSL 只验证过 fake server／适配器和部分安装路径。
 
 ## 排障入口

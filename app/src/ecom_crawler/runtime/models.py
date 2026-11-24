@@ -121,6 +121,7 @@ BATCH_READINESS = {
 }
 
 BUILD_STATES = {
+    "QUEUED",
     "CREATED",
     "RUNNING",
     "PAUSING",
@@ -208,6 +209,7 @@ class BuildRecord:
     mode: str = "build"
     feedback_id: str | None = None
     request_id: str | None = None
+    request: dict[str, Any] = field(default_factory=dict)
     source_rule_version: str | None = None
     source_rule_sha256: str | None = None
     target_rule_version: str | None = None

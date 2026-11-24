@@ -46,6 +46,7 @@ export function BuildTimeline({
   const [follow, setFollow] = useState(true);
   const entries = messages?.timeline ?? [];
   const last = entries[entries.length - 1];
+  const queued = build?.state === "QUEUED";
   const thinking = live && !ended && last?.kind === "reasoning";
   const responding = live && !ended && last?.kind === "text";
   const toolsRunning =
@@ -54,13 +55,15 @@ export function BuildTimeline({
     entries.some((item) => item.kind === "tool" && item.status === "running");
   const hasReasoning = entries.some((item) => item.kind === "reasoning");
   const reasoningEnabled = Boolean(build?.reasoning_capture_enabled);
-  const reasoningNote = !reasoningEnabled
-    ? "服务端未开启实时思考。设置 ECOM_BUILD_CAPTURE_REASONING=1 后重启服务。"
-    : build?.reasoning_retained
-      ? "思考已写入本次 trace；trace 可能包含页面或提示内容，按证据文件管理。"
-      : hasReasoning
-        ? "思考仅实时展示，不写入 trace。"
-        : "实时思考已开启，等待模型返回思考内容。";
+  const reasoningNote = queued
+    ? "排队中，尚未创建模型会话；开始后再显示思考和工具输出。"
+    : !reasoningEnabled
+      ? "服务端未开启实时思考。设置 ECOM_BUILD_CAPTURE_REASONING=1 后重启服务。"
+      : build?.reasoning_retained
+        ? "思考已写入本次 trace；trace 可能包含页面或提示内容，按证据文件管理。"
+        : hasReasoning
+          ? "思考仅实时展示，不写入 trace。"
+          : "实时思考已开启，等待模型返回思考内容。";
 
   useEffect(() => {
     const element = scrollRef.current;
@@ -83,19 +86,21 @@ export function BuildTimeline({
     element.scrollTop = element.scrollHeight;
   }
 
-  const statusText = ended
-    ? "构建流已结束"
-    : thinking
-      ? "模型正在思考…"
-      : responding
-        ? "模型正在输出…"
-        : toolsRunning
-          ? "工具执行中…"
-          : live
-            ? connected
-              ? "正在接收构建事件…"
-              : "正在轮询构建输出…"
-            : "构建时间线";
+  const statusText = queued
+    ? "排队中，尚未创建模型会话"
+    : ended
+      ? "构建流已结束"
+      : thinking
+        ? "模型正在思考…"
+        : responding
+          ? "模型正在输出…"
+          : toolsRunning
+            ? "工具执行中…"
+            : live
+              ? connected
+                ? "正在接收构建事件…"
+                : "正在轮询构建输出…"
+              : "构建时间线";
 
   return (
     <section className="rounded-panel border border-line bg-surface">
@@ -103,7 +108,11 @@ export function BuildTimeline({
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-[17px] leading-6 font-semibold text-ink">构建时间线</h2>
-            {live ? (
+            {queued ? (
+              <Badge tone="warning" dot={false}>
+                排队中
+              </Badge>
+            ) : live ? (
               <Badge tone={connected ? "info" : "warning"} dot>
                 {connected ? "实时" : ended ? "已结束" : "轮询回退"}
               </Badge>
@@ -125,7 +134,7 @@ export function BuildTimeline({
               />
             ) : null}
             {statusText}
-            {messages?.live && !ended ? " · 流式输出" : ""}
+            {messages?.live && !ended && !queued ? " · 流式输出" : ""}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -276,7 +285,9 @@ export function BuildTimeline({
           </ol>
         ) : (
           <div className="flex min-h-[140px] items-center justify-center text-sm text-ink-3">
-            {live ? (
+            {queued ? (
+              "排队中的构建尚未创建会话；开始后会在这里显示模型输出和工具调用。"
+            ) : live ? (
               <span className="flex items-center gap-2">
                 <Loader2 className="animate-spin" size={14} aria-hidden="true" />
                 等待模型输出…

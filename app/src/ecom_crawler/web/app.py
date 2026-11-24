@@ -3076,6 +3076,8 @@ def create_app(
             code = (
                 "BUILD_SESSION_UNAVAILABLE"
                 if "session is no longer available" in str(exc)
+                else "BUILD_CONFLICT"
+                if "another build is still active" in str(exc)
                 else "BUILD_NOT_CONTINUABLE"
             )
             raise _error(code, str(exc), 409) from exc

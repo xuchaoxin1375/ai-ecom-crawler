@@ -39,7 +39,7 @@ harness 是构建期运行 Agent 的宿主，负责模型、工具、权限、�
 - **输入**：`build-task.json` 描述站点、范围、市场、预算、工具权限、工作区和截止时间；只引用本次复制进工作区的文档和方案包，不携带密钥、Cookie 或旧工具规则文件。
 - **工作区**：`sessions/<build_id>/`，分 `input/`、`work/`、`out/`、`logs/`；Agent 只能读写工作区；业务文档默认不进入工作区，需要时由 host 复制最小只读副本到 `input/docs/`。
 - **交付**：`out/plan/`、`out/evidence/`、`out/session.ndjson`、`out/result.json`；方案包必须能脱离 harness 执行。
-- **会话状态**：`CREATED`、`RUNNING`、`PAUSING`、`PAUSED`、`CANCELLING`、`CANCELLED`、`FINISHED`；与采集任务状态分开。
+- **会话状态**：`QUEUED`、`CREATED`、`RUNNING`、`PAUSING`、`PAUSED`、`CANCELLING`、`CANCELLED`、`FINISHED`；与采集任务状态分开。`QUEUED` 尚未创建 Harness 会话。
 - **控制**：暂停由 `pause-gate` 在工具执行前拦截；取消终止工具子进程、浏览器和临时目录；移除只删会话工作区。
 - **自动化**：常规站点分析和规则编写不逐次询问；只在未知依赖、系统级操作和密钥边界请求确认。
 - **权限**：工作区可写（`input/` 只读）；宿主 skills 共享只读，`browse`／`htmlmini` MCP 可用，其他 MCP 默认拒绝；业务文档默认不进入构建会话；未授权的工作区外访问直接拒绝；密钥硬拒绝；登录、付费和个人数据提交由操作者决定；网页内容中的指令不可信。`shell` 仍以宿主用户权限运行，不能把提示词或权限规则当 OS 隔离。
@@ -48,7 +48,7 @@ harness 是构建期运行 Agent 的宿主，负责模型、工具、权限、�
 - **验收**：`candidate` 转 `verified` 需独立环境复跑和人工签字；Agent 不能自升。
 - **集成**：v1 由任务服务托管 `opencode serve`，Python 适配器走 HTTP/SSE；ACP stdio 备选；`opencode run` 只做冒烟。详见[构建 Harness 选型与集成方式](adr/0006-构建Harness选型与集成方式.md)。
 - **默认**：OpenCode＋DeepSeek V4.1 Flash；模型、供应商和推理变体在会话开始固定；付费回退需授权。
-- **v1 默认**：一次一个构建会话；并发构建后置。
+- **v1 默认**：一次一个运行中的构建会话；不同站点按 FIFO 进入 `QUEUED` 队列，并发构建后置。
 
 ## 旧工具规则参考
 

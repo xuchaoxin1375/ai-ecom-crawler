@@ -58,6 +58,7 @@ from .runtime.store import TaskStore
 ACTIVE_TASK_STATES = {"DRAFT", "QUEUED", "RUNNING", "PAUSING", "PAUSED"}
 
 ACTIVE_BUILD_STATES = {
+    "QUEUED",
     "CREATED",
     "RUNNING",
     "PAUSING",
@@ -65,6 +66,9 @@ ACTIVE_BUILD_STATES = {
     "CANCELLING",
     "VALIDATING",
 }
+# States that hold the single build slot. QUEUED waits for it instead of
+# occupying it, so restart and shutdown must leave queued rows alone.
+RUNNING_BUILD_STATES = ACTIVE_BUILD_STATES - {"QUEUED"}
 TERMINAL_BUILD_STATES = {"CANCELLED", "FINISHED"}
 SAFE_PERMISSIONS = {
     "bash",
@@ -807,6 +811,8 @@ class BuildManager:
         self._lock = threading.RLock()
         self._watchers: dict[str, threading.Thread] = {}
         self._finalizing: set[str] = set()
+        self._slot_build_id: str | None = None
+        self._dispatching: str | None = None
         self._handled_permissions: dict[str, set[str]] = {}
         self._stopping = threading.Event()
 
@@ -915,17 +921,11 @@ class BuildManager:
             robots_note = f"robots.txt probe failed: {type(exc).__name__}: {exc}"
             robots_sitemaps = []
         with self._lock:
-            active = self.service.active_build_id
-            if active is not None:
-                raise BuildError(f"another build is still active: {active}")
             latest = self.store.latest_build_for_site(batch.batch_id, site.site_key)
             if latest is not None and latest.state in ACTIVE_BUILD_STATES:
                 raise BuildError(f"site already has an active build: {latest.build_id}")
 
             build_id = f"build-{uuid.uuid4().hex[:12]}"
-            workspace_path = self.workspace_root / build_id
-            skill_roots = self._skill_roots()
-            skill_manifest = self._skill_manifest(skill_roots)
             self._trace_reasoning[build_id] = bool(
                 capture_reasoning and self.reasoning_capture_enabled
             )
@@ -973,60 +973,30 @@ class BuildManager:
                     ),
                 ),
             }
-            task = BuildTask(
-                build_id=build_id,
-                site={
-                    "name": site.site_key,
-                    "entry_urls": [entry_url],
-                    "allowed_origins": [_origin(entry_url)],
-                    "allowed_path_prefixes": ["/"],
-                    "market": batch.market or "UNKNOWN",
-                    "locale": batch.language or "en-US",
-                    "currency": "USD",
-                },
-                scope={
-                    "max_products": product_budget,
-                    "max_seconds": second_budget,
-                },
-                market=batch.market,
-                locale=batch.language,
-                limits={
-                    "max_products": product_budget,
-                    "max_seconds": second_budget,
-                    "max_requests": max(30, product_budget * 6),
-                },
-                tools=["shell", "read", "write", "edit", "webfetch", "websearch"],
-                model=self.model,
-                workspace=str(workspace_path),
-                output_dir=str(workspace_path / "out" / "plan"),
-                notes=(
-                    "Build a declarative product rule from the batch site entry "
-                    "and install it only after host validation."
-                ),
-                extra={
-                    **({"proxy": resolved_proxy} if resolved_proxy else {}),
-                    "permissions": default_permissions(
-                        workspace_path,
-                        skill_roots=[str(root) for root in skill_roots],
-                    ),
-                    "skills": skill_manifest,
-                    "robots_note": robots_note,
-                    "robots_sitemaps": robots_sitemaps,
-                    **self._catalog_configs[build_id],
-                    **self._archive_configs[build_id],
-                },
-            )
+            request = {
+                "max_products": product_budget,
+                "max_seconds": second_budget,
+                "repair_rounds": requested_repairs,
+                "capture_reasoning": bool(capture_reasoning),
+                "repair_reason": repair_reason or "",
+                "previous_readiness": site.readiness,
+                "robots_note": robots_note,
+                "robots_sitemaps": robots_sitemaps,
+                "archive": dict(self._archive_configs[build_id]),
+                "catalog": dict(self._catalog_configs[build_id]),
+            }
             record = BuildRecord(
                 build_id=build_id,
                 batch_id=batch.batch_id,
                 site_key=site.site_key,
-                state="CREATED",
+                state="QUEUED",
                 model=self.model,
                 proxy=resolved_proxy,
                 workspace=str(self.workspace_root / build_id),
                 mode="repair" if repair else "build",
                 feedback_id=feedback_id,
                 request_id=request_id,
+                request=request,
                 source_rule_version=site.rule_version if repair else None,
                 source_rule_sha256=source_rule_sha256,
             )
@@ -1038,48 +1008,13 @@ class BuildManager:
                 build_id=build_id,
                 proxy=resolved_proxy,
                 note=(
-                    f"规则修复中：{build_id}"
+                    f"规则修复排队中：{build_id}"
                     if repair
-                    else f"构建中：{build_id}"
+                    else f"构建排队中：{build_id}"
                 ),
             )
-            session: BuildSession | None = None
-            try:
-                session = self.service.start_build(task)
-                self._write_inputs(session, batch, site, task)
-                if repair:
-                    self._write_repair_inputs(
-                        session, batch, site, task, repair_reason or ""
-                    )
-                self.store.update_build(
-                    build_id,
-                    workspace=str(session.workspace.root),
-                    session_id=session.session_id,
-                    state=session.state,
-                )
-                prompt = (
-                    self._repair_run_prompt(site, task)
-                    if repair
-                    else self._prompt(site, batch, task)
-                )
-                self.service.send_prompt(build_id, prompt)
-                self.store.update_build(
-                    build_id,
-                    state="RUNNING",
-                    started_at=utc_now(),
-                )
-                self._start_watcher(build_id)
-            except Exception as exc:
-                message = f"{type(exc).__name__}: {exc}"
-                self._release_site(site.batch_id, site.site_key, build_id, message)
-                self._record_failure(build_id, message)
-                if session is not None:
-                    try:
-                        self.service.close(build_id)
-                    except Exception:
-                        logger.debug("build start cleanup failed", exc_info=True)
-                raise BuildError(message) from exc
-            return self.store.get_build(build_id) or record
+        self._drain_queue()
+        return self.store.get_build(build_id) or record
 
     def repair(
         self,
@@ -1118,6 +1053,251 @@ class BuildManager:
             feedback_id=feedback_id,
             request_id=request_id,
         )
+
+    # ----------------------------------------------------------------- queue
+    def _next_queued(self) -> BuildRecord | None:
+        queued = self.store.list_builds(
+            states={"QUEUED"}, limit=500, oldest_first=True
+        )
+        return queued[0] if queued else None
+
+    def _hydrate_request(self, record: BuildRecord) -> dict[str, Any]:
+        request = dict(record.request or {})
+        self._trace_reasoning[record.build_id] = bool(
+            request.get("capture_reasoning") and self.reasoning_capture_enabled
+        )
+        self._repair_limits[record.build_id] = int(request.get("repair_rounds") or 0)
+        self._repairs.setdefault(record.build_id, [])
+        archive = request.get("archive")
+        if isinstance(archive, dict):
+            self._archive_configs[record.build_id] = dict(archive)
+        catalog = request.get("catalog")
+        if isinstance(catalog, dict):
+            self._catalog_configs[record.build_id] = dict(catalog)
+        return request
+
+    def _queue_precondition_error(
+        self, record: BuildRecord, site: BatchSite
+    ) -> str | None:
+        if site.build_id and site.build_id != record.build_id:
+            return f"站点已关联其他构建：{site.build_id}"
+        if record.mode == "repair":
+            if site.readiness not in {"building", "ready"} or not site.rule_path:
+                return "站点已不再满足规则修复条件"
+            if not (self.rules_dir / site.rule_path).is_file():
+                return f"已安装规则文件不存在：{site.rule_path}"
+            if record.source_rule_sha256:
+                current_sha256 = hashlib.sha256(
+                    (self.rules_dir / site.rule_path).read_bytes()
+                ).hexdigest()
+                if current_sha256 != record.source_rule_sha256:
+                    return "源规则文件在排队期间发生变化；请重新发起修复"
+            if site.task_id:
+                current = self.store.get_task(site.task_id)
+                if current is not None and current.state in ACTIVE_TASK_STATES:
+                    return (
+                        "site has an active task; pause, cancel or wait before "
+                        f"repairing the rule: {current.task_id} ({current.state})"
+                    )
+        else:
+            if site.readiness in {"invalid", "duplicate"}:
+                return "无效或重复站点不能构建"
+            if site.task_id:
+                return f"站点已有任务：{site.task_id}"
+        return None
+
+    def _build_task(
+        self,
+        record: BuildRecord,
+        batch: Batch,
+        site: BatchSite,
+        request: dict[str, Any],
+    ) -> BuildTask:
+        entry_url = _entry_url(site)
+        workspace_path = self.workspace_root / record.build_id
+        skill_roots = self._skill_roots()
+        skill_manifest = self._skill_manifest(skill_roots)
+        product_budget = max(
+            1, int(request.get("max_products") or self.max_products)
+        )
+        second_budget = max(
+            60, int(request.get("max_seconds") or self.max_seconds)
+        )
+        archive = dict(request.get("archive") or {})
+        catalog = dict(request.get("catalog") or {})
+        return BuildTask(
+            build_id=record.build_id,
+            site={
+                "name": site.site_key,
+                "entry_urls": [entry_url],
+                "allowed_origins": [_origin(entry_url)],
+                "allowed_path_prefixes": ["/"],
+                "market": batch.market or "UNKNOWN",
+                "locale": batch.language or "en-US",
+                "currency": "USD",
+            },
+            scope={
+                "max_products": product_budget,
+                "max_seconds": second_budget,
+            },
+            market=batch.market,
+            locale=batch.language,
+            limits={
+                "max_products": product_budget,
+                "max_seconds": second_budget,
+                "max_requests": max(30, product_budget * 6),
+            },
+            tools=["shell", "read", "write", "edit", "webfetch", "websearch"],
+            model=record.model or self.model,
+            workspace=str(workspace_path),
+            output_dir=str(workspace_path / "out" / "plan"),
+            notes=(
+                "Build a declarative product rule from the batch site entry "
+                "and install it only after host validation."
+            ),
+            extra={
+                **({"proxy": record.proxy} if record.proxy else {}),
+                "permissions": default_permissions(
+                    workspace_path,
+                    skill_roots=[str(root) for root in skill_roots],
+                ),
+                "skills": skill_manifest,
+                "robots_note": str(request.get("robots_note") or ""),
+                "robots_sitemaps": list(request.get("robots_sitemaps") or []),
+                **catalog,
+                **archive,
+            },
+        )
+
+    def _launch_queued(self, build_id: str) -> bool:
+        record = self.store.get_build(build_id)
+        if record is None or record.state != "QUEUED":
+            return False
+        batch = self.store.get_batch(record.batch_id)
+        site = self.store.get_batch_site(record.batch_id, record.site_key)
+        if batch is None or site is None:
+            message = "队列中的构建找不到批次或站点"
+            self._release_site(record.batch_id, record.site_key, build_id, message)
+            self._record_failure(build_id, message)
+            return False
+        request = self._hydrate_request(record)
+        precondition = self._queue_precondition_error(record, site)
+        if precondition:
+            self._release_site(
+                record.batch_id,
+                record.site_key,
+                build_id,
+                f"构建启动失败：{precondition}",
+            )
+            self._record_failure(build_id, precondition)
+            return False
+        session: BuildSession | None = None
+        try:
+            task = self._build_task(record, batch, site, request)
+            session = self.service.start_build(task)
+            self._write_inputs(session, batch, site, task)
+            if record.mode == "repair":
+                self._write_repair_inputs(
+                    session,
+                    batch,
+                    site,
+                    task,
+                    str(request.get("repair_reason") or ""),
+                    previous_readiness=str(request.get("previous_readiness") or ""),
+                )
+            self.store.update_build(
+                build_id,
+                workspace=str(session.workspace.root),
+                session_id=session.session_id,
+                state=session.state,
+                started_at=utc_now(),
+            )
+            self.store.update_batch_site(
+                record.batch_id,
+                record.site_key,
+                readiness="building",
+                build_id=build_id,
+                note=(
+                    f"规则修复中：{build_id}"
+                    if record.mode == "repair"
+                    else f"构建中：{build_id}"
+                ),
+            )
+            prompt = (
+                self._repair_run_prompt(site, task)
+                if record.mode == "repair"
+                else self._prompt(site, batch, task)
+            )
+            self.service.send_prompt(build_id, prompt)
+            self.store.update_build(build_id, state="RUNNING")
+            self._start_watcher(build_id)
+            return True
+        except Exception as exc:  # noqa: BLE001 - queued start boundary
+            message = f"{type(exc).__name__}: {exc}"
+            logger.warning("queued build %s failed to start: %s", build_id, message)
+            self._release_site(
+                record.batch_id,
+                record.site_key,
+                build_id,
+                f"构建启动失败：{message}",
+            )
+            self._record_failure(build_id, message)
+            if session is not None:
+                try:
+                    self.service.close(build_id)
+                except Exception:
+                    logger.debug(
+                        "queued build start cleanup failed", exc_info=True
+                    )
+            return False
+
+    def _drain_queue(self) -> None:
+        """Start the oldest queued build when the single slot is free."""
+        if os.environ.get("ECOM_BUILD_DISABLED") == "1":
+            return
+        while not self._stopping.is_set():
+            with self._lock:
+                if self._dispatching is not None:
+                    return
+                if self._slot_build_id is not None:
+                    return
+                if self.service.active_build_id is not None:
+                    return
+                record = self._next_queued()
+                if record is None:
+                    return
+                self._dispatching = record.build_id
+                self._slot_build_id = record.build_id
+            launched = False
+            try:
+                launched = self._launch_queued(record.build_id)
+            except Exception as exc:
+                logger.exception("queue dispatch failed for %s", record.build_id)
+                self._release_site(
+                    record.batch_id,
+                    record.site_key,
+                    record.build_id,
+                    "构建启动失败：队列调度异常",
+                )
+                self._record_failure(
+                    record.build_id,
+                    f"队列调度失败：{type(exc).__name__}: {exc}",
+                )
+            finally:
+                with self._lock:
+                    self._dispatching = None
+                    if not launched and self._slot_build_id == record.build_id:
+                        self._slot_build_id = None
+            if launched:
+                with self._lock:
+                    if self._slot_build_id is not None:
+                        return
+                if self._stopping.is_set():
+                    return
+                # The launched build finished before the dispatch returned;
+                # continue with the next queued item instead of waiting for
+                # another API call or watcher to nudge the queue.
+                continue
 
     def _skill_roots(self) -> list[Path]:
         candidates: list[Path] = []
@@ -1212,6 +1392,8 @@ class BuildManager:
         site: BatchSite,
         task: BuildTask,
         reason: str,
+        *,
+        previous_readiness: str | None = None,
     ) -> None:
         existing = self.rules_dir / str(site.rule_path)
         input_dir = session.workspace.input_dir
@@ -1223,7 +1405,7 @@ class BuildManager:
         runtime_task = self._runtime_task_evidence(site)
         existing_versions = self._existing_rule_versions(site.rule_id)
         context = {
-            "previous_readiness": site.readiness,
+            "previous_readiness": previous_readiness or site.readiness,
             "previous_rule_id": site.rule_id,
             "previous_rule_version": site.rule_version,
             "previous_rule_path": site.rule_path,
@@ -1759,6 +1941,10 @@ domain-mismatched, or produces no valid product.
         finally:
             with self._lock:
                 self._watchers.pop(build_id, None)
+                if self._slot_build_id == build_id:
+                    self._slot_build_id = None
+            if not self._stopping.is_set():
+                self._drain_queue()
 
     def _session(self, build_id: str) -> BuildSession | None:
         try:
@@ -2436,6 +2622,21 @@ domain-mismatched, or produces no valid product.
             error=message,
             finished_at=utc_now(),
         )
+        self._release_feedback(build_id, message)
+
+    def _release_feedback(self, build_id: str, note: str) -> None:
+        """Return a repair feedback to TRIAGED when its build ends early."""
+        record = self.store.get_build(build_id)
+        if record is None or record.mode != "repair" or not record.feedback_id:
+            return
+        feedback = self.store.get_feedback(record.feedback_id)
+        if feedback is None or feedback.status != "REPAIRING":
+            return
+        self.store.update_feedback(
+            record.feedback_id,
+            status="TRIAGED",
+            triage_note=note[:2000],
+        )
 
     def _release_site(
         self,
@@ -2511,6 +2712,15 @@ domain-mismatched, or produces no valid product.
             # installing the rule.  Do not report a terminal build too early.
             state = "VALIDATING" if session.state == "FINISHED" else session.state
             outcome = None
+        queue_position: int | None = None
+        if state == "QUEUED":
+            queued = self.store.list_builds(
+                states={"QUEUED"}, limit=500, oldest_first=True
+            )
+            for index, item in enumerate(queued, 1):
+                if item.build_id == build_id:
+                    queue_position = index
+                    break
         events: list[dict[str, Any]] = []
         pending_permissions: list[dict[str, Any]] = []
         pending_dependencies: list[str] = []
@@ -2537,10 +2747,13 @@ domain-mismatched, or produces no valid product.
             events = self._read_events(record.workspace, limit=max(1, event_limit))
         repair_limit = self._repair_limits.get(build_id)
         repairs = list(self._repairs.get(build_id, []))
+        request = dict(record.request or {})
         trace_meta: dict[str, Any] = {}
         if repair_limit is None:
             trace_meta = self._trace_meta(build_id, record.workspace)
             repair_limit = int(trace_meta.get("repair_limit") or 0)
+            if not trace_meta and request.get("repair_rounds") is not None:
+                repair_limit = int(request.get("repair_rounds") or 0)
         if not repairs:
             repairs = list(trace_meta.get("repairs") or [])
         return {
@@ -2549,6 +2762,7 @@ domain-mismatched, or produces no valid product.
             "site_key": record.site_key,
             "state": state,
             "outcome": outcome,
+            "queue_position": queue_position,
             "mode": record.mode,
             "workspace": record.workspace,
             "session_id": record.session_id,
@@ -2616,9 +2830,19 @@ domain-mismatched, or produces no valid product.
             "repair_limit": repair_limit,
             "repair_round": len(repairs),
             "repairs": repairs,
-            "archive": self._archive_configs.get(build_id),
+            "archive": self._archive_configs.get(build_id)
+            or (
+                dict(request["archive"])
+                if isinstance(request.get("archive"), dict)
+                else None
+            ),
             "archive_stats": self._archive_stats.get(build_id),
-            "catalog": self._catalog_configs.get(build_id),
+            "catalog": self._catalog_configs.get(build_id)
+            or (
+                dict(request["catalog"])
+                if isinstance(request.get("catalog"), dict)
+                else None
+            ),
         }
 
     def messages(self, build_id: str, *, limit: int = 80) -> dict[str, Any]:
@@ -2687,7 +2911,7 @@ domain-mismatched, or produces no valid product.
         return {
             "build_id": build_id,
             "state": record.state,
-            "live": True,
+            "live": record.state != "QUEUED",
             "messages": messages[-limit:],
             "reasoning": reasoning[-limit:],
             "reasoning_retained": bool(reasoning),
@@ -2737,6 +2961,14 @@ domain-mismatched, or produces no valid product.
         with self._lock:
             if build_id in self._watchers:
                 raise BuildError(f"build {build_id} already has an active watcher")
+            active = self.service.active_build_id
+            if active is not None and active != build_id:
+                raise BuildError(f"another build is still active: {active}")
+            if self._slot_build_id is not None and self._slot_build_id != build_id:
+                raise BuildError(
+                    f"another build is still active: {self._slot_build_id}"
+                )
+            self._slot_build_id = build_id
         # Manual continuation is outside the automatic repair budget. If the
         # last auto-repair round failed, keep it visibly unresolved and let the
         # continuation record explain how the build eventually succeeded.
@@ -2748,6 +2980,9 @@ domain-mismatched, or produces no valid product.
         try:
             self.service.continue_after_finish(build_id, message)
         except Exception as exc:
+            with self._lock:
+                if self._slot_build_id == build_id:
+                    self._slot_build_id = None
             raise BuildError(
                 "build session is no longer available; start a new build "
                 f"instead ({type(exc).__name__}: {exc})"
@@ -2764,11 +2999,25 @@ domain-mismatched, or produces no valid product.
         return self.describe(build_id)
 
     def pause(self, build_id: str) -> dict[str, Any]:
+        record = self.store.get_build(build_id)
+        if record is None:
+            raise KeyError(f"unknown build: {build_id}")
+        if record.state == "QUEUED":
+            raise BuildError(
+                "queued build has not started; cancel it or wait for the slot"
+            )
         session = self.service.pause(build_id)
         self.store.update_build(build_id, state=session.state)
         return self.describe(build_id)
 
     def resume(self, build_id: str) -> dict[str, Any]:
+        record = self.store.get_build(build_id)
+        if record is None:
+            raise KeyError(f"unknown build: {build_id}")
+        if record.state == "QUEUED":
+            raise BuildError(
+                "queued build has not started; cancel it or wait for the slot"
+            )
         session = self.service.resume(build_id)
         self.store.update_build(build_id, state=session.state)
         return self.describe(build_id)
@@ -2777,6 +3026,22 @@ domain-mismatched, or produces no valid product.
         record = self.store.get_build(build_id)
         if record is None:
             raise KeyError(f"unknown build: {build_id}")
+        if record.state == "QUEUED":
+            self.store.update_build(
+                build_id,
+                state="CANCELLED",
+                outcome="cancelled",
+                finished_at=utc_now(),
+            )
+            self._release_site(
+                record.batch_id,
+                record.site_key,
+                build_id,
+                "构建已取消：可重新开始",
+            )
+            self._release_feedback(build_id, "构建已取消：未安装候选规则")
+            self._drain_queue()
+            return self.describe(build_id)
         session = self.service.cancel(build_id)
         self._write_trace(build_id, session, error="build was cancelled")
         self._release_site(
@@ -2785,6 +3050,7 @@ domain-mismatched, or produces no valid product.
             build_id,
             "构建已取消：可重新开始",
         )
+        self._release_feedback(build_id, "构建已取消：未安装候选规则")
         self.store.update_build(
             build_id,
             state=session.state,
@@ -2792,6 +3058,7 @@ domain-mismatched, or produces no valid product.
             finished_at=utc_now(),
         )
         self._close_session(build_id)
+        self._drain_queue()
         return self.describe(build_id)
 
     def reply_permission(
@@ -2835,7 +3102,7 @@ domain-mismatched, or produces no valid product.
         instead of leaving a permanently "building" row.
         """
         interrupted: list[str] = []
-        for record in self.store.list_builds(states=ACTIVE_BUILD_STATES, limit=500):
+        for record in self.store.list_builds(states=RUNNING_BUILD_STATES, limit=500):
             message = "服务重启，构建会话已中断"
             self.store.update_build(
                 record.build_id,
@@ -2850,6 +3117,7 @@ domain-mismatched, or produces no valid product.
                 record.build_id,
                 message,
             )
+            self._release_feedback(record.build_id, message)
             interrupted.append(record.build_id)
         for batch in self.store.list_batches(include_archived=True):
             for site in self.store.list_batch_sites(batch.batch_id):
@@ -2865,6 +3133,11 @@ domain-mismatched, or produces no valid product.
                     readiness="needs_onboarding",
                     note="构建状态已失效：可重新开始",
                 )
+        for record in self.store.list_builds(
+            states={"QUEUED"}, limit=500, oldest_first=True
+        ):
+            self._hydrate_request(record)
+        self._drain_queue()
         return interrupted
 
     def shutdown(self) -> None:
@@ -2872,7 +3145,7 @@ domain-mismatched, or produces no valid product.
         records = {
             record.build_id: record
             for record in self.store.list_builds(
-                states=ACTIVE_BUILD_STATES, limit=500
+                states=RUNNING_BUILD_STATES, limit=500
             )
         }
         for build_id, record in sorted(records.items()):
@@ -2893,6 +3166,7 @@ domain-mismatched, or produces no valid product.
                 error="服务停止，构建会话已中断",
                 finished_at=utc_now(),
             )
+            self._release_feedback(build_id, "服务停止，构建会话已中断")
             self._close_session(build_id)
         with self._lock:
             threads = list(self._watchers.values())
@@ -2903,3 +3177,6 @@ domain-mismatched, or produces no valid product.
         for build_id in list(self.service.sessions):
             if build_id not in records:
                 self._close_session(build_id)
+        with self._lock:
+            self._slot_build_id = None
+            self._dispatching = None

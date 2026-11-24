@@ -362,6 +362,7 @@ export interface BuildSummary {
   build_id: string;
   state: string;
   outcome: string | null;
+  queue_position?: number | null;
   proxy: string | null;
   error: string | null;
   rule: RuleRef | null;
@@ -413,6 +414,7 @@ export interface BuildStatus {
   site_key: string;
   state: string;
   outcome: string | null;
+  queue_position?: number | null;
   mode: "build" | "repair";
   workspace: string | null;
   session_id: string | null;

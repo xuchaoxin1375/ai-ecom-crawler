@@ -100,6 +100,16 @@ describe("siteNextStep", () => {
     expect(siteNextStep(site(), build({ state: "VALIDATING" })).action).toBe("none");
   });
 
+  it("shows queued builds as waiting and offers cancel", () => {
+    const queued = build({ state: "QUEUED", queue_position: 2 });
+    expect(buildIsActive(queued)).toBe(true);
+    const step = siteNextStep(site({ readiness: "building" }), queued);
+    expect(step.title).toBe("构建排队中");
+    expect(step.description).toContain("第 2 位");
+    expect(step.action).toBe("cancel-build");
+    expect(step.actionLabel).toBe("取消排队");
+  });
+
   it("offers task pause, resume and cancel for active tasks", () => {
     expect(
       siteNextStep(site({ task: task({ state: "RUNNING" }), task_id: "t-1" }), null)
@@ -151,6 +161,7 @@ describe("siteNextStep", () => {
 describe("active state helpers", () => {
   it("recognises active build and task states", () => {
     expect(buildIsActive(build({ state: "RUNNING" }))).toBe(true);
+    expect(buildIsActive(build({ state: "QUEUED" }))).toBe(true);
     expect(buildIsActive(build({ state: "FINISHED" }))).toBe(false);
     expect(taskIsActive(task({ state: "PAUSED" }))).toBe(true);
     expect(taskIsActive(task({ state: "FINISHED" }))).toBe(false);
