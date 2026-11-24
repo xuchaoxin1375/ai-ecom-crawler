@@ -1,5 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskSummary } from "../../lib/api";
 import { useTaskStream } from "./useTaskStream";
 
@@ -75,6 +75,7 @@ describe("useTaskStream", () => {
 
   afterEach(() => {
     globalThis.EventSource = original;
+    vi.useRealTimers();
   });
 
   it("apply snapshot, count updates and close on end", () => {
@@ -105,5 +106,19 @@ describe("useTaskStream", () => {
     expect(result.current.error).toContain("回退轮询");
     expect(result.current.connected).toBe(false);
     expect(FakeEventSource.instances[0].closed).toBe(true);
+  });
+
+  it("retries a dropped stream before falling back", () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useTaskStream("web-3"));
+    act(() => FakeEventSource.instances[0].fail());
+    expect(result.current.error).toContain("3 秒后重试");
+    act(() => vi.advanceTimersByTime(3000));
+    expect(FakeEventSource.instances).toHaveLength(2);
+    act(() =>
+      FakeEventSource.instances[1].emit("snapshot", task({ task_id: "web-3" })),
+    );
+    expect(result.current.task?.task_id).toBe("web-3");
+    expect(result.current.error).toBe("");
   });
 });

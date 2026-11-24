@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import shutil
 import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest import mock
 
 from fastapi.testclient import TestClient
 
@@ -128,6 +130,7 @@ class WebApiTests(unittest.TestCase):
         health = self.client.get("/api/health")
         self.assertEqual(health.status_code, 200)
         self.assertEqual(health.json()["status"], "ok")
+        self.assertEqual(health.json()["legacy_ui"], "enabled")
         legacy = self.client.get("/legacy")
         self.assertEqual(legacy.status_code, 200)
         self.assertIn("采集", legacy.text)
@@ -144,6 +147,22 @@ class WebApiTests(unittest.TestCase):
         else:
             self.assertEqual(index.status_code, 200)
             self.assertIn("采集", index.text)
+
+    def test_legacy_ui_can_be_retired_by_env(self) -> None:
+        with mock.patch.dict(os.environ, {"ECOM_LEGACY_UI": "off"}):
+            app = create_app(self.db_path, self.out_root, self.rules_dir)
+            client = TestClient(app, headers=CLIENT_HEADERS)
+            health = client.get("/api/health")
+            self.assertEqual(health.status_code, 200)
+            self.assertEqual(health.json()["legacy_ui"], "disabled")
+            batch = client.get("/batch/", follow_redirects=False)
+            self.assertEqual(batch.status_code, 307, batch.text)
+            self.assertEqual(batch.headers["location"], "/next/")
+            legacy = client.get("/legacy", follow_redirects=False)
+            self.assertEqual(legacy.status_code, 307, legacy.text)
+            self.assertEqual(legacy.headers["location"], "/next/")
+            nested = client.get("/batch/tasks/web-1", follow_redirects=False)
+            self.assertEqual(nested.status_code, 307, nested.text)
 
     def test_limits_accept_unbounded_full_catalog(self) -> None:
         limits = Limits(

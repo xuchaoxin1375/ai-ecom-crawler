@@ -680,6 +680,12 @@ def create_app(
     root.mkdir(parents=True, exist_ok=True)
     rules = Path(rules_dir).resolve() if rules_dir is not None else None
     builds_disabled = os.environ.get("ECOM_BUILD_DISABLED") == "1"
+    legacy_ui_enabled = os.environ.get("ECOM_LEGACY_UI", "on").strip().lower() not in {
+        "0",
+        "off",
+        "false",
+        "no",
+    }
     if build_manager is None and rules is not None:
         build_manager = BuildManager(store, root, rules, default_proxy=proxy)
 
@@ -1389,13 +1395,26 @@ def create_app(
     def index() -> Response:
         if (V2_DIST_DIR / "index.html").is_file():
             return RedirectResponse(url="/next/", status_code=307)
-        if (BATCH_DIST_DIR / "index.html").is_file():
+        if legacy_ui_enabled and (BATCH_DIST_DIR / "index.html").is_file():
             return RedirectResponse(url="/batch/", status_code=307)
         return FileResponse(STATIC_DIR / "index.html")
 
     @app.get("/legacy", include_in_schema=False)
-    def legacy_index() -> FileResponse:
+    def legacy_index() -> Response:
+        if not legacy_ui_enabled:
+            if (V2_DIST_DIR / "index.html").is_file():
+                return RedirectResponse(url="/next/", status_code=307)
+            raise _error("NOT_FOUND", "legacy UI is disabled", 404)
         return FileResponse(STATIC_DIR / "index.html")
+
+    if not legacy_ui_enabled:
+
+        @app.get("/batch", include_in_schema=False)
+        @app.get("/batch/{path:path}", include_in_schema=False)
+        def retired_batch(path: str = "") -> Response:
+            if (V2_DIST_DIR / "index.html").is_file():
+                return RedirectResponse(url="/next/", status_code=307)
+            raise _error("NOT_FOUND", "legacy UI is disabled", 404)
 
     @app.get("/api/health")
     def health() -> dict[str, Any]:
@@ -1408,6 +1427,7 @@ def create_app(
             "max_tasks": max_tasks if manage_worker else None,
             "max_browser_tasks": max_browser_tasks if manage_worker else None,
             "rules_configured": rules is not None and rules.is_dir(),
+            "legacy_ui": "enabled" if legacy_ui_enabled else "disabled",
         }
 
     @app.get("/api/rules")
@@ -3068,7 +3088,7 @@ def create_app(
             StaticFiles(directory=V2_DIST_DIR, html=True),
             name="next",
         )
-    if (BATCH_DIST_DIR / "index.html").is_file():
+    if legacy_ui_enabled and (BATCH_DIST_DIR / "index.html").is_file():
         app.mount(
             "/batch",
             StaticFiles(directory=BATCH_DIST_DIR, html=True),

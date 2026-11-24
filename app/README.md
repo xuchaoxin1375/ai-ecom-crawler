@@ -135,6 +135,7 @@ python -m uv run --project app ecom-crawler validate --task-result /path/to/task
 - 构建 trace 默认不保存 reasoning；需要本地复盘时用 `ECOM_BUILD_CAPTURE_REASONING=1` 启动服务，或在构建 API 传 `capture_reasoning=true`。trace 会截断工具输出、消息和 reasoning，不保存原始导出或整页 HTML。
 - 站点详情的“模型输出”读取 `/api/builds/{id}/messages`：构建中显示流式时间线，结束后显示完整可见消息；`timeline` 按时间合并思考、工具调用和文本。reasoning 仅在显式保留时出现；未保留时页面会提示服务端开关和单次勾选条件。
 - 规则激活：`ECOM_RULE_ACTIVATION_MODE=manual`（默认）下定向修复只产生候选，需在站点详情人工激活；`legacy` 恢复修复后自动激活。初始构建仍自动激活。`ECOM_BUILD_DISABLED=1` 在只读预览中保留构建读接口和历史，只拒绝新的构建／修复；候选规则详情和站点候选卡返回主机生成的字段级 `change_summary` 与规范化 `validation`（问题样本、回归计数、内容审计、证据哈希），不采用 Agent 自报的摘要。
+- 旧版退役：`ECOM_LEGACY_UI=off` 停止挂载旧 Vue `/batch`，并把 `/batch`、`/legacy` 307 到 `/next/`；`/api/health.legacy_ui` 显示 `disabled`。默认 `on` 保留直访回退，v1 API 和数据不受影响。构建时间线和任务时间线在 SSE 断开后按 3／6／9 秒重试，最多 3 次，同时继续轮询；`end` 事件后不再重连。
 - 规则账本迁移：服务停止后运行 `python -m ecom_crawler.migrate_rules --db <tasks.db> --rules-dir <rules>`；默认写 `<db>.migration-<timestamp>.json`，`--report` 可指定路径，`--dry-run` 只扫描。命令回填 `site_rules`、`rule_versions`、任务规则哈希和构建目标版本，不覆盖已有站点指针或版本，可重复执行；旧构建的 `change_summary`／validation 保持空对象，不伪造历史验证。
 - 自动修复：默认允许 1 轮，`ECOM_BUILD_MAX_REPAIR_ROUNDS` 可调整（0 关闭），`ECOM_BUILD_REPAIR_SECONDS` 控制每轮额外时间（默认 240 秒）。构建 API 可传 `repair_rounds` 单次覆盖；验证失败时用同一 OpenCode 会话继续提示，并重跑静态预检与主机验证。轮次、错误和是否解决写入构建状态与 trace。
 - 构建预检：`executor/preflight.py` 在联网验证前编译规则里的所有 lxml CSS 选择器；`:not(:first-of-type)` 这类 lxml 不支持的写法会在预检阶段直接报出，而不是等到商品页全部 `plan_error`。

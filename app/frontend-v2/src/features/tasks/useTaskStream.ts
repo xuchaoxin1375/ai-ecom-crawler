@@ -34,7 +34,10 @@ export function useTaskStream(taskId: string | null, enabled = true): TaskStream
     if (!taskId || !enabled || !supported) return;
     const id = taskId;
     let active = true;
-    const source = new EventSource(taskEventsUrl(id));
+    let source: EventSource | null = null;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let attempts = 0;
+    let ended = false;
 
     function update(next: Partial<Omit<StreamState, "taskId">>) {
       if (!active) return;
@@ -57,6 +60,7 @@ export function useTaskStream(taskId: string | null, enabled = true): TaskStream
     function handleSnapshot(event: MessageEvent<string>) {
       try {
         const payload = JSON.parse(event.data) as TaskSummary;
+        attempts = 0;
         update({
           task: payload,
           connected: true,
@@ -69,6 +73,7 @@ export function useTaskStream(taskId: string | null, enabled = true): TaskStream
     }
 
     function handleUpdate() {
+      attempts = 0;
       update({ connected: true, error: "" });
       if (!active) return;
       setState((current) =>
@@ -79,22 +84,47 @@ export function useTaskStream(taskId: string | null, enabled = true): TaskStream
     }
 
     function handleEnd() {
+      ended = true;
       update({ connected: false, ended: true });
-      source.close();
+      source?.close();
     }
 
-    source.addEventListener("snapshot", handleSnapshot as EventListener);
-    source.addEventListener("update", handleUpdate as EventListener);
-    source.addEventListener("end", handleEnd as EventListener);
-    source.onopen = () => update({ connected: true, error: "" });
-    source.onerror = () => {
-      update({ connected: false, error: "任务流连接中断，已回退轮询" });
-      source.close();
-    };
+    function handleError() {
+      if (ended || retryTimer) return;
+      source?.close();
+      if (attempts < 3) {
+        attempts += 1;
+        update({
+          connected: false,
+          error: `任务流连接中断，${Math.round(
+            (3000 * attempts) / 1000,
+          )} 秒后重试并回退轮询`,
+        });
+        retryTimer = setTimeout(() => {
+          retryTimer = null;
+          connect();
+        }, 3000 * attempts);
+      } else {
+        update({ connected: false, error: "任务流连接中断，已回退轮询" });
+      }
+    }
+
+    function connect() {
+      if (!active || ended) return;
+      source = new EventSource(taskEventsUrl(id));
+      source.addEventListener("snapshot", handleSnapshot as EventListener);
+      source.addEventListener("update", handleUpdate as EventListener);
+      source.addEventListener("end", handleEnd as EventListener);
+      source.onopen = () => update({ connected: true, error: "" });
+      source.onerror = handleError;
+    }
+
+    connect();
 
     return () => {
       active = false;
-      source.close();
+      source?.close();
+      if (retryTimer) clearTimeout(retryTimer);
     };
   }, [taskId, enabled, supported]);
 
