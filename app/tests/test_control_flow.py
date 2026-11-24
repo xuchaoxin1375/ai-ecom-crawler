@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Self
 
 from ecom_crawler.cli import main
-from ecom_crawler.execution import submit_task
+from ecom_crawler.execution import build_task, submit_task
 from ecom_crawler.runtime.fetcher import DomainLimiter
 from ecom_crawler.runtime.lock import worker_lock
 from ecom_crawler.runtime.models import FetchResult, WorkItem
@@ -318,6 +318,58 @@ class ControlFlowTests(unittest.TestCase):
             max_seconds=30,
             max_attempts=1,
         )
+
+    def _queued_task(self, task_id: str, **overrides: Any) -> Any:
+        task = build_task(
+            rule_path=self.rule_path,
+            task_id=task_id,
+            task_type="product",
+            max_urls=5,
+            max_products=5,
+            max_seconds=30,
+            max_attempts=1,
+        )
+        for key, value in overrides.items():
+            setattr(task, key, value)
+        store = TaskStore(self.db_path)
+        store.create_task(task)
+        return store.request_start(task.task_id)
+
+    def _assert_plan_error(self, task_id: str, detail: str) -> None:
+        store = TaskStore(self.db_path)
+        task = store.get_task(task_id)
+        assert task is not None
+        self.assertEqual(task.state, "FINISHED")
+        self.assertEqual(task.outcome, "FAILED")
+        self.assertEqual(task.stop_reason, "PLAN_ERROR")
+        payload = json.loads(
+            (self.out_root / task_id / "task-result.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertIn(detail, payload["stop_detail"])
+
+    def test_worker_rejects_rule_hash_change_after_enqueue(self) -> None:
+        self._queued_task("hash-mismatch", rule_sha256="0" * 64)
+        worker = Worker(
+            TaskStore(self.db_path),
+            out_root=self.out_root,
+            max_tasks=1,
+            per_domain_rps=50,
+        )
+        worker.run_once()
+        self._assert_plan_error("hash-mismatch", "rule file hash mismatch")
+
+    def test_worker_rejects_task_market_mismatch(self) -> None:
+        self._queued_task("market-mismatch", market="US")
+        worker = Worker(
+            TaskStore(self.db_path),
+            out_root=self.out_root,
+            max_tasks=1,
+            per_domain_rps=50,
+        )
+        worker.run_once()
+        self._assert_plan_error("market-mismatch", "market mismatch")
 
     def test_a20_pause_one_task_keeps_other_running(self) -> None:
         task_a = self._submit_prefixed("a", "a20-pause-a")

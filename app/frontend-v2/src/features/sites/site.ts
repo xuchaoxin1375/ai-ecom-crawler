@@ -3,6 +3,7 @@ import type {
   BuildStatus,
   BuildSummary,
   QualityException,
+  SiteRuleCandidate,
   TaskItem,
   TaskSummary,
 } from "../../lib/api";
@@ -56,6 +57,32 @@ export function buildIsActive(build: BuildLike | null | undefined): boolean {
 
 export function taskIsActive(task: TaskSummary | null | undefined): boolean {
   return Boolean(task && TASK_ACTIVE_STATES.has(task.state));
+}
+
+export function candidateActivationBlockedReason(
+  candidate: SiteRuleCandidate,
+): string | null {
+  const validation = candidate.validation;
+  if (!validation) return "缺少验证记录，不能激活";
+  if (validation.status === "INCOMPLETE") return "验证证据不完整，不能激活";
+  if (validation.status !== "PASSED") return "验证未通过，不能激活";
+  if (!validation.candidate_smoke?.executed) {
+    return "旧验证缺少候选冒烟／同页回归记录，不能激活";
+  }
+  const regression = validation.regression;
+  if (regression.required) {
+    if (!regression.executed) return "缺少新旧规则同页回归，不能激活";
+    const expected =
+      regression.required_checked ??
+      Math.min(3, validation.candidate_smoke.product_samples?.length ?? 0);
+    if (expected > 0 && regression.checked < expected) {
+      return "同页回归覆盖不足，不能激活";
+    }
+    if (regression.regressions.length) {
+      return "新旧规则回归发现字段退化，不能激活";
+    }
+  }
+  return null;
 }
 
 export function siteHasActiveWork(

@@ -73,6 +73,7 @@ import { useBuildStream } from "./useBuildStream";
 import { RuleEvidence } from "../rules/RuleEvidence";
 import {
   buildIsActive,
+  candidateActivationBlockedReason,
   siteHasActiveWork,
   siteNextStep,
   siteStatusSentence,
@@ -1182,51 +1183,58 @@ export function SiteDetailPage() {
                   <p className="text-[11px] text-ink-3">候选规则</p>
                   {siteRuleQuery.data?.candidates.length ? (
                     <ul className="mt-1.5 space-y-2">
-                      {siteRuleQuery.data.candidates.map((candidate) => (
-                        <li
-                          key={candidate.rule_version}
-                          className="rounded-control border border-warning/25 bg-warning-soft px-2.5 py-2"
-                        >
-                          <p className="flex items-center justify-between gap-2 font-mono text-[11px] text-ink">
-                            <span>{candidate.rule_version}</span>
-                            <Badge tone="warning" dot={false}>
-                              待激活
-                            </Badge>
-                          </p>
-                          <p className="mt-0.5 text-[11px] text-ink-3">
-                            {candidate.build_id || "未知构建"} ·{" "}
-                            {formatTime(candidate.created_at)}
-                          </p>
-                          <RuleEvidence
-                            change={candidate.change_summary}
-                            validation={candidate.validation}
-                            className="mt-1.5 border-t border-warning/20 pt-1.5"
-                          />
-                          <div className="mt-2 flex items-center gap-1.5">
-                            <Button
-                              size="sm"
-                              variant="primary"
-                              onClick={() =>
-                                void activateCandidate(candidate.rule_version)
-                              }
-                              disabled={
-                                Boolean(ruleBusy) || siteHasActiveWork(site, build)
-                              }
-                            >
-                              激活
-                            </Button>
-                            <Button
-                              size="sm"
-                              onClick={() =>
-                                void rejectCandidate(candidate.rule_version)
-                              }
-                              disabled={Boolean(ruleBusy)}
-                            >
-                              放弃
-                            </Button>
-                          </div>
-                        </li>
-                      ))}
+                      {siteRuleQuery.data.candidates.map((candidate) => {
+                        const activationBlocked =
+                          candidateActivationBlockedReason(candidate);
+                        return (
+                          <li
+                            key={candidate.rule_version}
+                            className="rounded-control border border-warning/25 bg-warning-soft px-2.5 py-2"
+                          >
+                            <p className="flex items-center justify-between gap-2 font-mono text-[11px] text-ink">
+                              <span>{candidate.rule_version}</span>
+                              <Badge tone="warning" dot={false}>
+                                待激活
+                              </Badge>
+                            </p>
+                            <p className="mt-0.5 text-[11px] text-ink-3">
+                              {candidate.build_id || "未知构建"} ·{" "}
+                              {formatTime(candidate.created_at)}
+                            </p>
+                            <RuleEvidence
+                              change={candidate.change_summary}
+                              validation={candidate.validation}
+                              className="mt-1.5 border-t border-warning/20 pt-1.5"
+                            />
+                            <div className="mt-2 flex items-center gap-1.5">
+                              <Button
+                                size="sm"
+                                variant="primary"
+                                onClick={() =>
+                                  void activateCandidate(candidate.rule_version)
+                                }
+                                disabled={
+                                  Boolean(ruleBusy) ||
+                                  siteHasActiveWork(site, build) ||
+                                  Boolean(activationBlocked)
+                                }
+                                title={activationBlocked ?? undefined}
+                              >
+                                激活
+                              </Button>
+                              <Button
+                                size="sm"
+                                onClick={() =>
+                                  void rejectCandidate(candidate.rule_version)
+                                }
+                                disabled={Boolean(ruleBusy)}
+                              >
+                                放弃
+                              </Button>
+                            </div>
+                          </li>
+                        );
+                      })}
                     </ul>
                   ) : (
                     <p className="mt-1 text-xs leading-5 text-ink-3">

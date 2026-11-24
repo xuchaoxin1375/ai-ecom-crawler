@@ -274,6 +274,30 @@ class ExecutionTests(unittest.TestCase):
             assert stored is not None
             self.assertEqual(stored.state, "FINISHED")
 
+    def test_seed_urls_without_discovery_fetch_only_those_pages(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary, fixture_server() as base:
+            root = Path(temporary)
+            rule = root / "rule.yaml"
+            rule.write_text(
+                RULE_TEMPLATE.replace("__BASE__", base), encoding="utf-8"
+            )
+            result, _ = run_task(
+                rule_path=rule,
+                db_path=root / "tasks.db",
+                out_root=root / "tasks",
+                task_id="seed-only",
+                task_type="product",
+                max_products=10,
+                max_seconds=30,
+                max_attempts=1,
+                per_domain_rps=50,
+                seed_urls=[f"{base}/p1.html"],
+                discover=False,
+            )
+            self.assertEqual(result["counts"]["valid_products"], 1)
+            items = TaskStore(root / "tasks.db").items("seed-only", "product")
+            self.assertEqual([item.url for item in items], [f"{base}/p1.html"])
+
     def test_full_archive_replays_offline(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

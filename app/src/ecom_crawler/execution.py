@@ -72,6 +72,8 @@ def build_task(
     archive_max_bytes: int | None = None,
     archive_reuse: bool = False,
     offline: bool = False,
+    seed_urls: list[str] | None = None,
+    discover: bool = True,
 ) -> Task:
     rule_path = Path(rule_path).resolve()
     if not rule_path.is_file():
@@ -81,6 +83,12 @@ def build_task(
     if task_type not in {"product", "discovery"}:
         raise ContractError(f"unsupported task_type: {task_type}")
     task_input = {"rule_path": str(rule_path)}
+    if seed_urls:
+        cleaned = [str(url).strip() for url in seed_urls if str(url).strip()]
+        if cleaned:
+            task_input["seed_urls"] = list(dict.fromkeys(cleaned))
+    if not discover:
+        task_input["discover"] = False
     if proxy:
         task_input["proxy"] = proxy
     archive = _archive_input(
@@ -183,6 +191,8 @@ def run_task(
     archive_max_bytes: int | None = None,
     archive_reuse: bool = False,
     offline: bool = False,
+    seed_urls: list[str] | None = None,
+    discover: bool = True,
 ) -> tuple[dict[str, Any], Path]:
     """Create and run one task, returning its result and task directory."""
     task = build_task(
@@ -200,6 +210,8 @@ def run_task(
         archive_max_bytes=archive_max_bytes,
         archive_reuse=archive_reuse,
         offline=offline,
+        seed_urls=seed_urls,
+        discover=discover,
     )
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)

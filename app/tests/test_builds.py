@@ -448,11 +448,30 @@ class BuildWorkflowTests(unittest.TestCase):
                 proxy: str | None = None,
                 **_: Any,
             ) -> dict[str, Any]:
+                resolved = currencies or {"EUR": 2}
+                currency = next(iter(resolved))
+                samples = [
+                    {
+                        "source_url": f"https://example.fr/p/{index}",
+                        "name": f"Example product {index}",
+                        "price_amount": f"{index}0.00",
+                        "price_currency": currency,
+                        "primary_image_url": (
+                            f"https://example.fr/images/{index}.jpg"
+                        ),
+                        "description_html": (
+                            f"<p>Example product {index} description with "
+                            "enough detail for the host check.</p>"
+                        ),
+                    }
+                    for index in (1, 2)
+                ]
                 return {
                     "counts": {"valid_products": 2, "failed_products": 0},
                     "outcome": "COMPLETED",
                     "stop_reason": "NATURAL_END",
-                    "currencies": currencies or {"EUR": 2},
+                    "currencies": resolved,
+                    "product_samples": samples,
                 }
 
         return BuildManager(
@@ -1292,6 +1311,10 @@ class BuildWorkflowTests(unittest.TestCase):
                 candidate["change_summary"]["changed_selectors"],
             )
             self.assertEqual(candidate["validation"]["status"], "PASSED")
+            self.assertTrue(candidate["validation"]["candidate_smoke"]["executed"])
+            self.assertTrue(candidate["validation"]["regression"]["executed"])
+            self.assertEqual(candidate["validation"]["regression"]["checked"], 2)
+            self.assertEqual(candidate["validation"]["regression"]["regressions"], [])
             self.assertEqual(
                 len(candidate["validation"]["evidence_sha256"]), 64
             )
@@ -1422,6 +1445,158 @@ class BuildWorkflowTests(unittest.TestCase):
             )
             self.assertEqual(rejected.status_code, 200, rejected.text)
             self.assertEqual(rejected.json()["status"], "rejected")
+
+    def test_activation_rejects_candidate_without_regression(self) -> None:
+        def validator(*_: Any, **__: Any) -> dict[str, Any]:
+            return {
+                "counts": {"valid_products": 2, "failed_products": 0},
+                "outcome": "COMPLETED",
+                "stop_reason": "NATURAL_END",
+                "currencies": {"EUR": 2},
+            }
+
+        adapter = FakeBuildAdapter(
+            self.root,
+            rule_payloads=[
+                rule_payload(version="2026.11.23-1"),
+                rule_payload(version="2026.11.23-2"),
+            ],
+        )
+        manager = self._manager(
+            adapter, validator=validator, activation_mode="manual"
+        )
+        with self._client(manager) as client:
+            first = client.post(
+                "/api/batches/b-1/sites/example.fr/build",
+                json={},
+                headers=CLIENT_HEADERS,
+            ).json()["build"]
+            self.assertEqual(
+                self._wait_ready(client, first["build_id"])["outcome"],
+                "succeeded",
+            )
+            repair = client.post(
+                "/api/batches/b-1/sites/example.fr/build",
+                json={"mode": "repair"},
+                headers=CLIENT_HEADERS,
+            ).json()["build"]
+            self.assertEqual(
+                self._wait_ready(client, repair["build_id"])["outcome"],
+                "succeeded",
+            )
+            site_rule = client.get("/api/sites/example.fr/rule").json()
+            candidate = next(
+                item
+                for item in site_rule["candidates"]
+                if item["rule_version"] == "2026.11.23-2"
+            )
+            self.assertEqual(candidate["validation_status"], "INCOMPLETE")
+            self.assertFalse(candidate["validation"]["regression"]["executed"])
+            blocked = client.post(
+                "/api/sites/example.fr/rule/activate",
+                json={
+                    "request_id": "activate-incomplete",
+                    "rule_version": "2026.11.23-2",
+                    "expected_active_version": "2026.11.23-1",
+                },
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(blocked.status_code, 409, blocked.text)
+            self.assertEqual(
+                blocked.json()["error"]["code"], "VALIDATION_REQUIRED"
+            )
+            self.assertEqual(
+                client.get("/api/sites/example.fr/rule").json()["active"][
+                    "rule_version"
+                ],
+                "2026.11.23-1",
+            )
+
+    def test_activation_rejects_price_regression(self) -> None:
+        def validator(
+            *_: Any, **kwargs: Any
+        ) -> dict[str, Any]:
+            price = "8.00" if kwargs.get("discover", True) else "10.00"
+            samples = [
+                {
+                    "source_url": f"https://example.fr/p/{index}",
+                    "name": f"Example product {index}",
+                    "price_amount": price,
+                    "price_currency": "EUR",
+                    "primary_image_url": f"https://example.fr/{index}.jpg",
+                    "description_html": (
+                        f"<p>Example product {index} has a complete description.</p>"
+                    ),
+                }
+                for index in (1, 2)
+            ]
+            return {
+                "counts": {"valid_products": 2, "failed_products": 0},
+                "outcome": "COMPLETED",
+                "stop_reason": "NATURAL_END",
+                "currencies": {"EUR": 2},
+                "product_samples": samples,
+            }
+
+        adapter = FakeBuildAdapter(
+            self.root,
+            rule_payloads=[
+                rule_payload(version="2026.11.23-1"),
+                rule_payload(version="2026.11.23-2"),
+            ],
+        )
+        manager = self._manager(
+            adapter, validator=validator, activation_mode="manual"
+        )
+        with self._client(manager) as client:
+            first = client.post(
+                "/api/batches/b-1/sites/example.fr/build",
+                json={},
+                headers=CLIENT_HEADERS,
+            ).json()["build"]
+            self.assertEqual(
+                self._wait_ready(client, first["build_id"])["outcome"],
+                "succeeded",
+            )
+            repair = client.post(
+                "/api/batches/b-1/sites/example.fr/build",
+                json={"mode": "repair"},
+                headers=CLIENT_HEADERS,
+            ).json()["build"]
+            self.assertEqual(
+                self._wait_ready(client, repair["build_id"])["outcome"],
+                "succeeded",
+            )
+            site_rule = client.get("/api/sites/example.fr/rule").json()
+            candidate = next(
+                item
+                for item in site_rule["candidates"]
+                if item["rule_version"] == "2026.11.23-2"
+            )
+            self.assertEqual(candidate["validation_status"], "FAILED")
+            regressions = candidate["validation"]["regression"]["regressions"]
+            self.assertTrue(
+                any(item["field"] == "price_amount" for item in regressions)
+            )
+            blocked = client.post(
+                "/api/sites/example.fr/rule/activate",
+                json={
+                    "request_id": "activate-regression",
+                    "rule_version": "2026.11.23-2",
+                    "expected_active_version": "2026.11.23-1",
+                },
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(blocked.status_code, 409, blocked.text)
+            self.assertEqual(
+                blocked.json()["error"]["code"], "VALIDATION_FAILED"
+            )
+            self.assertEqual(
+                client.get("/api/sites/example.fr/rule").json()["active"][
+                    "rule_version"
+                ],
+                "2026.11.23-1",
+            )
 
     def test_content_audit_gap_fails_validation(self) -> None:
         def validator(*_: Any, **__: Any) -> dict[str, Any]:

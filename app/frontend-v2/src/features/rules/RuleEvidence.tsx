@@ -13,14 +13,32 @@ interface RuleEvidenceProps {
  */
 export function RuleEvidence({ change, validation, className }: RuleEvidenceProps) {
   const hasChange = Array.isArray(change?.changed_fields);
+  const status = validation?.status;
   const hasValidation =
-    validation?.status === "PASSED" || validation?.status === "FAILED";
+    status === "PASSED" || status === "FAILED" || status === "INCOMPLETE";
   if (!hasChange && !hasValidation) return null;
+  const report = hasValidation ? validation : null;
 
   const changed = hasChange ? (change?.changed_fields ?? []) : [];
   const checks = validation?.issue_checks ?? [];
   const regressions = validation?.regression?.regressions ?? [];
   const audit = validation?.content_audit;
+  const statusLabel =
+    status === "PASSED" ? "通过" : status === "INCOMPLETE" ? "证据不完整" : "未通过";
+  const statusClass =
+    status === "PASSED"
+      ? "text-success"
+      : status === "INCOMPLETE"
+        ? "text-warning"
+        : "text-danger";
+  const regression = validation?.regression;
+  const legacyEvidence = Boolean(report && !report.candidate_smoke);
+  const regressionNote =
+    regression && regression.required && !regression.executed
+      ? "回归未执行"
+      : regression?.executed
+        ? `回归 ${regression.checked} 条`
+        : "";
 
   return (
     <div
@@ -28,24 +46,27 @@ export function RuleEvidence({ change, validation, className }: RuleEvidenceProp
         .filter(Boolean)
         .join(" ")}
     >
-      {hasValidation ? (
+      {report ? (
         <p>
-          主机验证{" "}
-          <span
-            className={validation.status === "PASSED" ? "text-success" : "text-danger"}
-          >
-            {validation.status === "PASSED" ? "通过" : "未通过"}
-          </span>
-          {typeof validation.valid_products === "number"
-            ? ` · 有效 ${validation.valid_products}`
+          主机验证 <span className={statusClass}>{statusLabel}</span>
+          {typeof report.valid_products === "number"
+            ? ` · 有效 ${report.valid_products}`
             : ""}
-          {typeof validation.failed_products === "number" &&
-          validation.failed_products > 0
-            ? ` · 失败 ${validation.failed_products}`
+          {typeof report.failed_products === "number" && report.failed_products > 0
+            ? ` · 失败 ${report.failed_products}`
             : ""}
+          {regressionNote ? ` · ${regressionNote}` : ""}
           {audit
             ? ` · 审计 ${audit.products_checked} 条 / 描述缺口 ${audit.description_gaps}`
             : ""}
+        </p>
+      ) : null}
+      {report?.status_reasons?.length ? (
+        <p className="text-warning">{report.status_reasons.join("；")}</p>
+      ) : null}
+      {legacyEvidence ? (
+        <p className="text-warning">
+          旧验证缺少候选冒烟／同页回归记录，不能激活；请重新运行修复构建。
         </p>
       ) : null}
       {hasChange ? (
@@ -61,9 +82,9 @@ export function RuleEvidence({ change, validation, className }: RuleEvidenceProp
           {change?.currency_changed ? " · 币种变更" : ""}
         </p>
       ) : null}
-      {hasValidation && validation.evidence_sha256 ? (
+      {report?.evidence_sha256 ? (
         <p className="font-mono text-[10px] text-ink-3">
-          证据 {validation.evidence_sha256.slice(0, 12)}
+          证据 {report.evidence_sha256.slice(0, 12)}
         </p>
       ) : null}
       {checks.length || regressions.length ? (

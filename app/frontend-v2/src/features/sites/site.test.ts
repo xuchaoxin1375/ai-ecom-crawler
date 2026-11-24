@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
-import type { BatchSite, BuildStatus, TaskSummary } from "../../lib/api";
-import { buildIsActive, siteNextStep, taskIsActive } from "./site";
+import type {
+  BatchSite,
+  BuildStatus,
+  SiteRuleCandidate,
+  TaskSummary,
+} from "../../lib/api";
+import {
+  buildIsActive,
+  candidateActivationBlockedReason,
+  siteNextStep,
+  taskIsActive,
+} from "./site";
 
 function task(overrides: Partial<TaskSummary> = {}): TaskSummary {
   return {
@@ -81,6 +91,114 @@ function build(overrides: Partial<BuildStatus> = {}): BuildStatus {
     ...overrides,
   };
 }
+
+function candidate(overrides: Partial<SiteRuleCandidate> = {}): SiteRuleCandidate {
+  return {
+    rule_version: "2026.11.24-2",
+    sha256: "a".repeat(64),
+    build_id: "build-1",
+    validation_status: "PASSED",
+    change_summary: null,
+    validation: {
+      status: "PASSED",
+      candidate_smoke: {
+        executed: true,
+        valid_products: 6,
+        failed_products: 0,
+        excluded_products: 0,
+        currencies: { EUR: 6 },
+        product_samples: [{}, {}, {}],
+      },
+      issue_checks: [],
+      regression: {
+        executed: true,
+        required: true,
+        required_checked: 3,
+        checked: 3,
+        regressions: [],
+      },
+      content_audit: { products_checked: 6, description_gaps: 0 },
+      diff: { changed_fields: [], discovery_changed: false },
+      evidence_sha256: "b".repeat(64),
+    },
+    created_at: "2026-11-24T00:00:00Z",
+    ...overrides,
+  };
+}
+
+describe("candidateActivationBlockedReason", () => {
+  it("allows a fully verified repair candidate", () => {
+    expect(candidateActivationBlockedReason(candidate())).toBeNull();
+  });
+
+  it("blocks legacy evidence without a smoke record", () => {
+    const legacy = candidate({
+      validation: {
+        ...candidate().validation!,
+        candidate_smoke: undefined,
+      },
+    });
+    expect(candidateActivationBlockedReason(legacy)).toContain("旧验证");
+  });
+
+  it("blocks incomplete or failed validation", () => {
+    const incomplete = candidate({
+      validation: {
+        ...candidate().validation!,
+        status: "INCOMPLETE",
+      },
+    });
+    expect(candidateActivationBlockedReason(incomplete)).toContain("不完整");
+    const failed = candidate({
+      validation: { ...candidate().validation!, status: "FAILED" },
+    });
+    expect(candidateActivationBlockedReason(failed)).toContain("未通过");
+  });
+
+  it("blocks missing or short regression coverage", () => {
+    const missing = candidate({
+      validation: {
+        ...candidate().validation!,
+        regression: {
+          ...candidate().validation!.regression,
+          executed: false,
+          checked: 0,
+        },
+      },
+    });
+    expect(candidateActivationBlockedReason(missing)).toContain("同页回归");
+    const short = candidate({
+      validation: {
+        ...candidate().validation!,
+        regression: {
+          ...candidate().validation!.regression,
+          checked: 1,
+        },
+      },
+    });
+    expect(candidateActivationBlockedReason(short)).toContain("覆盖不足");
+  });
+
+  it("blocks regression entries", () => {
+    const regressed = candidate({
+      validation: {
+        ...candidate().validation!,
+        regression: {
+          ...candidate().validation!.regression,
+          regressions: [
+            {
+              field: "price_amount",
+              sample: "https://site.fr/p/1",
+              before: "10.00",
+              after: "9.00",
+            },
+          ],
+        },
+      },
+    });
+    expect(candidateActivationBlockedReason(regressed)).toContain("退化");
+  });
+});
 
 describe("siteNextStep", () => {
   it("asks for a build when the site has no rule package", () => {

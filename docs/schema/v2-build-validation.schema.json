@@ -16,6 +16,7 @@
     "status": {
       "enum": [
         "PASSED",
+        "INCOMPLETE",
         "FAILED"
       ]
     },
@@ -49,6 +50,37 @@
         "additionalProperties": true
       }
     },
+    "candidate_smoke": {
+      "type": "object",
+      "description": "Bounded candidate run. executed=false is not a pass.",
+      "properties": {
+        "executed": {
+          "type": "boolean"
+        },
+        "valid_products": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failed_products": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "excluded_products": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "currencies": {
+          "type": "object"
+        },
+        "product_samples": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
     "regression": {
       "type": "object",
       "required": [
@@ -56,9 +88,34 @@
         "regressions"
       ],
       "properties": {
+        "executed": {
+          "type": "boolean"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "required_checked": {
+          "type": "integer",
+          "minimum": 0
+        },
         "checked": {
           "type": "integer",
           "minimum": 0
+        },
+        "compared_fields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "skipped": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "reason": {
+          "type": "string"
         },
         "regressions": {
           "type": "array",

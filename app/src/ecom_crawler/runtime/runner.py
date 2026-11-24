@@ -157,7 +157,8 @@ class TaskRunner:
         )
         control = "FINISHED"
         try:
-            self._probe_robots_sitemaps()
+            if self.task.input.get("discover", True) is not False:
+                self._probe_robots_sitemaps()
             self._seed_sources()
             control = self._loop()
         except StopTask as exc:
@@ -854,6 +855,15 @@ class TaskRunner:
         return min(base * (2 ** max(attempt - 1, 0)), 5.0)
 
     def _seed_sources(self) -> None:
+        seeds = self.task.input.get("seed_urls")
+        if isinstance(seeds, list):
+            for raw in seeds:
+                url = str(raw).strip()
+                if not url or not self._is_allowed_url(url):
+                    continue
+                self._add_product_item(url, parent="seed", source="seed")
+        if self.task.input.get("discover", True) is False:
+            return
         for source in self.rule.sources:
             source_type = str(source.get("type", "entry_links"))
             if source_type == "entry_links":

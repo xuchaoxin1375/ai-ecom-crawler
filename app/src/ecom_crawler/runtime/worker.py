@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import socket
@@ -430,6 +431,30 @@ class Worker:
                     "plan version mismatch: "
                     f"task={task.plan_id}@{task.plan_version} "
                     f"rule={rule.rule_id}@{rule.rule_version}",
+                )
+                return
+            if task.rule_sha256:
+                actual_sha256 = hashlib.sha256(
+                    Path(rule_path).read_bytes()
+                ).hexdigest()
+                if actual_sha256 != task.rule_sha256:
+                    self._fail(
+                        task,
+                        lease,
+                        "PLAN_ERROR",
+                        "rule file hash mismatch: "
+                        f"task={task.rule_sha256[:12]} file={actual_sha256[:12]}",
+                    )
+                    return
+            rule_market = str(rule.site.get("market") or "").strip().upper()
+            task_market = str(task.market or "").strip().upper()
+            if rule_market and task_market and rule_market != task_market:
+                self._fail(
+                    task,
+                    lease,
+                    "PLAN_ERROR",
+                    "market mismatch: "
+                    f"task={task_market} rule={rule_market}",
                 )
                 return
             if self._browser_semaphore is not None and self._needs_browser(rule):

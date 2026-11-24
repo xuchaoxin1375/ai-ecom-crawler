@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import shutil
@@ -9,10 +10,20 @@ import unittest
 import zipfile
 from pathlib import Path
 
+import yaml
 from fastapi.testclient import TestClient
 
 from ecom_crawler.runtime.batch import parse_site_text, parse_sites
-from ecom_crawler.runtime.models import Batch, BatchSite, BuildRecord, Task
+from ecom_crawler.runtime.models import (
+    Batch,
+    BatchSite,
+    BuildRecord,
+    RuleVersion,
+    SiteRule,
+    Task,
+    utc_now,
+)
+from ecom_crawler.runtime.rule import load_rule
 from ecom_crawler.runtime.store import TaskStore
 from ecom_crawler.web.app import create_app
 
@@ -156,9 +167,41 @@ class BatchApiTests(unittest.TestCase):
             / "decohappy-a08.yaml",
             self.rules_dir / "decohappy.yaml",
         )
+        for filename, site_key in (
+            ("familidoo.yaml", "familidoo.fr"),
+            ("decohappy.yaml", "decohappy.com"),
+        ):
+            self._activate_fixture_rule(filename, site_key)
         self.client = TestClient(
             create_app(self.db_path, self.out_root, self.rules_dir),
             headers=CLIENT_HEADERS,
+        )
+
+    def _activate_fixture_rule(self, filename: str, site_key: str) -> None:
+        path = self.rules_dir / filename
+        rule = load_rule(path)
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        now = utc_now()
+        self.store.create_rule_version(
+            RuleVersion(
+                rule_id=rule.rule_id,
+                rule_version=rule.rule_version,
+                sha256=digest,
+                path=filename,
+                status="active",
+                activated_at=now,
+                activated_by="test-fixture",
+            )
+        )
+        self.store.upsert_site_rule(
+            SiteRule(
+                site_key=site_key,
+                rule_id=rule.rule_id,
+                rule_version=rule.rule_version,
+                sha256=digest,
+                path=filename,
+                updated_at=now,
+            )
         )
 
     def tearDown(self) -> None:
@@ -182,6 +225,76 @@ class BatchApiTests(unittest.TestCase):
         }
         body.update(overrides)
         return self.client.post("/api/batches", json=body).json()
+
+    def _add_familidoo_version(self, version: str) -> tuple[str, str]:
+        payload = yaml.safe_load(
+            (self.rules_dir / "familidoo.yaml").read_text(encoding="utf-8")
+        )
+        payload["rule_version"] = version
+        payload["status"] = "candidate"
+        target = self.rules_dir / f"familidoo-{version}.yaml"
+        target.write_text(
+            yaml.safe_dump(payload, allow_unicode=True, sort_keys=False),
+            encoding="utf-8",
+        )
+        digest = hashlib.sha256(target.read_bytes()).hexdigest()
+        self.store.create_rule_version(
+            RuleVersion(
+                rule_id=str(payload["rule_id"]),
+                rule_version=version,
+                sha256=digest,
+                path=target.name,
+                status="candidate",
+                parent_version="2026.11.21-1",
+            )
+        )
+        return target.name, digest
+
+    def _switch_site_rule(
+        self,
+        version: str,
+        digest: str,
+        *,
+        action: str,
+        request_id: str,
+    ) -> None:
+        active = self.store.get_site_rule("familidoo.fr")
+        self.store.activate_rule(
+            site_key="familidoo.fr",
+            rule_id="familidoo-fr-d03",
+            rule_version=version,
+            sha256=digest,
+            expected_active_version=active.rule_version if active else None,
+            expected_active_sha256=active.sha256 if active else None,
+            request_id=request_id,
+            action=action,
+            actor="test",
+        )
+
+    def _candidate_only_batch(self) -> dict:
+        payload = yaml.safe_load(
+            (self.rules_dir / "familidoo.yaml").read_text(encoding="utf-8")
+        )
+        payload["rule_id"] = "candidate-only-fr"
+        payload["rule_version"] = "1.0.0"
+        payload["status"] = "candidate"
+        payload["site"]["name"] = "Candidate only"
+        payload["site"]["entry_urls"] = ["https://candidate-only.fr/"]
+        payload["site"]["allowed_origins"] = ["https://candidate-only.fr"]
+        payload["site"]["allowed_path_prefixes"] = ["/"]
+        payload["discovery"]["entry_url"] = "https://candidate-only.fr/"
+        (self.rules_dir / "candidate-only.yaml").write_text(
+            yaml.safe_dump(payload, allow_unicode=True, sort_keys=False),
+            encoding="utf-8",
+        )
+        return self.client.post(
+            "/api/batches",
+            json={
+                "name": "候选未激活",
+                "market": "FR",
+                "sites": ["https://candidate-only.fr/"],
+            },
+        ).json()
 
     def test_preview_does_not_create_batch(self) -> None:
         response = self.client.post(
@@ -280,6 +393,94 @@ class BatchApiTests(unittest.TestCase):
         self.assertEqual(
             second.json()["accepted"][0]["site_key"], "familidoo.fr"
         )
+
+    def test_import_prefers_active_rule_over_candidate(self) -> None:
+        self._add_familidoo_version("2026.11.22-2")
+        batch = self._create(sites=["https://www.familidoo.fr/fr/"])["batch"]
+        ready = next(
+            site for site in batch["sites"] if site["readiness"] == "ready"
+        )
+        self.assertEqual(ready["rule"]["rule_version"], "2026.11.21-1")
+
+        started = self.client.post(
+            f"/api/batches/{batch['batch_id']}/start", json={}
+        ).json()
+        self.assertEqual(len(started["accepted"]), 1, started)
+        task = self.store.get_task(started["accepted"][0]["task_id"])
+        assert task is not None
+        self.assertEqual(task.plan_version, "2026.11.21-1")
+
+    def test_start_uses_active_rule_after_activation_and_rollback(self) -> None:
+        batch = self._create(sites=["https://www.familidoo.fr/fr/"])["batch"]
+        path, digest = self._add_familidoo_version("2026.11.22-2")
+        self._switch_site_rule(
+            "2026.11.22-2",
+            digest,
+            action="activate",
+            request_id="test-activate-2",
+        )
+
+        # The batch row still points at the rule imported before activation.
+        started = self.client.post(
+            f"/api/batches/{batch['batch_id']}/start", json={}
+        ).json()
+        self.assertEqual(len(started["accepted"]), 1, started)
+        task = self.store.get_task(started["accepted"][0]["task_id"])
+        assert task is not None
+        self.assertEqual(task.plan_version, "2026.11.22-2")
+        self.assertEqual(task.rule_path, str(self.rules_dir / path))
+
+        second = self._create(sites=["https://www.familidoo.fr/fr/"])["batch"]
+        second_site = next(
+            site for site in second["sites"] if site["readiness"] == "ready"
+        )
+        self.assertEqual(
+            second_site["rule"]["rule_version"], "2026.11.22-2"
+        )
+
+        active = self.store.get_site_rule("familidoo.fr")
+        assert active is not None
+        v1 = self.store.get_rule_version("familidoo-fr-d03", "2026.11.21-1")
+        assert v1 is not None
+        self.store.activate_rule(
+            site_key="familidoo.fr",
+            rule_id=v1.rule_id,
+            rule_version=v1.rule_version,
+            sha256=v1.sha256,
+            expected_active_version="2026.11.22-2",
+            expected_active_sha256=digest,
+            request_id="test-rollback-1",
+            action="rollback",
+            actor="test",
+        )
+        third = self._create(sites=["https://www.familidoo.fr/fr/"])["batch"]
+        third_site = next(
+            site for site in third["sites"] if site["readiness"] == "ready"
+        )
+        self.assertEqual(
+            third_site["rule"]["rule_version"], "2026.11.21-1"
+        )
+
+    def test_candidate_only_rule_is_not_ready(self) -> None:
+        payload = self._candidate_only_batch()
+        site = payload["batch"]["sites"][0]
+        self.assertEqual(site["readiness"], "needs_onboarding")
+        self.assertIn("未激活", site["note"])
+        self.assertEqual(payload["import"]["summary"]["ready"], 0)
+
+    def test_market_mismatch_is_skipped(self) -> None:
+        payload = self._create(
+            market="US",
+            sites=["https://www.familidoo.fr/fr/"],
+        )
+        site = payload["batch"]["sites"][0]
+        self.assertEqual(site["readiness"], "needs_onboarding")
+        self.assertIn("市场不匹配", site["note"])
+        started = self.client.post(
+            f"/api/batches/{payload['batch']['batch_id']}/start", json={}
+        ).json()
+        self.assertEqual(started["accepted"], [])
+        self.assertIn("市场不匹配", started["skipped"][0]["reason"])
 
     def test_build_events_stream_snapshot_and_end(self) -> None:
         batch = self._create()["batch"]

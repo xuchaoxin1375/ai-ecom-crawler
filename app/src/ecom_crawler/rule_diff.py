@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+from decimal import Decimal, InvalidOperation
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 # Bookkeeping keys change on every build and must not count as rule changes.
 _METADATA_KEYS = {
@@ -186,6 +188,278 @@ def _nested(payload: Any, *keys: str) -> Any:
     return current
 
 
+_REGRESSION_FIELDS = [
+    "name",
+    "price_amount",
+    "price_currency",
+    "primary_image_url",
+    "description_html",
+]
+_AUTOMATED_FEEDBACK_CATEGORIES = {
+    "DESCRIPTION",
+    "PRICE_CURRENCY_UNIT",
+    "BASIC_FIELDS",
+    "DISCOVERY",
+    "IDENTITY",
+    "ACCESS_RUNTIME",
+}
+
+
+def _url_key(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    parts = urlsplit(text)
+    if not parts.scheme or not parts.netloc:
+        return text
+    return urlunsplit(
+        (
+            parts.scheme.lower(),
+            parts.netloc.lower(),
+            parts.path.rstrip("/") or "/",
+            parts.query,
+            "",
+        )
+    )
+
+
+def _text_key(value: Any) -> str:
+    return " ".join(str(value or "").split())
+
+
+def _price_key(value: Any) -> Any:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        return Decimal(text)
+    except InvalidOperation:
+        return text
+
+
+def _description_regressed(before: Any, after: Any) -> bool:
+    old = str(before or "").strip()
+    new = str(after or "").strip()
+    if not old:
+        return False
+    return not new or len(new) < max(30, int(len(old) * 0.8))
+
+
+def compare_product_samples(
+    old_samples: Any,
+    new_samples: Any,
+    *,
+    source_rule_version: str | None = None,
+    source_rule_sha256: str | None = None,
+    limit: int = 5,
+) -> dict[str, Any]:
+    """Compare core product fields for the same fixed page set.
+
+    The caller must run both rules over the same URLs.  ``checked`` counts the
+    pages present on both sides; pages only seen on one side are reported in
+    ``skipped`` instead of being treated as a regression.
+    """
+
+    old = [item for item in old_samples or [] if isinstance(item, dict)]
+    new = [item for item in new_samples or [] if isinstance(item, dict)]
+    old_by_url = {
+        _url_key(item.get("source_url")): item
+        for item in old
+        if _url_key(item.get("source_url"))
+    }
+    new_by_url = {
+        _url_key(item.get("source_url")): item
+        for item in new
+        if _url_key(item.get("source_url"))
+    }
+    shared = sorted(set(old_by_url) & set(new_by_url))[: max(1, int(limit))]
+    skipped = [
+        {"sample": key, "reason": "missing_from_old_rule"}
+        for key in sorted(set(new_by_url) - set(old_by_url))[:limit]
+    ] + [
+        {"sample": key, "reason": "missing_from_new_rule"}
+        for key in sorted(set(old_by_url) - set(new_by_url))[:limit]
+    ]
+    regressions: list[dict[str, Any]] = []
+    for key in shared:
+        before = old_by_url[key]
+        after = new_by_url[key]
+        for field in _REGRESSION_FIELDS:
+            if field == "name":
+                degraded = _text_key(before.get(field)) != _text_key(
+                    after.get(field)
+                )
+            elif field == "price_amount":
+                degraded = _price_key(before.get(field)) != _price_key(
+                    after.get(field)
+                )
+            elif field == "price_currency":
+                degraded = (
+                    str(before.get(field) or "").strip().upper()
+                    != str(after.get(field) or "").strip().upper()
+                )
+            elif field == "primary_image_url":
+                degraded = str(before.get(field) or "").strip() != str(
+                    after.get(field) or ""
+                ).strip()
+            else:
+                degraded = _description_regressed(
+                    before.get(field), after.get(field)
+                )
+            if not degraded:
+                continue
+            before_value = before.get(field)
+            after_value = after.get(field)
+            if field == "description_html":
+                before_value = str(before_value or "")[:400]
+                after_value = str(after_value or "")[:400]
+            regressions.append(
+                {
+                    "field": field,
+                    "sample": key,
+                    "before": before_value,
+                    "after": after_value,
+                }
+            )
+    executed = bool(shared)
+    return {
+        "executed": executed,
+        "source_rule_version": source_rule_version,
+        "source_rule_sha256": source_rule_sha256,
+        "checked": len(shared),
+        "compared_fields": list(_REGRESSION_FIELDS),
+        "regressions": regressions,
+        "skipped": skipped,
+        **(
+            {}
+            if executed
+            else {
+                "reason": (
+                    "no product page was extracted by both rules"
+                    if old and new
+                    else "old or new rule produced no product records"
+                )
+            }
+        ),
+    }
+
+
+def feedback_issue_checks(
+    feedback: Any,
+    product_samples: Any,
+    *,
+    rule_currency: str | None = None,
+    audit_samples: Any = None,
+) -> list[dict[str, Any]]:
+    """Turn a feedback record into host-checkable sample assertions.
+
+    Only categories with a deterministic field assertion return checks.  A
+    business-expectation or free-form note still needs human review and is not
+    disguised as a passed automated check.
+    """
+
+    category = str(getattr(feedback, "category", "") or "").upper()
+    if category not in _AUTOMATED_FEEDBACK_CATEGORIES:
+        return []
+    samples = [
+        str(sample).strip()
+        for sample in (getattr(feedback, "samples", None) or [])
+        if str(sample).strip()
+    ]
+    if not samples:
+        return []
+    products = {
+        _url_key(item.get("source_url")): item
+        for item in product_samples or []
+        if isinstance(item, dict) and _url_key(item.get("source_url"))
+    }
+    missing_blocks: dict[str, list[str]] = {}
+    for item in audit_samples or []:
+        if not isinstance(item, dict):
+            continue
+        key = _url_key(item.get("source_url"))
+        if key:
+            missing_blocks[key] = [
+                str(block)
+                for block in (item.get("missing_blocks") or [])
+                if str(block).strip()
+            ]
+    checks: list[dict[str, Any]] = []
+    currency = str(rule_currency or "").strip().upper()
+    for sample in samples:
+        key = _url_key(sample)
+        product = products.get(key)
+        if product is None:
+            checks.append(
+                {
+                    "sample": sample,
+                    "expected": "问题样本在本次有界验证中可抓取",
+                    "passed": False,
+                    "detail": "sample was not extracted by the bounded validation run",
+                }
+            )
+            continue
+        if category == "DESCRIPTION":
+            description = str(product.get("description_html") or "").strip()
+            missing = missing_blocks.get(key) or []
+            passed = len(description) >= 30 and not missing
+            checks.append(
+                {
+                    "sample": sample,
+                    "expected": "描述正文和声明的页面块均出现",
+                    "observed": f"description {len(description)} chars",
+                    "passed": passed,
+                    **(
+                        {"detail": "missing blocks: " + ", ".join(missing)}
+                        if missing
+                        else {}
+                    ),
+                }
+            )
+        elif category == "PRICE_CURRENCY_UNIT":
+            amount = _price_key(product.get("price_amount"))
+            product_currency = str(
+                product.get("price_currency") or ""
+            ).strip().upper()
+            passed = bool(amount) and (
+                not currency or product_currency == currency
+            )
+            checks.append(
+                {
+                    "sample": sample,
+                    "expected": (
+                        f"价格为正且币种为 {currency}"
+                        if currency
+                        else "价格为正且币种明确"
+                    ),
+                    "observed": f"{product.get('price_amount')} {product_currency}".strip(),
+                    "passed": passed,
+                }
+            )
+        elif category == "BASIC_FIELDS":
+            name = str(product.get("name") or "").strip()
+            image = str(product.get("primary_image_url") or "").strip()
+            checks.append(
+                {
+                    "sample": sample,
+                    "expected": "名称和主图均出现",
+                    "observed": (
+                        f"name={bool(name)} image={bool(image)}"
+                    ),
+                    "passed": bool(name and image),
+                }
+            )
+        else:
+            checks.append(
+                {
+                    "sample": sample,
+                    "expected": "问题样本在本次有界验证中产生有效商品",
+                    "passed": True,
+                }
+            )
+    return checks
+
+
 def normalize_validation(
     raw: dict[str, Any] | None,
     change_summary: dict[str, Any] | None,
@@ -195,18 +469,86 @@ def normalize_validation(
 ) -> dict[str, Any]:
     """Return a validation payload that satisfies the v2 schema.
 
-    Raw host counts stay in the payload as additional properties so the UI and
-    existing tests can keep reading ``valid_products`` and friends.  Only
-    fields actually produced by the host are filled in; no cross-version
-    regression is invented when the bounded run did not check one.
+    Candidate smoke, issue samples and cross-version regression are separate
+    facts.  A repair whose regression did not run is ``INCOMPLETE`` rather than
+    ``PASSED``; activation must reject it.  Raw host counts stay in the payload
+    as additional properties so the UI and existing tests can keep reading
+    ``valid_products`` and friends.
     """
 
     source = raw if isinstance(raw, dict) else {}
     summary = change_summary if isinstance(change_summary, dict) else {}
     audit = source.get("content_audit")
     audit = audit if isinstance(audit, dict) else {}
+    parent_version = summary.get("parent_version")
+    smoke_raw = source.get("candidate_smoke")
+    smoke_raw = smoke_raw if isinstance(smoke_raw, dict) else {}
+    smoke_valid = int(
+        smoke_raw.get("valid_products", source.get("valid_products") or 0) or 0
+    )
+    smoke_failed = int(
+        smoke_raw.get("failed_products", source.get("failed_products") or 0) or 0
+    )
+    smoke_excluded = int(
+        smoke_raw.get(
+            "excluded_products", source.get("excluded_products") or 0
+        )
+        or 0
+    )
+    product_samples = smoke_raw.get("product_samples") or source.get(
+        "product_samples"
+    )
+    candidate_smoke = {
+        "executed": bool(
+            smoke_raw.get("executed", smoke_valid >= 1)
+            if "executed" in smoke_raw
+            else smoke_valid >= 1
+        ),
+        "valid_products": smoke_valid,
+        "failed_products": smoke_failed,
+        "excluded_products": smoke_excluded,
+        "currencies": dict(smoke_raw.get("currencies") or source.get("currencies") or {}),
+        "product_samples": [
+            item
+            for item in (product_samples or [])
+            if isinstance(item, dict)
+        ][:10],
+    }
 
     issue_checks: list[dict[str, Any]] = []
+    seen_checks: set[tuple[str, str]] = set()
+
+    def add_check(item: Any) -> None:
+        if not isinstance(item, dict):
+            return
+        sample = str(item.get("sample") or "").strip()
+        expected = str(item.get("expected") or "").strip()
+        if not sample or not expected:
+            return
+        key = (_url_key(sample), expected)
+        if key in seen_checks:
+            return
+        seen_checks.add(key)
+        issue_checks.append(
+            {
+                "sample": sample,
+                "expected": expected,
+                "passed": bool(item.get("passed")),
+                **(
+                    {"observed": str(item["observed"])}
+                    if item.get("observed") is not None
+                    else {}
+                ),
+                **(
+                    {"detail": str(item["detail"])}
+                    if item.get("detail")
+                    else {}
+                ),
+            }
+        )
+
+    for item in source.get("issue_checks") or []:
+        add_check(item)
     for sample in audit.get("samples") or []:
         if not isinstance(sample, dict):
             continue
@@ -218,7 +560,7 @@ def normalize_validation(
             for block in (sample.get("missing_blocks") or [])
             if str(block).strip()
         ]
-        issue_checks.append(
+        add_check(
             {
                 "sample": url,
                 "expected": (
@@ -234,16 +576,96 @@ def normalize_validation(
                 ),
             }
         )
+    for sample in source.get("feedback_samples") or []:
+        url = str(sample or "").strip()
+        if not url:
+            continue
+        if any(
+            check["sample"] == url
+            or _url_key(check["sample"]) == _url_key(url)
+            for check in issue_checks
+        ):
+            continue
+        add_check(
+            {
+                "sample": url,
+                "expected": "问题样本在本次有界验证中可抓取",
+                "passed": False,
+                "detail": "no host check covered this feedback sample",
+            }
+        )
+
+    regression_raw = source.get("regression")
+    regression_raw = regression_raw if isinstance(regression_raw, dict) else {}
+    required = bool(regression_raw.get("required", parent_version is not None))
+    regressions = [
+        item
+        for item in (regression_raw.get("regressions") or [])
+        if isinstance(item, dict)
+    ]
+    regression: dict[str, Any] = {
+        "executed": bool(regression_raw.get("executed")) and bool(
+            int(regression_raw.get("checked") or 0)
+        ),
+        "required": required,
+        "required_checked": int(regression_raw.get("required_checked") or 0),
+        "checked": int(regression_raw.get("checked") or 0),
+        "compared_fields": list(
+            regression_raw.get("compared_fields") or _REGRESSION_FIELDS
+        ),
+        "regressions": regressions,
+    }
+    for key in (
+        "source_rule_version",
+        "source_rule_sha256",
+        "skipped",
+        "reason",
+    ):
+        if regression_raw.get(key) not in (None, "", []):
+            regression[key] = regression_raw[key]
+
+    reasons: list[str] = []
+    requested = str(source.get("status") or status or "PASSED").upper()
+    if requested == "FAILED":
+        final_status = "FAILED"
+        reasons.append("host validation reported a failure")
+    elif error_class:
+        final_status = "FAILED"
+        reasons.append(f"error_class={error_class}")
+    elif not candidate_smoke["executed"] or smoke_valid < 1:
+        final_status = "FAILED"
+        reasons.append("candidate smoke produced no valid product")
+    elif any(not check["passed"] for check in issue_checks):
+        final_status = "FAILED"
+        reasons.append("at least one issue-sample check failed")
+    elif regressions:
+        final_status = "FAILED"
+        reasons.append("cross-version regression detected")
+    elif required and not regression["executed"]:
+        final_status = "INCOMPLETE"
+        reasons.append("required cross-version regression did not run")
+    elif (
+        required
+        and regression["required_checked"]
+        and regression["checked"] < regression["required_checked"]
+    ):
+        final_status = "INCOMPLETE"
+        reasons.append(
+            "cross-version regression covered "
+            f"{regression['checked']} of {regression['required_checked']} "
+            "required pages"
+        )
+    else:
+        final_status = "PASSED"
 
     normalized: dict[str, Any] = dict(source)
     normalized.update(
         {
-            "status": status,
+            "status": final_status,
+            "status_reasons": reasons,
+            "candidate_smoke": candidate_smoke,
             "issue_checks": issue_checks,
-            "regression": {
-                "checked": int(source.get("valid_products") or 0),
-                "regressions": [],
-            },
+            "regression": regression,
             "content_audit": {
                 "products_checked": int(audit.get("products_checked") or 0),
                 "description_gaps": int(audit.get("description_gaps") or 0),
@@ -257,6 +679,16 @@ def normalize_validation(
                 "changed_fields": list(summary.get("changed_fields") or []),
                 "discovery_changed": bool(
                     summary.get("discovery_changed") or False
+                ),
+                **(
+                    {"market_changed": bool(summary["market_changed"])}
+                    if "market_changed" in summary
+                    else {}
+                ),
+                **(
+                    {"currency_changed": bool(summary["currency_changed"])}
+                    if "currency_changed" in summary
+                    else {}
                 ),
             },
             "error_class": error_class,

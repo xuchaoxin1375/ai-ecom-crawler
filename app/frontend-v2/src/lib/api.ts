@@ -282,11 +282,25 @@ export interface RuleRegression {
 }
 
 export interface RuleValidation {
-  status: "PASSED" | "FAILED";
+  status: "PASSED" | "FAILED" | "INCOMPLETE";
+  status_reasons?: string[];
+  candidate_smoke?: {
+    executed: boolean;
+    valid_products: number;
+    failed_products: number;
+    excluded_products: number;
+    currencies: Record<string, number>;
+    product_samples?: unknown[];
+  };
   issue_checks: RuleIssueCheck[];
   regression: {
     checked: number;
     regressions: RuleRegression[];
+    executed?: boolean;
+    required?: boolean;
+    required_checked?: number;
+    reason?: string;
+    source_rule_version?: string | null;
   };
   content_audit: {
     products_checked: number;
@@ -296,6 +310,8 @@ export interface RuleValidation {
   diff: {
     changed_fields: string[];
     discovery_changed: boolean;
+    market_changed?: boolean;
+    currency_changed?: boolean;
   };
   evidence_sha256: string;
   valid_products?: number;

@@ -646,6 +646,7 @@ def _rule_entries(rules_dir: Path | None) -> list[dict[str, Any]]:
             "path": resolved.relative_to(root).as_posix(),
             "rule_id": None,
             "rule_version": None,
+            "sha256": hashlib.sha256(resolved.read_bytes()).hexdigest(),
             "task_types": [],
             "site": None,
             "domains": [],
@@ -994,6 +995,137 @@ def create_app(
                 409,
             )
 
+    def sample_key(value: Any) -> str:
+        return str(value or "").strip().rstrip("/").casefold()
+
+    def activation_validation_error(
+        target: RuleVersion, feedback_id: str | None
+    ) -> tuple[str, str] | None:
+        """Return ``(code, message)`` when activation lacks valid evidence."""
+        build = (
+            store.get_build(target.source_build_id)
+            if target.source_build_id
+            else None
+        )
+        if build is None:
+            return (
+                "VALIDATION_REQUIRED",
+                "候选没有关联的构建验证记录",
+            )
+        if (
+            build.target_rule_version != target.rule_version
+            or build.target_rule_sha256 != target.sha256
+        ):
+            return (
+                "VALIDATION_REQUIRED",
+                "候选版本或哈希与构建验证记录不一致",
+            )
+        validation = build.validation if isinstance(build.validation, dict) else {}
+        evidence = str(validation.get("evidence_sha256") or "")
+        if (
+            not re.fullmatch(r"[0-9a-f]{64}", evidence)
+            or evidence != str(build.evidence_sha256 or "")
+        ):
+            return (
+                "VALIDATION_REQUIRED",
+                "候选缺少可核对的验证证据哈希",
+            )
+        smoke = validation.get("candidate_smoke")
+        if not isinstance(smoke, dict) or not smoke.get("executed"):
+            return (
+                "VALIDATION_REQUIRED",
+                "候选缺少候选冒烟记录；请重新运行修复构建",
+            )
+        if int(smoke.get("valid_products") or 0) < 1:
+            return (
+                "VALIDATION_REQUIRED",
+                "候选冒烟没有产生有效商品",
+            )
+        status = str(validation.get("status") or "").upper()
+        if status == "INCOMPLETE":
+            reasons = [
+                str(reason)
+                for reason in (validation.get("status_reasons") or [])
+                if str(reason).strip()
+            ]
+            return (
+                "VALIDATION_REQUIRED",
+                "验证证据不完整" + (f"：{'；'.join(reasons)}" if reasons else ""),
+            )
+        if status != "PASSED":
+            regression = validation.get("regression")
+            regression = regression if isinstance(regression, dict) else {}
+            regressions = regression.get("regressions") or []
+            reasons = [
+                str(reason)
+                for reason in (validation.get("status_reasons") or [])
+                if str(reason).strip()
+            ]
+            if regressions:
+                return (
+                    "VALIDATION_FAILED",
+                    f"候选验证发现 {len(regressions)} 项回归，不能激活",
+                )
+            return (
+                "VALIDATION_FAILED",
+                "候选验证未通过" + (f"：{'；'.join(reasons)}" if reasons else ""),
+            )
+        regression = validation.get("regression")
+        regression = regression if isinstance(regression, dict) else {}
+        if regression.get("required"):
+            if not regression.get("executed") or int(
+                regression.get("checked") or 0
+            ) < 1:
+                return (
+                    "VALIDATION_REQUIRED",
+                    "修复候选缺少新旧规则同页回归；请重新运行修复构建",
+                )
+            expected_checked = int(regression.get("required_checked") or 0)
+            if expected_checked < 1:
+                samples = smoke.get("product_samples") or []
+                expected_checked = min(3, len(samples)) if samples else 0
+            checked = int(regression.get("checked") or 0)
+            if expected_checked and checked < expected_checked:
+                return (
+                    "VALIDATION_REQUIRED",
+                    (
+                        "同页回归覆盖不足："
+                        f"{checked} / {expected_checked} 条必需页面"
+                    ),
+                )
+            if regression.get("regressions"):
+                return (
+                    "VALIDATION_FAILED",
+                    "新旧规则回归发现字段退化，不能激活",
+                )
+        linked = feedback_id or target.source_feedback_id
+        if linked:
+            feedback = store.get_feedback(linked)
+            samples = [
+                str(sample).strip()
+                for sample in (feedback.samples if feedback else [])
+                if str(sample).strip()
+            ]
+            if samples:
+                checks = {
+                    sample_key(check.get("sample")): check
+                    for check in (validation.get("issue_checks") or [])
+                    if isinstance(check, dict)
+                }
+                for sample in samples:
+                    check = checks.get(sample_key(sample))
+                    if check is None:
+                        return (
+                            "VALIDATION_REQUIRED",
+                            f"问题样本缺少主机检查：{sample}",
+                        )
+                    if not check.get("passed"):
+                        return (
+                            "VALIDATION_FAILED",
+                            f"问题样本检查未通过：{sample}",
+                        )
+        return None
+
     @app.middleware("http")
     async def same_origin_guard(request: Request, call_next: Any) -> Any:
         host = request.headers.get("host", "")
@@ -1083,27 +1215,108 @@ def create_app(
         values.extend(parse_site_text(payload.sites_text))
         return values
 
-    def match_rule(
-        site_key: str, entries: list[dict[str, Any]]
-    ) -> tuple[dict[str, Any] | None, int]:
+    def normalize_market(value: Any) -> str:
+        return str(value or "").strip().upper()
+
+    def market_conflict(
+        rule: dict[str, Any], batch_market: str | None
+    ) -> str | None:
+        rule_market = normalize_market(rule.get("market"))
+        wanted = normalize_market(batch_market)
+        if wanted and rule_market and wanted != rule_market:
+            return f"市场不匹配：规则 {rule_market}，批次 {wanted}"
+        return None
+
+    def find_rule_entry(
+        rule_id: str,
+        rule_version: str,
+        entries: list[dict[str, Any]],
+        sha256: str | None = None,
+    ) -> dict[str, Any] | None:
         matches = [
             entry
             for entry in entries
             if entry.get("valid")
-            and entry.get("status") != "deprecated"
+            and entry.get("rule_id") == rule_id
+            and entry.get("rule_version") == rule_version
+            and (sha256 is None or entry.get("sha256") == sha256)
+        ]
+        return matches[0] if len(matches) == 1 else None
+
+    def match_rule(
+        site_key: str, entries: list[dict[str, Any]]
+    ) -> tuple[dict[str, Any] | None, str]:
+        """Resolve the rule a normal batch may run.
+
+        The active rule ledger is authoritative.  The YAML ``status`` field is
+        only a fallback for legacy rules that predate the ledger; candidates,
+        rejected and superseded versions never enter a normal task through the
+        directory scan.
+        """
+        active = store.get_site_rule(site_key)
+        if active is not None:
+            entry = find_rule_entry(
+                active.rule_id, active.rule_version, entries, active.sha256
+            )
+            if entry is None:
+                return (
+                    None,
+                    (
+                        "生效规则 "
+                        f"{active.rule_id}@{active.rule_version} 的文件不可用或哈希不一致"
+                    ),
+                )
+            return entry, f"生效版本 {active.rule_id}@{active.rule_version}"
+        stored = store.latest_batch_site_rule(site_key)
+        if stored is not None and stored.rule_id and stored.rule_version:
+            entry = find_rule_entry(stored.rule_id, stored.rule_version, entries)
+            if entry is not None and entry.get("status") == "verified":
+                return (
+                    entry,
+                    f"已复核版本 {entry['rule_id']}@{entry['rule_version']}",
+                )
+            if entry is not None:
+                return (
+                    None,
+                    f"规则 {entry['rule_id']}@{entry['rule_version']} 未在生效账本中",
+                )
+        verified = [
+            entry
+            for entry in entries
+            if entry.get("valid")
+            and entry.get("status") == "verified"
             and site_key in entry.get("domains", [])
         ]
-        if not matches:
-            return None, 0
-        rank = {"verified": 2, "candidate": 1}
-        matches.sort(
-            key=lambda entry: (
-                rank.get(str(entry.get("status")), 0),
-                str(entry.get("rule_version") or ""),
-                str(entry.get("path") or ""),
+        if verified:
+            verified.sort(
+                key=lambda entry: (
+                    str(entry.get("rule_version") or ""),
+                    str(entry.get("path") or ""),
+                )
             )
-        )
-        return matches[-1], len(matches)
+            entry = verified[-1]
+            note = f"已复核版本 {entry['rule_id']}@{entry['rule_version']}"
+            if len(verified) > 1:
+                note += f"（{len(verified)} 个已复核版本，使用最高版本）"
+            return entry, note
+        unactivated = [
+            entry
+            for entry in entries
+            if entry.get("valid") and site_key in entry.get("domains", [])
+        ]
+        if unactivated:
+            unactivated.sort(
+                key=lambda entry: (
+                    str(entry.get("rule_version") or ""),
+                    str(entry.get("path") or ""),
+                )
+            )
+            entry = unactivated[-1]
+            return (
+                None,
+                f"仅有未激活版本 {entry['rule_id']}@{entry['rule_version']}",
+            )
+        return None, "未匹配受管规则包"
 
     def unique_site_key(prefix: str, value: str, used: set[str]) -> str:
         digest = hashlib.sha1(value.encode("utf-8")).hexdigest()[:10]
@@ -1122,6 +1335,7 @@ def create_app(
         entries: list[dict[str, Any]],
         *,
         persist: bool,
+        batch_market: str | None = None,
     ) -> tuple[dict[str, Any], list[BatchSite]]:
         parsed = parse_sites(values)
         existing_input: dict[str, BatchSite] = {}
@@ -1158,15 +1372,16 @@ def create_app(
                 note = f"与批次内 {existing_keys[item.site_key].domain} 重复"
                 stored = True
             else:
-                rule, match_count = match_rule(item.site_key or "", entries)
+                rule, note = match_rule(item.site_key or "", entries)
                 if rule is None:
                     readiness = "needs_onboarding"
-                    note = "未匹配受管规则包"
                 else:
-                    readiness = "ready"
-                    note = f"已匹配 {rule['rule_id']}@{rule['rule_version']}"
-                    if match_count > 1:
-                        note += f"（{match_count} 个匹配，使用优先级最高的版本）"
+                    conflict = market_conflict(rule, batch_market)
+                    if conflict:
+                        readiness = "needs_onboarding"
+                        note = f"{conflict}；请调整批次市场或换用匹配规则"
+                    else:
+                        readiness = "ready"
                 stored = True
             if stored:
                 if readiness in {"ready", "needs_onboarding", "building"} and item.site_key:
@@ -2245,6 +2460,20 @@ def create_app(
                 f"rule_id does not match candidate: {target.rule_id}",
                 409,
             )
+        gate_error = activation_validation_error(
+            target, payload.feedback_id or target.source_feedback_id
+        )
+        if gate_error is not None:
+            code, message = gate_error
+            raise _error(
+                code,
+                message,
+                409,
+                {
+                    "rule_version": target.rule_version,
+                    "build_id": target.source_build_id,
+                },
+            )
         require_file_hash(target)
         try:
             site_rule, activation = store.activate_rule(
@@ -2389,7 +2618,14 @@ def create_app(
         entries = _rule_entries(rules)
         values = site_values(payload)
         if payload.preview:
-            report, _ = import_sites("", values, [], entries, persist=False)
+            report, _ = import_sites(
+                "",
+                values,
+                [],
+                entries,
+                persist=False,
+                batch_market=payload.market,
+            )
             return JSONResponse(
                 status_code=200,
                 content={
@@ -2423,6 +2659,7 @@ def create_app(
             [],
             entries,
             persist=True,
+            batch_market=batch.market,
         )
         return JSONResponse(
             status_code=201,
@@ -2448,6 +2685,7 @@ def create_app(
             store.list_batch_sites(batch_id),
             _rule_entries(rules),
             persist=True,
+            batch_market=batch.market,
         )
         return {
             "batch_id": batch_id,
@@ -2509,7 +2747,10 @@ def create_app(
                         {**item, "reason": f"站点任务状态为 {existing.state}"}
                     )
                     continue
-            if site.readiness != "ready":
+            if rules is None or not rules.is_dir():
+                skipped.append({**item, "reason": "服务未配置规则目录"})
+                continue
+            if site.readiness in {"invalid", "duplicate"}:
                 skipped.append(
                     {
                         **item,
@@ -2519,21 +2760,24 @@ def create_app(
                     }
                 )
                 continue
-            if rules is None or not rules.is_dir():
-                skipped.append({**item, "reason": "服务未配置规则目录"})
+            rule, rule_note = match_rule(site.site_key, entries)
+            conflict = market_conflict(rule, batch.market) if rule else None
+            if site.readiness != "ready":
+                if conflict:
+                    reason = conflict
+                elif site.readiness == "needs_onboarding" and rule is None:
+                    reason = rule_note
+                else:
+                    reason = READINESS_SKIP.get(
+                        site.readiness, f"站点状态为 {site.readiness}"
+                    )
+                skipped.append({**item, "reason": reason})
                 continue
-            rule = next(
-                (
-                    entry
-                    for entry in entries
-                    if entry.get("valid")
-                    and entry.get("rule_id") == site.rule_id
-                    and entry.get("rule_version") == site.rule_version
-                ),
-                None,
-            )
             if rule is None:
-                skipped.append({**item, "reason": "规则包不可用或已变更"})
+                skipped.append({**item, "reason": rule_note})
+                continue
+            if conflict:
+                skipped.append({**item, "reason": conflict})
                 continue
             if "product" not in rule.get("task_types", []):
                 skipped.append({**item, "reason": "规则包不支持商品任务"})
@@ -2565,7 +2809,13 @@ def create_app(
             task.batch_id = batch_id
             task.site_key = site.site_key
             task.domain_key = site.site_key
-            task.market = batch.market or rule.get("market")
+            task.market = (
+                normalize_market(batch.market)
+                or normalize_market(rule.get("market"))
+                or None
+            )
+            if rule.get("sha256"):
+                task.rule_sha256 = str(rule["sha256"])
             try:
                 created = store.create_task_for_site(
                     task, site_key=site.site_key, replace_existing=rerun

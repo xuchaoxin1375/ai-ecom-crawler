@@ -52,7 +52,12 @@ from .harness.dependencies import (
 )
 from .harness.trace import build_trace, render_trace_markdown
 from .robots import extract_sitemaps, robots_url_for
-from .rule_diff import build_change_summary, normalize_validation
+from .rule_diff import (
+    build_change_summary,
+    compare_product_samples,
+    feedback_issue_checks,
+    normalize_validation,
+)
 from .runtime.archive import prefetch_rule_samples
 from .runtime.batch import normalize_site, rule_domains
 from .runtime.models import (
@@ -367,6 +372,8 @@ def default_validator(
     archive_sample_limit: int = 20,
     archive_max_bytes: int | None = None,
     archive_reuse: bool = False,
+    seed_urls: list[str] | None = None,
+    discover: bool = True,
 ) -> dict[str, Any]:
     """Run the bounded validation task in an isolated ledger/output tree."""
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -388,10 +395,14 @@ def default_validator(
         archive_sample_limit=archive_sample_limit,
         archive_max_bytes=archive_max_bytes,
         archive_reuse=archive_reuse,
+        seed_urls=seed_urls,
+        discover=discover,
     )
     result["failure_samples"] = _validation_failure_samples(work_dir, task_id)
     currencies: dict[str, int] = {}
-    products_path = task_dir / "export" / "products.csv"
+    products_path = task_dir / "products.csv"
+    if not products_path.is_file():
+        products_path = task_dir / "export" / "products.csv"
     if products_path.is_file():
         with products_path.open(encoding="utf-8", newline="") as handle:
             for row in csv.DictReader(handle):
@@ -399,7 +410,36 @@ def default_validator(
                 if currency:
                     currencies[currency] = currencies.get(currency, 0) + 1
     result["currencies"] = currencies
+    result["product_samples"] = _product_samples(products_path)
     return result
+
+
+def _product_samples(products_path: Path, *, limit: int = 20) -> list[dict[str, Any]]:
+    """Read the bounded validation CSV into comparable product records."""
+    if not products_path.is_file():
+        return []
+    samples: list[dict[str, Any]] = []
+    with products_path.open(encoding="utf-8", newline="") as handle:
+        for row in csv.DictReader(handle):
+            samples.append(
+                {
+                    "source_url": str(row.get("source_url") or "").strip(),
+                    "name": str(row.get("name") or "").strip(),
+                    "price_amount": str(row.get("price_amount") or "").strip(),
+                    "price_currency": str(
+                        row.get("price_currency") or ""
+                    ).strip().upper(),
+                    "primary_image_url": str(
+                        row.get("primary_image_url") or ""
+                    ).strip(),
+                    "description_html": str(
+                        row.get("description_html") or ""
+                    ).strip(),
+                }
+            )
+            if len(samples) >= limit:
+                break
+    return [sample for sample in samples if sample["source_url"]]
 
 
 def _safe_filename(value: str) -> str:
@@ -2292,6 +2332,16 @@ domain-mismatched, or produces no valid product.
                     )
                 self.store.update_build(build_id, state="VALIDATING")
                 work_dir = Path(session.workspace.root) / "validation"
+                feedback = (
+                    self.store.get_feedback(record.feedback_id)
+                    if record.feedback_id
+                    else None
+                )
+                feedback_samples = [
+                    str(sample).strip()
+                    for sample in (feedback.samples if feedback else [])
+                    if str(sample).strip()
+                ][:5]
                 task_result = self.validator(
                     rule_path,
                     work_dir,
@@ -2303,6 +2353,8 @@ domain-mismatched, or produces no valid product.
                     archive_sample_limit=int(archive.get("sample_limit") or 20),
                     archive_max_bytes=archive.get("max_bytes"),
                     archive_reuse=True,
+                    seed_urls=feedback_samples or None,
+                    discover=True,
                 )
                 counts = task_result.get("counts") if isinstance(task_result, dict) else {}
                 counts = counts if isinstance(counts, dict) else {}
@@ -2392,6 +2444,43 @@ domain-mismatched, or produces no valid product.
                         f"host validation produced {sorted(currencies)}; "
                         "use a market-localized URL or fix the rule currency"
                     )
+                product_samples = task_result.get("product_samples") or []
+                site = self.store.get_batch_site(record.batch_id, record.site_key)
+                parent_rule = self.store.get_site_rule(record.site_key)
+                has_parent = record.mode == "repair" or bool(
+                    parent_rule and parent_rule.rule_version
+                )
+                issue_checks = feedback_issue_checks(
+                    feedback,
+                    product_samples,
+                    rule_currency=rule_currency,
+                    audit_samples=audit.get("samples"),
+                )
+                regression = self._run_regression(
+                    record,
+                    site,
+                    product_samples,
+                    work_dir,
+                    record.proxy,
+                    archive,
+                    has_parent=has_parent,
+                )
+                validation["product_samples"] = product_samples
+                validation["candidate_smoke"] = {
+                    "executed": valid >= 1,
+                    "valid_products": valid,
+                    "failed_products": failed,
+                    "excluded_products": int(
+                        counts.get("excluded_products") or 0
+                    ),
+                    "currencies": currencies,
+                    "product_samples": product_samples[:10],
+                }
+                validation["issue_checks"] = issue_checks
+                validation["regression"] = regression
+                validation["feedback_samples"] = (
+                    feedback_samples if issue_checks else []
+                )
                 rule_id, rule_version, rule_name, rule_sha256, change_summary = (
                     self._install_rule(
                         rule_path,
@@ -2428,7 +2517,6 @@ domain-mismatched, or produces no valid product.
 
             validation.update(
                 {
-                    "status": "PASSED",
                     "rule_id": rule_id,
                     "rule_version": rule_version,
                     "rule_path": rule_name,
@@ -2437,16 +2525,27 @@ domain-mismatched, or produces no valid product.
                 }
             )
             validation = normalize_validation(validation, change_summary)
+            validation_status = str(validation.get("status") or "FAILED")
             auto_activate = (
                 record.mode == "build" or self.activation_mode == "legacy"
-            )
-            note_prefix = "候选方案" if not auto_activate else "已激活方案"
+            ) and validation_status == "PASSED"
+            note_prefix = "已激活方案" if auto_activate else "候选方案"
+            reasons = [
+                str(reason)
+                for reason in (validation.get("status_reasons") or [])
+                if str(reason).strip()
+            ]
             note = (
                 f"{note_prefix}：{rule_id}@{rule_version}，"
                 f"有界验证 {valid} 条有效、{failed} 失败"
-                + ("" if auto_activate else "；待人工激活")
             )
-            site = self.store.get_batch_site(record.batch_id, record.site_key)
+            if not auto_activate:
+                if validation_status == "PASSED":
+                    note += "；待人工激活"
+                else:
+                    note += f"；验证{validation_status}"
+                    if reasons:
+                        note += "：" + "；".join(reasons[:2])
             if auto_activate:
                 current = self.store.get_site_rule(record.site_key)
                 self.store.activate_rule(
@@ -2481,12 +2580,25 @@ domain-mismatched, or produces no valid product.
                     note=note,
                 )
                 if record.feedback_id:
-                    self.store.update_feedback(
-                        record.feedback_id,
-                        status="AWAITING_ACTIVATION",
-                        repair_build_id=build_id,
-                    )
-            self._mark_repair_finished(build_id, resolved=True)
+                    if validation_status == "PASSED":
+                        self.store.update_feedback(
+                            record.feedback_id,
+                            status="AWAITING_ACTIVATION",
+                            repair_build_id=build_id,
+                        )
+                    else:
+                        self.store.update_feedback(
+                            record.feedback_id,
+                            status="TRIAGED",
+                            repair_build_id=build_id,
+                            triage_note=(
+                                f"候选验证{validation_status}，未进入待激活："
+                                + ("；".join(reasons[:2]) or "缺少验证证据")
+                            )[:2000],
+                        )
+            self._mark_repair_finished(
+                build_id, resolved=validation_status == "PASSED"
+            )
             self._write_trace(
                 build_id,
                 session,
@@ -2515,6 +2627,141 @@ domain-mismatched, or produces no valid product.
                 self._finalizing.discard(build_id)
                 self._recovered_finalize.discard(build_id)
                 self._handled_permissions.pop(build_id, None)
+
+    def _source_rule_path(
+        self,
+        record: BuildRecord,
+        site: BatchSite | None,
+        *,
+        has_parent: bool = False,
+    ) -> Path | None:
+        """Locate the source rule with its recorded hash."""
+        if record.mode != "repair" and not has_parent:
+            return None
+        candidates: list[Path] = []
+        if site is not None and site.rule_path:
+            candidates.append(self.rules_dir / site.rule_path)
+        active = self.store.get_site_rule(record.site_key)
+        if active is not None:
+            candidates.append(self.rules_dir / active.path)
+        for path in candidates:
+            if self._rule_file_matches(record, site, path):
+                return path
+        try:
+            scanned = sorted(self.rules_dir.glob("*.yaml")) + sorted(
+                self.rules_dir.glob("*.yml")
+            )
+        except OSError:
+            return None
+        for path in scanned[:500]:
+            if self._rule_file_matches(record, site, path):
+                return path
+        return None
+
+    def _rule_file_matches(
+        self,
+        record: BuildRecord,
+        site: BatchSite | None,
+        path: Path,
+    ) -> bool:
+        if not path.is_file():
+            return False
+        try:
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        except OSError:
+            return False
+        if record.source_rule_sha256 and digest != record.source_rule_sha256:
+            return False
+        if record.source_rule_version:
+            try:
+                rule = load_rule(path)
+            except Exception:  # noqa: BLE001 - candidate file boundary
+                return False
+            if rule.rule_version != record.source_rule_version:
+                return False
+            if site is not None and site.rule_id and rule.rule_id != site.rule_id:
+                return False
+        return True
+
+    def _run_regression(
+        self,
+        record: BuildRecord,
+        site: BatchSite | None,
+        new_samples: list[dict[str, Any]],
+        work_dir: Path,
+        proxy: str | None,
+        archive: dict[str, Any],
+        *,
+        has_parent: bool = False,
+    ) -> dict[str, Any]:
+        """Run the source rule over the candidate's fixed product page set."""
+        if record.mode != "repair" and not has_parent:
+            return {
+                "executed": False,
+                "required": False,
+                "required_checked": 0,
+                "checked": 0,
+                "regressions": [],
+                "reason": "initial build has no source rule to compare",
+            }
+        source_path = self._source_rule_path(
+            record, site, has_parent=has_parent
+        )
+        if source_path is None:
+            return {
+                "executed": False,
+                "required": True,
+                "required_checked": 0,
+                "checked": 0,
+                "regressions": [],
+                "reason": "source rule file is unavailable or its hash changed",
+            }
+        seeds = [
+            str(item.get("source_url") or "").strip()
+            for item in new_samples
+            if str(item.get("source_url") or "").strip()
+        ][:5]
+        if not seeds:
+            return {
+                "executed": False,
+                "required": True,
+                "required_checked": 0,
+                "checked": 0,
+                "regressions": [],
+                "reason": "candidate validation produced no product URLs",
+            }
+        try:
+            old_result = self.validator(
+                source_path,
+                work_dir / "regression-old",
+                len(seeds),
+                max(30, int(self.validation_seconds)),
+                proxy,
+                archive_mode=str(archive.get("mode") or "off"),
+                archive_root=archive.get("root"),
+                archive_sample_limit=int(archive.get("sample_limit") or 20),
+                archive_max_bytes=archive.get("max_bytes"),
+                archive_reuse=True,
+                seed_urls=seeds,
+                discover=False,
+            )
+        except Exception as exc:  # noqa: BLE001 - regression boundary
+            return {
+                "executed": False,
+                "required": True,
+                "required_checked": min(3, len(seeds)),
+                "checked": 0,
+                "regressions": [],
+                "reason": f"source rule run failed: {type(exc).__name__}: {exc}",
+            }
+        result = compare_product_samples(
+            old_result.get("product_samples") if isinstance(old_result, dict) else [],
+            new_samples,
+            source_rule_version=record.source_rule_version,
+            source_rule_sha256=record.source_rule_sha256,
+        )
+        result["required_checked"] = min(3, len(seeds))
+        return result
 
     def _assert_catalog_rule(self, build_id: str, rule: Any) -> None:
         catalog = self._catalog_configs.get(build_id, {})

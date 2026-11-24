@@ -29,6 +29,13 @@ function validation(overrides: Partial<RuleValidation> = {}): RuleValidation {
       },
     ],
     regression: { checked: 6, regressions: [] },
+    candidate_smoke: {
+      executed: true,
+      valid_products: 6,
+      failed_products: 0,
+      excluded_products: 0,
+      currencies: { EUR: 6 },
+    },
     content_audit: { products_checked: 6, description_gaps: 0 },
     diff: {
       changed_fields: ["extract.fields.description_html"],
@@ -83,6 +90,11 @@ describe("RuleEvidence", () => {
     expect(screen.getByText("验证明细")).toBeInTheDocument();
     expect(screen.getByText(/description blocks present/)).toBeInTheDocument();
     expect(screen.getByText(/回归 price.amount/)).toBeInTheDocument();
+  });
+
+  it("warns when legacy evidence lacks the smoke record", () => {
+    render(<RuleEvidence validation={validation({ candidate_smoke: undefined })} />);
+    expect(screen.getByText(/不能激活/)).toBeInTheDocument();
   });
 
   it("renders nothing for legacy builds without evidence", () => {
