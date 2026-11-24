@@ -362,7 +362,11 @@ class TaskRunner:
             futures.pop(future, None)
 
     def _process_item(self, item: WorkItem) -> tuple[str, dict[str, Any]]:
-        advance = item.result.get("advance", {}) if item.discovered_from == "listing" else {}
+        advance = (
+            self._listing_advance(item)
+            if item.discovered_from == "listing"
+            else {}
+        )
         try:
             if advance.get("type") in {"load_more", "infinite_scroll"}:
                 get_listing = getattr(self.fetcher, "get_listing", None)
@@ -601,6 +605,21 @@ class TaskRunner:
             "depth": depth,
         }
 
+    def _listing_advance(self, item: WorkItem) -> dict[str, Any]:
+        """Return the listing advance config from the item or its source."""
+        advance = item.result.get("advance")
+        if isinstance(advance, dict) and advance:
+            return advance
+        for source in self.rule.sources:
+            if str(source.get("type")) != "listing":
+                continue
+            source_url = str(source.get("url") or source.get("seed") or "")
+            if source_url and _normalize_url(source_url) == item.normalized_url:
+                source_advance = source.get("advance")
+                if isinstance(source_advance, dict):
+                    return dict(source_advance)
+        return {}
+
     def _listing_selector(self, item: WorkItem) -> str:
         """Return the listing link selector from the item or its source.
 
@@ -639,7 +658,7 @@ class TaskRunner:
         for url in urls:
             if self._add_product_item(url, parent=item.url, source="listing"):
                 added += 1
-        advance = item.result.get("advance", {"type": "none"})
+        advance = self._listing_advance(item) or {"type": "none"}
         next_url = self._next_listing_url(item, page, advance) if added else None
         if next_url:
             next_page = int(item.result.get("page", 1)) + 1
