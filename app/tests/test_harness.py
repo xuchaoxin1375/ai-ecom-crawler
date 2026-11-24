@@ -393,6 +393,55 @@ class HarnessTests(unittest.TestCase):
         self.assertEqual(result["state"], "CANCELLED")
         self.assertTrue(result["artifacts"])
 
+    def test_adapter_adopts_persisted_session_and_detaches_without_delete(self) -> None:
+        adapter = OpenCodeHttpAdapter(
+            self.root / "sessions",
+            client=self.client,
+        )
+        task = self._task("build-recover")
+        session = adapter.start_build(task)
+        workspace = BuildWorkspace(root=session.workspace.root, build_id=task.build_id)
+        FakeHandler.state.permissions = [
+            {"id": "perm_1", "sessionID": SESSION_ID, "action": "shell"}
+        ]
+
+        recovered = OpenCodeHttpAdapter(
+            self.root / "sessions",
+            client=self.client,
+        )
+        adopted = recovered.adopt_build(
+            task.build_id,
+            session_id=SESSION_ID,
+            workspace=workspace,
+        )
+        self.assertEqual(adopted.state, "FINISHED")
+        self.assertEqual(adopted.outcome, "interrupted")
+        self.assertTrue(adopted.harness.get("recovered"))
+        self.assertEqual(FakeHandler.state.decisions, [("perm_1", "reject")])
+        self.assertEqual(FakeHandler.state.permissions, [])
+        event_types = [
+            json.loads(line)["type"]
+            for line in workspace.session_path.read_text(encoding="utf-8").splitlines()
+        ]
+        self.assertIn("build_recovered", event_types)
+
+        detach_task = self._task("build-detach")
+        recovered.start_build(detach_task)
+        detached = recovered.detach(detach_task.build_id)
+        self.assertEqual(detached.state, "FINISHED")
+        self.assertEqual(detached.outcome, "interrupted")
+        self.assertEqual(FakeHandler.state.interrupts, 1)
+        self.assertEqual(FakeHandler.state.deleted, 0)
+        recovered.shutdown()
+        self.assertEqual(FakeHandler.state.deleted, 0)
+
+        with self.assertRaises(HarnessStateError):
+            recovered.adopt_build(
+                "build-missing",
+                session_id="ses_missing",
+                workspace=workspace,
+            )
+
     def test_adapter_uses_task_permissions(self) -> None:
         adapter = OpenCodeHttpAdapter(self.root / "sessions", client=self.client)
         task = self._task("build-permissions")

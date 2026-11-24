@@ -418,6 +418,7 @@ export interface BuildStatus {
   mode: "build" | "repair";
   workspace: string | null;
   session_id: string | null;
+  recoverable?: boolean;
   model: Record<string, unknown> | null;
   proxy: string | null;
   proxy_configured: boolean;

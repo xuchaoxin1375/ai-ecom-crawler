@@ -23,7 +23,11 @@ const EMPTY: BuildStream = {
   ended: false,
 };
 
-export function useBuildStream(buildId: string | null, enabled = true): BuildStream {
+export function useBuildStream(
+  buildId: string | null,
+  enabled = true,
+  restartKey: string | number = "",
+): BuildStream {
   const [state, setState] = useState<StreamState | null>(null);
   const supported = typeof EventSource !== "undefined";
 
@@ -100,7 +104,7 @@ export function useBuildStream(buildId: string | null, enabled = true): BuildStr
       source.addEventListener("snapshot", handleTimeline as EventListener);
       source.addEventListener("timeline", handleTimeline as EventListener);
       source.addEventListener("end", handleEnd as EventListener);
-      source.onopen = () => update({ connected: true, error: "" });
+      source.onopen = () => update({ connected: true, error: "", ended: false });
       source.onerror = handleError;
     }
 
@@ -111,7 +115,7 @@ export function useBuildStream(buildId: string | null, enabled = true): BuildStr
       source?.close();
       if (retryTimer) clearTimeout(retryTimer);
     };
-  }, [buildId, enabled, supported]);
+  }, [buildId, enabled, supported, restartKey]);
 
   if (!buildId || !enabled) return EMPTY;
   if (!supported) {

@@ -29,7 +29,7 @@ import {
 } from "../../lib/api";
 import {
   buildStateLabel,
-  buildStateTone,
+  buildTone,
   buildOutcomeLabel,
   formatTime,
 } from "../../lib/format";
@@ -50,6 +50,9 @@ import { InlineNotice } from "../../components/ui/InlineNotice";
 import { Textarea } from "../../components/ui/Input";
 import { MetricStrip } from "../../components/ui/MetricStrip";
 import { ConfirmBatchActionDialog } from "../batches/ConfirmBatchActionDialog";
+
+const INTERRUPTED_CONTINUE_MESSAGE =
+  "服务重启后继续：请先检查工作区和已有产物，从中断处完成剩余工作；不要重复已完成的抓取或覆盖已写好的规则。";
 
 function siteHref(build: BuildStatus): string | null {
   if (!build.batch_id || !build.site_key) return null;
@@ -172,6 +175,7 @@ export function BuildDetailPage() {
   const stream = useBuildStream(
     buildId,
     Boolean(buildId && build && build.state !== "QUEUED"),
+    build ? (buildIsActive(build) ? "active" : build.state) : "",
   );
   const streamHealthy = stream.connected || stream.ended;
   const messagesQuery = useQuery({
@@ -262,7 +266,9 @@ export function BuildDetailPage() {
 
   async function runContinue() {
     if (!build) return;
-    const message = continueDraft.trim();
+    const message =
+      continueDraft.trim() ||
+      (build.outcome === "interrupted" ? INTERRUPTED_CONTINUE_MESSAGE : "");
     if (!message) {
       setError("继续会话需要一条具体指令。");
       return;
@@ -276,7 +282,11 @@ export function BuildDetailPage() {
       });
       apply(response);
       setContinueDraft("");
-      setNotice("已继续失败会话；模型响应和主机验证会写回本次构建。");
+      setNotice(
+        build.outcome === "interrupted"
+          ? "已继续中断会话；后台会重新加载同一会话，模型响应和主机验证会写回本次构建。"
+          : "已继续失败会话；模型响应和主机验证会写回本次构建。",
+      );
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : String(exc));
     } finally {
@@ -286,7 +296,10 @@ export function BuildDetailPage() {
 
   const active = build ? buildIsActive(build) : false;
   const queued = build?.state === "QUEUED";
-  const canContinue = build?.state === "FINISHED" && build.outcome === "failed";
+  const interrupted = build?.outcome === "interrupted";
+  const canContinue =
+    build?.state === "FINISHED" &&
+    (build.outcome === "failed" || build.outcome === "interrupted");
   const continuations = build?.continuations ?? [];
   const continueDisabled = continueBusy || !buildConfig?.available;
   const canPause = build?.state === "RUNNING";
@@ -358,20 +371,11 @@ export function BuildDetailPage() {
               <Badge tone="neutral" dot={false}>
                 {buildModeLabel(build.mode)}
               </Badge>
-              <Badge tone={buildStateTone(build.state)} dot={false}>
+              <Badge tone={buildTone(build.state, build.outcome)} dot={false}>
                 {buildStateLabel(build.state)}
               </Badge>
               {build.outcome ? (
-                <Badge
-                  tone={
-                    build.outcome === "succeeded"
-                      ? "success"
-                      : build.outcome === "failed"
-                        ? "danger"
-                        : "neutral"
-                  }
-                  dot={false}
-                >
+                <Badge tone={buildTone(null, build.outcome)} dot={false}>
                   {buildOutcomeLabel(build.outcome)}
                 </Badge>
               ) : null}
@@ -471,7 +475,12 @@ export function BuildDetailPage() {
       ) : null}
       {error ? <ErrorNotice title="构建操作失败" message={error} compact /> : null}
       {build.error ? (
-        <ErrorNotice title="构建错误" message={build.error} compact />
+        <ErrorNotice
+          title={interrupted ? "构建已中断" : "构建错误"}
+          message={build.error}
+          tone={interrupted ? "warning" : "danger"}
+          compact
+        />
       ) : null}
 
       <MetricStrip
@@ -626,10 +635,12 @@ export function BuildDetailPage() {
         <section className="rounded-panel border border-line bg-surface">
           <div className="border-b border-line px-5 py-4">
             <h2 className="text-[17px] leading-6 font-semibold text-ink">
-              继续失败会话
+              继续构建会话
             </h2>
             <p className="mt-0.5 text-xs leading-5 text-ink-3">
-              仅失败的构建可以继续，且要求当前服务进程仍保留该会话；成功构建请通过结果反馈走规则修复。
+              {interrupted
+                ? "服务重启中断了本次构建，会话和工作区已保留。继续会重新加载同一会话，从中断处完成剩余工作。"
+                : "失败的构建可以继续，且要求会话仍可恢复；成功构建请通过结果反馈走规则修复。"}
             </p>
           </div>
           <div className="space-y-3 px-5 py-4">
@@ -644,14 +655,18 @@ export function BuildDetailPage() {
                     rows={3}
                     maxLength={4000}
                     value={continueDraft}
-                    placeholder="例如：上次失败在 discovery.sources，请检查列表入口并重新生成规则；保留已确认的选择器。"
+                    placeholder={
+                      interrupted
+                        ? "留空会发送默认指令：检查工作区已有产物，从中断处继续，不重复已完成部分。"
+                        : "例如：上次失败在 discovery.sources，请检查列表入口并重新生成规则；保留已确认的选择器。"
+                    }
                     onChange={(event) => setContinueDraft(event.target.value)}
                     disabled={continueDisabled}
                   />
                 </label>
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="max-w-2xl text-[11px] leading-5 text-ink-3">
-                    发送会继续调用模型并产生费用；主机只接受失败构建的会话，不会创建新的构建记录。
+                    发送会继续调用模型并产生费用；主机只接受失败或中断构建的会话，不会创建新的构建记录。
                   </p>
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-[11px] text-ink-3">
@@ -661,7 +676,9 @@ export function BuildDetailPage() {
                       size="sm"
                       variant="primary"
                       onClick={() => void runContinue()}
-                      disabled={continueDisabled || !continueDraft.trim()}
+                      disabled={
+                        continueDisabled || (!continueDraft.trim() && !interrupted)
+                      }
                     >
                       {continueBusy ? "发送中…" : "发送并继续"}
                     </Button>

@@ -147,6 +147,15 @@ export function siteNextStep(
   }
 
   if (site.readiness === "needs_onboarding" || site.readiness === "building") {
+    if (activeBuild?.state === "FINISHED" && activeBuild.outcome === "interrupted") {
+      return {
+        tone: "warning",
+        title: "最近构建已中断",
+        description:
+          "服务重启中断了构建会话，会话和工作区已保留；打开构建详情可以继续同一会话，或重新构建。",
+        action: "none",
+      };
+    }
     if (activeBuild?.state === "FINISHED") {
       return {
         tone: activeBuild.outcome === "succeeded" ? "success" : "danger",

@@ -212,6 +212,30 @@ class BuildService:
                 self.pending_permissions[session.build_id].discard(str(request_id))
                 self.held_permissions[session.build_id].discard(str(request_id))
 
+    def adopt(
+        self,
+        session: BuildSession,
+        *,
+        events: list[HarnessEvent] | None = None,
+    ) -> BuildSession:
+        """Register a session that was restored from persisted state.
+
+        Restored sessions are terminal (``FINISHED`` / ``interrupted``) and
+        have no pump or dependency bridge until the user continues them.
+        """
+        with self._lock:
+            existing = self.sessions.get(session.build_id)
+            if existing is not None:
+                return existing
+            log: deque[HarnessEvent] = deque(maxlen=self._max_events)
+            if events:
+                log.extend(events)
+            self.sessions[session.build_id] = session
+            self.events[session.build_id] = log
+            self.held_permissions[session.build_id] = set()
+            self.pending_permissions[session.build_id] = set()
+            return session
+
     def send_prompt(self, build_id: str, text: str) -> dict[str, Any]:
         with self._lock:
             session = self._require(build_id)
@@ -305,6 +329,31 @@ class BuildService:
             )
             self.held_permissions[build_id].discard(request_id)
             self.pending_permissions[build_id].discard(request_id)
+
+    def detach(self, build_id: str) -> BuildSession:
+        """Stop a session locally while keeping its remote conversation."""
+        with self._lock:
+            session = self._require(build_id)
+            if session.state in TERMINAL_STATES:
+                return session
+        self._stop_bridge(
+            build_id,
+            status="interrupted",
+            detail="service stopped before the dependency request was resolved",
+        )
+        with self._lock:
+            session = self._require(build_id)
+            detach = getattr(self.adapter, "detach", None)
+            if callable(detach):
+                session = detach(build_id)
+            else:
+                session = self.adapter.cancel(build_id)
+            self.sessions[build_id] = session
+            self.held_permissions[build_id].clear()
+            self.pending_permissions[build_id].clear()
+            if self._active_id == build_id:
+                self._active_id = None
+            return session
 
     def cancel(self, build_id: str) -> BuildSession:
         with self._lock:

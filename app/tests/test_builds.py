@@ -20,6 +20,7 @@ from ecom_crawler.builds import (
     _live_timeline,
     _merge_reasoning_timeline,
     _probe_robots,
+    _seconds_since,
     _trace_timeline,
     default_permissions,
 )
@@ -188,12 +189,16 @@ class FakeBuildAdapter:
         finish: bool = True,
         rule_payloads: list[dict[str, Any]] | None = None,
         gate: threading.Event | None = None,
+        hang: bool = False,
+        persisted: dict[str, BuildSession] | None = None,
     ) -> None:
         self.root = root
         self.write_rule = write_rule
         self.finish = finish
         self.rule_payloads = rule_payloads or []
         self.gate = gate
+        self.hang = hang
+        self.persisted = dict(persisted or {})
         self.queue: queue.Queue[HarnessEvent | None] = queue.Queue()
         self.queues: dict[str, queue.Queue[HarnessEvent | None]] = {}
         self.current_build: str | None = None
@@ -203,6 +208,9 @@ class FakeBuildAdapter:
         self.continued: list[tuple[str, str]] = []
         self.closed: list[str] = []
         self.canceled: list[str] = []
+        self.adopted: list[str] = []
+        self.detached: list[str] = []
+        self.shutdown_called = False
 
     def start_build(self, task: BuildTask) -> BuildSession:
         workspace = BuildWorkspace.create(
@@ -224,7 +232,10 @@ class FakeBuildAdapter:
     def send_prompt(self, build_id: str, text: str) -> dict[str, Any]:
         index = len(self.prompts)
         self.prompts.append((build_id, text))
-        self._complete_async(build_id, index)
+        if not self.hang:
+            self._complete_async(build_id, index)
+        else:
+            self.sessions[build_id].state = "RUNNING"
         return {"id": "msg_fake"}
 
     def continue_prompt(self, build_id: str, text: str) -> dict[str, Any]:
@@ -232,8 +243,49 @@ class FakeBuildAdapter:
         self.continued.append((build_id, text))
         self.prompts.append((build_id, text))
         self.sessions[build_id].state = "RUNNING"
+        self.queues.setdefault(build_id, queue.Queue())
         self._complete_async(build_id, index)
         return {"id": f"msg_fake_repair_{len(self.continued)}"}
+
+    def adopt_build(
+        self,
+        build_id: str,
+        *,
+        session_id: str,
+        workspace: BuildWorkspace,
+        model: dict[str, Any] | None = None,
+        error: str | None = None,
+    ) -> BuildSession:
+        self.adopted.append(build_id)
+        session = self.sessions.get(build_id) or self.persisted.get(build_id)
+        if session is None:
+            session = BuildSession(
+                build_id=build_id,
+                state="FINISHED",
+                workspace=workspace,
+                session_id=session_id,
+                model=model,
+                outcome="interrupted",
+                error=error,
+            )
+        self.sessions[build_id] = session
+        if self.current_build is None:
+            self.current_build = build_id
+        self.queues.setdefault(build_id, queue.Queue())
+        return session
+
+    def detach(self, build_id: str) -> BuildSession:
+        self.detached.append(build_id)
+        session = self.sessions[build_id]
+        if session.state not in {"CANCELLED", "FINISHED"}:
+            session.state = "FINISHED"
+            session.outcome = "interrupted"
+            session.error = "服务停止，构建会话已中断"
+        self.queues.setdefault(build_id, queue.Queue()).put(None)
+        return session
+
+    def shutdown(self) -> None:
+        self.shutdown_called = True
 
     def _complete_async(self, build_id: str, index: int) -> None:
         self.sessions[build_id].state = "RUNNING"
@@ -437,6 +489,15 @@ class BuildWorkflowTests(unittest.TestCase):
                 break
             time.sleep(0.05)
         return last
+
+    def test_seconds_since_accepts_naive_legacy_timestamps(self) -> None:
+        self.assertEqual(
+            _seconds_since(
+                "2026-11-24 12:00:00",
+                end="2026-11-24 12:00:10",
+            ),
+            10.0,
+        )
 
     def test_build_permissions_share_skills_and_keep_workspace_boundaries(self) -> None:
         workspace = self.root / "out" / "build-permissions"
@@ -2018,6 +2079,170 @@ class BuildWorkflowTests(unittest.TestCase):
                 f"/api/builds/{running['build_id']}/cancel",
                 headers=CLIENT_HEADERS,
             )
+
+    def test_shutdown_marks_build_interrupted_and_continue_reloads_session(self) -> None:
+        adapter = FakeBuildAdapter(self.root, hang=True)
+        manager = self._manager(adapter)
+        with self._client(manager) as client:
+            response = client.post(
+                "/api/batches/b-1/sites/example.fr/build",
+                json={},
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(response.status_code, 202, response.text)
+            build_id = response.json()["build"]["build_id"]
+            self.assertEqual(response.json()["build"]["state"], "RUNNING")
+        manager.shutdown()
+
+        record = self.store.get_build(build_id)
+        assert record is not None
+        self.assertEqual(record.state, "FINISHED")
+        self.assertEqual(record.outcome, "interrupted")
+        self.assertIn("会话已保留", record.error or "")
+        self.assertEqual(record.error_class, "service_stop")
+        site = self.store.get_batch_site("b-1", "example.fr")
+        assert site is not None
+        self.assertEqual(site.readiness, "needs_onboarding")
+        self.assertEqual(adapter.detached, [build_id])
+
+        restarted_adapter = FakeBuildAdapter(
+            self.root, persisted=dict(adapter.sessions)
+        )
+        restarted = self._manager(restarted_adapter)
+        with self._client(restarted) as client:
+            response = client.post(
+                f"/api/builds/{build_id}/continue",
+                json={
+                    "request_id": "continue-after-restart",
+                    "message": "continue after restart",
+                },
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(response.status_code, 202, response.text)
+            done = self._wait_ready(client, build_id)
+            self.assertEqual(done["outcome"], "succeeded", done.get("error"))
+            self.assertIsNone(done["error_class"])
+        self.assertEqual(restarted_adapter.adopted, [build_id])
+        self.assertEqual(restarted_adapter.continued[0][1], "continue after restart")
+        self.assertTrue(list(self.rules.glob("*.yaml")))
+
+    def test_reconcile_finalizes_finished_agent_workspace_without_prompt(self) -> None:
+        workspace = self.root / "out" / "builds" / "build-finished"
+        plan = workspace / "out" / "plan"
+        plan.mkdir(parents=True)
+        (plan / "rule.yaml").write_text(
+            yaml.safe_dump(rule_payload(), allow_unicode=True, sort_keys=False),
+            encoding="utf-8",
+        )
+        (workspace / "out" / "result.json").write_text(
+            json.dumps(
+                {
+                    "build_id": "build-finished",
+                    "state": "FINISHED",
+                    "outcome": "succeeded",
+                }
+            ),
+            encoding="utf-8",
+        )
+        (workspace / "out" / "session.ndjson").write_text(
+            json.dumps(
+                {
+                    "type": "finished",
+                    "source_type": "session.execution.succeeded",
+                    "session_id": "ses_finished",
+                    "data": {"outcome": "succeeded"},
+                    "created_at": utc_now(),
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        self.store.create_build(
+            BuildRecord(
+                build_id="build-finished",
+                batch_id="b-1",
+                site_key="example.fr",
+                state="VALIDATING",
+                session_id="ses_finished",
+                workspace=str(workspace),
+            )
+        )
+        self.store.update_batch_site(
+            "b-1",
+            "example.fr",
+            readiness="building",
+            build_id="build-finished",
+            note="验证中",
+        )
+        calls: list[str] = []
+
+        def validator(
+            rule_path: Path,
+            work_dir: Path,
+            max_products: int,
+            max_seconds: int,
+            proxy: str | None = None,
+            **_: Any,
+        ) -> dict[str, Any]:
+            calls.append(str(rule_path))
+            return {
+                "counts": {"valid_products": 2, "failed_products": 0},
+                "outcome": "COMPLETED",
+                "stop_reason": "NATURAL_END",
+                "currencies": {"EUR": 2},
+            }
+
+        adapter = FakeBuildAdapter(self.root)
+        manager = self._manager(adapter, validator=validator)
+        interrupted = manager.reconcile()
+        self.assertEqual(interrupted, [])
+        deadline = time.monotonic() + 10
+        record = self.store.get_build("build-finished")
+        while time.monotonic() < deadline:
+            record = self.store.get_build("build-finished")
+            if record is not None and record.state == "FINISHED":
+                break
+            time.sleep(0.05)
+        assert record is not None
+        self.assertEqual(record.state, "FINISHED")
+        self.assertEqual(record.outcome, "succeeded", record.error)
+        self.assertIsNone(record.error_class)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(adapter.prompts, [])
+        self.assertTrue(list(self.rules.glob("*.yaml")))
+
+    def test_reconcile_marks_session_backed_build_interrupted(self) -> None:
+        workspace = self.root / "out" / "builds" / "build-resumable"
+        (workspace / "out").mkdir(parents=True)
+        self.store.create_build(
+            BuildRecord(
+                build_id="build-resumable",
+                batch_id="b-1",
+                site_key="example.fr",
+                state="RUNNING",
+                session_id="ses_resumable",
+                workspace=str(workspace),
+            )
+        )
+        self.store.update_batch_site(
+            "b-1",
+            "example.fr",
+            readiness="building",
+            build_id="build-resumable",
+            note="构建中",
+        )
+        adapter = FakeBuildAdapter(self.root)
+        manager = self._manager(adapter)
+        interrupted = manager.reconcile()
+        self.assertEqual(interrupted, ["build-resumable"])
+        record = self.store.get_build("build-resumable")
+        assert record is not None
+        self.assertEqual(record.state, "FINISHED")
+        self.assertEqual(record.outcome, "interrupted")
+        self.assertEqual(record.error_class, "service_restart")
+        self.assertIn("会话已保留", record.error or "")
+        described = manager.describe("build-resumable")
+        self.assertTrue(described["recoverable"])
 
     def test_reconcile_interrupts_stale_build(self) -> None:
         self.store.create_build(

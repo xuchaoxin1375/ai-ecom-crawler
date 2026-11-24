@@ -155,6 +155,17 @@ export function buildStateTone(state: string | null | undefined): Tone {
   return "neutral";
 }
 
+export function buildTone(
+  state: string | null | undefined,
+  outcome: string | null | undefined,
+): Tone {
+  if (outcome === "succeeded") return "success";
+  if (outcome === "failed") return "danger";
+  if (outcome === "interrupted") return "warning";
+  if (outcome === "cancelled" || outcome === "closed") return "neutral";
+  return buildStateTone(state);
+}
+
 const COVERAGE_LABELS: Record<string, string> = {
   KNOWN: "已知",
   PARTIAL: "部分",

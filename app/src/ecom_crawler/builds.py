@@ -36,7 +36,13 @@ import yaml
 
 from .execution import run_task
 from .executor.preflight import check_rule_selectors, format_selector_errors
-from .harness import BuildService, BuildTask, OpenCodeHttpAdapter
+from .harness import (
+    BuildService,
+    BuildTask,
+    BuildWorkspace,
+    HarnessEvent,
+    OpenCodeHttpAdapter,
+)
 from .harness.adapter import BuildSession
 from .harness.dependencies import DependencyPolicy
 from .harness.trace import build_trace, render_trace_markdown
@@ -329,6 +335,11 @@ def _seconds_since(value: str | None, *, end: str | None = None) -> float | None
         parsed = datetime.fromisoformat(value)
     except ValueError:
         return None
+    if parsed.tzinfo is None:
+        # Older rows or external tooling may store naive timestamps; the
+        # application writes UTC, so treat naive values as UTC instead of
+        # failing the build detail response.
+        parsed = parsed.replace(tzinfo=UTC)
     if end:
         try:
             finished = datetime.fromisoformat(end)
@@ -336,6 +347,8 @@ def _seconds_since(value: str | None, *, end: str | None = None) -> float | None
             finished = datetime.now(UTC)
     else:
         finished = datetime.now(UTC)
+    if finished.tzinfo is None:
+        finished = finished.replace(tzinfo=UTC)
     return max(0.0, (finished - parsed).total_seconds())
 
 
@@ -356,6 +369,42 @@ def _mask_proxy(value: str | None) -> str | None:
         port = f":{parsed.port}" if parsed.port else ""
         return f"{parsed.scheme}://***@{host}{port}"
     return value
+
+
+def _workspace_events(workspace: BuildWorkspace) -> list[HarnessEvent]:
+    """Load normalized events written before a service restart."""
+    try:
+        lines = workspace.session_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    events: list[HarnessEvent] = []
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        event_type = str(payload.get("type") or "")
+        if not event_type:
+            continue
+        data = payload.get("data")
+        events.append(
+            HarnessEvent(
+                type=event_type,
+                source_type=str(payload.get("source_type") or ""),
+                session_id=(
+                    str(payload["session_id"])
+                    if payload.get("session_id")
+                    else None
+                ),
+                data=dict(data) if isinstance(data, dict) else {},
+                created_at=str(payload.get("created_at") or utc_now()),
+            )
+        )
+    return events
 
 
 def _entry_url(site: BatchSite) -> str:
@@ -757,6 +806,9 @@ class BuildManager:
         self._repair_limits: dict[str, int] = {}
         self._repairs: dict[str, list[dict[str, Any]]] = {}
         self._repair_pending: set[str] = set()
+        # Builds whose agent run finished before the host crashed.  Recovered
+        # validation must not silently start a new paid repair turn.
+        self._recovered_finalize: set[str] = set()
         self._trace_meta_cache: dict[str, dict[str, Any]] = {}
         self._archive_configs: dict[str, dict[str, Any]] = {}
         self._catalog_configs: dict[str, dict[str, Any]] = {}
@@ -1952,6 +2004,85 @@ domain-mismatched, or produces no valid product.
         except KeyError:
             return None
 
+    def _restore_local_session(
+        self,
+        record: BuildRecord,
+        *,
+        outcome: str = "succeeded",
+    ) -> BuildSession | None:
+        """Recreate a finished session from workspace data without a server.
+
+        Used when the agent had already finished but the host crashed before
+        validating and installing the rule.  Host validation can then resume
+        without a model call.
+        """
+        if not record.session_id or not record.workspace:
+            return None
+        root = Path(record.workspace)
+        if not (root / "out").is_dir():
+            return None
+        workspace = BuildWorkspace(root=root, build_id=record.build_id)
+        session = BuildSession(
+            build_id=record.build_id,
+            state="FINISHED",
+            workspace=workspace,
+            session_id=record.session_id,
+            model=record.model,
+            harness={
+                "name": "opencode",
+                "version": None,
+                "adapter_version": "opencode-http/0.1",
+                "transport": "http+sse",
+                "restored": True,
+            },
+            outcome=outcome,
+            error=record.error,
+        )
+        sessions = getattr(self.service.adapter, "sessions", None)
+        if isinstance(sessions, dict):
+            sessions[record.build_id] = session
+        self.service.adopt(session, events=_workspace_events(workspace))
+        return session
+
+    def _ensure_build_session(self, record: BuildRecord) -> BuildSession:
+        """Return the live session or re-attach a persisted one on demand."""
+        existing = self._session(record.build_id)
+        if existing is not None:
+            return existing
+        if not record.session_id or not record.workspace:
+            raise BuildError(
+                "build session is no longer available; start a new build instead"
+            )
+        root = Path(record.workspace)
+        if not root.is_dir():
+            raise BuildError(
+                "build session is no longer available: build workspace is missing"
+            )
+        workspace = BuildWorkspace(root=root, build_id=record.build_id)
+        adopt = getattr(self.service.adapter, "adopt_build", None)
+        if not callable(adopt):
+            raise BuildError(
+                "build session is no longer available; start a new build instead"
+            )
+        try:
+            session = adopt(
+                record.build_id,
+                session_id=record.session_id,
+                workspace=workspace,
+                model=record.model,
+                error=record.error,
+            )
+        except Exception as exc:
+            raise BuildError(
+                "build session is no longer available: "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
+        # A user-requested continuation clears a pause marker that was
+        # persisted before the restart.
+        session.workspace.set_paused(False)
+        self.service.adopt(session, events=_workspace_events(workspace))
+        return session
+
     def _auto_approve(self, build_id: str, session: BuildSession) -> None:
         if session.state in {"PAUSING", "PAUSED", "CANCELLING", "CANCELLED"}:
             return
@@ -2003,7 +2134,11 @@ domain-mismatched, or produces no valid product.
                 self._record_failure(build_id, message)
                 return None
             try:
-                self.service.adapter.collect_artifacts(build_id)
+                # Use the session workspace directly: a session restored after
+                # a restart has no live adapter-side object, but its artifacts
+                # and rule files are still on disk.
+                artifacts = session.workspace.artifact_map()
+                session.workspace.update_result(artifacts=artifacts)
             except Exception:
                 logger.debug("artifact collection failed", exc_info=True)
             if error is None and session.state == "CANCELLED":
@@ -2286,12 +2421,14 @@ domain-mismatched, or produces no valid product.
                 evidence_sha256=str(validation.get("evidence_sha256") or "") or None,
                 finished_at=utc_now(),
                 error=None,
+                error_class=None,
             )
             self._close_session(build_id)
             return None
         finally:
             with self._lock:
                 self._finalizing.discard(build_id)
+                self._recovered_finalize.discard(build_id)
                 self._handled_permissions.pop(build_id, None)
 
     def _assert_catalog_rule(self, build_id: str, rule: Any) -> None:
@@ -2318,6 +2455,10 @@ domain-mismatched, or produces no valid product.
         validation: dict[str, Any] | None,
     ) -> bool:
         """Hand one validation failure back to the same harness session."""
+        if build_id in self._recovered_finalize:
+            # Restart recovery re-runs host validation only.  Starting a new
+            # model turn is an explicit user decision after that.
+            return False
         rounds = self._repairs.setdefault(build_id, [])
         limit = self._repair_limits.get(build_id, 0)
         if len(rounds) >= limit:
@@ -2766,6 +2907,13 @@ domain-mismatched, or produces no valid product.
             "mode": record.mode,
             "workspace": record.workspace,
             "session_id": record.session_id,
+            "recoverable": bool(
+                state == "FINISHED"
+                and outcome in {"failed", "interrupted"}
+                and record.session_id
+                and record.workspace
+                and Path(record.workspace).is_dir()
+            ),
             "model": record.model,
             "proxy": _mask_proxy(record.proxy),
             "proxy_configured": bool(record.proxy),
@@ -2953,11 +3101,13 @@ domain-mismatched, or produces no valid product.
             raise BuildError(
                 f"build {build_id} is {record.state}; only finished builds can continue"
             )
-        if record.outcome != "failed":
+        if record.outcome not in {"failed", "interrupted"}:
             raise BuildError(
                 f"build {build_id} is {record.outcome or 'unfinished'}; "
-                "only failed builds can continue"
+                "only failed or interrupted builds can continue"
             )
+        if record.request:
+            self._hydrate_request(record)
         with self._lock:
             if build_id in self._watchers:
                 raise BuildError(f"build {build_id} already has an active watcher")
@@ -2973,11 +3123,14 @@ domain-mismatched, or produces no valid product.
         # last auto-repair round failed, keep it visibly unresolved and let the
         # continuation record explain how the build eventually succeeded.
         self._repair_pending.discard(build_id)
+        self._recovered_finalize.discard(build_id)
         rounds = self._repairs.get(build_id) or []
         if rounds:
             rounds[-1].setdefault("finished_at", utc_now())
             rounds[-1]["resolved"] = False
         try:
+            session = self._ensure_build_session(record)
+            session.workspace.set_paused(False)
             self.service.continue_after_finish(build_id, message)
         except Exception as exc:
             with self._lock:
@@ -2992,6 +3145,7 @@ domain-mismatched, or produces no valid product.
             state="RUNNING",
             outcome=None,
             error=None,
+            error_class=None,
             finished_at=None,
         )
         self._repair_limits.setdefault(build_id, self.max_repair_rounds)
@@ -3094,28 +3248,107 @@ domain-mismatched, or produces no valid product.
         return self.describe(build_id)
 
     # -------------------------------------------------------------- lifecycle
-    def reconcile(self) -> list[str]:
-        """Close builds left active by a previous service process.
+    def _read_workspace_result(self, record: BuildRecord) -> dict[str, Any]:
+        if not record.workspace:
+            return {}
+        path = Path(record.workspace) / "out" / "result.json"
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return payload if isinstance(payload, dict) else {}
 
-        Harness sessions live in memory, so a restarted service cannot resume
-        them.  Mark them interrupted and return the site to ``needs_onboarding``
-        instead of leaving a permanently "building" row.
+    def reconcile(self) -> list[str]:
+        """Recover builds left active by a previous service process.
+
+        Conversations are persistent in OpenCode storage, so the host does
+        not delete them on restart.  A build whose agent had already finished
+        is revalidated and installed without a model call.  Other active
+        builds become ``FINISHED`` / ``interrupted`` and can be continued
+        explicitly from the build page; they do not hold the queue slot.
         """
         interrupted: list[str] = []
         for record in self.store.list_builds(states=RUNNING_BUILD_STATES, limit=500):
-            message = "服务重启，构建会话已中断"
+            if record.state == "CANCELLING":
+                message = "服务重启，取消操作已完成"
+                self.store.update_build(
+                    record.build_id,
+                    state="CANCELLED",
+                    outcome="cancelled",
+                    error=None,
+                    finished_at=utc_now(),
+                )
+                self._release_site(
+                    record.batch_id,
+                    record.site_key,
+                    record.build_id,
+                    "构建已取消：可重新开始",
+                )
+                self._release_feedback(
+                    record.build_id, "构建已取消：未安装候选规则"
+                )
+                interrupted.append(record.build_id)
+                continue
+            result = self._read_workspace_result(record)
+            result_state = str(result.get("state") or "")
+            result_outcome = str(result.get("outcome") or "")
+            agent_finished = record.state == "VALIDATING" or (
+                result_state == "FINISHED" and result_outcome == "succeeded"
+            )
+            if agent_finished:
+                restored = self._restore_local_session(record)
+                if restored is not None:
+                    with self._lock:
+                        slot_free = self._slot_build_id is None
+                        if slot_free:
+                            self._slot_build_id = record.build_id
+                    if slot_free:
+                        self._hydrate_request(record)
+                        self._recovered_finalize.add(record.build_id)
+                        self.store.update_build(
+                            record.build_id,
+                            state="VALIDATING",
+                            error=None,
+                            error_class="service_restart",
+                        )
+                        logger.info(
+                            "recovering host validation for %s", record.build_id
+                        )
+                        self._start_watcher(record.build_id)
+                        continue
+            if result_state == "FINISHED" and result_outcome in {"failed", "closed"}:
+                outcome = "failed"
+                message = str(
+                    result.get("error")
+                    or f"构建会话在服务重启前已结束：{result_outcome}"
+                )
+            elif (
+                record.session_id
+                and record.workspace
+                and Path(record.workspace).is_dir()
+            ):
+                outcome = "interrupted"
+                message = "服务重启，构建会话已中断；会话已保留，可在构建详情继续"
+            else:
+                outcome = "failed"
+                message = "服务重启，构建会话已中断；没有可恢复的会话，请重新构建"
             self.store.update_build(
                 record.build_id,
                 state="FINISHED",
-                outcome="failed",
+                outcome=outcome,
                 error=message,
+                error_class="service_restart",
                 finished_at=utc_now(),
             )
             self._release_site(
                 record.batch_id,
                 record.site_key,
                 record.build_id,
-                message,
+                (
+                    f"构建已中断：{message}"
+                    if outcome == "interrupted"
+                    else f"构建失败：{message}"
+                ),
             )
             self._release_feedback(record.build_id, message)
             interrupted.append(record.build_id)
@@ -3148,35 +3381,61 @@ domain-mismatched, or produces no valid product.
                 states=RUNNING_BUILD_STATES, limit=500
             )
         }
+        message = "服务停止，构建会话已中断；会话已保留，可在构建详情继续"
         for build_id, record in sorted(records.items()):
+            if record.state == "CANCELLING":
+                try:
+                    self.service.cancel(build_id)
+                except Exception:
+                    logger.debug("build cancel on shutdown failed", exc_info=True)
+                self._release_site(
+                    record.batch_id,
+                    record.site_key,
+                    build_id,
+                    "构建已取消：可重新开始",
+                )
+                self.store.update_build(
+                    build_id,
+                    state="CANCELLED",
+                    outcome="cancelled",
+                    error=None,
+                    finished_at=utc_now(),
+                )
+                self._release_feedback(
+                    build_id, "构建已取消：未安装候选规则"
+                )
+                continue
             try:
-                self.service.cancel(build_id)
+                self.service.detach(build_id)
             except Exception:
-                logger.debug("build cancel on shutdown failed", exc_info=True)
+                logger.debug("build detach on shutdown failed", exc_info=True)
             self._release_site(
                 record.batch_id,
                 record.site_key,
                 build_id,
-                "服务停止，构建会话已中断",
+                f"构建已中断：{message}",
             )
             self.store.update_build(
                 build_id,
                 state="FINISHED",
-                outcome="failed",
-                error="服务停止，构建会话已中断",
+                outcome="interrupted",
+                error=message,
+                error_class="service_stop",
                 finished_at=utc_now(),
             )
-            self._release_feedback(build_id, "服务停止，构建会话已中断")
-            self._close_session(build_id)
+            self._release_feedback(build_id, message)
         with self._lock:
             threads = list(self._watchers.values())
         for thread in threads:
             thread.join(timeout=2)
-        # Failed sessions are kept open for manual continue; release them on
-        # shutdown instead of leaving adapter processes around.
-        for build_id in list(self.service.sessions):
-            if build_id not in records:
-                self._close_session(build_id)
+        # Stop adapter-owned processes but keep persisted conversations for a
+        # later "continue" action.
+        shutdown = getattr(self.service.adapter, "shutdown", None)
+        if callable(shutdown):
+            try:
+                shutdown()
+            except Exception:
+                logger.debug("harness shutdown failed", exc_info=True)
         with self._lock:
             self._slot_build_id = None
             self._dispatching = None

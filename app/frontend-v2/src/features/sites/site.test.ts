@@ -110,6 +110,17 @@ describe("siteNextStep", () => {
     expect(step.actionLabel).toBe("取消排队");
   });
 
+  it("shows an interrupted build as resumable from its detail page", () => {
+    const interrupted = build({ state: "FINISHED", outcome: "interrupted" });
+    const step = siteNextStep(
+      site({ readiness: "needs_onboarding", build: interrupted }),
+      interrupted,
+    );
+    expect(step.title).toBe("最近构建已中断");
+    expect(step.description).toContain("构建详情");
+    expect(step.action).toBe("none");
+  });
+
   it("offers task pause, resume and cancel for active tasks", () => {
     expect(
       siteNextStep(site({ task: task({ state: "RUNNING" }), task_id: "t-1" }), null)

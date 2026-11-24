@@ -6,7 +6,7 @@ import { getBuilds, type BuildStatus } from "../../lib/api";
 import {
   buildOutcomeLabel,
   buildStateLabel,
-  buildStateTone,
+  buildTone,
   formatTime,
 } from "../../lib/format";
 import { buildIsActive } from "../sites/site";
@@ -168,20 +168,11 @@ export function BuildsPage() {
       cell: (build) => (
         <div className="space-y-1">
           <div className="flex flex-wrap items-center gap-1">
-            <Badge tone={buildStateTone(build.state)} dot={false}>
+            <Badge tone={buildTone(build.state, build.outcome)} dot={false}>
               {buildStateLabel(build.state)}
             </Badge>
             {build.outcome ? (
-              <Badge
-                tone={
-                  build.outcome === "succeeded"
-                    ? "success"
-                    : build.outcome === "failed"
-                      ? "danger"
-                      : "neutral"
-                }
-                dot={false}
-              >
+              <Badge tone={buildTone(null, build.outcome)} dot={false}>
                 {buildOutcomeLabel(build.outcome)}
               </Badge>
             ) : null}
@@ -199,6 +190,7 @@ export function BuildsPage() {
                 : build.validation?.status === "FAILED"
                   ? " · 验证未通过"
                   : ""}
+            {build.outcome === "interrupted" ? " · 可在详情继续" : ""}
           </p>
         </div>
       ),

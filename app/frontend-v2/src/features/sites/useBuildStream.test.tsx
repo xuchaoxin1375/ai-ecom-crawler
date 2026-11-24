@@ -83,6 +83,20 @@ describe("useBuildStream", () => {
     expect(FakeEventSource.instances[0].closed).toBe(true);
   });
 
+  it("reconnects a terminal stream when the build becomes active again", () => {
+    const { result, rerender } = renderHook(
+      ({ restartKey }) => useBuildStream("build-3", true, restartKey),
+      { initialProps: { restartKey: "FINISHED" } },
+    );
+    act(() => FakeEventSource.instances[0].emit("end", {}));
+    expect(result.current.ended).toBe(true);
+    expect(FakeEventSource.instances[0].closed).toBe(true);
+
+    rerender({ restartKey: "active" });
+    expect(FakeEventSource.instances).toHaveLength(2);
+    expect(FakeEventSource.instances[1].closed).toBe(false);
+  });
+
   it("retries a dropped stream before falling back", () => {
     vi.useFakeTimers();
     const { result } = renderHook(() => useBuildStream("build-2"));

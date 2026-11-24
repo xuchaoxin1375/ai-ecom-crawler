@@ -44,7 +44,7 @@ import {
 import {
   buildOutcomeLabel,
   buildStateLabel,
-  buildStateTone,
+  buildTone,
   coverageLabel,
   formatNumber,
   formatTime,
@@ -726,11 +726,10 @@ export function SiteDetailPage() {
               ) : null}
               {build || site.build ? (
                 <Badge
-                  tone={
-                    (build ?? site.build)?.outcome === "failed"
-                      ? "danger"
-                      : buildStateTone((build ?? site.build)?.state)
-                  }
+                  tone={buildTone(
+                    (build ?? site.build)?.state,
+                    (build ?? site.build)?.outcome,
+                  )}
                   dot={false}
                 >
                   {buildStateLabel((build ?? site.build)?.state)}

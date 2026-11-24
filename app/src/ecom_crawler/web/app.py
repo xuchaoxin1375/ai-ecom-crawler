@@ -3047,11 +3047,11 @@ def create_app(
                 f"build {build_id} is {record.state}; only finished builds can continue",
                 409,
             )
-        if record.outcome != "failed":
+        if record.outcome not in {"failed", "interrupted"}:
             raise _error(
                 "BUILD_NOT_CONTINUABLE",
                 f"build {build_id} is {record.outcome or 'unfinished'}; "
-                "only failed builds can continue",
+                "only failed or interrupted builds can continue",
                 409,
             )
         try:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import os
 import threading
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
@@ -17,6 +19,17 @@ from .workspace import BuildWorkspace
 
 ADAPTER_VERSION = "opencode-http/0.1"
 TERMINAL_STATES = {"CANCELLED", "FINISHED"}
+logger = logging.getLogger(__name__)
+
+
+def _same_directory(left: str | Path, right: str | Path) -> bool:
+    try:
+        left_path = Path(left).resolve()
+        right_path = Path(right).resolve()
+    except OSError:
+        left_path = Path(os.path.abspath(str(left)))
+        right_path = Path(os.path.abspath(str(right)))
+    return os.path.normcase(str(left_path)) == os.path.normcase(str(right_path))
 
 
 class HarnessStateError(ValueError):
@@ -112,6 +125,32 @@ class HarnessAdapter(ABC):
     @abstractmethod
     def resume(self, build_id: str) -> BuildSession:
         raise NotImplementedError
+
+    def adopt_build(
+        self,
+        build_id: str,
+        *,
+        session_id: str,
+        workspace: BuildWorkspace,
+        model: dict[str, Any] | None = None,
+        error: str | None = None,
+    ) -> BuildSession:
+        """Re-attach a persisted conversation after a host restart.
+
+        Adapters that keep conversations only in memory cannot support this and
+        should leave the default.  The returned session is ended and
+        ``interrupted``; the caller decides whether to prompt it again.
+        """
+        raise HarnessUnsupportedError(
+            "this adapter cannot re-attach a persisted build session"
+        )
+
+    def detach(self, build_id: str) -> BuildSession:
+        """Release a session without deleting its remote conversation."""
+        return self.cancel(build_id)
+
+    def shutdown(self) -> None:
+        """Stop adapter-owned processes without deleting persisted sessions."""
 
     @abstractmethod
     def cancel(self, build_id: str) -> BuildSession:
@@ -312,6 +351,166 @@ class OpenCodeHttpAdapter(HarnessAdapter):
             )
             self._set_state(session, "RUNNING")
             return result
+
+    def adopt_build(
+        self,
+        build_id: str,
+        *,
+        session_id: str,
+        workspace: BuildWorkspace,
+        model: dict[str, Any] | None = None,
+        error: str | None = None,
+    ) -> BuildSession:
+        """Reload a persisted OpenCode session and mark it interrupted.
+
+        The conversation survives ``opencode serve`` restarts in the local
+        OpenCode data directory, so the host can reattach by session id and
+        wait for an explicit user continuation.  Stale permission requests
+        from the interrupted turn are rejected so that the next prompt is not
+        blocked behind a request whose UI is gone.
+        """
+        with self._lock:
+            existing = self.sessions.get(build_id)
+            if existing is not None:
+                return existing
+            client = self._ensure_client(cwd=workspace.work_dir)
+            try:
+                payload = client.get_session(session_id)
+            except OpenCodeHttpError as exc:
+                if exc.status == 404:
+                    raise HarnessStateError(
+                        f"build session is no longer available: {session_id}"
+                    ) from exc
+                raise
+            except Exception as exc:
+                raise HarnessStateError(
+                    "build session is no longer available: "
+                    f"{type(exc).__name__}: {exc}"
+                ) from exc
+            location = payload.get("location")
+            directory = (
+                str(location.get("directory") or "")
+                if isinstance(location, dict)
+                else ""
+            )
+            if directory and not _same_directory(directory, workspace.work_dir):
+                raise HarnessStateError(
+                    "persisted session directory does not match the build "
+                    f"workspace: {directory}"
+                )
+            rejected = 0
+            try:
+                for permission in client.list_permissions(session_id):
+                    request_id = permission.get("id")
+                    if not request_id:
+                        continue
+                    try:
+                        client.reply_permission(
+                            session_id,
+                            str(request_id),
+                            "reject",
+                            message=(
+                                "host service restarted; previous permission "
+                                "request expired"
+                            ),
+                        )
+                        rejected += 1
+                    except Exception:
+                        logger.debug(
+                            "stale permission cleanup failed for %s",
+                            session_id,
+                            exc_info=True,
+                        )
+            except Exception:
+                logger.debug(
+                    "stale permission list failed for %s",
+                    session_id,
+                    exc_info=True,
+                )
+            session = BuildSession(
+                build_id=build_id,
+                state="FINISHED",
+                workspace=workspace,
+                session_id=session_id,
+                model=model or self.model,
+                harness={
+                    "name": "opencode",
+                    "version": getattr(self.server, "version", None),
+                    "adapter_version": ADAPTER_VERSION,
+                    "transport": "http+sse",
+                    "recovered": True,
+                },
+                outcome="interrupted",
+                error=error or "服务重启，构建会话已中断",
+            )
+            self.sessions[build_id] = session
+            self._append_adapter_event(
+                session,
+                "build_recovered",
+                stale_permissions_rejected=rejected,
+            )
+            return session
+
+    def detach(self, build_id: str) -> BuildSession:
+        """Interrupt the remote turn but keep its conversation for recovery."""
+        with self._lock:
+            session = self._require(build_id)
+            if session.terminal:
+                return session
+            client = None
+            errors: list[str] = []
+            try:
+                client = self._ensure_client()
+            except Exception as exc:  # noqa: BLE001 - detach boundary
+                errors.append(f"server: {type(exc).__name__}: {exc}")
+            if client is not None and session.session_id is not None:
+                try:
+                    for permission in client.list_permissions(session.session_id):
+                        request_id = permission.get("id")
+                        if request_id:
+                            try:
+                                client.reply_permission(
+                                    session.session_id,
+                                    str(request_id),
+                                    "reject",
+                                    message="host service stopped",
+                                )
+                            except Exception:
+                                logger.debug(
+                                    "stale permission cleanup failed for %s",
+                                    session.session_id,
+                                    exc_info=True,
+                                )
+                except Exception:
+                    logger.debug(
+                        "stale permission list failed for %s",
+                        session.session_id,
+                        exc_info=True,
+                    )
+                try:
+                    client.interrupt(session.session_id, resume=False)
+                except Exception as exc:  # noqa: BLE001 - detach boundary
+                    errors.append(f"interrupt: {type(exc).__name__}: {exc}")
+            error = "; ".join(errors) or None
+            self._append_adapter_event(
+                session,
+                "build_interrupted",
+                reason="service stopped",
+                errors=errors,
+            )
+            return self._set_state(
+                session,
+                "FINISHED",
+                outcome="interrupted",
+                error=error or "服务停止，构建会话已中断",
+            )
+
+    def shutdown(self) -> None:
+        """Stop the owned server without deleting persisted sessions."""
+        with self._lock:
+            if self._owns_server and self.server is not None:
+                self.server.stop()
+                self.client = None
 
     def stream_events(self, build_id: str) -> Iterator[HarnessEvent]:
         session = self._require(build_id)

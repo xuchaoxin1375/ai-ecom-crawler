@@ -19,7 +19,7 @@ import {
 import {
   buildOutcomeLabel,
   buildStateLabel,
-  buildStateTone,
+  buildTone,
   formatTime,
 } from "../../lib/format";
 import { Badge } from "../../components/ui/Badge";
@@ -145,22 +145,11 @@ export function BuildPanel({
       {build ? (
         <div className="space-y-4 px-5 py-4">
           <div className="flex flex-wrap items-center gap-2">
-            <Badge
-              tone={build.outcome === "failed" ? "danger" : buildStateTone(build.state)}
-            >
+            <Badge tone={buildTone(build.state, build.outcome)}>
               {buildStateLabel(build.state)}
             </Badge>
             {build.outcome ? (
-              <Badge
-                tone={
-                  build.outcome === "succeeded"
-                    ? "success"
-                    : build.outcome === "failed"
-                      ? "danger"
-                      : "neutral"
-                }
-                dot={false}
-              >
+              <Badge tone={buildTone(null, build.outcome)} dot={false}>
                 {buildOutcomeLabel(build.outcome)}
               </Badge>
             ) : null}
@@ -234,7 +223,18 @@ export function BuildPanel({
           ) : null}
 
           {build.error ? (
-            <ErrorNotice title="构建错误" message={build.error} compact />
+            <ErrorNotice
+              title={build.outcome === "interrupted" ? "构建已中断" : "构建错误"}
+              message={build.error}
+              tone={build.outcome === "interrupted" ? "warning" : "danger"}
+              compact
+            />
+          ) : null}
+
+          {build.outcome === "interrupted" ? (
+            <p className="rounded-control border border-warning/25 bg-warning-soft px-3 py-2 text-xs leading-5 text-warning">
+              会话和工作区已保留；打开构建详情可以继续同一会话，或重新构建。
+            </p>
           ) : null}
 
           {repair ? (
