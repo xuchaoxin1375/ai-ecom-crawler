@@ -227,6 +227,7 @@ class TaskRunner:
                             result = {
                                 "reason": f"item_error:{type(exc).__name__}",
                                 "failure_class": "permanent",
+                                "detail": str(exc),
                             }
                         self._finish_item(item, state, result)
                 else:
@@ -318,6 +319,7 @@ class TaskRunner:
                 result = {
                     "reason": f"item_error:{type(exc).__name__}",
                     "failure_class": "permanent",
+                    "detail": str(exc),
                 }
             self._finish_item(item, state, result)
 
