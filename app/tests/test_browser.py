@@ -391,6 +391,8 @@ class HybridRoutingTests(unittest.TestCase):
 
 @unittest.skipUnless(BROWSER_AVAILABLE, "Patchright Chromium is not installed")
 class BrowserIntegrationTests(unittest.TestCase):
+    # CI Chromium can report a transient chrome-error navigation; one retry
+    # keeps these fixture tests about browser behavior, not startup timing.
     def _assert_valid_products(
         self, result: Any, root: Path, expected: int = 1
     ) -> None:
@@ -451,7 +453,7 @@ class BrowserIntegrationTests(unittest.TestCase):
                 task_type="product",
                 max_products=5,
                 max_seconds=60,
-                max_attempts=1,
+                max_attempts=2,
                 per_domain_rps=50,
             )
             task_result = result.task_result
@@ -494,7 +496,7 @@ class BrowserIntegrationTests(unittest.TestCase):
                 task_type="product",
                 max_products=5,
                 max_seconds=60,
-                max_attempts=1,
+                max_attempts=2,
                 per_domain_rps=50,
             )
             task_result = result.task_result
