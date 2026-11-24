@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>构建详情与导航 · 阶段 4 原型</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" id="sidebar" aria-label="主导航">
+        <a class="brand" href="#/build" aria-label="电商采集">
+          <span class="brand-mark" aria-hidden="true">采</span>
+          <span class="brand-copy">
+            <strong>电商采集</strong>
+            <small>本地控制台</small>
+          </span>
+        </a>
+
+        <nav class="nav" aria-label="页面">
+          <div class="nav-group">
+            <p class="nav-label">采集工作台</p>
+            <a class="nav-item" href="#/build" data-static>
+              <span class="nav-icon" aria-hidden="true">▦</span>
+              采集批次
+            </a>
+            <a class="nav-item" href="#/build" data-static>
+              <span class="nav-icon" aria-hidden="true">≡</span>
+              全部任务
+            </a>
+          </div>
+          <div class="nav-group">
+            <p class="nav-label">规则与设置</p>
+            <a class="nav-item is-active" href="#/build" aria-current="page">
+              <span class="nav-icon" aria-hidden="true">⌁</span>
+              构建记录
+            </a>
+            <a class="nav-item" href="#/build" data-static>
+              <span class="nav-icon" aria-hidden="true">⚙</span>
+              模型配置
+            </a>
+          </div>
+        </nav>
+
+        <div class="sidebar-footer">
+          <span class="status-dot" aria-hidden="true"></span>
+          本地单用户 · 回环地址
+        </div>
+      </aside>
+
+      <div class="app-main">
+        <header class="topbar">
+          <button class="menu-button" id="menu-button" type="button" aria-label="打开导航">
+            <span aria-hidden="true">☰</span>
+          </button>
+          <div class="breadcrumb">
+            <span>构建记录</span>
+            <span aria-hidden="true">/</span>
+            <strong>构建详情</strong>
+          </div>
+          <div class="topbar-right">
+            <span class="prototype-badge">静态原型 · 模拟数据</span>
+            <span class="env-badge"><i aria-hidden="true"></i>服务正常 · 托管 worker</span>
+          </div>
+        </header>
+
+        <main id="view" tabindex="-1"></main>
+      </div>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+    <div class="nav-backdrop" id="nav-backdrop" hidden></div>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
