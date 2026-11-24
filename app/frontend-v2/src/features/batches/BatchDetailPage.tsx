@@ -1018,7 +1018,7 @@ export function BatchDetailPage() {
             <ArrowLeft size={15} aria-hidden="true" />
             返回批次列表
           </Link>
-          <span className="min-w-0 truncate font-mono text-[11px] text-ink-3">
+          <span className="hidden min-w-0 truncate font-mono text-[11px] text-ink-3 sm:inline">
             {batch.batch_id}
           </span>
         </div>

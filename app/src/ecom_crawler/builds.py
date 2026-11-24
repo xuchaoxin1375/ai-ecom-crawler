@@ -44,7 +44,12 @@ from .harness import (
     OpenCodeHttpAdapter,
 )
 from .harness.adapter import BuildSession
-from .harness.dependencies import DependencyPolicy
+from .harness.dependencies import (
+    DependencyPolicy,
+    install_with_pip,
+    install_with_uv,
+    verify_with_python,
+)
 from .harness.trace import build_trace, render_trace_markdown
 from .robots import extract_sitemaps, robots_url_for
 from .rule_diff import build_change_summary, normalize_validation
@@ -280,6 +285,74 @@ def default_permissions(
             ]
         )
     return rules
+
+
+def normalize_permission_rules(
+    rules: list[dict[str, Any]] | None,
+) -> list[dict[str, str]]:
+    """Validate extra session rules.
+
+    Extra rules are appended after :func:`default_permissions`; OpenCode uses
+    the last matching rule, so callers can use them to turn a default ``allow``
+    into ``ask`` without rebuilding the workspace-specific rules.
+    """
+
+    normalized: list[dict[str, str]] = []
+    for rule in rules or []:
+        if not isinstance(rule, dict):
+            raise BuildError("permission rules must be objects")
+        action = str(rule.get("action") or "").strip()
+        resource = str(rule.get("resource") or "*").strip()
+        effect = str(rule.get("effect") or "").strip().lower()
+        if not action:
+            raise BuildError("permission rule action is required")
+        if effect not in {"allow", "deny", "ask"}:
+            raise BuildError(f"unsupported permission effect: {effect}")
+        normalized.append(
+            {"action": action, "resource": resource, "effect": effect}
+        )
+    return normalized
+
+
+def dependency_policy_from_env() -> DependencyPolicy:
+    """Build an opt-in dependency policy from explicit environment settings.
+
+    Production defaults to an empty policy: a build may request a package, but
+    the host will not install anything until an operator wires a dedicated build
+    interpreter and allowlist.  ``ECOM_BUILD_PYTHON`` selects that interpreter;
+    ``ECOM_BUILD_DEPENDENCY_ALLOWLIST`` is a comma-separated ``name==version``
+    list.  Without the interpreter, the policy stays empty even if an allowlist
+    is present.
+    """
+
+    python = os.environ.get("ECOM_BUILD_PYTHON", "").strip()
+    if not python:
+        return DependencyPolicy.empty()
+    path = Path(python).expanduser()
+    if not path.is_file():
+        raise BuildError(f"ECOM_BUILD_PYTHON is not a file: {path}")
+    allowlist: dict[str, dict[str, str]] = {}
+    raw = os.environ.get("ECOM_BUILD_DEPENDENCY_ALLOWLIST", "")
+    for item in raw.split(","):
+        entry = item.strip()
+        if not entry:
+            continue
+        if "==" not in entry:
+            raise BuildError(
+                "ECOM_BUILD_DEPENDENCY_ALLOWLIST entries must be name==version"
+            )
+        name, version = (part.strip() for part in entry.split("==", 1))
+        if not name or not version:
+            raise BuildError(
+                "ECOM_BUILD_DEPENDENCY_ALLOWLIST entries must be name==version"
+            )
+        allowlist[name] = {"version": version}
+    return DependencyPolicy(
+        allowlist=allowlist,
+        build_python=path,
+        installers={"pip": install_with_pip, "uv": install_with_uv},
+        verifier=verify_with_python,
+    )
 
 
 def default_validator(
@@ -756,12 +829,16 @@ class BuildManager:
         archive_root: str | Path | None = None,
         archive_sample_limit: int | None = None,
         skills_dir: str | Path | None = None,
+        extra_permissions: list[dict[str, Any]] | None = None,
+        dependency_policy: DependencyPolicy | None = None,
     ) -> None:
         self.store = store
         self.out_root = Path(out_root)
         self.rules_dir = Path(rules_dir)
         self.workspace_root = self.out_root / "builds"
         self.skills_dir = Path(skills_dir) if skills_dir is not None else None
+        self.extra_permissions = normalize_permission_rules(extra_permissions)
+        self.dependency_policy = dependency_policy or dependency_policy_from_env()
         self.model = model if model is not None else default_model()
         self.default_proxy = (
             default_proxy
@@ -860,7 +937,7 @@ class BuildManager:
                 self.workspace_root,
                 model=self.model,
                 permissions=default_permissions(),
-                dependency_policy=DependencyPolicy.empty(),
+                dependency_policy=self.dependency_policy,
                 event_timeout=event_timeout,
                 capture_reasoning=self.reasoning_capture_enabled,
             )
@@ -1183,6 +1260,11 @@ class BuildManager:
         )
         archive = dict(request.get("archive") or {})
         catalog = dict(request.get("catalog") or {})
+        permissions = default_permissions(
+            workspace_path,
+            skill_roots=[str(root) for root in skill_roots],
+        )
+        permissions.extend(self.extra_permissions)
         return BuildTask(
             build_id=record.build_id,
             site={
@@ -1215,10 +1297,7 @@ class BuildManager:
             ),
             extra={
                 **({"proxy": record.proxy} if record.proxy else {}),
-                "permissions": default_permissions(
-                    workspace_path,
-                    skill_roots=[str(root) for root in skill_roots],
-                ),
+                "permissions": permissions,
                 "skills": skill_manifest,
                 "robots_note": str(request.get("robots_note") or ""),
                 "robots_sitemaps": list(request.get("robots_sitemaps") or []),
@@ -2843,6 +2922,13 @@ domain-mismatched, or produces no valid product.
             logger.debug("build session close failed", exc_info=True)
 
     # ------------------------------------------------------------------ reads
+    @property
+    def dependency_installer_configured(self) -> bool:
+        return bool(
+            self.dependency_policy.build_python
+            and self.dependency_policy.installers
+        )
+
     def describe(self, build_id: str, *, event_limit: int = 30) -> dict[str, Any]:
         record = self.store.get_build(build_id)
         if record is None:
@@ -2983,6 +3069,7 @@ domain-mismatched, or produces no valid product.
             "pending_permissions": pending_permissions,
             "pending_dependencies": pending_dependencies,
             "pending_dependency_requests": pending_dependency_requests,
+            "dependency_installer_configured": self.dependency_installer_configured,
             "trace_available": (
                 bool(record.workspace)
                 and (Path(record.workspace) / "out" / "trace.json").is_file()

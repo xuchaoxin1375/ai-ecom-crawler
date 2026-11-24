@@ -95,6 +95,8 @@ export function BuildPanel({
   const dependencyDetails = new Map(
     (build?.pending_dependency_requests ?? []).map((item) => [item.request_id, item]),
   );
+  const dependencyInstallerConfigured =
+    build?.dependency_installer_configured !== false;
   const repair = activeRepair(build);
 
   if (!build && !canStartBuild && !canRepair) return null;
@@ -273,9 +275,14 @@ export function BuildPanel({
                     {detail?.reason ? (
                       <span className="text-ink-3">{detail.reason}</span>
                     ) : null}
+                    {!dependencyInstallerConfigured ? (
+                      <span className="basis-full text-[11px] leading-5 text-warning">
+                        当前服务未配置依赖安装器；请操作者手工安装。
+                      </span>
+                    ) : null}
                     <Button
                       size="sm"
-                      disabled={Boolean(busy)}
+                      disabled={Boolean(busy) || !dependencyInstallerConfigured}
                       onClick={() => onReplyDependency(requestId, "once")}
                     >
                       批准

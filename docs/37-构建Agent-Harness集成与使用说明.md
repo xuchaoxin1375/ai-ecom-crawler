@@ -2,7 +2,7 @@
 title: 构建 Agent Harness 集成与使用说明
 document_type: technical-guide
 status: provisional
-updated: 2026-11-23
+updated: 2026-11-24
 ---
 
 ## 目的与范围
@@ -104,9 +104,11 @@ OpenCode 的项目技能优先级高于全局技能。使用联接／符号链�
 
 `pause-gate` 插件在权限 hook 中把动作提升为 `ask` 并扣住请求；恢复时回复 `once`。它不暂停模型推理，已启动的工具可能跑完。取消走 `interrupt`，拒绝 pending 权限并回收 session／server；迟到事件按构建 ID 拒收。
 
+**权限规则的生效位置（2026-11-24 复核）**：OpenCode 的会话权限在 agent 规则之后评估，最后匹配的规则生效。`BuildManager` 创建每个构建任务时写入 `default_permissions(workspace, skill_roots)`，并可通过 `extra_permissions` 在其后追加 `ask`／`deny`；`OpenCodeHttpAdapter(permissions=...)` 只在任务没有自带权限时作为回退。2026-11-24 的审批走查把 `ask` 设在 adapter 上，但 `BuildManager` 随后用默认 `allow` 写入任务，覆盖了它，所以模型调用 `shell` 时没有出现权限请求；这是宿主侧权限入口用错，不是 OpenCode 没有触发。需要真实 `ask` 时，在 `BuildManager(extra_permissions=[...])` 或 `create_app(..., build_extra_permissions=[...])` 传入，并确认规则位于默认规则之后。
+
 `request_dependency` 工具把依赖请求写到 `control/dependencies/`，宿主侧 `DependencyBridge` 按基线／allowlist 自动安装，未知包或系统级包走一次性审批。直接 `pip install`／`npm install` 到全局环境不属于允许范围。构建详情现在显示待审批依赖的包名、版本、manager、scope 和原因，不只显示请求 ID。
 
-**依赖策略接线边界（2026-11-24）**：当前 `serve` 构造的构建适配器仍使用 `DependencyPolicy.empty()`，没有安装器和 allowlist，因此审批“批准一次”后会返回“no installer is configured”，不会修改构建环境。2026-11-24 的审批走查使用证据专用服务：临时 venv、`DependencyPolicy` 的 pip 安装器和验证器，真实模型请求 `six==1.17.0` 后由 UI 批准并安装成功。生产环境是否把某个构建解释器和 allowlist 接入 `serve` 尚未决定；在此之前，依赖安装仍由操作者手工完成。
+**依赖策略接线决策（2026-11-24）**：v1 生产默认保持 `DependencyPolicy.empty()`，不在宿主环境自动安装包；批准未知依赖仍会返回 `no installer is configured`，由操作者手工安装。需要自动安装时，显式设置 `ECOM_BUILD_PYTHON` 指向专用 build venv，并用 `ECOM_BUILD_DEPENDENCY_ALLOWLIST=name==version,...` 限定可自动安装的包；两者都配置后 `BuildManager` 才接入 pip／uv 安装器和安装后验证。构建详情返回 `dependency_installer_configured`，便于界面区分“可批准安装”和“只能手工处理”。不把宿主 Python 或全局环境作为安装目标。
 
 `shell` 仍以宿主用户权限运行，文件权限规则不能阻止它读取宿主文件；这是当前 guardrail 的已知边界，不是安全沙箱。需要强隔离时使用专用用户、容器或独立设备。
 
@@ -144,6 +146,8 @@ python -m uv run --project app ecom-crawler serve `
 | `ECOM_BUILD_PROXY` | 构建默认出口；主机验证沿用 |
 | `ECOM_FETCH_PROXY` | 运行期静态／浏览器 fetcher 出口 |
 | `ECOM_BUILD_SKILLS_DIR` | 额外或固定的 skills 根 |
+| `ECOM_BUILD_PYTHON` | 专用 build venv 的 Python；未设置时不安装依赖 |
+| `ECOM_BUILD_DEPENDENCY_ALLOWLIST` | 逗号分隔的 `name==version`；仅在 `ECOM_BUILD_PYTHON` 设置后生效 |
 | `ECOM_BUILD_CAPTURE_REASONING` | `1` 时捕获 reasoning |
 | `ECOM_BUILD_MAX_REPAIR_ROUNDS` | 自动修复轮次 |
 | `ECOM_BUILD_REPAIR_SECONDS` | 每轮修复额外时间 |

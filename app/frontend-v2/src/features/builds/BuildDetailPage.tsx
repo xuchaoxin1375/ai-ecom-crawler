@@ -308,6 +308,8 @@ export function BuildDetailPage() {
   const dependencyDetails = new Map(
     (build?.pending_dependency_requests ?? []).map((item) => [item.request_id, item]),
   );
+  const dependencyInstallerConfigured =
+    build?.dependency_installer_configured !== false;
   const href = build ? siteHref(build) : null;
   const hasEvidence =
     Array.isArray(build?.change_summary?.changed_fields) ||
@@ -767,10 +769,15 @@ export function BuildDetailPage() {
                       {detail.reason}
                     </p>
                   ) : null}
+                  {!dependencyInstallerConfigured ? (
+                    <p className="w-full text-[11px] leading-5 text-warning">
+                      当前服务未配置依赖安装器；请操作者手工安装，批准不会执行安装。
+                    </p>
+                  ) : null}
                   <div className="ml-auto flex gap-1.5">
                     <Button
                       size="sm"
-                      disabled={Boolean(busy)}
+                      disabled={Boolean(busy) || !dependencyInstallerConfigured}
                       onClick={() => void replyDependency(requestId, "once")}
                     >
                       批准一次

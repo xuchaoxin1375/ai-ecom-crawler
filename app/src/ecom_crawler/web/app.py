@@ -37,6 +37,7 @@ from ..builds import ACTIVE_BUILD_STATES, BuildError, BuildManager
 from ..execution import build_task
 from ..executor.runner import CSV_COLUMNS
 from ..harness.adapter import HarnessStateError
+from ..harness.dependencies import DependencyPolicy
 from ..model import ContractError
 from ..runtime.batch import parse_site_text, parse_sites, rule_domains
 from ..runtime.models import (
@@ -717,6 +718,8 @@ def create_app(
     lease_ttl_seconds: float = 30.0,
     heartbeat_interval: float | None = None,
     build_manager: BuildManager | None = None,
+    build_extra_permissions: list[dict[str, Any]] | None = None,
+    build_dependency_policy: DependencyPolicy | None = None,
     proxy: str | None = None,
 ) -> FastAPI:
     store = TaskStore(db_path)
@@ -726,7 +729,14 @@ def create_app(
     builds_disabled = os.environ.get("ECOM_BUILD_DISABLED") == "1"
     legacy_ui_enabled = _legacy_ui_enabled()
     if build_manager is None and rules is not None:
-        build_manager = BuildManager(store, root, rules, default_proxy=proxy)
+        build_manager = BuildManager(
+            store,
+            root,
+            rules,
+            default_proxy=proxy,
+            extra_permissions=build_extra_permissions,
+            dependency_policy=build_dependency_policy,
+        )
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> Any:

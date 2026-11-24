@@ -424,28 +424,55 @@ class BatchApiTests(unittest.TestCase):
         )
         run_dir = self.out_root / task_id
         run_dir.mkdir(parents=True)
-        (run_dir / "products.csv").write_text("source_url,name\n", encoding="utf-8")
-        (run_dir / "task-result.json").write_text(
-            json.dumps(
-                {
-                    "counts": {
-                        "valid_products": 1,
-                        "failed_products": 0,
-                    },
-                    "coverage": {"status": "KNOWN"},
-                    "quality_exceptions": [],
-                }
-            ),
+        (run_dir / "products.csv").write_text(
+            "source_url,name,price\nhttps://example.fr/p/1,Example,9.99\n",
             encoding="utf-8",
         )
+        task_result = json.dumps(
+            {
+                "counts": {
+                    "valid_products": 1,
+                    "failed_products": 0,
+                },
+                "coverage": {"status": "KNOWN"},
+                "quality_exceptions": [],
+            },
+            ensure_ascii=False,
+        )
+        (run_dir / "task-result.json").write_text(task_result, encoding="utf-8")
+        (run_dir / "records.jsonl").write_text(
+            '{"source_url":"https://example.fr/p/1"}\n', encoding="utf-8"
+        )
+        (run_dir / "diagnostics").mkdir()
+        (run_dir / "diagnostics" / "excluded.jsonl").write_text(
+            '{"reason":"zero_price"}\n', encoding="utf-8"
+        )
+        (run_dir / "diagnostics" / "failed.jsonl").write_text(
+            '{"reason":"timeout"}\n', encoding="utf-8"
+        )
         (run_dir / "secret.txt").write_text("not exported", encoding="utf-8")
+        expected = {
+            "products.csv": (run_dir / "products.csv").read_bytes(),
+            "task-result.json": (run_dir / "task-result.json").read_bytes(),
+            "records.jsonl": (run_dir / "records.jsonl").read_bytes(),
+            "diagnostics/excluded.jsonl": (
+                run_dir / "diagnostics" / "excluded.jsonl"
+            ).read_bytes(),
+        }
 
         complete = self.client.get(f"/api/batches/{batch_id}/export")
         self.assertEqual(complete.status_code, 200)
         with zipfile.ZipFile(io.BytesIO(complete.content)) as archive:
             names = set(archive.namelist())
             manifest = json.loads(archive.read("batch.json"))
+            for name, content in expected.items():
+                self.assertEqual(
+                    archive.read(f"sites/familidoo.fr/{name}"),
+                    content,
+                    name,
+                )
         self.assertIn("sites/familidoo.fr/products.csv", names)
+        self.assertIn("sites/familidoo.fr/diagnostics/failed.jsonl", names)
         self.assertNotIn("sites/familidoo.fr/secret.txt", names)
         ready = next(
             item for item in manifest["sites"] if item["site_key"] == "familidoo.fr"

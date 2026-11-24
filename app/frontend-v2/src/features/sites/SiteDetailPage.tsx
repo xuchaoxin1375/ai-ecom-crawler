@@ -707,7 +707,7 @@ export function SiteDetailPage() {
             <ArrowLeft size={15} aria-hidden="true" />
             返回 {batch.name}
           </Link>
-          <span className="min-w-0 truncate font-mono text-[11px] text-ink-3">
+          <span className="hidden min-w-0 truncate font-mono text-[11px] text-ink-3 sm:inline">
             {site.site_key}
           </span>
         </div>

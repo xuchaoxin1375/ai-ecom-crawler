@@ -450,6 +450,7 @@ export interface BuildStatus {
   pending_permissions: Array<Record<string, unknown>>;
   pending_dependencies: string[];
   pending_dependency_requests?: BuildDependencyRequest[];
+  dependency_installer_configured?: boolean;
   trace_available: boolean;
   reasoning_capture_enabled: boolean;
   reasoning_live: boolean;

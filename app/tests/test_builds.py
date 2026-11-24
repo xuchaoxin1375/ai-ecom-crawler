@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import queue
+import sys
 import tempfile
 import threading
 import time
@@ -16,6 +17,7 @@ import yaml
 from fastapi.testclient import TestClient
 
 from ecom_crawler.builds import (
+    BuildError,
     BuildManager,
     _live_timeline,
     _merge_reasoning_timeline,
@@ -23,8 +25,11 @@ from ecom_crawler.builds import (
     _seconds_since,
     _trace_timeline,
     default_permissions,
+    dependency_policy_from_env,
+    normalize_permission_rules,
 )
 from ecom_crawler.harness.adapter import BuildSession
+from ecom_crawler.harness.dependencies import DependencyPolicy
 from ecom_crawler.harness.models import BuildTask, HarnessEvent, utc_now
 from ecom_crawler.harness.workspace import BuildWorkspace
 from ecom_crawler.runtime.models import (
@@ -430,6 +435,8 @@ class BuildWorkflowTests(unittest.TestCase):
         robots_probe: Any | None = None,
         skills_dir: Path | None = None,
         activation_mode: str = "legacy",
+        extra_permissions: list[dict[str, Any]] | None = None,
+        dependency_policy: DependencyPolicy | None = None,
     ) -> BuildManager:
         if validator is None:
 
@@ -466,6 +473,8 @@ class BuildWorkflowTests(unittest.TestCase):
             skills_dir=skills_dir
             if skills_dir is not None
             else self.root / "skills",
+            extra_permissions=extra_permissions,
+            dependency_policy=dependency_policy,
         )
 
     def _client(self, manager: BuildManager) -> TestClient:
@@ -526,6 +535,76 @@ class BuildWorkflowTests(unittest.TestCase):
         self.assertIn(("external_directory", shared, "allow"), entries)
         self.assertIn(("external_directory", f"{shared}/*", "allow"), entries)
         self.assertIn(("edit", f"{shared}/*", "deny"), entries)
+
+    def test_extra_permissions_are_appended_after_defaults(self) -> None:
+        adapter = FakeBuildAdapter(self.root)
+        manager = self._manager(
+            adapter,
+            extra_permissions=[
+                {"action": "shell", "resource": "*", "effect": "ask"}
+            ],
+        )
+        with self._client(manager) as client:
+            response = client.post(
+                "/api/batches/b-1/sites/example.fr/build",
+                json={"max_products": 2, "max_seconds": 60},
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(response.status_code, 202, response.text)
+            build_id = response.json()["build"]["build_id"]
+            result = self._wait_ready(client, build_id)
+            task_payload = json.loads(
+                (Path(result["workspace"]) / "input" / "build-task.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+        permissions = task_payload["permissions"]
+        self.assertEqual(
+            permissions[-1],
+            {"action": "shell", "resource": "*", "effect": "ask"},
+        )
+        self.assertIn(
+            {"action": "shell", "resource": "*", "effect": "allow"},
+            permissions,
+        )
+
+    def test_normalize_permission_rules_rejects_unknown_effect(self) -> None:
+        with self.assertRaises(BuildError):
+            normalize_permission_rules(
+                [{"action": "shell", "resource": "*", "effect": "maybe"}]
+            )
+
+    def test_dependency_policy_from_env_is_opt_in(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {
+                "ECOM_BUILD_PYTHON": str(Path(sys.executable)),
+                "ECOM_BUILD_DEPENDENCY_ALLOWLIST": "six==1.17.0,pyyaml==6.0.3",
+            },
+            clear=False,
+        ):
+            policy = dependency_policy_from_env()
+        self.assertEqual(policy.build_python, Path(sys.executable))
+        self.assertEqual(policy.allowlist["six"], {"version": "1.17.0"})
+        self.assertEqual(policy.allowlist["pyyaml"], {"version": "6.0.3"})
+        self.assertIn("pip", policy.installers)
+        self.assertIn("uv", policy.installers)
+
+    def test_dependency_installer_configured_needs_python_and_installer(self) -> None:
+        adapter = FakeBuildAdapter(self.root)
+        empty = self._manager(adapter)
+        self.assertFalse(empty.dependency_installer_configured)
+
+        policy = DependencyPolicy(build_python=Path(sys.executable))
+        manager = self._manager(adapter, dependency_policy=policy)
+        self.assertFalse(manager.dependency_installer_configured)
+
+        policy = DependencyPolicy(
+            build_python=Path(sys.executable),
+            installers={"pip": lambda *_: None},
+        )
+        manager = self._manager(adapter, dependency_policy=policy)
+        self.assertTrue(manager.dependency_installer_configured)
 
     def test_build_records_shared_skills(self) -> None:
         skills = self.root / "skills"
