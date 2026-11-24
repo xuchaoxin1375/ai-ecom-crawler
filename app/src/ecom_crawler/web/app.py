@@ -42,6 +42,7 @@ from ..runtime.batch import parse_site_text, parse_sites, rule_domains
 from ..runtime.models import (
     Batch,
     BatchSite,
+    BuildContinuation,
     BuildRecord,
     QualityFeedback,
     RuleVersion,
@@ -54,6 +55,7 @@ from ..runtime.rule import RuleError, load_rule
 from ..runtime.store import (
     BatchNotFoundError,
     BatchTransitionError,
+    BuildContinuationConflictError,
     FeedbackNotFoundError,
     FeedbackRequestConflictError,
     FeedbackTransitionError,
@@ -339,6 +341,11 @@ class BuildStartRequest(BaseModel):
 class BuildPermissionRequest(BaseModel):
     decision: Literal["once", "always", "reject"] = "once"
     message: str | None = Field(default=None, max_length=2000)
+
+
+class BuildContinueRequest(BaseModel):
+    request_id: str = Field(min_length=1, max_length=200)
+    message: str = Field(min_length=1, max_length=4000)
 
 
 class BuildDependencyRequest(BaseModel):
@@ -2927,6 +2934,81 @@ def create_app(
         except (HarnessStateError, ValueError) as exc:
             raise build_failure(exc) from exc
         return {"accepted": True, "build": payload}
+
+    @app.post("/api/builds/{build_id}/continue", status_code=202)
+    def continue_build(
+        build_id: str, payload: BuildContinueRequest
+    ) -> dict[str, Any]:
+        if build_manager is None:
+            raise _error("BUILD_UNAVAILABLE", "build agent is not configured", 409)
+        if builds_disabled:
+            raise _error(
+                "BUILD_UNAVAILABLE",
+                "build agent is disabled in read-only preview",
+                409,
+            )
+        require_build(build_id)
+        record = store.get_build(build_id)
+        if record is None:
+            raise _error("NOT_FOUND", f"unknown build: {build_id}", 404)
+        digest = hashlib.sha256(payload.message.encode("utf-8")).hexdigest()
+        existing = store.get_build_continuation(payload.request_id)
+        if existing is not None:
+            if (
+                existing.build_id != build_id
+                or existing.message_sha256 != digest
+            ):
+                raise _error(
+                    "CONFLICT",
+                    "request_id belongs to another build continuation",
+                    409,
+                )
+            if existing.state == "FAILED":
+                raise _error(
+                    "BUILD_SESSION_UNAVAILABLE",
+                    existing.error or "build continuation failed",
+                    409,
+                )
+            return {"accepted": True, "build": build_manager.describe(build_id)}
+        if record.state != "FINISHED":
+            raise _error(
+                "BUILD_NOT_CONTINUABLE",
+                f"build {build_id} is {record.state}; only finished builds can continue",
+                409,
+            )
+        if record.outcome != "failed":
+            raise _error(
+                "BUILD_NOT_CONTINUABLE",
+                f"build {build_id} is {record.outcome or 'unfinished'}; "
+                "only failed builds can continue",
+                409,
+            )
+        try:
+            store.create_build_continuation(
+                BuildContinuation(
+                    request_id=payload.request_id,
+                    build_id=build_id,
+                    message_sha256=digest,
+                    message_chars=len(payload.message),
+                )
+            )
+        except BuildContinuationConflictError as exc:
+            raise _error("CONFLICT", str(exc), 409) from exc
+        try:
+            described = build_manager.continue_session(build_id, payload.message)
+        except (BuildError, HarnessStateError, KeyError) as exc:
+            store.update_build_continuation(
+                payload.request_id,
+                state="FAILED",
+                error=str(exc)[:2000],
+            )
+            code = (
+                "BUILD_SESSION_UNAVAILABLE"
+                if "session is no longer available" in str(exc)
+                else "BUILD_NOT_CONTINUABLE"
+            )
+            raise _error(code, str(exc), 409) from exc
+        return {"accepted": True, "build": described}
 
     @app.post("/api/builds/{build_id}/cancel", status_code=202)
     def cancel_build(build_id: str) -> dict[str, Any]:

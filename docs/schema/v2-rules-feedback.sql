@@ -135,6 +135,21 @@ CREATE TABLE IF NOT EXISTS rule_activations (
 CREATE INDEX IF NOT EXISTS idx_rule_activations_site
     ON rule_activations(site_key, created_at DESC);
 
+-- Idempotency and audit for a user-triggered continue on a failed build.
+-- The message body is not stored; only its hash and length.
+CREATE TABLE IF NOT EXISTS build_continuations (
+    request_id TEXT PRIMARY KEY,
+    build_id TEXT NOT NULL,
+    message_sha256 TEXT NOT NULL,
+    message_chars INTEGER NOT NULL,
+    state TEXT NOT NULL CHECK (state IN ('ACCEPTED', 'FAILED')),
+    error TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_build_continuations_build
+    ON build_continuations(build_id, created_at DESC);
+
 -- Conditional ALTERs, applied by TaskStore._init_schema() only when the
 -- column is absent:
 --

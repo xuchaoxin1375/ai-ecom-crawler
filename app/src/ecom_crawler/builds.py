@@ -1801,7 +1801,8 @@ domain-mismatched, or produces no valid product.
                     f"构建失败：{error}",
                 )
                 self._record_failure(build_id, error)
-                self._close_session(build_id)
+                # Keep the failed session available for a user-triggered
+                # manual continue; manager shutdown closes it.
                 return None
 
             validation: dict[str, Any] | None = None
@@ -1980,7 +1981,7 @@ domain-mismatched, or produces no valid product.
                     f"构建失败：{message}",
                 )
                 self._record_failure(build_id, message)
-                self._close_session(build_id)
+                # Keep the failed session for manual continue.
                 return None
 
             validation.update(
@@ -2539,6 +2540,16 @@ domain-mismatched, or produces no valid product.
             "error_class": record.error_class,
             "change_summary": record.change_summary,
             "validation": record.validation,
+            "continuations": [
+                {
+                    "request_id": item.request_id,
+                    "state": item.state,
+                    "message_chars": item.message_chars,
+                    "error": item.error,
+                    "created_at": item.created_at,
+                }
+                for item in self.store.list_build_continuations(build_id)
+            ],
             "created_at": record.created_at,
             "updated_at": record.updated_at,
             "started_at": record.started_at,
@@ -2664,6 +2675,41 @@ domain-mismatched, or produces no valid product.
         return rows[-limit:]
 
     # ---------------------------------------------------------------- control
+    def continue_session(self, build_id: str, message: str) -> dict[str, Any]:
+        """Continue one failed build session with a user instruction."""
+        record = self.store.get_build(build_id)
+        if record is None:
+            raise BuildError(f"unknown build: {build_id}")
+        if record.state != "FINISHED":
+            raise BuildError(
+                f"build {build_id} is {record.state}; only finished builds can continue"
+            )
+        if record.outcome != "failed":
+            raise BuildError(
+                f"build {build_id} is {record.outcome or 'unfinished'}; "
+                "only failed builds can continue"
+            )
+        with self._lock:
+            if build_id in self._watchers:
+                raise BuildError(f"build {build_id} already has an active watcher")
+        try:
+            self.service.continue_after_finish(build_id, message)
+        except Exception as exc:
+            raise BuildError(
+                "build session is no longer available; start a new build "
+                f"instead ({type(exc).__name__}: {exc})"
+            ) from exc
+        self.store.update_build(
+            build_id,
+            state="RUNNING",
+            outcome=None,
+            error=None,
+            finished_at=None,
+        )
+        self._repair_limits.setdefault(build_id, self.max_repair_rounds)
+        self._start_watcher(build_id)
+        return self.describe(build_id)
+
     def pause(self, build_id: str) -> dict[str, Any]:
         session = self.service.pause(build_id)
         self.store.update_build(build_id, state=session.state)
@@ -2799,3 +2845,8 @@ domain-mismatched, or produces no valid product.
             threads = list(self._watchers.values())
         for thread in threads:
             thread.join(timeout=2)
+        # Failed sessions are kept open for manual continue; release them on
+        # shutdown instead of leaving adapter processes around.
+        for build_id in list(self.service.sessions):
+            if build_id not in records:
+                self._close_session(build_id)

@@ -273,6 +273,23 @@ class QualityFeedback:
 
 
 @dataclass
+class BuildContinuation:
+    """An idempotent user request to continue one finished build session."""
+
+    request_id: str
+    build_id: str
+    message_sha256: str
+    message_chars: int
+    state: str = "ACCEPTED"
+    error: str | None = None
+    created_at: str = field(default_factory=utc_now)
+
+    def __post_init__(self) -> None:
+        if self.state not in {"ACCEPTED", "FAILED"}:
+            raise ValueError(f"unsupported continuation state: {self.state!r}")
+
+
+@dataclass
 class RuleVersion:
     rule_id: str
     rule_version: str

@@ -200,6 +200,28 @@
         "title": "BatchStartRequest",
         "type": "object"
       },
+      "BuildContinueRequest": {
+        "properties": {
+          "message": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "message"
+        ],
+        "title": "BuildContinueRequest",
+        "type": "object"
+      },
       "BuildDependencyRequest": {
         "properties": {
           "decision": {
@@ -2557,6 +2579,57 @@
           }
         },
         "summary": "Cancel Build"
+      }
+    },
+    "/api/builds/{build_id}/continue": {
+      "post": {
+        "operationId": "continue_build_api_builds__build_id__continue_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "build_id",
+            "required": true,
+            "schema": {
+              "title": "Build Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BuildContinueRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Continue Build Api Builds  Build Id  Continue Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Continue Build"
       }
     },
     "/api/builds/{build_id}/dependencies/{request_id}": {

@@ -13,6 +13,7 @@ from typing import Any
 from .models import (
     Batch,
     BatchSite,
+    BuildContinuation,
     BuildRecord,
     Lease,
     QualityFeedback,
@@ -123,6 +124,19 @@ CREATE TABLE IF NOT EXISTS builds (
 
 CREATE INDEX IF NOT EXISTS idx_builds_batch_site
     ON builds(batch_id, site_key, created_at);
+
+CREATE TABLE IF NOT EXISTS build_continuations (
+    request_id TEXT PRIMARY KEY,
+    build_id TEXT NOT NULL,
+    message_sha256 TEXT NOT NULL,
+    message_chars INTEGER NOT NULL,
+    state TEXT NOT NULL,
+    error TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_build_continuations_build
+    ON build_continuations(build_id, created_at);
 
 CREATE TABLE IF NOT EXISTS quality_feedback (
     feedback_id TEXT PRIMARY KEY,
@@ -324,9 +338,12 @@ class FeedbackRequestConflictError(ValueError):
     """Raised when a feedback request_id is reused with a different body."""
 
 
+class BuildContinuationConflictError(ValueError):
+    """Raised when a continuation request_id is reused with different content."""
+
+
 class RuleVersionError(ValueError):
     """Raised when a rule version cannot be created, activated or rolled back."""
-
 
 class RuleActivationConflictError(RuleVersionError):
     """Raised when a rule activation request conflicts with current state."""
@@ -1639,6 +1656,96 @@ class TaskStore:
             ).fetchone()
         return _build_from_row(row) if row else None
 
+    def get_build_continuation(
+        self, request_id: str
+    ) -> BuildContinuation | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM build_continuations WHERE request_id = ?",
+                (request_id,),
+            ).fetchone()
+        return _build_continuation_from_row(row) if row else None
+
+    def list_build_continuations(
+        self, build_id: str, *, limit: int = 20
+    ) -> list[BuildContinuation]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM build_continuations
+                WHERE build_id = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (build_id, max(1, int(limit))),
+            ).fetchall()
+        return [_build_continuation_from_row(row) for row in rows]
+
+    def create_build_continuation(
+        self, continuation: BuildContinuation
+    ) -> BuildContinuation:
+        with self._connect() as connection:
+            try:
+                connection.execute(
+                    """
+                    INSERT INTO build_continuations (
+                        request_id, build_id, message_sha256, message_chars,
+                        state, error, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        continuation.request_id,
+                        continuation.build_id,
+                        continuation.message_sha256,
+                        continuation.message_chars,
+                        continuation.state,
+                        continuation.error,
+                        continuation.created_at,
+                    ),
+                )
+            except sqlite3.IntegrityError as exc:
+                existing = self.get_build_continuation(
+                    continuation.request_id
+                )
+                if existing and (
+                    existing.build_id == continuation.build_id
+                    and existing.message_sha256 == continuation.message_sha256
+                ):
+                    return existing
+                raise BuildContinuationConflictError(
+                    f"continuation request_id already used: "
+                    f"{continuation.request_id}"
+                ) from exc
+        created = self.get_build_continuation(continuation.request_id)
+        if created is None:
+            raise ValueError("build continuation insert was not visible")
+        return created
+
+    def update_build_continuation(
+        self,
+        request_id: str,
+        *,
+        state: str,
+        error: str | None = None,
+    ) -> BuildContinuation:
+        if state not in {"ACCEPTED", "FAILED"}:
+            raise ValueError(f"unsupported continuation state: {state!r}")
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE build_continuations
+                SET state = ?, error = ?
+                WHERE request_id = ?
+                """,
+                (state, error, request_id),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError(f"unknown build continuation: {request_id}")
+        updated = self.get_build_continuation(request_id)
+        if updated is None:
+            raise ValueError(f"unknown build continuation: {request_id}")
+        return updated
+
     def list_builds(
         self,
         *,
@@ -2586,6 +2693,18 @@ def _build_from_row(row: sqlite3.Row) -> BuildRecord:
         updated_at=row["updated_at"],
         started_at=row["started_at"],
         finished_at=row["finished_at"],
+    )
+
+
+def _build_continuation_from_row(row: sqlite3.Row) -> BuildContinuation:
+    return BuildContinuation(
+        request_id=row["request_id"],
+        build_id=row["build_id"],
+        message_sha256=row["message_sha256"],
+        message_chars=row["message_chars"],
+        state=row["state"],
+        error=row["error"],
+        created_at=row["created_at"],
     )
 
 

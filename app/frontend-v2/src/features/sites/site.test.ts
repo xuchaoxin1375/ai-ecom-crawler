@@ -74,6 +74,7 @@ function build(overrides: Partial<BuildStatus> = {}): BuildStatus {
     repair_limit: 1,
     repair_round: 0,
     repairs: [],
+    continuations: [],
     archive: null,
     archive_stats: null,
     catalog: null,

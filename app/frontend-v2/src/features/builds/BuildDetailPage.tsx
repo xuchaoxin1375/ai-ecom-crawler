@@ -13,7 +13,9 @@ import {
 } from "lucide-react";
 import {
   cancelBuild,
+  continueBuild,
   getBuild,
+  getBuildConfig,
   getBuildMessages,
   pauseBuild,
   replyBuildDependency,
@@ -45,6 +47,7 @@ import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
 import { ErrorNotice } from "../../components/ui/ErrorNotice";
 import { InlineNotice } from "../../components/ui/InlineNotice";
+import { Textarea } from "../../components/ui/Input";
 import { MetricStrip } from "../../components/ui/MetricStrip";
 import { ConfirmBatchActionDialog } from "../batches/ConfirmBatchActionDialog";
 
@@ -53,6 +56,14 @@ function siteHref(build: BuildStatus): string | null {
   return `/batches/${encodeURIComponent(build.batch_id)}/sites/${encodeURIComponent(
     build.site_key,
   )}`;
+}
+
+function newBuildRequest(prefix: string): string {
+  const random =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `${prefix}-${random}`;
 }
 
 function repairTime(repair: BuildRepair): string {
@@ -137,6 +148,8 @@ export function BuildDetailPage() {
   const [notice, setNotice] = useState("");
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [confirmError, setConfirmError] = useState("");
+  const [continueDraft, setContinueDraft] = useState("");
+  const [continueBusy, setContinueBusy] = useState(false);
 
   const buildQuery = useQuery({
     queryKey: ["build", buildId],
@@ -148,6 +161,13 @@ export function BuildDetailPage() {
     },
   });
   const build: BuildStatus | null = buildQuery.data?.build ?? null;
+
+  const configQuery = useQuery({
+    queryKey: ["build-config"],
+    queryFn: ({ signal }) => getBuildConfig(signal),
+    staleTime: 60_000,
+  });
+  const buildConfig = configQuery.data ?? null;
 
   const stream = useBuildStream(buildId, Boolean(buildId));
   const streamHealthy = stream.connected || stream.ended;
@@ -237,7 +257,34 @@ export function BuildDetailPage() {
     }
   }
 
+  async function runContinue() {
+    if (!build) return;
+    const message = continueDraft.trim();
+    if (!message) {
+      setError("继续会话需要一条具体指令。");
+      return;
+    }
+    setContinueBusy(true);
+    setError("");
+    try {
+      const response = await continueBuild(build.build_id, {
+        request_id: newBuildRequest("build-continue"),
+        message,
+      });
+      apply(response);
+      setContinueDraft("");
+      setNotice("已继续失败会话；模型响应和主机验证会写回本次构建。");
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : String(exc));
+    } finally {
+      setContinueBusy(false);
+    }
+  }
+
   const active = build ? buildIsActive(build) : false;
+  const canContinue = build?.state === "FINISHED" && build.outcome === "failed";
+  const continuations = build?.continuations ?? [];
+  const continueDisabled = continueBusy || !buildConfig?.available;
   const canPause = build?.state === "RUNNING";
   const canResume = build?.state === "PAUSED";
   const permissions = permissionItems(build);
@@ -561,6 +608,94 @@ export function BuildDetailPage() {
           <RepairHistory repairs={build.repairs} />
         </div>
       </section>
+
+      {canContinue || continuations.length ? (
+        <section className="rounded-panel border border-line bg-surface">
+          <div className="border-b border-line px-5 py-4">
+            <h2 className="text-[17px] leading-6 font-semibold text-ink">
+              继续失败会话
+            </h2>
+            <p className="mt-0.5 text-xs leading-5 text-ink-3">
+              仅失败的构建可以继续，且要求当前服务进程仍保留该会话；成功构建请通过结果反馈走规则修复。
+            </p>
+          </div>
+          <div className="space-y-3 px-5 py-4">
+            {canContinue ? (
+              <>
+                <label className="flex flex-col gap-1" htmlFor="build-continue">
+                  <span className="text-xs font-medium text-ink-3">
+                    给构建 Agent 的指令
+                  </span>
+                  <Textarea
+                    id="build-continue"
+                    rows={3}
+                    maxLength={4000}
+                    value={continueDraft}
+                    placeholder="例如：上次失败在 discovery.sources，请检查列表入口并重新生成规则；保留已确认的选择器。"
+                    onChange={(event) => setContinueDraft(event.target.value)}
+                    disabled={continueDisabled}
+                  />
+                </label>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="max-w-2xl text-[11px] leading-5 text-ink-3">
+                    发送会继续调用模型并产生费用；主机只接受失败构建的会话，不会创建新的构建记录。
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-[11px] text-ink-3">
+                      {continueDraft.length}/4000
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      onClick={() => void runContinue()}
+                      disabled={continueDisabled || !continueDraft.trim()}
+                    >
+                      {continueBusy ? "发送中…" : "发送并继续"}
+                    </Button>
+                  </div>
+                </div>
+                {!buildConfig?.available ? (
+                  <p className="rounded-control border border-warning/25 bg-warning-soft px-3 py-2 text-xs leading-5 text-warning">
+                    构建入口已关闭（例如只读预览或服务未配置构建），不能继续会话。
+                  </p>
+                ) : null}
+              </>
+            ) : (
+              <p className="text-xs leading-5 text-ink-3">
+                本次构建已经继续过，当前状态为 {buildStateLabel(build.state)}。
+              </p>
+            )}
+            {continuations.length ? (
+              <div>
+                <p className="text-[11px] text-ink-3">继续记录</p>
+                <ul className="mt-1 space-y-1">
+                  {continuations.map((item) => (
+                    <li
+                      key={item.request_id}
+                      className="flex flex-wrap items-center gap-2 rounded-control border border-line bg-surface-muted px-3 py-2 text-xs text-ink-2"
+                    >
+                      <Badge
+                        tone={item.state === "FAILED" ? "danger" : "neutral"}
+                        dot={false}
+                      >
+                        {item.state === "FAILED" ? "失败" : "已受理"}
+                      </Badge>
+                      <span>{formatTime(item.created_at)}</span>
+                      <span className="text-ink-3">{item.message_chars} 字</span>
+                      <span className="font-mono text-[10px] text-ink-3">
+                        {item.request_id}
+                      </span>
+                      {item.error ? (
+                        <span className="basis-full text-danger">{item.error}</span>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
 
       {build.pending_dependencies.length || permissions.length ? (
         <section className="rounded-panel border border-warning/25 bg-warning-soft px-5 py-4">

@@ -385,6 +385,14 @@ export interface BuildRepair {
   [key: string]: unknown;
 }
 
+export interface BuildContinuation {
+  request_id: string;
+  state: "ACCEPTED" | "FAILED";
+  message_chars: number;
+  error: string | null;
+  created_at: string;
+}
+
 export interface BuildArchiveConfig {
   mode?: string;
   root?: string | null;
@@ -434,6 +442,7 @@ export interface BuildStatus {
   repair_limit: number;
   repair_round: number;
   repairs: BuildRepair[];
+  continuations: BuildContinuation[];
   archive: BuildArchiveConfig | null;
   archive_stats: BuildArchiveStats | null;
   catalog: { catalog_scope?: string; catalog_products?: number } | null;
@@ -1136,6 +1145,17 @@ export function cancelBuild(buildId: string): Promise<BuildResponse> {
   return sendJson<BuildResponse>(
     `/api/builds/${encodeURIComponent(buildId)}/cancel`,
     "POST",
+  );
+}
+
+export function continueBuild(
+  buildId: string,
+  body: { request_id: string; message: string },
+): Promise<BuildResponse> {
+  return sendJson<BuildResponse>(
+    `/api/builds/${encodeURIComponent(buildId)}/continue`,
+    "POST",
+    body,
   );
 }
 

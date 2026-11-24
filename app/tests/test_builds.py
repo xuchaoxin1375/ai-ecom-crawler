@@ -827,6 +827,16 @@ class BuildWorkflowTests(unittest.TestCase):
             self.assertIn("bump rule_version", result["error"])
 
     def test_read_only_build_preview_keeps_build_history(self) -> None:
+        self.store.create_build(
+            BuildRecord(
+                build_id="build-readonly",
+                batch_id="b-1",
+                site_key="example.fr",
+                state="FINISHED",
+                outcome="failed",
+                error="previous failure",
+            )
+        )
         with mock.patch.dict(os.environ, {"ECOM_BUILD_DISABLED": "1"}):
             app = create_app(
                 self.root / "tasks.db",
@@ -837,7 +847,10 @@ class BuildWorkflowTests(unittest.TestCase):
             with TestClient(app, headers=CLIENT_HEADERS) as client:
                 listing = client.get("/api/builds")
                 self.assertEqual(listing.status_code, 200, listing.text)
-                self.assertEqual(listing.json()["builds"], [])
+                self.assertEqual(
+                    [item["build_id"] for item in listing.json()["builds"]],
+                    ["build-readonly"],
+                )
                 config = client.get("/api/builds/config").json()
                 self.assertFalse(config["available"])
                 response = client.post(
@@ -850,6 +863,116 @@ class BuildWorkflowTests(unittest.TestCase):
                     response.json()["error"]["code"], "BUILD_UNAVAILABLE"
                 )
                 self.assertIn("disabled", response.json()["error"]["message"])
+                continued = client.post(
+                    "/api/builds/build-readonly/continue",
+                    json={
+                        "request_id": "readonly-continue",
+                        "message": "try again",
+                    },
+                    headers=CLIENT_HEADERS,
+                )
+                self.assertEqual(continued.status_code, 409, continued.text)
+                self.assertEqual(
+                    continued.json()["error"]["code"], "BUILD_UNAVAILABLE"
+                )
+
+    def test_failed_build_can_continue_once(self) -> None:
+        adapter = FakeBuildAdapter(self.root, write_rule=False, finish=True)
+        manager = self._manager(adapter, max_repair_rounds=0)
+        with self._client(manager) as client:
+            started = client.post(
+                "/api/batches/b-1/sites/example.fr/build",
+                json={},
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(started.status_code, 202, started.text)
+            build_id = started.json()["build"]["build_id"]
+            failed = self._wait_ready(client, build_id)
+            self.assertEqual(failed["outcome"], "failed", failed)
+            deadline = time.monotonic() + 5
+            while build_id in manager._watchers and time.monotonic() < deadline:
+                time.sleep(0.05)
+
+            adapter.write_rule = True
+            body = {
+                "request_id": "continue-1",
+                "message": "retry with a valid rule",
+            }
+            response = client.post(
+                f"/api/builds/{build_id}/continue",
+                json=body,
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(response.status_code, 202, response.text)
+            self.assertTrue(response.json()["accepted"])
+            result = self._wait_ready(client, build_id)
+            self.assertEqual(result["outcome"], "succeeded", result)
+            self.assertEqual(len(adapter.continued), 1)
+            self.assertEqual(
+                [item["state"] for item in result["continuations"]],
+                ["ACCEPTED"],
+            )
+
+            replay = client.post(
+                f"/api/builds/{build_id}/continue",
+                json=body,
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(replay.status_code, 202, replay.text)
+            self.assertEqual(len(adapter.continued), 1)
+
+            conflict = client.post(
+                f"/api/builds/{build_id}/continue",
+                json={
+                    "request_id": "continue-1",
+                    "message": "different instruction",
+                },
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(conflict.status_code, 409, conflict.text)
+            self.assertEqual(conflict.json()["error"]["code"], "CONFLICT")
+
+            not_failed = client.post(
+                f"/api/builds/{build_id}/continue",
+                json={
+                    "request_id": "continue-2",
+                    "message": "another round",
+                },
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(not_failed.status_code, 409, not_failed.text)
+            self.assertEqual(
+                not_failed.json()["error"]["code"], "BUILD_NOT_CONTINUABLE"
+            )
+
+    def test_continue_requires_live_session(self) -> None:
+        self.store.create_build(
+            BuildRecord(
+                build_id="build-old",
+                batch_id="b-1",
+                site_key="example.fr",
+                state="FINISHED",
+                outcome="failed",
+                error="old failure",
+            )
+        )
+        manager = self._manager(FakeBuildAdapter(self.root))
+        with self._client(manager) as client:
+            response = client.post(
+                "/api/builds/build-old/continue",
+                json={
+                    "request_id": "continue-old",
+                    "message": "try again",
+                },
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(response.status_code, 409, response.text)
+            self.assertEqual(
+                response.json()["error"]["code"], "BUILD_SESSION_UNAVAILABLE"
+            )
+            continuation = self.store.get_build_continuation("continue-old")
+            assert continuation is not None
+            self.assertEqual(continuation.state, "FAILED")
 
     def test_candidate_activation_rerun_and_rollback(self) -> None:
         initial_rule = rule_payload(version="2026.11.23-1")
