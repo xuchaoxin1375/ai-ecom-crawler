@@ -485,6 +485,17 @@ function renderTabs(state, activeView) {
   };
   return `
     <div class="tabs-row">
+      <label class="sr-only" for="proto-view-select">切换站点视图</label>
+      <select class="view-select-mobile" id="proto-view-select" data-view-select>
+        ${Object.entries(viewLabels)
+          .map(
+            ([key, label]) =>
+              `<option value="${key}" ${key === activeView ? "selected" : ""}>${esc(
+                label,
+              )}${counts[key] ? `（${counts[key]}）` : ""}</option>`,
+          )
+          .join("")}
+      </select>
       <nav class="tabs" role="tablist" aria-label="站点视图">
         ${Object.entries(viewLabels)
           .map(
@@ -836,7 +847,7 @@ view.addEventListener("change", (event) => {
     approvalsResolved = false;
     writeParams({ state: target.value, view: activeView });
     render();
-  } else if (target.id === "view-select") {
+  } else if (target.id === "view-select" || target.id === "proto-view-select") {
     writeParams({ state, view: target.value });
     render();
   }
