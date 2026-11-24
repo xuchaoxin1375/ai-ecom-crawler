@@ -94,6 +94,16 @@ export const router = createHashRouter([
           })),
         ),
       },
+      {
+        path: "models",
+        element: lazyPage(() =>
+          import("../features/builds/ModelSettingsPage").then(
+            ({ ModelSettingsPage }) => ({
+              default: ModelSettingsPage,
+            }),
+          ),
+        ),
+      },
       { path: "*", element: <NotFoundPage /> },
     ],
   },

@@ -264,6 +264,22 @@
         "title": "BuildModelCheckRequest",
         "type": "object"
       },
+      "BuildModelPoolRequest": {
+        "properties": {
+          "refs": {
+            "items": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 16,
+            "title": "Refs",
+            "type": "array"
+          }
+        },
+        "title": "BuildModelPoolRequest",
+        "type": "object"
+      },
       "BuildPermissionRequest": {
         "properties": {
           "decision": {
@@ -2536,6 +2552,64 @@
           }
         },
         "summary": "Get Build Config"
+      }
+    },
+    "/api/builds/config/models": {
+      "delete": {
+        "operationId": "reset_build_models_api_builds_config_models_delete",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Reset Build Models Api Builds Config Models Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Reset Build Models"
+      },
+      "put": {
+        "operationId": "update_build_models_api_builds_config_models_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BuildModelPoolRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Update Build Models Api Builds Config Models Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Build Models"
       }
     },
     "/api/builds/models/check": {

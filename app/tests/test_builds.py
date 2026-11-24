@@ -924,6 +924,128 @@ class BuildWorkflowTests(unittest.TestCase):
             self.assertEqual(response.status_code, 409, response.text)
             self.assertEqual(manager.adapter.started, [])
 
+    def test_model_pool_settings_persist_and_hot_apply(self) -> None:
+        env_pool = "opencode-go/deepseek-v4.1-flash#high"
+        with mock.patch.dict(os.environ, {"ECOM_BUILD_MODEL_POOL": env_pool}, clear=False):
+            manager = self._manager(FakeBuildAdapter(self.root, hang=True))
+            self.assertEqual(manager.model_pool_source, "env")
+            with self._client(manager) as client:
+                response = client.put(
+                    "/api/builds/config/models",
+                    json={
+                        "refs": [
+                            "opencode-go/deepseek-v4.1-flash#max",
+                            "yjwd-gpt-enterprise/gpt-6.1-terra#medium",
+                        ]
+                    },
+                )
+                self.assertEqual(response.status_code, 200, response.text)
+                body = response.json()
+                self.assertEqual(body["model_pool_source"], "settings")
+                self.assertTrue(body["model_pool_editable"])
+                self.assertTrue(body["model_pool_override"])
+                self.assertEqual(
+                    [model["variant"] for model in body["models"]],
+                    ["max", "medium"],
+                )
+                self.assertEqual(
+                    self.store.get_setting("build_model_pool"),
+                    "opencode-go/deepseek-v4.1-flash#max,"
+                    "yjwd-gpt-enterprise/gpt-6.1-terra#medium",
+                )
+
+                # Invalid saves reject without changing the active pool.
+                bad = client.put(
+                    "/api/builds/config/models", json={"refs": ["not-a-model"]}
+                )
+                self.assertEqual(bad.status_code, 400)
+                self.assertEqual(bad.json()["error"]["code"], "MODEL_POOL_INVALID")
+                self.assertEqual(
+                    manager.model_pool.refs(),
+                    [
+                        "opencode-go/deepseek-v4.1-flash#max",
+                        "yjwd-gpt-enterprise/gpt-6.1-terra#medium",
+                    ],
+                )
+
+                # A restarted manager reads the persisted pool, not the env.
+                restarted = BuildManager(
+                    self.store,
+                    self.root / "out-restart",
+                    self.rules,
+                    adapter=FakeBuildAdapter(self.root),
+                )
+                self.addCleanup(restarted.shutdown)
+                self.assertEqual(restarted.model_pool_source, "settings")
+                self.assertEqual(restarted.model_pool.refs(), manager.model_pool.refs())
+
+                # New builds pick up the saved pool immediately.
+                started = client.post(
+                    "/api/batches/b-1/sites/example.fr/build", json={}
+                )
+                self.assertEqual(started.status_code, 202, started.text)
+                self.assertEqual(
+                    started.json()["build"]["model"]["variant"], "max"
+                )
+
+                # Reset removes the override and returns to the startup env.
+                reset = client.delete("/api/builds/config/models")
+                self.assertEqual(reset.status_code, 200, reset.text)
+                self.assertEqual(reset.json()["model_pool_source"], "env")
+                self.assertFalse(reset.json()["model_pool_override"])
+                self.assertEqual(
+                    [model["variant"] for model in reset.json()["models"]],
+                    ["high"],
+                )
+                self.assertIsNone(self.store.get_setting("build_model_pool"))
+
+    def test_model_pool_settings_can_be_empty(self) -> None:
+        manager = self._manager(FakeBuildAdapter(self.root))
+        with self._client(manager) as client:
+            response = client.put("/api/builds/config/models", json={"refs": []})
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()["models"], [])
+            self.assertEqual(response.json()["model_pool_source"], "settings")
+            self.assertEqual(self.store.get_setting("build_model_pool"), "")
+            started = client.post(
+                "/api/batches/b-1/sites/example.fr/build", json={}
+            )
+            self.assertEqual(started.status_code, 202, started.text)
+            self.assertEqual(
+                started.json()["build"]["model"],
+                {"providerID": "opencode-go", "id": "deepseek-v4.1-flash", "variant": "high"},
+            )
+
+    def test_invalid_stored_model_pool_falls_back_to_env(self) -> None:
+        self.store.set_setting("build_model_pool", "not-a-ref")
+        env_pool = "opencode-go/deepseek-v4.1-flash#high"
+        with mock.patch.dict(
+            os.environ, {"ECOM_BUILD_MODEL_POOL": env_pool}, clear=False
+        ):
+            manager = self._manager(FakeBuildAdapter(self.root))
+        self.assertEqual(manager.model_pool_source, "env")
+        self.assertTrue(manager.model_pool_override)
+        self.assertEqual(manager.model_pool.refs(), [env_pool])
+        manager.reset_model_pool()
+        self.assertFalse(manager.model_pool_override)
+        self.assertIsNone(self.store.get_setting("build_model_pool"))
+
+    def test_model_pool_settings_write_is_read_only_guarded(self) -> None:
+        app = create_app(
+            self.root / "tasks.db",
+            self.root / "out",
+            self.rules,
+            read_only=True,
+        )
+        with TestClient(app, headers=CLIENT_HEADERS) as client:
+            response = client.put(
+                "/api/builds/config/models",
+                json={"refs": ["opencode-go/deepseek-v4.1-flash#high"]},
+            )
+            self.assertEqual(response.status_code, 403)
+            self.assertEqual(response.json()["error"]["code"], "READ_ONLY")
+            self.assertIsNone(self.store.get_setting("build_model_pool"))
+
     def test_pilot_rehearsal_validates_six_and_exports_ten(self) -> None:
         site = "pilot-fixture.test"
         origin = f"http://{site}"

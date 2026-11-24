@@ -276,6 +276,12 @@ CREATE TABLE IF NOT EXISTS task_resources (
     PRIMARY KEY (task_id, resource_id)
 );
 
+CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_task_resources_task
     ON task_resources(task_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_task_resources_browser_slot
@@ -1818,6 +1824,37 @@ class TaskStore:
         if model.get("providerID") and model.get("id"):
             return f"{model['providerID']}/{model['id']}"
         return None
+
+    def get_setting(self, key: str) -> str | None:
+        try:
+            with self._connect() as connection:
+                row = connection.execute(
+                    "SELECT value FROM app_settings WHERE key = ?", (key,)
+                ).fetchone()
+        except sqlite3.OperationalError as exc:
+            # A read-only preview may open a ledger created before app_settings
+            # existed; an absent table means no override, not a failed read.
+            if "no such table" in str(exc):
+                return None
+            raise
+        return str(row["value"]) if row is not None else None
+
+    def set_setting(self, key: str, value: str) -> None:
+        if self.read_only:
+            raise RuntimeError("task ledger is read-only")
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET "
+                "value = excluded.value, updated_at = excluded.updated_at",
+                (key, value, utc_now()),
+            )
+
+    def delete_setting(self, key: str) -> None:
+        if self.read_only:
+            raise RuntimeError("task ledger is read-only")
+        with self._connect() as connection:
+            connection.execute("DELETE FROM app_settings WHERE key = ?", (key,))
 
     def latest_build_for_site(
         self, batch_id: str, site_key: str

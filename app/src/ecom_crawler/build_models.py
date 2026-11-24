@@ -71,6 +71,23 @@ def _full_ref(model: dict[str, Any]) -> str:
     return _model_key(model) + (f"#{variant}" if variant else "")
 
 
+def known_models() -> list[dict[str, Any]]:
+    """Return the models with known labels and thinking levels.
+
+    Unknown models may still be configured; the UI uses this list for presets
+    and only offers bounded probes where a probe request shape is known.
+    """
+    return [
+        {
+            "id": key,
+            "label": label,
+            "variants": list(variants),
+            "probe_supported": key in PROBE_LIMIT_FIELDS,
+        }
+        for key, (label, variants) in CATALOG.items()
+    ]
+
+
 def probe_chat(model: dict[str, str], *, inherit_env: bool) -> int:
     """Use OpenCode's credentials without sending build context or registering tools."""
     limit = PROBE_LIMIT_FIELDS[_model_key(model)]
@@ -186,6 +203,30 @@ class BuildModelPool:
                            for variant in self._variants(key)
                            if _full_ref(model | {"variant": variant}) in self._results},
             } for key, model in self.models.items()]
+
+    def refs(self) -> list[str]:
+        return [_full_ref(model) for model in self.models.values()]
+
+    def _configured_refs(self) -> set[str]:
+        refs: set[str] = set()
+        for key, model in self.models.items():
+            for variant in self._variants(key):
+                refs.add(_full_ref(model | {"variant": variant}))
+        return refs
+
+    def snapshot_health(self) -> dict[str, dict[str, Any]]:
+        with self._lock:
+            return {ref: dict(result) for ref, result in self._results.items()}
+
+    def restore_health(self, snapshot: dict[str, dict[str, Any]]) -> None:
+        """Keep probe results for models that remain in the pool after a save."""
+        allowed = self._configured_refs()
+        with self._lock:
+            self._results = {
+                ref: dict(result)
+                for ref, result in snapshot.items()
+                if ref in allowed
+            }
 
     def check(self, ref: str) -> dict[str, Any]:
         model = self.manual(ref)

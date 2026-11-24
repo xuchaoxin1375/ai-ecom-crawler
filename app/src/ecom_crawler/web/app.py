@@ -33,7 +33,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .. import __version__
-from ..build_models import ModelPoolError
+from ..build_models import ModelPoolError, known_models
 from ..builds import ACTIVE_BUILD_STATES, BuildError, BuildManager
 from ..execution import build_task
 from ..executor.runner import CSV_COLUMNS
@@ -344,6 +344,12 @@ class BuildStartRequest(BaseModel):
 
 class BuildModelCheckRequest(BaseModel):
     model_ref: str = Field(min_length=1, max_length=200)
+
+
+class BuildModelPoolRequest(BaseModel):
+    refs: list[Annotated[str, Field(min_length=1, max_length=200)]] = Field(
+        default_factory=list, max_length=16
+    )
 
 
 class BuildPermissionRequest(BaseModel):
@@ -3195,20 +3201,56 @@ def create_app(
             "build": build_manager.describe(record.build_id),
         }
 
-    @app.get("/api/builds/config")
-    def get_build_config() -> dict[str, Any]:
+    def build_config_payload() -> dict[str, Any]:
         if build_manager is None:
             return {
                 "available": False,
                 "reasoning_capture_enabled": False,
                 "max_repair_rounds": 0,
+                "models": [],
+                "model_pool_source": "none",
+                "model_pool_editable": False,
+                "model_pool_override": False,
+                "model_catalog": known_models(),
             }
         return {
             "available": not builds_disabled,
             "reasoning_capture_enabled": build_manager.reasoning_capture_enabled,
             "max_repair_rounds": build_manager.max_repair_rounds,
             "models": build_manager.model_pool.describe(),
+            "model_pool_source": build_manager.model_pool_source,
+            "model_pool_editable": not builds_disabled and not read_only,
+            "model_pool_override": build_manager.model_pool_override,
+            "model_catalog": known_models(),
         }
+
+    @app.get("/api/builds/config")
+    def get_build_config() -> dict[str, Any]:
+        return build_config_payload()
+
+    @app.put("/api/builds/config/models")
+    def update_build_models(payload: BuildModelPoolRequest) -> dict[str, Any]:
+        if build_manager is None or builds_disabled:
+            raise _error("BUILD_UNAVAILABLE", "build service unavailable", 409)
+        try:
+            build_manager.update_model_pool(payload.refs)
+        except ModelPoolError as exc:
+            raise _error("MODEL_POOL_INVALID", str(exc), 400) from exc
+        except BuildError as exc:
+            raise _error("MODEL_POOL_UNAVAILABLE", str(exc), 409) from exc
+        return build_config_payload()
+
+    @app.delete("/api/builds/config/models")
+    def reset_build_models() -> dict[str, Any]:
+        if build_manager is None or builds_disabled:
+            raise _error("BUILD_UNAVAILABLE", "build service unavailable", 409)
+        try:
+            build_manager.reset_model_pool()
+        except ModelPoolError as exc:
+            raise _error("MODEL_POOL_UNAVAILABLE", str(exc), 409) from exc
+        except BuildError as exc:
+            raise _error("MODEL_POOL_UNAVAILABLE", str(exc), 409) from exc
+        return build_config_payload()
 
     @app.post("/api/builds/models/check")
     def check_build_model(payload: BuildModelCheckRequest) -> dict[str, Any]:

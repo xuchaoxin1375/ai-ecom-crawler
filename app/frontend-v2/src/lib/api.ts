@@ -489,11 +489,24 @@ export interface BuildListResponse {
   builds: BuildStatus[];
 }
 
+export type BuildModelPoolSource = "settings" | "env" | "none";
+
+export interface BuildModelCatalogEntry {
+  id: string;
+  label: string;
+  variants: string[];
+  probe_supported: boolean;
+}
+
 export interface BuildConfig {
   available: boolean;
   reasoning_capture_enabled: boolean;
   max_repair_rounds: number;
   models?: BuildModelOption[];
+  model_pool_source?: BuildModelPoolSource;
+  model_pool_editable?: boolean;
+  model_pool_override?: boolean;
+  model_catalog?: BuildModelCatalogEntry[];
 }
 
 export interface BuildModelHealth {
@@ -761,7 +774,7 @@ export function getBatch(batchId: string, signal?: AbortSignal): Promise<BatchDe
 
 async function sendJson<T>(
   url: string,
-  method: "POST" | "PATCH" | "DELETE",
+  method: "POST" | "PUT" | "PATCH" | "DELETE",
   body?: unknown,
 ): Promise<T> {
   const response = await fetch(url, {
@@ -1179,6 +1192,14 @@ export function checkBuildModel(modelRef: string): Promise<BuildModelHealth> {
   return sendJson<BuildModelHealth>("/api/builds/models/check", "POST", {
     model_ref: modelRef,
   });
+}
+
+export function updateBuildModels(refs: string[]): Promise<BuildConfig> {
+  return sendJson<BuildConfig>("/api/builds/config/models", "PUT", { refs });
+}
+
+export function resetBuildModels(): Promise<BuildConfig> {
+  return sendJson<BuildConfig>("/api/builds/config/models", "DELETE");
 }
 
 export function pauseBuild(buildId: string): Promise<BuildResponse> {

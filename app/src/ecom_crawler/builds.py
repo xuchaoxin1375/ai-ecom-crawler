@@ -117,6 +117,7 @@ RULE_NAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
 TIMELINE_LIMIT = 200
 ROBOTS_USER_AGENT = "ecom-crawler-build/0.1"
 ROBOTS_TIMEOUT_SECONDS = 10.0
+MODEL_POOL_SETTING = "build_model_pool"
 logger = logging.getLogger(__name__)
 
 
@@ -890,9 +891,31 @@ class BuildManager:
             else os.environ.get("ECOM_BUILD_ISOLATE_ENV") == "1"
         )
         self.model = model if model is not None else default_model()
-        self.model_pool = BuildModelPool(
-            os.environ.get("ECOM_BUILD_MODEL_POOL", ""), inherit_env=not self.isolate_env,
+        self._env_model_pool = os.environ.get("ECOM_BUILD_MODEL_POOL", "").strip()
+        stored_pool = self.store.get_setting(MODEL_POOL_SETTING)
+        self._model_pool_override = stored_pool is not None
+        raw_pool = stored_pool if stored_pool is not None else self._env_model_pool
+        self._model_pool_source = (
+            "settings"
+            if stored_pool is not None
+            else ("env" if self._env_model_pool else "none")
         )
+        try:
+            self.model_pool = BuildModelPool(
+                raw_pool, inherit_env=not self.isolate_env,
+            )
+        except ModelPoolError as exc:
+            if stored_pool is None:
+                raise
+            logger.warning(
+                "stored model pool is invalid; falling back to environment: %s", exc
+            )
+            self._model_pool_source = (
+                "env" if self._env_model_pool else "none"
+            )
+            self.model_pool = BuildModelPool(
+                self._env_model_pool, inherit_env=not self.isolate_env,
+            )
         self.default_proxy = (
             default_proxy
             or os.environ.get("ECOM_BUILD_PROXY")
@@ -1011,6 +1034,41 @@ class BuildManager:
         self._dispatching: str | None = None
         self._handled_permissions: dict[str, set[str]] = {}
         self._stopping = threading.Event()
+
+    @property
+    def model_pool_source(self) -> str:
+        return self._model_pool_source
+
+    @property
+    def model_pool_override(self) -> bool:
+        return self._model_pool_override
+
+    def update_model_pool(self, refs: list[str]) -> None:
+        if self.read_only:
+            raise BuildError("build manager is read-only")
+        candidate = BuildModelPool(
+            ",".join(refs), inherit_env=not self.isolate_env
+        )
+        candidate.restore_health(self.model_pool.snapshot_health())
+        raw = ",".join(candidate.refs())
+        with self._lock:
+            self.store.set_setting(MODEL_POOL_SETTING, raw)
+            self.model_pool = candidate
+            self._model_pool_source = "settings"
+            self._model_pool_override = True
+
+    def reset_model_pool(self) -> None:
+        if self.read_only:
+            raise BuildError("build manager is read-only")
+        candidate = BuildModelPool(
+            self._env_model_pool, inherit_env=not self.isolate_env
+        )
+        candidate.restore_health(self.model_pool.snapshot_health())
+        with self._lock:
+            self.store.delete_setting(MODEL_POOL_SETTING)
+            self.model_pool = candidate
+            self._model_pool_source = "env" if self._env_model_pool else "none"
+            self._model_pool_override = False
 
     # ------------------------------------------------------------------ start
     def _ensure_site_rule(self, site: BatchSite) -> SiteRule | None:

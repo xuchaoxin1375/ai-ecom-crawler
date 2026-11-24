@@ -14,6 +14,7 @@ import { Button } from "../../components/ui/Button";
 import { Checkbox, Input, Select } from "../../components/ui/Input";
 import { ErrorNotice } from "../../components/ui/ErrorNotice";
 import { formatTime } from "../../lib/format";
+import { modelRef as modelRefString, probeErrorLabels } from "../builds/modelHealth";
 
 interface BuildStartDialogProps {
   open: boolean;
@@ -24,12 +25,6 @@ interface BuildStartDialogProps {
   onOpenChange: (open: boolean) => void;
   onStarted: (response: BuildResponse) => void;
 }
-
-const probeErrorLabels: Record<string, string> = {
-  MODEL_UNAVAILABLE: "此 OpenCode 进程未识别该模型，请检查模型配置和凭据",
-  CONNECTION_ERROR: "连接失败或超时",
-  NO_OUTPUT: "未收到有效输出",
-};
 
 export function BuildStartDialog({
   open,
@@ -66,12 +61,12 @@ export function BuildStartDialog({
   const models = config?.models ?? [];
   const selected = models.find((model) => model.id === modelId);
   const variant = variantOverride ?? selected?.variant ?? "";
-  const modelRef = modelId ? modelId + (variant ? `#${variant}` : "") : undefined;
+  const modelRef = modelId ? modelRefString(modelId, variant) : undefined;
   const blocked =
     !selected &&
     models.length > 0 &&
     models.every((model) => {
-      const ref = model.id + (model.variant ? `#${model.variant}` : "");
+      const ref = modelRefString(model.id, model.variant);
       return (checks[ref] ?? model.health[model.variant])?.status === "failed";
     });
 
@@ -172,6 +167,16 @@ export function BuildStartDialog({
               />
             ) : null}
 
+            {models.length === 0 ? (
+              <p className="text-xs leading-5 text-ink-3">
+                未配置模型池，本次使用默认模型；可在{" "}
+                <a className="font-medium text-accent hover:underline" href="#/models">
+                  模型配置
+                </a>{" "}
+                添加模型。
+              </p>
+            ) : null}
+
             {models.length > 0 ? (
               <fieldset
                 className="min-w-0 space-y-2"
@@ -223,7 +228,7 @@ export function BuildStartDialog({
                 >
                   {(selected ? [selected] : models).map((model) => {
                     const level = selected ? variant : model.variant;
-                    const ref = model.id + (level ? `#${level}` : "");
+                    const ref = modelRefString(model.id, level);
                     const result = checks[ref] ?? model.health[level];
                     return (
                       <li key={model.id}>

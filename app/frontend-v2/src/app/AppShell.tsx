@@ -10,6 +10,7 @@ import {
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
+  Cpu,
   Layers,
   LayoutList,
   ListTodo,
@@ -196,6 +197,7 @@ export function AppShell() {
   const batchMatch = location.pathname.match(/^\/batches\/([^/]+)/);
   const isTaskDetail = /^\/tasks\/[^/]+/.test(location.pathname);
   const isBuildDetail = /^\/builds\/[^/]+/.test(location.pathname);
+  const isModelSettings = location.pathname.startsWith("/models");
   const isSiteDetail = Boolean(siteMatch);
   const isBatchDetail = Boolean(batchMatch) && !isSiteDetail;
   const showBreadcrumb = isBatchDetail || isSiteDetail || isTaskDetail || isBuildDetail;
@@ -224,13 +226,22 @@ export function AppShell() {
           ? "站点详情"
           : isBatchDetail
             ? "批次详情"
-            : location.pathname.startsWith("/tasks")
-              ? "全部任务"
-              : location.pathname.startsWith("/builds")
-                ? "构建记录"
-                : "采集批次";
+            : isModelSettings
+              ? "模型配置"
+              : location.pathname.startsWith("/tasks")
+                ? "全部任务"
+                : location.pathname.startsWith("/builds")
+                  ? "构建记录"
+                  : "采集批次";
     document.title = `${title} · 电商采集`;
-  }, [isBatchDetail, isBuildDetail, isSiteDetail, isTaskDetail, location.pathname]);
+  }, [
+    isBatchDetail,
+    isBuildDetail,
+    isModelSettings,
+    isSiteDetail,
+    isTaskDetail,
+    location.pathname,
+  ]);
 
   useEffect(() => {
     function onPointerDown() {
@@ -511,6 +522,15 @@ export function AppShell() {
                   if (!pinned) setFocused(false);
                 }}
               />
+              <SidebarLink
+                to="/models"
+                icon={<Cpu size={17} />}
+                label="模型配置"
+                expanded={visualOpen}
+                onPointerNavigate={() => {
+                  if (!pinned) setFocused(false);
+                }}
+              />
               <SidebarAction
                 href="#/batches?new=1"
                 icon={<Plus size={17} />}
@@ -617,6 +637,13 @@ export function AppShell() {
                   to="/builds"
                   icon={<Wrench size={17} />}
                   label="构建记录"
+                  expanded
+                  onPointerNavigate={closeMobile}
+                />
+                <SidebarLink
+                  to="/models"
+                  icon={<Cpu size={17} />}
+                  label="模型配置"
                   expanded
                   onPointerNavigate={closeMobile}
                 />

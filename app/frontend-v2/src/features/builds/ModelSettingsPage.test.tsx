@@ -1,0 +1,194 @@
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type {
+  BuildConfig,
+  BuildModelCatalogEntry,
+  BuildModelOption,
+} from "../../lib/api";
+import { renderPage } from "../../test/renderPage";
+import { ModelSettingsPage } from "./ModelSettingsPage";
+
+const deepseek = "opencode-go/deepseek-v4.1-flash";
+const terra = "yjwd-gpt-enterprise/gpt-6.1-terra";
+const checkedAt = "2026-11-24T12:00:00Z";
+
+const catalog: BuildModelCatalogEntry[] = [
+  {
+    id: deepseek,
+    label: "DeepSeek V4.1 Flash",
+    variants: ["low", "high", "max"],
+    probe_supported: true,
+  },
+  {
+    id: terra,
+    label: "YJWD GPT-6.1 Terra",
+    variants: ["none", "low", "medium", "high", "xhigh", "max"],
+    probe_supported: true,
+  },
+];
+
+function option(id: string, variant: string): BuildModelOption {
+  const entry = catalog.find((item) => item.id === id)!;
+  return {
+    id,
+    label: entry.label,
+    variant,
+    variants: entry.variants,
+    probe_supported: entry.probe_supported,
+    health: {},
+  };
+}
+
+function config(
+  models: BuildModelOption[] = [option(deepseek, "high"), option(terra, "medium")],
+  overrides: Partial<BuildConfig> = {},
+): BuildConfig {
+  return {
+    available: true,
+    reasoning_capture_enabled: false,
+    max_repair_rounds: 1,
+    models,
+    model_pool_source: "env",
+    model_pool_editable: true,
+    model_catalog: catalog,
+    ...overrides,
+  };
+}
+
+function jsonBody(init?: RequestInit): { refs: string[] } {
+  return JSON.parse(String(init?.body)) as { refs: string[] };
+}
+
+afterEach(() => vi.unstubAllGlobals());
+
+describe("model settings", () => {
+  it("adds a model and saves the ordered refs", async () => {
+    let current = config([option(deepseek, "high")]);
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = url.split("?")[0];
+      if (path === "/api/builds/config" && !init?.method) {
+        return Response.json(current);
+      }
+      if (path === "/api/builds/config/models" && init?.method === "PUT") {
+        const refs = jsonBody(init).refs;
+        current = config(
+          refs.map((ref) => {
+            const [id, variant] = ref.split("#");
+            return option(id, variant);
+          }),
+          { model_pool_source: "settings" },
+        );
+        return Response.json(current);
+      }
+      throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage("/models", "/models", <ModelSettingsPage />);
+
+    const preset = await screen.findByLabelText("预设模型");
+    fireEvent.change(preset, { target: { value: terra } });
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "默认思考等级" })).toHaveValue(
+        "medium",
+      ),
+    );
+    const add = screen.getByRole("button", { name: "添加" });
+    fireEvent.click(add);
+
+    const terraRow = (
+      await screen.findByLabelText("YJWD GPT-6.1 Terra 默认思考等级")
+    ).closest("li")!;
+    expect(within(terraRow).getByText(terra)).toBeVisible();
+
+    const save = screen.getByRole("button", { name: "保存配置" });
+    expect(save).toBeEnabled();
+    fireEvent.click(save);
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/builds/config/models",
+        expect.objectContaining({ method: "PUT" }),
+      ),
+    );
+    const put = fetchMock.mock.calls.find(
+      ([url, init]) => url === "/api/builds/config/models" && init?.method === "PUT",
+    )!;
+    expect(jsonBody(put[1]).refs).toEqual([`${deepseek}#high`, `${terra}#medium`]);
+    expect(await screen.findByText(/模型池已保存/)).toBeVisible();
+  });
+
+  it("probes a saved model and shows the result", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = url.split("?")[0];
+      if (path === "/api/builds/config" && !init?.method) {
+        return Response.json(config());
+      }
+      if (path === "/api/builds/models/check" && init?.method === "POST") {
+        return Response.json({
+          status: "ok",
+          code: null,
+          checked_at: checkedAt,
+          latency_ms: 123,
+        });
+      }
+      throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage("/models", "/models", <ModelSettingsPage />);
+
+    const variant = await screen.findByLabelText("DeepSeek V4.1 Flash 默认思考等级");
+    const row = variant.closest("li")!;
+    fireEvent.click(within(row).getByRole("button", { name: "测试可用性" }));
+    expect(await screen.findByText(/探测通过/)).toBeVisible();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/builds/models/check",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("resets a page override back to the environment pool", async () => {
+    const overridden = config([option(deepseek, "max")], {
+      model_pool_source: "settings",
+      model_pool_override: true,
+    });
+    const fromEnv = config([option(deepseek, "high")]);
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = url.split("?")[0];
+      if (path === "/api/builds/config" && !init?.method) {
+        return Response.json(overridden);
+      }
+      if (path === "/api/builds/config/models" && init?.method === "DELETE") {
+        return Response.json(fromEnv);
+      }
+      throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage("/models", "/models", <ModelSettingsPage />);
+
+    const reset = await screen.findByRole("button", {
+      name: "恢复环境变量配置",
+    });
+    expect(reset).toBeEnabled();
+    fireEvent.click(reset);
+    expect(await screen.findByText(/已恢复为服务启动时的环境变量配置/)).toBeVisible();
+    expect(screen.getByText("环境变量")).toBeVisible();
+  });
+
+  it("keeps the page read-only when the service disables writes", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json(
+          config(undefined, {
+            model_pool_editable: false,
+          }),
+        ),
+      ),
+    );
+    renderPage("/models", "/models", <ModelSettingsPage />);
+
+    expect(await screen.findByText("当前配置只读")).toBeVisible();
+    expect(screen.getByRole("button", { name: "保存配置" })).toBeDisabled();
+    expect(screen.getByLabelText("DeepSeek V4.1 Flash 默认思考等级")).toBeDisabled();
+  });
+});
