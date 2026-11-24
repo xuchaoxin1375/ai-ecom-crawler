@@ -525,6 +525,33 @@ it("shows an active build as a strip without hiding current results", async () =
   );
 });
 
+it("opens the build dialog from a rebuild deep link", async () => {
+  const fetchMock = vi.fn(async (url: string) => {
+    const path = url.split("?")[0];
+    if (path === "/api/batches/b-fixture") return Response.json(batch);
+    if (path === "/api/sites/fixture.test/rule") return Response.json(siteRule);
+    if (path === "/api/tasks") return Response.json({ items: [], total: 0 });
+    if (path === "/api/builds/config")
+      return Response.json({
+        available: true,
+        reasoning_capture_enabled: false,
+        max_repair_rounds: 1,
+        models: [],
+      });
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  renderPage(
+    "/batches/:batchId/sites/:siteKey",
+    "/batches/b-fixture/sites/fixture.test?build=1",
+    <SiteDetailPage />,
+  );
+
+  const dialog = await screen.findByRole("dialog");
+  expect(dialog).toBeVisible();
+  expect(within(dialog).getByRole("button", { name: "启动修复" })).toBeVisible();
+});
+
 it("keeps approval actions retryable after a failed submit", async () => {
   const build = buildFixture({
     pending_permissions: [

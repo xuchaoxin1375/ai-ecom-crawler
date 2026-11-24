@@ -190,7 +190,6 @@ export function SiteDetailPage() {
   const queryClient = useQueryClient();
 
   const [dialog, setDialog] = useState<DialogKind>("");
-  const [buildMode, setBuildMode] = useState<"build" | "repair">("build");
   const [notice, setNotice] = useState<Notice | null>(null);
   const [actionError, setActionError] = useState("");
   const [buildActionError, setBuildActionError] = useState("");
@@ -307,6 +306,29 @@ export function SiteDetailPage() {
     (step?.action === "build" || step?.action === "repair");
   const quality = task?.quality_exceptions ?? [];
 
+  const autoBuildMode: "build" | "repair" | null =
+    searchParams.get("build") === "1" &&
+    site &&
+    !dialog &&
+    site.readiness !== "invalid" &&
+    site.readiness !== "duplicate" &&
+    !buildIsActive(build) &&
+    !configQuery.isPending &&
+    !configBlockReason
+      ? site.readiness === "ready"
+        ? "repair"
+        : "build"
+      : null;
+  const openBuildMode =
+    dialog === "build" || dialog === "repair" ? dialog : autoBuildMode;
+
+  function clearBuildParam() {
+    if (searchParams.get("build") !== "1") return;
+    const params = new URLSearchParams(searchParams);
+    params.delete("build");
+    setSearchParams(params, { replace: true, state: location.state });
+  }
+
   function applyBatch(next: BatchDetail) {
     queryClient.setQueryData(["batch", batchId], next);
     void queryClient.invalidateQueries({ queryKey: ["batches"] });
@@ -343,7 +365,6 @@ export function SiteDetailPage() {
   }
 
   function openBuild(mode: "build" | "repair") {
-    setBuildMode(mode);
     setBuildActionError("");
     setDialog(mode);
   }
@@ -535,6 +556,7 @@ export function SiteDetailPage() {
     });
     setBuildActionError("");
     setDialog("");
+    clearBuildParam();
     setNotice({
       tone: "success",
       text:
@@ -1452,16 +1474,19 @@ export function SiteDetailPage() {
         </section>
       ))}
 
-      {dialog === "build" || dialog === "repair" ? (
+      {openBuildMode ? (
         <BuildStartDialog
           open
           batchId={batch.batch_id}
           site={site}
           config={config}
           blockedReason={configBlockReason}
-          initialMode={buildMode}
+          initialMode={openBuildMode}
           onOpenChange={(next) => {
-            if (!next) setDialog("");
+            if (!next) {
+              setDialog("");
+              clearBuildParam();
+            }
           }}
           onStarted={handleStartedBuild}
         />

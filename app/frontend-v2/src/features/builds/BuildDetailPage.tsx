@@ -1,15 +1,22 @@
-import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
+import {
+  Link,
+  useLocation,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
   Download,
+  ExternalLink,
   FileText,
+  MoreHorizontal,
   Pause,
   Play,
   RefreshCw,
   ShieldAlert,
-  X,
 } from "lucide-react";
 import {
   cancelBuild,
@@ -33,12 +40,16 @@ import {
   buildOutcomeLabel,
   formatTime,
 } from "../../lib/format";
+import { cn } from "../../lib/cn";
 import { buildIsActive, buildServiceBlockReason } from "../sites/site";
 import {
+  buildEventText,
+  buildEventTone,
   buildModeLabel,
   buildModelLabel,
   formatBytes,
   permissionItems,
+  visibleBuildEvents,
 } from "../sites/build";
 import { BuildTimeline } from "../sites/BuildTimeline";
 import { useBuildStream } from "../sites/useBuildStream";
@@ -48,11 +59,45 @@ import { Button } from "../../components/ui/Button";
 import { ErrorNotice } from "../../components/ui/ErrorNotice";
 import { InlineNotice } from "../../components/ui/InlineNotice";
 import { Textarea } from "../../components/ui/Input";
-import { MetricStrip } from "../../components/ui/MetricStrip";
+import { RowActionsMenu, type RowActionItem } from "../../components/ui/DropdownMenu";
 import { ConfirmBatchActionDialog } from "../batches/ConfirmBatchActionDialog";
 
 const INTERRUPTED_CONTINUE_MESSAGE =
   "服务重启后继续：请先检查工作区和已有产物，从中断处完成剩余工作；不要重复已完成的抓取或覆盖已写好的规则。";
+
+const BUILD_VIEWS = ["status", "evidence", "repairs", "logs"] as const;
+type BuildView = (typeof BUILD_VIEWS)[number];
+
+const BUILD_VIEW_LABELS: Record<BuildView, string> = {
+  status: "运行状态",
+  evidence: "验证证据",
+  repairs: "修复轮次",
+  logs: "日志与 Trace",
+};
+
+function parseBuildView(value: string | null): BuildView {
+  return BUILD_VIEWS.find((item) => item === value) ?? "status";
+}
+
+function validationLabel(build: BuildStatus): string {
+  if (build.validation?.status === "PASSED") return "通过";
+  if (build.validation?.status === "FAILED") return "失败";
+  if (build.validation?.status === "INCOMPLETE") return "证据不完整";
+  if (build.state === "VALIDATING") return "验证中";
+  if (buildIsActive(build)) return "等待中";
+  return "—";
+}
+
+function BuildFact({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="grid grid-cols-[88px_minmax(0,1fr)] gap-3 px-4 py-2.5">
+      <dt className="text-xs text-ink-3">{label}</dt>
+      <dd className="min-w-0 text-xs leading-5 text-ink-2 [overflow-wrap:anywhere]">
+        {children}
+      </dd>
+    </div>
+  );
+}
 
 function siteHref(build: BuildStatus): string | null {
   if (!build.batch_id || !build.site_key) return null;
@@ -145,6 +190,10 @@ function RepairHistory({ repairs }: { repairs: BuildRepair[] }) {
 
 export function BuildDetailPage() {
   const { buildId = "" } = useParams<{ buildId: string }>();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeView = parseBuildView(searchParams.get("view"));
   const queryClient = useQueryClient();
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -199,6 +248,40 @@ export function BuildDetailPage() {
     if (!build || buildIsActive(build)) return;
     void queryClient.invalidateQueries({ queryKey: ["builds"] });
   }, [build, queryClient]);
+
+  useEffect(() => {
+    const raw = searchParams.get("view");
+    if (!raw || BUILD_VIEWS.includes(raw as BuildView)) return;
+    const params = new URLSearchParams(searchParams);
+    params.delete("view");
+    setSearchParams(params, { replace: true, state: location.state });
+  }, [searchParams, setSearchParams, location.state]);
+
+  function setView(next: BuildView) {
+    const params = new URLSearchParams(searchParams);
+    if (next === "status") params.delete("view");
+    else params.set("view", next);
+    setSearchParams(params, { replace: true, state: location.state });
+  }
+
+  function handleViewKey(event: KeyboardEvent<HTMLButtonElement>, current: BuildView) {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const index = BUILD_VIEWS.indexOf(current);
+    const next =
+      event.key === "Home"
+        ? BUILD_VIEWS[0]
+        : event.key === "End"
+          ? BUILD_VIEWS[BUILD_VIEWS.length - 1]
+          : BUILD_VIEWS[
+              (index + (event.key === "ArrowRight" ? 1 : -1) + BUILD_VIEWS.length) %
+                BUILD_VIEWS.length
+            ];
+    setView(next);
+    window.requestAnimationFrame(() => {
+      document.getElementById(`build-tab-${next}`)?.focus();
+    });
+  }
 
   function apply(response: BuildResponse) {
     queryClient.setQueryData(["build", response.build.build_id], response);
@@ -358,6 +441,505 @@ export function BuildDetailPage() {
     );
   }
 
+  const rebuildHref = href ? `${href}?build=1` : null;
+  const canCancel = ["QUEUED", "CREATED", "RUNNING", "PAUSED"].includes(build.state);
+  const events = visibleBuildEvents(build).slice(-4);
+
+  const primary =
+    build.state === "QUEUED" || build.state === "CREATED"
+      ? {
+          kind: "cancel" as const,
+          label: build.state === "QUEUED" ? "取消排队" : "取消构建",
+        }
+      : canPause
+        ? { kind: "pause" as const, label: "暂停构建" }
+        : canResume
+          ? { kind: "resume" as const, label: "继续构建" }
+          : canContinue
+            ? { kind: "continue" as const, label: "继续原会话" }
+            : build.state === "FINISHED" && build.outcome === "succeeded"
+              ? { kind: "site" as const, label: "查看站点" }
+              : build.state === "CANCELLED"
+                ? { kind: "rebuild" as const, label: "重新构建" }
+                : null;
+
+  function focusContinue() {
+    if (activeView !== "status") setView("status");
+    window.setTimeout(() => {
+      const input = document.getElementById("build-continue");
+      input?.focus();
+      input?.scrollIntoView({ block: "center" });
+    }, 0);
+  }
+
+  function downloadTrace(format: "md" | "json") {
+    if (!build) return;
+    const link = document.createElement("a");
+    link.href = buildTraceUrl(build.build_id, format);
+    link.download = "";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  }
+
+  const summary = (
+    <section
+      aria-label="构建概览"
+      className="rounded-panel border border-line bg-surface px-4 py-3"
+    >
+      <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm leading-5 xl:grid-cols-4">
+        <div className="flex min-w-0 flex-wrap gap-x-2">
+          <dt className="font-semibold text-ink">状态</dt>
+          <dd className="min-w-0 text-ink-2">
+            {buildStateLabel(build.state)}
+            {build.outcome ? ` · ${buildOutcomeLabel(build.outcome)}` : ""}
+          </dd>
+        </div>
+        <div className="flex min-w-0 flex-wrap gap-x-2">
+          <dt className="font-semibold text-ink">自动修复</dt>
+          <dd className="min-w-0 text-ink-2">
+            {build.repair_round ? `${build.repair_round}/${build.repair_limit}` : "0"}
+          </dd>
+        </div>
+        <div className="flex min-w-0 flex-wrap gap-x-2">
+          <dt className="font-semibold text-ink">耗时</dt>
+          <dd className="min-w-0 text-ink-2">
+            {build.elapsed_seconds !== null
+              ? `${Math.round(build.elapsed_seconds)} 秒`
+              : "—"}
+          </dd>
+        </div>
+        <div className="flex min-w-0 flex-wrap gap-x-2">
+          <dt className="font-semibold text-ink">验证</dt>
+          <dd className="min-w-0 text-ink-2">{validationLabel(build)}</dd>
+        </div>
+      </dl>
+    </section>
+  );
+
+  const moreGroups: RowActionItem[][] = [];
+  const primaryActions: RowActionItem[] = [];
+  if (
+    rebuildHref &&
+    (canContinue || build.state === "CANCELLED") &&
+    primary?.kind !== "rebuild"
+  ) {
+    primaryActions.push({
+      key: "rebuild",
+      label: "重新构建（新 build）",
+      icon: <RefreshCw size={14} />,
+      onSelect: () => navigate(rebuildHref),
+    });
+  }
+  if (canCancel && primary?.kind !== "cancel") {
+    primaryActions.push({
+      key: "cancel",
+      label: "取消构建…",
+      icon: <ShieldAlert size={14} />,
+      danger: true,
+      onSelect: () => {
+        setConfirmError("");
+        setConfirmCancel(true);
+      },
+    });
+  }
+  if (primaryActions.length) moreGroups.push(primaryActions);
+
+  const utilityActions: RowActionItem[] = [
+    {
+      key: "copy",
+      label: "复制构建 ID",
+      icon: <FileText size={14} />,
+      onSelect: () => void copyId(),
+    },
+  ];
+  if (href) {
+    utilityActions.push({
+      key: "site",
+      label: "打开站点详情",
+      icon: <ArrowLeft size={14} />,
+      onSelect: () => navigate(href),
+    });
+  }
+  if (build.batch_id) {
+    utilityActions.push({
+      key: "batch",
+      label: "打开批次详情",
+      icon: <ArrowLeft size={14} />,
+      onSelect: () => navigate(`/batches/${encodeURIComponent(build.batch_id ?? "")}`),
+    });
+  }
+  if (build.trace_available) {
+    utilityActions.push(
+      {
+        key: "trace-md",
+        label: "下载构建过程",
+        icon: <FileText size={14} />,
+        onSelect: () => downloadTrace("md"),
+      },
+      {
+        key: "trace-json",
+        label: "下载 trace.json",
+        icon: <Download size={14} />,
+        onSelect: () => downloadTrace("json"),
+      },
+    );
+  }
+  moreGroups.push(utilityActions);
+
+  const continuePanel = canContinue ? (
+    <section
+      aria-label="继续构建会话"
+      className="rounded-panel border border-warning/25 bg-warning-soft px-4 py-4 sm:px-5"
+    >
+      <div className="border-b border-warning/20 pb-3">
+        <h2 className="text-[17px] leading-6 font-semibold text-warning">继续原会话</h2>
+        <p className="mt-1 text-xs leading-5 text-ink-2">
+          沿用当前构建记录、会话和工作区，把补充指令发回同一模型会话，不产生新的
+          build。重新构建会回到站点详情发起新构建，旧记录和证据保留。
+        </p>
+      </div>
+      <div className="mt-3 space-y-3">
+        {canContinue ? (
+          <>
+            <label className="flex flex-col gap-1" htmlFor="build-continue">
+              <span className="text-xs font-medium text-ink-3">
+                给构建 Agent 的补充指令
+              </span>
+              <Textarea
+                id="build-continue"
+                rows={3}
+                maxLength={4000}
+                value={continueDraft}
+                placeholder={
+                  interrupted
+                    ? "留空会发送默认指令：检查工作区已有产物，从中断处继续，不重复已完成部分。"
+                    : "例如：上次失败在 discovery.sources，请检查列表入口并重新生成规则；保留已确认的选择器。"
+                }
+                onChange={(event) => setContinueDraft(event.target.value)}
+                disabled={continueDisabled}
+              />
+            </label>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="max-w-2xl text-[11px] leading-5 text-ink-3">
+                发送会继续调用模型并产生费用；主机只接受失败或中断构建的会话，不会创建新的构建记录。
+              </p>
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-[11px] text-ink-3">
+                  {continueDraft.length}/4000
+                </span>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  onClick={() => void runContinue()}
+                  disabled={continueDisabled || (!continueDraft.trim() && !interrupted)}
+                >
+                  {continueBusy ? "发送中…" : "发送并继续"}
+                </Button>
+                {rebuildHref ? (
+                  <Button
+                    size="sm"
+                    onClick={() => navigate(rebuildHref)}
+                    disabled={continueBusy}
+                  >
+                    重新构建（新 build）
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+            {configBlockReason ? (
+              <div className="flex flex-wrap items-center gap-2 rounded-control border border-warning/25 bg-warning-soft px-3 py-2 text-xs leading-5 text-warning">
+                <p>{configBlockReason}</p>
+                {configQuery.isError ? (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => void configQuery.refetch()}
+                  >
+                    重试读取配置
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <p className="text-xs leading-5 text-ink-3">
+            本次构建已经继续过，当前状态为 {buildStateLabel(build.state)}。
+          </p>
+        )}
+        {continuations.length ? (
+          <div>
+            <p className="text-[11px] text-ink-3">继续记录</p>
+            <ul className="mt-1 space-y-1">
+              {continuations.map((item) => (
+                <li
+                  key={item.request_id}
+                  className="flex flex-wrap items-center gap-2 rounded-control border border-line bg-surface-muted px-3 py-2 text-xs text-ink-2"
+                >
+                  <Badge
+                    tone={item.state === "FAILED" ? "danger" : "neutral"}
+                    dot={false}
+                  >
+                    {item.state === "FAILED" ? "失败" : "已受理"}
+                  </Badge>
+                  <span>{formatTime(item.created_at)}</span>
+                  <span className="text-ink-3">{item.message_chars} 字</span>
+                  <span className="font-mono text-[10px] text-ink-3">
+                    {item.request_id}
+                  </span>
+                  {item.error ? (
+                    <span className="basis-full text-danger">{item.error}</span>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </div>
+    </section>
+  ) : null;
+
+  const factsPanel = (
+    <section className="rounded-panel border border-line bg-surface">
+      <div className="border-b border-line px-4 py-4 sm:px-5">
+        <h2 className="text-[17px] leading-6 font-semibold text-ink">构建事实</h2>
+        <p className="mt-0.5 text-xs leading-5 text-ink-3">
+          模型、出口、会话和规则；不包含规则正文。
+        </p>
+      </div>
+      <dl className="grid grid-cols-1 gap-x-6 px-4 py-2 sm:grid-cols-2 sm:px-5">
+        <BuildFact label="模型">{buildModelLabel(build) || "—"}</BuildFact>
+        <BuildFact label="出口">
+          {build.proxy ? build.proxy : "服务默认／直连"}
+        </BuildFact>
+        <BuildFact label="开始">
+          {build.started_at ? formatTime(build.started_at) : "—"}
+        </BuildFact>
+        <BuildFact label="会话">
+          <span className="font-mono text-[11px]">{build.session_id || "—"}</span>
+        </BuildFact>
+        <BuildFact label="来源规则">{build.source_rule?.rule_version || "—"}</BuildFact>
+        <BuildFact label="目标规则">
+          {build.candidate_rule?.rule_version || build.rule?.rule_version || "—"}
+        </BuildFact>
+        <BuildFact label="工作区">
+          <span className="break-all font-mono text-[11px]">
+            {build.workspace || "—"}
+          </span>
+        </BuildFact>
+        <BuildFact label="样例存档">
+          {build.archive_stats
+            ? `${build.archive_stats.pages} 页 / ${formatBytes(
+                build.archive_stats.bytes,
+              )}`
+            : "—"}
+        </BuildFact>
+        <BuildFact label="目录">
+          {build.catalog?.catalog_scope === "full"
+            ? `全量目标 ${build.catalog.catalog_products ?? "—"}`
+            : "样例"}
+        </BuildFact>
+        <BuildFact label="思考">
+          {!build.reasoning_capture_enabled
+            ? "服务端未开启"
+            : build.reasoning_retained
+              ? "实时 + trace"
+              : build.reasoning_live
+                ? "实时，不写 trace"
+                : "已开启，等待输出"}
+        </BuildFact>
+        <BuildFact label="更新">
+          <span className="tabular">{formatTime(build.updated_at)}</span>
+        </BuildFact>
+        <BuildFact label="队列">
+          {queued && build.queue_position ? `第 ${build.queue_position} 位` : "—"}
+        </BuildFact>
+      </dl>
+    </section>
+  );
+
+  const eventsPanel = (
+    <section className="rounded-panel border border-line bg-surface">
+      <div className="border-b border-line px-4 py-4 sm:px-5">
+        <h2 className="text-[17px] leading-6 font-semibold text-ink">当前阶段</h2>
+        <p className="mt-0.5 text-xs leading-5 text-ink-3">
+          最近事件；完整模型输出和工具调用在「日志与 Trace」。
+        </p>
+      </div>
+      <div className="px-4 py-3 sm:px-5">
+        {events.length ? (
+          <ol className="space-y-1.5" aria-label="构建事件">
+            {events.map((event, index) => (
+              <li
+                key={`${event.created_at}-${index}`}
+                className="flex flex-wrap items-center gap-2 text-xs"
+              >
+                <Badge tone={buildEventTone(event)} dot={false}>
+                  {buildEventText(event)}
+                </Badge>
+                <span className="text-ink-3">{formatTime(event.created_at)}</span>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <p className="text-xs leading-5 text-ink-3">
+            {queued
+              ? "排队中的构建尚未创建会话；开始后会在这里显示当前阶段。"
+              : "还没有可显示的事件。"}
+          </p>
+        )}
+      </div>
+    </section>
+  );
+
+  const statusContent = (
+    <>
+      {continuePanel}
+      {factsPanel}
+      {eventsPanel}
+      {build.state === "FINISHED" && build.outcome === "succeeded" ? (
+        <p className="flex items-start gap-2 rounded-panel border border-success/25 bg-success-soft px-4 py-3 text-xs leading-5 text-success">
+          <FileText className="mt-0.5 shrink-0" size={14} aria-hidden="true" />
+          构建完成，候选规则已安装。回到站点详情启动可采站点即可创建采集任务。
+        </p>
+      ) : null}
+    </>
+  );
+
+  const evidenceContent = (
+    <>
+      <section className="rounded-panel border border-line bg-surface">
+        <div className="border-b border-line px-4 py-4 sm:px-5">
+          <h2 className="text-[17px] leading-6 font-semibold text-ink">验证证据</h2>
+          <p className="mt-0.5 text-xs leading-5 text-ink-3">
+            主机变更、候选冒烟和同页回归；证据不足时保留阻断理由。
+          </p>
+        </div>
+        <div className="px-4 py-4 sm:px-5">
+          {hasEvidence ? (
+            <RuleEvidence change={build.change_summary} validation={build.validation} />
+          ) : (
+            <p className="text-xs leading-5 text-ink-3">
+              该构建没有记录主机验证摘要。旧构建、取消或未进入候选安装的会话不会伪造验证结果。
+            </p>
+          )}
+        </div>
+      </section>
+      <section className="rounded-panel border border-line bg-surface px-4 py-4 sm:px-5">
+        <h2 className="text-[17px] leading-6 font-semibold text-ink">样例存档</h2>
+        <p className="mt-1 text-xs leading-5 text-ink-3">
+          {build.archive_stats
+            ? `${build.archive_stats.pages} 页，${formatBytes(
+                build.archive_stats.bytes,
+              )}；按样例验证范围保存。`
+            : "本次构建没有样例存档。"}
+        </p>
+      </section>
+    </>
+  );
+
+  const repairsContent = (
+    <section className="rounded-panel border border-line bg-surface">
+      <div className="border-b border-line px-4 py-4 sm:px-5">
+        <h2 className="text-[17px] leading-6 font-semibold text-ink">自动修复轮次</h2>
+        <p className="mt-0.5 text-xs leading-5 text-ink-3">
+          每轮由主机验证失败触发，使用同一构建会话继续；轮次上限由服务配置。
+        </p>
+      </div>
+      <div className="px-4 py-4 sm:px-5">
+        <RepairHistory repairs={build.repairs} />
+      </div>
+    </section>
+  );
+
+  const logsContent = (
+    <>
+      <section className="rounded-panel border border-line bg-surface px-4 py-4 sm:px-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-[17px] leading-6 font-semibold text-ink">
+              日志与 Trace
+            </h2>
+            <p className="mt-1 text-xs leading-5 text-ink-3">
+              构建时间线有界滚动；trace 可能包含页面或提示内容，按证据文件管理。
+            </p>
+          </div>
+          {build.trace_available ? (
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" onClick={() => downloadTrace("md")}>
+                <FileText size={13} aria-hidden="true" />
+                下载构建过程
+              </Button>
+              <Button size="sm" onClick={() => downloadTrace("json")}>
+                <Download size={13} aria-hidden="true" />
+                trace.json
+              </Button>
+            </div>
+          ) : null}
+        </div>
+      </section>
+      <BuildTimeline
+        build={build}
+        messages={messages}
+        live={active && !queued}
+        connected={stream.connected}
+        streamError={stream.error}
+        ended={stream.ended}
+      />
+    </>
+  );
+
+  const panels: Record<BuildView, ReactNode> = {
+    status: statusContent,
+    evidence: evidenceContent,
+    repairs: repairsContent,
+    logs: logsContent,
+  };
+
+  const tabCounts: Record<BuildView, string> = {
+    status: "",
+    evidence: hasEvidence ? "1" : "",
+    repairs: build.repairs.length ? String(build.repairs.length) : "",
+    logs: build.trace_available ? "1" : "",
+  };
+
+  async function copyId() {
+    if (!build) return;
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error("浏览器不支持复制操作");
+      }
+      await navigator.clipboard.writeText(build.build_id);
+      setNotice("构建 ID 已复制。");
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : String(exc));
+    }
+  }
+
+  function handlePrimary() {
+    if (!primary) return;
+    if (primary.kind === "cancel") {
+      setConfirmError("");
+      setConfirmCancel(true);
+      return;
+    }
+    if (primary.kind === "continue") {
+      focusContinue();
+      return;
+    }
+    if (primary.kind === "site" && href) {
+      navigate(href);
+      return;
+    }
+    if (primary.kind === "rebuild" && rebuildHref) {
+      navigate(rebuildHref);
+      return;
+    }
+    if (primary.kind === "pause" || primary.kind === "resume") {
+      void runControl(primary.kind);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <header className="rounded-panel border border-line bg-surface px-4 py-5 sm:px-6">
@@ -374,10 +956,10 @@ export function BuildDetailPage() {
           </span>
         </div>
 
-        <div className="mt-4 flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between lg:gap-8">
-          <div className="min-w-0">
+        <div className="mt-3 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between lg:gap-8">
+          <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2.5">
-              <h1 className="text-[24px] leading-8 font-semibold tracking-[-0.02em] text-ink sm:text-[28px] sm:leading-9">
+              <h1 className="text-[24px] leading-8 font-semibold tracking-[-0.02em] break-words text-ink sm:text-[28px] sm:leading-9">
                 {build.site_key || "未关联站点"}
               </h1>
               <Badge tone="neutral" dot={false}>
@@ -392,15 +974,21 @@ export function BuildDetailPage() {
                 </Badge>
               ) : null}
             </div>
-            <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-ink-3">
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-ink-2">
+              {build.error ? "构建错误" : buildModeLabel(build.mode)} ·{" "}
+              <span className="mono text-[11px]">
+                {buildModelLabel(build) || "模型未记录"}
+              </span>
+            </p>
+            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-3">
               {href ? (
-                <Link className="hover:text-accent hover:underline" to={href}>
+                <Link className="text-accent hover:underline" to={href}>
                   站点详情
                 </Link>
               ) : null}
               {build.batch_id ? (
                 <Link
-                  className="hover:text-accent hover:underline"
+                  className="text-accent hover:underline"
                   to={`/batches/${encodeURIComponent(build.batch_id)}`}
                 >
                   批次 {build.batch_id}
@@ -421,44 +1009,48 @@ export function BuildDetailPage() {
           </div>
 
           <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:shrink-0 lg:justify-end">
-            {canPause ? (
+            {primary ? (
               <Button
-                size="sm"
-                onClick={() => void runControl("pause")}
-                disabled={Boolean(busy)}
+                variant={primary.kind === "cancel" ? "danger" : "primary"}
+                onClick={handlePrimary}
+                disabled={
+                  Boolean(busy) ||
+                  (primary.kind === "continue" && continueDisabled) ||
+                  (primary.kind === "site" && !href) ||
+                  (primary.kind === "rebuild" && !rebuildHref)
+                }
               >
-                <Pause size={13} aria-hidden="true" />
-                暂停
+                {primary.kind === "pause" ? (
+                  <Pause size={14} aria-hidden="true" />
+                ) : primary.kind === "resume" ? (
+                  <Play size={14} aria-hidden="true" />
+                ) : primary.kind === "continue" ? (
+                  <Play size={14} aria-hidden="true" />
+                ) : primary.kind === "site" ? (
+                  <ExternalLink size={14} aria-hidden="true" />
+                ) : (
+                  <RefreshCw size={14} aria-hidden="true" />
+                )}
+                {busy &&
+                primary.kind !== "continue" &&
+                primary.kind !== "site" &&
+                primary.kind !== "rebuild"
+                  ? "处理中…"
+                  : primary.label}
               </Button>
             ) : null}
-            {canResume ? (
-              <Button
-                size="sm"
-                variant="primary"
-                onClick={() => void runControl("resume")}
-                disabled={Boolean(busy)}
-              >
-                <Play size={13} aria-hidden="true" />
-                继续
-              </Button>
-            ) : null}
-            {active ? (
-              <Button
-                size="sm"
-                variant="danger"
-                onClick={() => {
-                  setConfirmError("");
-                  setConfirmCancel(true);
-                }}
-                disabled={Boolean(busy)}
-              >
-                <X size={13} aria-hidden="true" />
-                {queued ? "取消排队" : "取消构建"}
-              </Button>
-            ) : null}
+            <RowActionsMenu
+              label="更多构建操作"
+              groups={moreGroups}
+              busy={busy === "cancel"}
+              trigger={
+                <Button aria-label="更多构建操作">
+                  <MoreHorizontal size={16} aria-hidden="true" />
+                  更多
+                </Button>
+              }
+            />
             <Button
-              size="sm"
-              variant="ghost"
               onClick={() => {
                 void buildQuery.refetch();
                 void messagesQuery.refetch();
@@ -471,7 +1063,7 @@ export function BuildDetailPage() {
                     ? "animate-spin"
                     : undefined
                 }
-                size={13}
+                size={14}
                 aria-hidden="true"
               />
               刷新
@@ -498,7 +1090,7 @@ export function BuildDetailPage() {
       {build.pending_dependencies.length || permissions.length ? (
         <section
           aria-label="构建等待审批"
-          className="rounded-panel border border-warning/25 bg-warning-soft px-5 py-4"
+          className="rounded-panel border border-warning/25 bg-warning-soft px-4 py-4 sm:px-5"
         >
           <h2 className="flex items-center gap-1.5 text-[15px] leading-6 font-semibold text-warning">
             <ShieldAlert size={15} aria-hidden="true" />
@@ -598,286 +1190,90 @@ export function BuildDetailPage() {
         </section>
       ) : null}
 
-      <MetricStrip
-        label="构建概览"
-        items={[
-          {
-            label: "自动修复",
-            value: build.repair_round
-              ? `${build.repair_round}/${build.repair_limit}`
-              : "0",
-            hint: build.repairs.some((item) => item.resolved)
-              ? "至少一轮已解决"
-              : build.repair_round
-                ? "自动轮次未解决"
-                : "主机验证失败才触发",
-          },
-          {
-            label: "耗时",
-            value:
-              build.elapsed_seconds !== null
-                ? `${Math.round(build.elapsed_seconds)} 秒`
-                : "—",
-            hint: build.finished_at
-              ? `结束于 ${formatTime(build.finished_at)}`
-              : "尚未结束",
-          },
-          {
-            label: "规则",
-            value: build.rule ? build.rule.rule_version : "—",
-            hint: build.rule ? build.rule.rule_id : "尚未安装",
-          },
-          {
-            label: "样例存档",
-            value: build.archive_stats ? `${build.archive_stats.pages} 页` : "—",
-            hint: build.archive_stats
-              ? formatBytes(build.archive_stats.bytes)
-              : "本次未存档",
-          },
-        ]}
-      />
+      {summary}
 
-      <section className="rounded-panel border border-line bg-surface">
-        <div className="flex flex-col items-start gap-3 border-b border-line px-4 py-4 sm:flex-row sm:justify-between sm:px-5">
-          <div>
-            <h2 className="text-[17px] leading-6 font-semibold text-ink">构建事实</h2>
-            <p className="mt-0.5 text-xs text-ink-3">
-              模型、出口、工作区和会话信息；不包含规则正文。
-            </p>
-          </div>
-          {build.trace_available ? (
-            <div className="flex flex-wrap gap-2">
-              <Button asChild size="sm">
-                <a href={buildTraceUrl(build.build_id, "md")} download>
-                  <FileText size={13} aria-hidden="true" />
-                  下载构建过程
-                </a>
-              </Button>
-              <Button asChild size="sm">
-                <a href={buildTraceUrl(build.build_id, "json")} download>
-                  <Download size={13} aria-hidden="true" />
-                  trace.json
-                </a>
-              </Button>
-            </div>
-          ) : null}
-        </div>
-        <dl className="grid grid-cols-2 gap-x-4 gap-y-3 px-4 py-4 sm:grid-cols-4 sm:px-5">
-          <div>
-            <dt className="text-[11px] text-ink-3">模型</dt>
-            <dd className="mt-0.5 text-xs leading-5 text-ink">
-              {buildModelLabel(build) || "—"}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-[11px] text-ink-3">出口</dt>
-            <dd className="mt-0.5 text-xs leading-5 text-ink">
-              {build.proxy ? build.proxy : "服务默认／直连"}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-[11px] text-ink-3">开始</dt>
-            <dd className="mt-0.5 text-xs leading-5 text-ink">
-              {build.started_at ? formatTime(build.started_at) : "—"}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-[11px] text-ink-3">会话</dt>
-            <dd className="mt-0.5 truncate font-mono text-xs leading-5 text-ink">
-              {build.session_id || "—"}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-[11px] text-ink-3">来源规则</dt>
-            <dd className="mt-0.5 text-xs leading-5 text-ink">
-              {build.source_rule?.rule_version || "—"}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-[11px] text-ink-3">目标规则</dt>
-            <dd className="mt-0.5 text-xs leading-5 text-ink">
-              {build.candidate_rule?.rule_version || build.rule?.rule_version || "—"}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-[11px] text-ink-3">思考</dt>
-            <dd className="mt-0.5 text-xs leading-5 text-ink">
-              {!build.reasoning_capture_enabled
-                ? "服务端未开启"
-                : build.reasoning_retained
-                  ? "实时 + trace"
-                  : build.reasoning_live
-                    ? "实时，不写 trace"
-                    : build.state === "FINISHED" || build.state === "CANCELLED"
-                      ? "已结束，未写入 trace"
-                      : "已开启，等待输出"}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-[11px] text-ink-3">档案</dt>
-            <dd className="mt-0.5 text-xs leading-5 text-ink">
-              {build.catalog?.catalog_scope === "full"
-                ? `全量目标 ${build.catalog.catalog_products ?? "—"}`
-                : "样例验证"}
-            </dd>
-          </div>
-        </dl>
-        <div className="border-t border-line px-5 py-4">
-          <p className="mb-1.5 text-[11px] text-ink-3">主机变更与验证</p>
-          {hasEvidence ? (
-            <RuleEvidence change={build.change_summary} validation={build.validation} />
-          ) : (
-            <p className="text-xs leading-5 text-ink-3">
-              该构建没有记录主机验证摘要。旧构建、取消或未进入候选安装的会话不会伪造验证结果。
-            </p>
-          )}
-        </div>
-      </section>
+      <div className="sm:hidden">
+        <label className="sr-only" htmlFor="build-view-select">
+          切换构建视图
+        </label>
+        <select
+          id="build-view-select"
+          className="h-9 w-full rounded-control border border-line-strong bg-surface px-3 text-sm text-ink"
+          value={activeView}
+          onChange={(event) => setView(event.target.value as BuildView)}
+        >
+          {BUILD_VIEWS.map((view) => (
+            <option key={view} value={view}>
+              {BUILD_VIEW_LABELS[view]}
+              {tabCounts[view] ? `（${tabCounts[view]}）` : ""}
+            </option>
+          ))}
+        </select>
+      </div>
 
-      <section className="rounded-panel border border-line bg-surface">
-        <div className="border-b border-line px-5 py-4">
-          <h2 className="text-[17px] leading-6 font-semibold text-ink">自动修复轮次</h2>
-          <p className="mt-0.5 text-xs text-ink-3">
-            每轮由主机验证失败触发，使用同一构建会话继续；轮次上限由服务配置。
-          </p>
-        </div>
-        <div className="px-5 py-4">
-          <RepairHistory repairs={build.repairs} />
-        </div>
-      </section>
+      <div
+        className="hidden gap-1 overflow-x-auto border-b border-line sm:flex"
+        role="tablist"
+        aria-label="构建视图"
+      >
+        {BUILD_VIEWS.map((view) => {
+          const selected = activeView === view;
+          const count = tabCounts[view];
+          return (
+            <button
+              key={view}
+              id={`build-tab-${view}`}
+              type="button"
+              role="tab"
+              aria-selected={selected}
+              aria-controls={`build-panel-${view}`}
+              tabIndex={selected ? 0 : -1}
+              className={cn(
+                "flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-semibold transition-colors",
+                selected
+                  ? "border-accent text-accent"
+                  : "border-transparent text-ink-2 hover:text-ink",
+              )}
+              onClick={() => setView(view)}
+              onKeyDown={(event) => handleViewKey(event, view)}
+            >
+              {BUILD_VIEW_LABELS[view]}
+              {count ? (
+                <span className="rounded-full bg-surface-sunken px-1.5 text-[10px] leading-[18px] text-ink-3">
+                  {count}
+                </span>
+              ) : null}
+            </button>
+          );
+        })}
+      </div>
 
-      {canContinue || continuations.length ? (
-        <section className="rounded-panel border border-line bg-surface">
-          <div className="border-b border-line px-5 py-4">
-            <h2 className="text-[17px] leading-6 font-semibold text-ink">
-              继续构建会话
-            </h2>
-            <p className="mt-0.5 text-xs leading-5 text-ink-3">
-              {interrupted
-                ? "服务重启中断了本次构建，会话和工作区已保留。继续会重新加载同一会话，从中断处完成剩余工作。"
-                : "失败的构建可以继续，且要求会话仍可恢复；成功构建请通过结果反馈走规则修复。"}
-            </p>
-          </div>
-          <div className="space-y-3 px-5 py-4">
-            {canContinue ? (
-              <>
-                <label className="flex flex-col gap-1" htmlFor="build-continue">
-                  <span className="text-xs font-medium text-ink-3">
-                    给构建 Agent 的指令
-                  </span>
-                  <Textarea
-                    id="build-continue"
-                    rows={3}
-                    maxLength={4000}
-                    value={continueDraft}
-                    placeholder={
-                      interrupted
-                        ? "留空会发送默认指令：检查工作区已有产物，从中断处继续，不重复已完成部分。"
-                        : "例如：上次失败在 discovery.sources，请检查列表入口并重新生成规则；保留已确认的选择器。"
-                    }
-                    onChange={(event) => setContinueDraft(event.target.value)}
-                    disabled={continueDisabled}
-                  />
-                </label>
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="max-w-2xl text-[11px] leading-5 text-ink-3">
-                    发送会继续调用模型并产生费用；主机只接受失败或中断构建的会话，不会创建新的构建记录。
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-[11px] text-ink-3">
-                      {continueDraft.length}/4000
-                    </span>
-                    <Button
-                      size="sm"
-                      variant="primary"
-                      onClick={() => void runContinue()}
-                      disabled={
-                        continueDisabled || (!continueDraft.trim() && !interrupted)
-                      }
-                    >
-                      {continueBusy ? "发送中…" : "发送并继续"}
-                    </Button>
-                  </div>
-                </div>
-                {configBlockReason ? (
-                  <div className="flex flex-wrap items-center gap-2 rounded-control border border-warning/25 bg-warning-soft px-3 py-2 text-xs leading-5 text-warning">
-                    <p>{configBlockReason}</p>
-                    {configQuery.isError ? (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => void configQuery.refetch()}
-                      >
-                        重试读取配置
-                      </Button>
-                    ) : null}
-                  </div>
-                ) : null}
-              </>
-            ) : (
-              <p className="text-xs leading-5 text-ink-3">
-                本次构建已经继续过，当前状态为 {buildStateLabel(build.state)}。
-              </p>
-            )}
-            {continuations.length ? (
-              <div>
-                <p className="text-[11px] text-ink-3">继续记录</p>
-                <ul className="mt-1 space-y-1">
-                  {continuations.map((item) => (
-                    <li
-                      key={item.request_id}
-                      className="flex flex-wrap items-center gap-2 rounded-control border border-line bg-surface-muted px-3 py-2 text-xs text-ink-2"
-                    >
-                      <Badge
-                        tone={item.state === "FAILED" ? "danger" : "neutral"}
-                        dot={false}
-                      >
-                        {item.state === "FAILED" ? "失败" : "已受理"}
-                      </Badge>
-                      <span>{formatTime(item.created_at)}</span>
-                      <span className="text-ink-3">{item.message_chars} 字</span>
-                      <span className="font-mono text-[10px] text-ink-3">
-                        {item.request_id}
-                      </span>
-                      {item.error ? (
-                        <span className="basis-full text-danger">{item.error}</span>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-          </div>
+      {BUILD_VIEWS.map((view) => (
+        <section
+          key={view}
+          id={`build-panel-${view}`}
+          role="tabpanel"
+          aria-labelledby={`build-tab-${view}`}
+          hidden={activeView !== view}
+          tabIndex={0}
+          className="space-y-5"
+        >
+          {activeView === view ? panels[view] : null}
         </section>
-      ) : null}
-
-      <BuildTimeline
-        build={build}
-        messages={messages}
-        live={active && !queued}
-        connected={stream.connected}
-        streamError={stream.error}
-        ended={stream.ended}
-      />
+      ))}
 
       <ConfirmBatchActionDialog
         open={confirmCancel}
-        title={queued ? "取消这次排队？" : "取消这次构建？"}
-        description={
-          queued
-            ? `构建 ${build.build_id} 还在排队，取消后不会启动模型会话。`
-            : `构建 ${build.build_id} 会停止；已产生的会话记录和输出保留。`
-        }
-        consequence={
-          build.mode === "repair"
-            ? "取消后原规则继续生效，已有采集数据不变。"
-            : "取消后站点回到待接入；可重新发起构建。"
-        }
-        confirmLabel={queued ? "确认取消排队" : "确认取消构建"}
-        tone="danger"
+        title="取消这次构建？"
+        description="构建会停止，站点回到待接入；已经生成的中间文件和原因会保留。"
+        consequence="取消构建不影响已有采集任务和结果；之后可以重新开始构建。"
+        confirmLabel="确认取消构建"
+        tone="warning"
         busy={busy === "cancel"}
         error={confirmError}
-        onOpenChange={setConfirmCancel}
+        onOpenChange={(next) => {
+          if (!next) setConfirmCancel(false);
+        }}
         onConfirm={() => void runControl("cancel")}
       />
     </div>

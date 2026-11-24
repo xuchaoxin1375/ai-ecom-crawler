@@ -17,7 +17,6 @@ import {
   Menu,
   PanelLeftClose,
   PanelLeftOpen,
-  Plus,
   Wrench,
   X,
 } from "lucide-react";
@@ -93,45 +92,28 @@ function SidebarLink({
   );
 }
 
-function SidebarAction({
-  href,
-  icon,
+function SidebarGroup({
   label,
   expanded,
-  onPointerNavigate,
+  first = false,
+  children,
 }: {
-  href: string;
-  icon: ReactNode;
   label: string;
   expanded: boolean;
-  onPointerNavigate?: () => void;
+  first?: boolean;
+  children: ReactNode;
 }) {
   return (
-    <a
-      className="flex h-9 items-center gap-2.5 overflow-hidden rounded-control px-2.5 text-sm text-ink-2 transition-colors hover:bg-surface-muted hover:text-ink"
-      href={href}
-      aria-label={expanded ? undefined : label}
-      title={expanded ? undefined : label}
-      onClick={(event) => {
-        if (event.detail > 0) onPointerNavigate?.();
-      }}
-    >
-      <span
-        className="flex h-5 w-5 shrink-0 items-center justify-center text-ink-3"
-        aria-hidden="true"
-      >
-        {icon}
-      </span>
-      <span
-        className={cn(
-          "truncate whitespace-nowrap transition-opacity duration-150",
-          expanded ? "opacity-100" : "opacity-0",
-        )}
-        aria-hidden={!expanded || undefined}
-      >
-        {label}
-      </span>
-    </a>
+    <div className="grid gap-0.5" role="group" aria-label={label}>
+      {expanded ? (
+        <p className="px-2.5 pb-1 pt-3 text-[10px] font-semibold tracking-[0.08em] text-ink-3 uppercase">
+          {label}
+        </p>
+      ) : first ? null : (
+        <div className="mx-2 my-2 h-px bg-line" aria-hidden="true" />
+      )}
+      {children}
+    </div>
   );
 }
 
@@ -494,52 +476,47 @@ export function AppShell() {
       >
         <div className="flex h-full flex-col">
           <nav className="flex-1 overflow-y-auto px-3 py-4" aria-label="主导航">
-            <div className="space-y-0.5">
-              <SidebarLink
-                to="/batches"
-                icon={<LayoutList size={17} />}
-                label="采集批次"
-                expanded={visualOpen}
-                onPointerNavigate={() => {
-                  if (!pinned) setFocused(false);
-                }}
-              />
-              <SidebarLink
-                to="/tasks"
-                icon={<ListTodo size={17} />}
-                label="全部任务"
-                expanded={visualOpen}
-                onPointerNavigate={() => {
-                  if (!pinned) setFocused(false);
-                }}
-              />
-              <SidebarLink
-                to="/builds"
-                icon={<Wrench size={17} />}
-                label="构建记录"
-                expanded={visualOpen}
-                onPointerNavigate={() => {
-                  if (!pinned) setFocused(false);
-                }}
-              />
-              <SidebarLink
-                to="/models"
-                icon={<Cpu size={17} />}
-                label="模型配置"
-                expanded={visualOpen}
-                onPointerNavigate={() => {
-                  if (!pinned) setFocused(false);
-                }}
-              />
-              <SidebarAction
-                href="#/batches?new=1"
-                icon={<Plus size={17} />}
-                label="新建批次"
-                expanded={visualOpen}
-                onPointerNavigate={() => {
-                  if (!pinned) setFocused(false);
-                }}
-              />
+            <div className="space-y-1">
+              <SidebarGroup label="采集工作台" expanded={visualOpen} first>
+                <SidebarLink
+                  to="/batches"
+                  icon={<LayoutList size={17} />}
+                  label="采集批次"
+                  expanded={visualOpen}
+                  onPointerNavigate={() => {
+                    if (!pinned) setFocused(false);
+                  }}
+                />
+                <SidebarLink
+                  to="/tasks"
+                  icon={<ListTodo size={17} />}
+                  label="全部任务"
+                  expanded={visualOpen}
+                  onPointerNavigate={() => {
+                    if (!pinned) setFocused(false);
+                  }}
+                />
+              </SidebarGroup>
+              <SidebarGroup label="规则与设置" expanded={visualOpen}>
+                <SidebarLink
+                  to="/builds"
+                  icon={<Wrench size={17} />}
+                  label="构建记录"
+                  expanded={visualOpen}
+                  onPointerNavigate={() => {
+                    if (!pinned) setFocused(false);
+                  }}
+                />
+                <SidebarLink
+                  to="/models"
+                  icon={<Cpu size={17} />}
+                  label="模型配置"
+                  expanded={visualOpen}
+                  onPointerNavigate={() => {
+                    if (!pinned) setFocused(false);
+                  }}
+                />
+              </SidebarGroup>
             </div>
           </nav>
 
@@ -618,42 +595,39 @@ export function AppShell() {
               </button>
             </div>
             <nav className="flex-1 overflow-y-auto px-3 py-4" aria-label="主导航">
-              <div className="space-y-0.5">
-                <SidebarLink
-                  to="/batches"
-                  icon={<LayoutList size={17} />}
-                  label="采集批次"
-                  expanded
-                  onPointerNavigate={closeMobile}
-                />
-                <SidebarLink
-                  to="/tasks"
-                  icon={<ListTodo size={17} />}
-                  label="全部任务"
-                  expanded
-                  onPointerNavigate={closeMobile}
-                />
-                <SidebarLink
-                  to="/builds"
-                  icon={<Wrench size={17} />}
-                  label="构建记录"
-                  expanded
-                  onPointerNavigate={closeMobile}
-                />
-                <SidebarLink
-                  to="/models"
-                  icon={<Cpu size={17} />}
-                  label="模型配置"
-                  expanded
-                  onPointerNavigate={closeMobile}
-                />
-                <SidebarAction
-                  href="#/batches?new=1"
-                  icon={<Plus size={17} />}
-                  label="新建批次"
-                  expanded
-                  onPointerNavigate={closeMobile}
-                />
+              <div className="space-y-1">
+                <SidebarGroup label="采集工作台" expanded first>
+                  <SidebarLink
+                    to="/batches"
+                    icon={<LayoutList size={17} />}
+                    label="采集批次"
+                    expanded
+                    onPointerNavigate={closeMobile}
+                  />
+                  <SidebarLink
+                    to="/tasks"
+                    icon={<ListTodo size={17} />}
+                    label="全部任务"
+                    expanded
+                    onPointerNavigate={closeMobile}
+                  />
+                </SidebarGroup>
+                <SidebarGroup label="规则与设置" expanded>
+                  <SidebarLink
+                    to="/builds"
+                    icon={<Wrench size={17} />}
+                    label="构建记录"
+                    expanded
+                    onPointerNavigate={closeMobile}
+                  />
+                  <SidebarLink
+                    to="/models"
+                    icon={<Cpu size={17} />}
+                    label="模型配置"
+                    expanded
+                    onPointerNavigate={closeMobile}
+                  />
+                </SidebarGroup>
               </div>
             </nav>
             <div className="border-t border-line px-4 py-3">

@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { BuildMessages, BuildStatus } from "../../lib/api";
 import { renderPage } from "../../test/renderPage";
@@ -136,4 +136,78 @@ it("shows a retry when build configuration cannot be read", async () => {
     (await screen.findAllByRole("button", { name: "重试读取配置" })).length,
   ).toBeGreaterThan(0);
   expect(screen.getByRole("button", { name: "发送并继续" })).toBeDisabled();
+});
+
+it("switches between build status, evidence, repairs and logs", async () => {
+  const build = buildFixture({
+    state: "FINISHED",
+    outcome: "succeeded",
+    validation: {
+      status: "PASSED",
+      candidate_smoke: {
+        executed: true,
+        valid_products: 6,
+        failed_products: 0,
+        excluded_products: 0,
+        currencies: { GBP: 6 },
+      },
+      issue_checks: [],
+      regression: {
+        executed: true,
+        required: false,
+        required_checked: 0,
+        checked: 0,
+        regressions: [],
+      },
+      content_audit: { products_checked: 6, description_gaps: 0 },
+      diff: { changed_fields: ["price_selector"], discovery_changed: false },
+      evidence_sha256: "a".repeat(64),
+    },
+    repairs: [
+      {
+        round: 1,
+        started_at: date,
+        finished_at: date,
+        error: "价格选择器为空",
+        resolved: true,
+      },
+    ],
+    trace_available: true,
+  });
+  await renderBuild(build, {
+    available: true,
+    reasoning_capture_enabled: false,
+    max_repair_rounds: 1,
+  });
+
+  expect(await screen.findByRole("heading", { name: "构建事实" })).toBeVisible();
+  fireEvent.click(screen.getByRole("tab", { name: /验证证据/ }));
+  expect(await screen.findByRole("heading", { name: "验证证据" })).toBeVisible();
+  fireEvent.click(screen.getByRole("tab", { name: /修复轮次/ }));
+  expect(await screen.findByRole("heading", { name: "自动修复轮次" })).toBeVisible();
+  fireEvent.click(screen.getByRole("tab", { name: /日志与 Trace/ }));
+  expect(await screen.findByRole("heading", { name: "构建时间线" })).toBeVisible();
+  expect(
+    within(screen.getByRole("tabpanel")).getByRole("button", {
+      name: "下载构建过程",
+    }),
+  ).toBeVisible();
+});
+
+it("separates continuing the session from rebuilding", async () => {
+  const build = buildFixture({
+    state: "FINISHED",
+    outcome: "failed",
+    error: "价格选择器为空",
+  });
+  await renderBuild(build, {
+    available: true,
+    reasoning_capture_enabled: false,
+    max_repair_rounds: 1,
+  });
+
+  expect(await screen.findByRole("button", { name: "继续原会话" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "发送并继续" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "重新构建（新 build）" })).toBeVisible();
+  expect(screen.getByText(/不产生新的 build/)).toBeVisible();
 });

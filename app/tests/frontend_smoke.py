@@ -152,6 +152,13 @@ def exercise(page: Page, origin: str, fixture: str, root: Path) -> None:
         "FastAPI root did not redirect to the built workbench",
     )
     expect(page).to_have_url(re.compile(r"/next/#/batches(?:\?|$)"))
+    nav = page.get_by_role("navigation", name="主导航")
+    expect(nav.get_by_text("采集工作台", exact=True)).to_be_visible()
+    expect(nav.get_by_text("规则与设置", exact=True)).to_be_visible()
+    expect(nav.get_by_role("link", name="新建批次", exact=True)).to_have_count(0)
+    expect(nav.get_by_role("link", name="采集批次", exact=True)).to_have_attribute(
+        "aria-current", "page"
+    )
     page.get_by_role("region", name="采集批次列表").get_by_role("button", name="新建批次").click()
     draft = page.get_by_role("dialog", name="新建采集批次")
     parse = draft.get_by_role("button", name="解析并预览")
