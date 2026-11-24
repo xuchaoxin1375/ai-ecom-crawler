@@ -510,6 +510,7 @@ class BuildWorkflowTests(unittest.TestCase):
         self.assertIn(("skill", "*", "allow"), entries)
         self.assertIn(("browse_*", "*", "allow"), entries)
         self.assertIn(("htmlmini_*", "*", "allow"), entries)
+        self.assertIn(("request_dependency", "*", "allow"), entries)
         self.assertIn(("websearch", "*", "allow"), entries)
         self.assertIn(("webfetch", "*", "allow"), entries)
         self.assertIn(("question", "*", "deny"), entries)
@@ -1515,6 +1516,81 @@ class BuildWorkflowTests(unittest.TestCase):
             self.assertEqual(len(trace["repairs"]), 1)
             self.assertTrue(trace["repairs"][0]["resolved"])
             self.assertEqual(trace["repair_limit"], 1)
+
+    def test_two_repair_rounds_keep_earlier_round_unresolved(self) -> None:
+        validator_calls = {"count": 0}
+
+        def validator(
+            rule_path: Path,
+            work_dir: Path,
+            max_products: int,
+            max_seconds: int,
+            proxy: str | None = None,
+            **_: Any,
+        ) -> dict[str, Any]:
+            validator_calls["count"] += 1
+            if validator_calls["count"] <= 1:
+                return {
+                    "counts": {"valid_products": 0, "failed_products": 2},
+                    "outcome": "FAILED",
+                    "stop_reason": "NATURAL_END",
+                    "stop_detail": "injected validation failure 1",
+                    "failure_samples": [
+                        {
+                            "url": "https://example.fr/p1",
+                            "reason": "injected_fetch_failure",
+                        }
+                    ],
+                    "currencies": {},
+                }
+            return {
+                "counts": {"valid_products": 2, "failed_products": 0},
+                "outcome": "COMPLETED",
+                "stop_reason": "NATURAL_END",
+                "currencies": {"EUR": 2},
+            }
+
+        adapter = FakeBuildAdapter(
+            self.root,
+            rule_payloads=[
+                invalid_selector_payload(),
+                rule_payload(),
+                rule_payload(version="2026.11.23-3"),
+            ],
+        )
+        manager = self._manager(
+            adapter, validator=validator, max_repair_rounds=2
+        )
+        with self._client(manager) as client:
+            response = client.post(
+                "/api/batches/b-1/sites/example.fr/build",
+                json={"repair_rounds": 2},
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(response.status_code, 202, response.text)
+            build_id = response.json()["build"]["build_id"]
+            result = self._wait_ready(client, build_id)
+            self.assertEqual(result["outcome"], "succeeded", result["error"])
+            self.assertEqual(result["repair_limit"], 2)
+            self.assertEqual(result["repair_round"], 2)
+            self.assertEqual(len(result["repairs"]), 2)
+            self.assertFalse(result["repairs"][0]["resolved"])
+            self.assertTrue(result["repairs"][1]["resolved"])
+            self.assertIn("invalid CSS selector", result["repairs"][0]["error"])
+            self.assertIn(
+                "injected validation failure 1", result["repairs"][1]["error"]
+            )
+            self.assertEqual(validator_calls["count"], 2)
+            self.assertEqual(len(adapter.continued), 2)
+            self.assertIn("automatic repair round 1 of 2", adapter.continued[0][1])
+            self.assertIn("automatic repair round 2 of 2", adapter.continued[1][1])
+            self.assertIn("injected validation failure 1", adapter.continued[1][1])
+
+            trace = client.get(f"/api/builds/{build_id}/trace?format=json").json()
+            self.assertEqual(trace["repair_limit"], 2)
+            self.assertEqual(len(trace["repairs"]), 2)
+            self.assertFalse(trace["repairs"][0]["resolved"])
+            self.assertTrue(trace["repairs"][1]["resolved"])
 
     def test_repair_metadata_survives_manager_restart(self) -> None:
         def validator(

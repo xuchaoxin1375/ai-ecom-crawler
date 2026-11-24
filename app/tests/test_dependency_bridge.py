@@ -151,6 +151,11 @@ class DependencyBridgeTests(unittest.TestCase):
             lambda: self.bridge.pending_ids() == ["req-approval"],
             "request was not held for approval",
         )
+        pending = self.bridge.pending_requests()
+        self.assertEqual(len(pending), 1)
+        self.assertEqual(pending[0]["package"], "brandnew")
+        self.assertEqual(pending[0]["version"], "1.2.3")
+        self.assertEqual(pending[0]["manager"], "pip")
         self.assertIsNone(self._response("req-approval"))
         self.assertTrue(
             any(

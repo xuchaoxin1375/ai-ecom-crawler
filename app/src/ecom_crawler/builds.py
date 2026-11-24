@@ -201,10 +201,16 @@ def default_permissions(
     root = Path(workspace).resolve().as_posix().rstrip("/")
     rules.extend(
         [
-            # Unknown MCP tools/resources stay denied; the known page tools are
-            # re-allowed below. External-directory rules also contain an
-            # underscore, so they are re-allowed separately.
+            # Unknown MCP tools/resources stay denied; the known page tools and
+            # the host-owned dependency bridge are re-allowed below.
+            # External-directory rules also contain an underscore, so they are
+            # re-allowed separately.
             {"action": "*_*", "resource": "*", "effect": "deny"},
+            {
+                "action": "request_dependency",
+                "resource": "*",
+                "effect": "allow",
+            },
             {"action": "browse_*", "resource": "*", "effect": "allow"},
             {"action": "htmlmini_*", "resource": "*", "effect": "allow"},
             {"action": "external_directory", "resource": "*", "effect": "deny"},
@@ -2865,6 +2871,7 @@ domain-mismatched, or produces no valid product.
         events: list[dict[str, Any]] = []
         pending_permissions: list[dict[str, Any]] = []
         pending_dependencies: list[str] = []
+        pending_dependency_requests: list[dict[str, Any]] = []
         if session is not None:
             try:
                 events = [
@@ -2884,6 +2891,13 @@ domain-mismatched, or produces no valid product.
             except Exception:
                 logger.debug("dependency read failed", exc_info=True)
                 pending_dependencies = []
+            try:
+                pending_dependency_requests = (
+                    self.service.pending_dependency_requests(build_id)
+                )
+            except Exception:
+                logger.debug("dependency detail read failed", exc_info=True)
+                pending_dependency_requests = []
         else:
             events = self._read_events(record.workspace, limit=max(1, event_limit))
         repair_limit = self._repair_limits.get(build_id)
@@ -2968,6 +2982,7 @@ domain-mismatched, or produces no valid product.
             "events": events,
             "pending_permissions": pending_permissions,
             "pending_dependencies": pending_dependencies,
+            "pending_dependency_requests": pending_dependency_requests,
             "trace_available": (
                 bool(record.workspace)
                 and (Path(record.workspace) / "out" / "trace.json").is_file()

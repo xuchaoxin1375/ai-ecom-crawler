@@ -99,13 +99,13 @@ export function ImportSitesDialog({
       <Dialog.Portal>
         <Dialog.Overlay className="animate-overlay-in fixed inset-0 z-50 bg-ink/35" />
         <Dialog.Content
-          className="animate-dialog-in fixed left-1/2 top-1/2 z-50 flex max-h-[86vh] w-[min(720px,calc(100vw-64px))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-overlay border border-line bg-surface shadow-overlay"
+          className="animate-dialog-in fixed left-1/2 top-1/2 z-50 flex max-h-[92vh] w-[min(720px,calc(100vw-24px))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-overlay border border-line bg-surface shadow-overlay"
           onOpenAutoFocus={(event) => {
             event.preventDefault();
             document.getElementById("import-sites-text")?.focus();
           }}
         >
-          <header className="flex items-start justify-between gap-6 border-b border-line px-6 py-4">
+          <header className="flex items-start justify-between gap-4 border-b border-line px-4 py-4 sm:gap-6 sm:px-6">
             <div>
               <Dialog.Title className="text-[22px] leading-8 font-semibold tracking-[-0.01em] text-ink">
                 继续导入站点
@@ -125,7 +125,7 @@ export function ImportSitesDialog({
             </button>
           </header>
 
-          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-5">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-5 sm:px-6">
             <div>
               <label
                 className="mb-1 block text-xs font-medium text-ink-3"
@@ -178,7 +178,7 @@ export function ImportSitesDialog({
                   </span>
                 </div>
 
-                <div className="grid grid-cols-4 gap-2">
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                   {[
                     { label: "可采", value: report.summary.ready },
                     { label: "待接入", value: report.summary.needs_onboarding },
@@ -229,7 +229,7 @@ export function ImportSitesDialog({
           </div>
 
           {confirmDiscard ? (
-            <div className="flex items-center justify-between gap-4 border-t border-warning/25 bg-warning-soft px-6 py-3">
+            <div className="flex flex-col items-start gap-3 border-t border-warning/25 bg-warning-soft px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6">
               <p className="text-sm text-warning">
                 输入框里还有未导入的站点，确定关闭弹窗？
               </p>
@@ -251,11 +251,11 @@ export function ImportSitesDialog({
             </div>
           ) : null}
 
-          <footer className="flex items-center justify-between gap-4 border-t border-line px-6 py-4">
+          <footer className="flex flex-col items-start gap-3 border-t border-line px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
             <p className="text-xs text-ink-3">
               导入会立即写入批次；重复和无效条目会保留并标出原因。
             </p>
-            <div className="flex items-center gap-2">
+            <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
               <Button
                 variant="ghost"
                 onClick={() => requestOpenChange(false)}

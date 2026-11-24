@@ -333,6 +333,26 @@ class DependencyBridge:
         with self._lock:
             return sorted(self._pending)
 
+    def pending_requests(self) -> list[dict[str, Any]]:
+        """Return the held approval requests with the fields the UI needs."""
+        with self._lock:
+            items = sorted(
+                self._pending.values(), key=lambda item: (item.created_at, item.request_id)
+            )
+            return [
+                {
+                    "request_id": item.request_id,
+                    "package": str(item.payload.get("package") or ""),
+                    "version": item.payload.get("version"),
+                    "manager": item.payload.get("manager"),
+                    "scope": item.payload.get("scope"),
+                    "reason": item.payload.get("reason"),
+                    "source": item.payload.get("source"),
+                    "fallback": item.payload.get("fallback"),
+                }
+                for item in items
+            ]
+
     def process_once(self) -> None:
         if not self.is_active() or self.is_paused():
             return

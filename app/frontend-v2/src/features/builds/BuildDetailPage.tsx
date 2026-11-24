@@ -305,6 +305,9 @@ export function BuildDetailPage() {
   const canPause = build?.state === "RUNNING";
   const canResume = build?.state === "PAUSED";
   const permissions = permissionItems(build);
+  const dependencyDetails = new Map(
+    (build?.pending_dependency_requests ?? []).map((item) => [item.request_id, item]),
+  );
   const href = build ? siteHref(build) : null;
   const hasEvidence =
     Array.isArray(build?.change_summary?.changed_fields) ||
@@ -350,7 +353,7 @@ export function BuildDetailPage() {
 
   return (
     <div className="space-y-6">
-      <header className="rounded-panel border border-line bg-surface px-6 py-5">
+      <header className="rounded-panel border border-line bg-surface px-4 py-5 sm:px-6">
         <div className="flex items-center justify-between gap-4">
           <Link
             className="inline-flex items-center gap-1.5 text-sm font-medium text-ink-2 hover:text-ink"
@@ -359,13 +362,15 @@ export function BuildDetailPage() {
             <ArrowLeft size={15} aria-hidden="true" />
             返回构建记录
           </Link>
-          <span className="font-mono text-[11px] text-ink-3">{build.build_id}</span>
+          <span className="min-w-0 truncate font-mono text-[11px] text-ink-3">
+            {build.build_id}
+          </span>
         </div>
 
-        <div className="mt-4 flex items-start justify-between gap-8">
+        <div className="mt-4 flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between lg:gap-8">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2.5">
-              <h1 className="text-[28px] leading-9 font-semibold tracking-[-0.02em] text-ink">
+              <h1 className="text-[24px] leading-8 font-semibold tracking-[-0.02em] text-ink sm:text-[28px] sm:leading-9">
                 {build.site_key || "未关联站点"}
               </h1>
               <Badge tone="neutral" dot={false}>
@@ -408,7 +413,7 @@ export function BuildDetailPage() {
             </div>
           </div>
 
-          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:shrink-0 lg:justify-end">
             {canPause ? (
               <Button
                 size="sm"
@@ -523,7 +528,7 @@ export function BuildDetailPage() {
       />
 
       <section className="rounded-panel border border-line bg-surface">
-        <div className="flex items-start justify-between gap-4 border-b border-line px-5 py-4">
+        <div className="flex flex-col items-start gap-3 border-b border-line px-4 py-4 sm:flex-row sm:justify-between sm:px-5">
           <div>
             <h2 className="text-[17px] leading-6 font-semibold text-ink">构建事实</h2>
             <p className="mt-0.5 text-xs text-ink-3">
@@ -547,7 +552,7 @@ export function BuildDetailPage() {
             </div>
           ) : null}
         </div>
-        <dl className="grid grid-cols-4 gap-x-4 gap-y-3 px-5 py-4">
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-3 px-4 py-4 sm:grid-cols-4 sm:px-5">
           <div>
             <dt className="text-[11px] text-ink-3">模型</dt>
             <dd className="mt-0.5 text-xs leading-5 text-ink">
@@ -737,32 +742,51 @@ export function BuildDetailPage() {
             构建会话在等待你的决定；处理后会继续执行。
           </p>
           <div className="mt-3 space-y-2">
-            {build.pending_dependencies.map((requestId) => (
-              <div
-                key={requestId}
-                className="flex flex-wrap items-center gap-2 rounded-control border border-warning/20 bg-surface px-3 py-2 text-xs"
-              >
-                <span className="font-medium text-ink">依赖安装</span>
-                <code className="font-mono text-[11px] text-ink-2">{requestId}</code>
-                <div className="ml-auto flex gap-1.5">
-                  <Button
-                    size="sm"
-                    disabled={Boolean(busy)}
-                    onClick={() => void replyDependency(requestId, "once")}
-                  >
-                    批准一次
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    disabled={Boolean(busy)}
-                    onClick={() => void replyDependency(requestId, "reject")}
-                  >
-                    拒绝
-                  </Button>
+            {build.pending_dependencies.map((requestId) => {
+              const detail = dependencyDetails.get(requestId);
+              return (
+                <div
+                  key={requestId}
+                  className="flex flex-wrap items-center gap-2 rounded-control border border-warning/20 bg-surface px-3 py-2 text-xs"
+                >
+                  <span className="font-medium text-ink">
+                    {detail?.package ? `依赖 ${detail.package}` : "依赖安装"}
+                  </span>
+                  {detail?.version ? (
+                    <code className="font-mono text-[11px] text-ink-2">
+                      @{detail.version}
+                    </code>
+                  ) : null}
+                  <span className="text-ink-3">
+                    {detail?.manager
+                      ? `${detail.manager} · ${detail.scope ?? "build"}`
+                      : requestId}
+                  </span>
+                  {detail?.reason ? (
+                    <p className="w-full text-[11px] leading-5 text-ink-3">
+                      {detail.reason}
+                    </p>
+                  ) : null}
+                  <div className="ml-auto flex gap-1.5">
+                    <Button
+                      size="sm"
+                      disabled={Boolean(busy)}
+                      onClick={() => void replyDependency(requestId, "once")}
+                    >
+                      批准一次
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={Boolean(busy)}
+                      onClick={() => void replyDependency(requestId, "reject")}
+                    >
+                      拒绝
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
             {permissions.map((request) => {
               const requestId = String(request.id);
               return (

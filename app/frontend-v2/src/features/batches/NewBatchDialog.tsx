@@ -190,13 +190,13 @@ export function NewBatchDialog({ open, onOpenChange, onSaved }: NewBatchDialogPr
       <Dialog.Portal>
         <Dialog.Overlay className="animate-overlay-in fixed inset-0 z-50 bg-ink/35" />
         <Dialog.Content
-          className="animate-dialog-in fixed left-1/2 top-1/2 z-50 flex max-h-[86vh] w-[min(1040px,calc(100vw-64px))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-overlay border border-line bg-surface shadow-overlay"
+          className="animate-dialog-in fixed left-1/2 top-1/2 z-50 flex max-h-[92vh] w-[min(1040px,calc(100vw-24px))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-overlay border border-line bg-surface shadow-overlay"
           onOpenAutoFocus={(event) => {
             event.preventDefault();
             document.getElementById("new-batch-name")?.focus();
           }}
         >
-          <header className="flex items-start justify-between gap-6 border-b border-line px-6 py-4">
+          <header className="flex items-start justify-between gap-4 border-b border-line px-4 py-4 sm:gap-6 sm:px-6">
             <div>
               <Dialog.Title className="text-[22px] leading-8 font-semibold tracking-[-0.01em] text-ink">
                 新建采集批次
@@ -217,8 +217,8 @@ export function NewBatchDialog({ open, onOpenChange, onSaved }: NewBatchDialogPr
             </Dialog.Close>
           </header>
 
-          <div className="grid min-h-0 flex-1 grid-cols-[7fr_5fr] overflow-hidden">
-            <div className="space-y-5 overflow-y-auto p-6">
+          <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[7fr_5fr] lg:overflow-hidden">
+            <div className="space-y-5 p-4 sm:p-6 lg:overflow-y-auto">
               <div>
                 <label
                   className="mb-1 block text-xs font-medium text-ink-3"
@@ -242,7 +242,7 @@ export function NewBatchDialog({ open, onOpenChange, onSaved }: NewBatchDialogPr
                 ) : null}
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
                   <label
                     className="mb-1 block text-xs font-medium text-ink-3"
@@ -368,7 +368,7 @@ export function NewBatchDialog({ open, onOpenChange, onSaved }: NewBatchDialogPr
               ) : null}
             </div>
 
-            <aside className="overflow-y-auto border-l border-line bg-surface-muted p-6">
+            <aside className="border-t border-line bg-surface-muted p-4 sm:p-6 lg:overflow-y-auto lg:border-l lg:border-t-0">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <h2 className="text-[17px] leading-6 font-semibold text-ink">
@@ -508,7 +508,7 @@ export function NewBatchDialog({ open, onOpenChange, onSaved }: NewBatchDialogPr
           </div>
 
           {confirmDiscard ? (
-            <div className="flex items-center justify-between gap-4 border-t border-warning/25 bg-warning-soft px-6 py-3">
+            <div className="flex flex-col items-start gap-3 border-t border-warning/25 bg-warning-soft px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6">
               <p className="text-sm text-warning">
                 表单里还有未提交内容，确定关闭弹窗？
               </p>
@@ -530,11 +530,11 @@ export function NewBatchDialog({ open, onOpenChange, onSaved }: NewBatchDialogPr
             </div>
           ) : null}
 
-          <footer className="flex items-center justify-between gap-4 border-t border-line px-6 py-4">
+          <footer className="flex flex-col items-start gap-3 border-t border-line px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
             <p className="text-xs text-ink-3">
               保存草稿和启动分离；启动只受理可采且未开始的站点。
             </p>
-            <div className="flex items-center gap-2">
+            <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
               <Dialog.Close asChild>
                 <Button variant="ghost" disabled={Boolean(busy)}>
                   取消

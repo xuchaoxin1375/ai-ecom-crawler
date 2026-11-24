@@ -173,7 +173,7 @@ function DetailSkeleton() {
         <div className="mt-3 h-3 w-96 animate-pulse rounded bg-surface-sunken" />
       </div>
       <div className="h-24 animate-pulse rounded-panel border border-line bg-surface" />
-      <div className="grid grid-cols-[minmax(0,8fr)_minmax(320px,4fr)] items-start gap-6">
+      <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,8fr)_minmax(320px,4fr)]">
         <div className="h-[520px] animate-pulse rounded-panel border border-line bg-surface" />
         <div className="space-y-4">
           <div className="h-40 animate-pulse rounded-panel border border-line bg-surface" />
@@ -698,7 +698,7 @@ export function SiteDetailPage() {
 
   return (
     <div className="space-y-6">
-      <header className="rounded-panel border border-line bg-surface px-6 py-5">
+      <header className="rounded-panel border border-line bg-surface px-4 py-5 sm:px-6">
         <div className="flex items-center justify-between gap-4">
           <Link
             className="inline-flex items-center gap-1.5 text-sm font-medium text-ink-2 hover:text-ink"
@@ -707,13 +707,15 @@ export function SiteDetailPage() {
             <ArrowLeft size={15} aria-hidden="true" />
             返回 {batch.name}
           </Link>
-          <span className="font-mono text-[11px] text-ink-3">{site.site_key}</span>
+          <span className="min-w-0 truncate font-mono text-[11px] text-ink-3">
+            {site.site_key}
+          </span>
         </div>
 
-        <div className="mt-4 flex items-start justify-between gap-8">
+        <div className="mt-4 flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between lg:gap-8">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2.5">
-              <h1 className="text-[28px] leading-9 font-semibold tracking-[-0.02em] text-ink">
+              <h1 className="text-[24px] leading-8 font-semibold tracking-[-0.02em] text-ink sm:text-[28px] sm:leading-9">
                 {site.domain}
               </h1>
               <Badge tone={readinessTone(site.readiness)}>
@@ -751,7 +753,7 @@ export function SiteDetailPage() {
             </div>
           </div>
 
-          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:shrink-0 lg:justify-end">
             {step && step.action !== "none" ? (
               step.action === "batch" ? (
                 <Button asChild variant="primary">
@@ -813,14 +815,14 @@ export function SiteDetailPage() {
 
       <MetricStrip items={statusItems} label="站点状态" />
 
-      <div className="grid grid-cols-[minmax(0,8fr)_minmax(320px,4fr)] items-start gap-6">
+      <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,8fr)_minmax(320px,4fr)]">
         <div className="min-w-0 space-y-5">
           {needsBuildFirst ? buildPanel : null}
 
           {task ? (
             <>
               <section className="rounded-panel border border-line bg-surface">
-                <div className="flex items-start justify-between gap-4 border-b border-line px-5 py-4">
+                <div className="flex flex-col items-start gap-3 border-b border-line px-4 py-4 sm:flex-row sm:justify-between sm:px-5">
                   <div>
                     <h2 className="text-[17px] leading-6 font-semibold text-ink">
                       当前任务
@@ -829,7 +831,7 @@ export function SiteDetailPage() {
                       任务 {task.task_id} · {task.plan_id}@{task.plan_version}
                     </p>
                   </div>
-                  <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                  <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:shrink-0 sm:justify-end">
                     <Button asChild size="sm">
                       <Link to={`/tasks/${encodeURIComponent(task.task_id)}`}>
                         打开任务详情
@@ -875,26 +877,26 @@ export function SiteDetailPage() {
                   </div>
                 </div>
 
-                <dl className="grid grid-cols-4 divide-x divide-line border-b border-line">
-                  <div className="px-4 py-3">
+                <dl className="grid grid-cols-2 gap-px border-b border-line bg-line sm:grid-cols-4">
+                  <div className="bg-surface px-4 py-3">
                     <dt className="text-xs text-ink-3">停止原因</dt>
                     <dd className="mt-0.5 text-sm text-ink">
                       {stopReasonLabel(task.stop_reason)}
                     </dd>
                   </div>
-                  <div className="px-4 py-3">
+                  <div className="bg-surface px-4 py-3">
                     <dt className="text-xs text-ink-3">覆盖</dt>
                     <dd className="mt-0.5 text-sm text-ink">
                       {coverageLabel(task.coverage?.status)}
                     </dd>
                   </div>
-                  <div className="px-4 py-3">
+                  <div className="bg-surface px-4 py-3">
                     <dt className="text-xs text-ink-3">质量异常</dt>
                     <dd className="mt-0.5 text-sm text-ink tabular">
                       {formatNumber(quality.length)}
                     </dd>
                   </div>
-                  <div className="px-4 py-3">
+                  <div className="bg-surface px-4 py-3">
                     <dt className="text-xs text-ink-3">更新</dt>
                     <dd className="mt-0.5 text-sm text-ink tabular">
                       {formatTime(task.updated_at)}
@@ -964,7 +966,7 @@ export function SiteDetailPage() {
             <summary className="cursor-pointer list-none px-5 py-4 text-sm font-semibold text-ink [&::-webkit-details-marker]:hidden">
               技术详情
             </summary>
-            <dl className="grid grid-cols-2 gap-x-6 gap-y-0 border-t border-line px-5 py-3">
+            <dl className="grid grid-cols-1 gap-x-6 gap-y-0 border-t border-line px-4 py-3 sm:grid-cols-2 sm:px-5">
               <Fact label="站点 ID">
                 <code className="font-mono text-[11px]">{site.site_key}</code>
               </Fact>

@@ -94,7 +94,7 @@ export function ProductPreviewSection({
         ) : null}
 
         {items.length ? (
-          <div className="grid grid-cols-2 gap-4 px-5 py-4 xl:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 px-4 py-4 sm:grid-cols-2 sm:px-5 xl:grid-cols-3">
             {items.map((item) => {
               const image = previewImage(item);
               const descriptionStatus = previewDescriptionStatusRaw(item);

@@ -874,7 +874,7 @@ export function BatchesPage() {
             </label>
           </div>
 
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex flex-wrap items-center gap-2">
             <Button onClick={resetFilters} disabled={!hasFilters && !queryParam}>
               <RotateCcw size={14} aria-hidden="true" />
               重置
@@ -897,9 +897,9 @@ export function BatchesPage() {
           ref={listRef}
           tabIndex={-1}
           aria-label="批次列表"
-          className="overflow-clip rounded-panel border border-line bg-surface"
+          className="overflow-hidden rounded-panel border border-line bg-surface"
         >
-          <div className="flex items-center justify-between gap-4 border-b border-line px-6 py-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-4 sm:px-6">
             <div>
               <h2 className="text-[17px] leading-6 font-semibold text-ink">批次列表</h2>
               <p className="mt-0.5 text-xs text-ink-3" role="status">

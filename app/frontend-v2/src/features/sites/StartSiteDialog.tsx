@@ -61,13 +61,13 @@ export function StartSiteDialog({
       <Dialog.Portal>
         <Dialog.Overlay className="animate-overlay-in fixed inset-0 z-50 bg-ink/35" />
         <Dialog.Content
-          className="animate-dialog-in fixed left-1/2 top-1/2 z-50 w-[min(560px,calc(100vw-64px))] -translate-x-1/2 -translate-y-1/2 rounded-overlay border border-line bg-surface shadow-overlay"
+          className="animate-dialog-in fixed left-1/2 top-1/2 z-50 max-h-[92vh] w-[min(560px,calc(100vw-24px))] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-overlay border border-line bg-surface shadow-overlay"
           onOpenAutoFocus={(event) => {
             event.preventDefault();
             document.getElementById("start-site-cancel")?.focus();
           }}
         >
-          <header className="flex items-start justify-between gap-6 border-b border-line px-6 py-4">
+          <header className="flex items-start justify-between gap-4 border-b border-line px-4 py-4 sm:gap-6 sm:px-6">
             <div>
               <Dialog.Title className="text-[22px] leading-8 font-semibold tracking-[-0.01em] text-ink">
                 {rerun ? "复跑站点采集" : "启动站点采集"}
@@ -90,7 +90,7 @@ export function StartSiteDialog({
             </Dialog.Close>
           </header>
 
-          <div className="space-y-4 px-6 py-5">
+          <div className="space-y-4 px-4 py-5 sm:px-6">
             <div className="flex items-baseline justify-between gap-4 rounded-panel border border-line bg-surface-muted px-4 py-3">
               <div>
                 <p className="text-xs text-ink-3">{rerun ? "本次复跑" : "本次启动"}</p>
@@ -138,9 +138,9 @@ export function StartSiteDialog({
             ) : null}
           </div>
 
-          <footer className="flex items-center justify-between gap-4 border-t border-line px-6 py-4">
+          <footer className="flex flex-col items-start gap-3 border-t border-line px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
             <p className="text-xs text-ink-3">站点级操作不会动到批次内其他站点。</p>
-            <div className="flex items-center gap-2">
+            <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
               <Button
                 id="start-site-cancel"
                 variant="ghost"

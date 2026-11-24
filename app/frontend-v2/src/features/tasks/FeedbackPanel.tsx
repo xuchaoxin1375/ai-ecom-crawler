@@ -330,7 +330,7 @@ function FeedbackCard({ feedback, onChanged }: FeedbackCardProps) {
       {triageOpen ? (
         <div className="space-y-3 border-t border-line bg-surface-muted/60 px-4 py-3">
           {error ? <ErrorNotice title="分诊失败" message={error} compact /> : null}
-          <div className="grid grid-cols-[160px_minmax(0,1fr)] gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-[160px_minmax(0,1fr)]">
             <label className="flex flex-col gap-1">
               <span className="text-xs font-medium text-ink-3">分诊结论</span>
               <Select
@@ -519,7 +519,7 @@ export function FeedbackPanel({ task }: FeedbackPanelProps) {
       {open ? (
         <div className="space-y-3 border-b border-line bg-surface-muted/60 px-5 py-4">
           {error ? <ErrorNotice title="提交失败" message={error} compact /> : null}
-          <div className="grid grid-cols-[220px_minmax(0,1fr)] gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-[220px_minmax(0,1fr)]">
             <label className="flex flex-col gap-1">
               <span className="text-xs font-medium text-ink-3">问题分类</span>
               <Select

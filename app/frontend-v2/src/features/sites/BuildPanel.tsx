@@ -92,6 +92,9 @@ export function BuildPanel({
     !active && !taskActive && site.readiness === "ready" && Boolean(site.rule);
   const events = visibleBuildEvents(build);
   const permissions = permissionItems(build);
+  const dependencyDetails = new Map(
+    (build?.pending_dependency_requests ?? []).map((item) => [item.request_id, item]),
+  );
   const repair = activeRepair(build);
 
   if (!build && !canStartBuild && !canRepair) return null;
@@ -103,7 +106,7 @@ export function BuildPanel({
       className="rounded-panel border border-line bg-surface"
       aria-label="方案构建与规则维护"
     >
-      <div className="flex items-start justify-between gap-4 border-b border-line px-5 py-4">
+      <div className="flex flex-col items-start gap-3 border-b border-line px-4 py-4 sm:flex-row sm:justify-between sm:px-5">
         <div className="min-w-0">
           <h2 className="text-[17px] leading-6 font-semibold text-ink">{title}</h2>
           <p className="mt-1 max-w-3xl text-xs leading-5 text-ink-3">
@@ -114,7 +117,7 @@ export function BuildPanel({
               : "新站由构建 Agent 生成候选规则；主机完成有界验证后站点才变为可采。构建会话与采集任务分开，默认只运行一个构建。"}
           </p>
         </div>
-        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:shrink-0 sm:justify-end">
           {canRepair ? (
             <Button
               size="sm"
@@ -168,7 +171,7 @@ export function BuildPanel({
             ) : null}
           </div>
 
-          <dl className="grid grid-cols-4 gap-x-4 gap-y-3 rounded-panel border border-line bg-surface-muted px-4 py-3">
+          <dl className="grid grid-cols-2 gap-x-4 gap-y-3 rounded-panel border border-line bg-surface-muted px-4 py-3 sm:grid-cols-4">
             <MetaItem label="模型">{buildModelLabel(build) || "—"}</MetaItem>
             <MetaItem label="出口">
               {build.proxy ? build.proxy : "服务默认／直连"}
@@ -254,29 +257,40 @@ export function BuildPanel({
                 <ShieldAlert size={14} aria-hidden="true" />
                 依赖审批
               </p>
-              {build.pending_dependencies.map((requestId) => (
-                <div
-                  key={requestId}
-                  className="flex flex-wrap items-center gap-2 text-xs"
-                >
-                  <code className="font-mono text-[11px]">{requestId}</code>
-                  <Button
-                    size="sm"
-                    disabled={Boolean(busy)}
-                    onClick={() => onReplyDependency(requestId, "once")}
+              {build.pending_dependencies.map((requestId) => {
+                const detail = dependencyDetails.get(requestId);
+                return (
+                  <div
+                    key={requestId}
+                    className="flex flex-wrap items-center gap-2 text-xs"
                   >
-                    批准
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    disabled={Boolean(busy)}
-                    onClick={() => onReplyDependency(requestId, "reject")}
-                  >
-                    拒绝
-                  </Button>
-                </div>
-              ))}
+                    <span className="font-medium text-ink">
+                      {detail?.package ? `依赖 ${detail.package}` : "依赖安装"}
+                    </span>
+                    {detail?.version ? (
+                      <code className="font-mono text-[11px]">@{detail.version}</code>
+                    ) : null}
+                    {detail?.reason ? (
+                      <span className="text-ink-3">{detail.reason}</span>
+                    ) : null}
+                    <Button
+                      size="sm"
+                      disabled={Boolean(busy)}
+                      onClick={() => onReplyDependency(requestId, "once")}
+                    >
+                      批准
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={Boolean(busy)}
+                      onClick={() => onReplyDependency(requestId, "reject")}
+                    >
+                      拒绝
+                    </Button>
+                  </div>
+                );
+              })}
             </div>
           ) : null}
 

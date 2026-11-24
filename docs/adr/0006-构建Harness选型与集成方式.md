@@ -7,7 +7,7 @@ updated: 2026-11-23
 
 ## 状态与适用范围
 
-**Provisional**（方向已确认，验证未完成）。项目方于 2026-11-20 确认 v1 采用 OpenCode + HTTP/SSE，并确认高自动化、常见依赖预置；安全沙箱不作为 v1 前置。2026-11-21 适配器核心、契约测试和真实端到端冒烟已通过（session、prompt、事件、权限回复、执行中 interrupt、pause-gate、关闭回收）；2026-11-22 `request_dependency` 工作区文件桥、一次性审批、uv／pip 真实安装和安装后校验已实现并有测试／安装冒烟；2026-11-23 真实模型工具调用／自然完成、站点级构建、trace 和出口代理已验证，选择器预检和自动修复 1 轮已实现并通过 fake adapter 测试，bennytex 真实 schema 错误自动修复 1 轮已验证；完整构建会话 UI 和多轮自动修复仍未完成，保持 Provisional。
+**Provisional**（方向已确认，验证未完成）。项目方于 2026-11-20 确认 v1 采用 OpenCode + HTTP/SSE，并确认高自动化、常见依赖预置；安全沙箱不作为 v1 前置。2026-11-21 适配器核心、契约测试和真实端到端冒烟已通过（session、prompt、事件、权限回复、执行中 interrupt、pause-gate、关闭回收）；2026-11-22 `request_dependency` 工作区文件桥、一次性审批、uv／pip 真实安装和安装后校验已实现并有测试／安装冒烟；2026-11-23 真实模型工具调用／自然完成、站点级构建、trace 和出口代理已验证，选择器预检和自动修复 1 轮已实现并通过 fake adapter 测试，bennytex 真实 schema 错误自动修复 1 轮已验证；2026-11-24 用真实模型和注入主机验证失败走查两轮修复，第 1 轮未解决、第 2 轮已解决、最终 PASSED；完整构建会话 UI 和自然规则缺陷连续多轮仍未完成，保持 Provisional。
 
 本文决定参考 harness、集成协议、适配器边界和构建会话的暂停／取消／恢复映射。构建会话契约以 [构建 Agent Harness 契约](0005-构建Agent与Harness契约.md) 为准；采集任务状态以 [任务状态与计数契约](../09-任务状态与计数契约.md) 和 [采集规则与任务运行时](../19-采集规则与任务运行时.md) 为准；方案包以 [采集方案与兼容契约](../08-采集方案与兼容契约.md) 为准。本文不改变执行期，也不把 harness 引入运行期。
 
@@ -33,7 +33,7 @@ updated: 2026-11-23
 - 站点详情接入最小构建控制面：启动、状态、暂停／恢复／取消、错误、失败回到 `needs_onboarding`；完整构建会话 UI（多轮对话、权限／依赖审批页面）仍未实现。
 - 每次构建写 `out/trace.json`／`out/trace.md`：阶段、工具调用、命令／路径摘要、截断输出、可见消息、tokens／费用、主机验证和错误；默认不保存 reasoning，`ECOM_BUILD_CAPTURE_REASONING=1` 时才保留并截断。模型、provider 和 variant 在状态与 trace 中标出。
 - 构建简报和主机验证使用同一出口代理；规则包不写代理 URL。市场／币种不一致时拒绝安装，避免浏览器样本与静态样本混用。
-- 仍保持 Provisional：完整构建会话 UI、多轮自动修复、真实模型循环中的 `request_dependency` 调用、跨物理设备和更大规模站点未验证。
+- 仍保持 Provisional：完整构建会话 UI、自然规则缺陷连续多轮、生产依赖安装器接线、权限请求的真实触发、跨物理设备和更大规模站点未验证。
 
 ## 背景与约束
 
@@ -216,7 +216,7 @@ v1 采用 **任务服务托管的 `opencode serve` 子进程 + HTTP/SSE 适配**
 - 安全沙箱、VM／容器、独立 OS 用户和网络隔离不在 v1 范围；出现不可信站点或多人共用时再评估。
 - ACP 适配器维持备选，HTTP 契约稳定后再评估。
 
-2026-11-23 状态：`HarnessAdapter`、`OpenCodeHttpAdapter`、server 进程管理、事件归一化、真实 session／prompt／permission／interrupt、pause-gate 和真实模型工具调用／自然完成已通过；`DependencyPolicy`、`DependencyBridge`、`request_dependency` 工作区插件、一次性审批和 uv／pip 真实安装已补并有测试与安装冒烟；构建 trace、出口代理、站点详情最小控制、选择器预检和自动修复 1 轮（fake adapter 测试，bennytex 真实 schema 错误验证）已落地。完整构建会话 UI、多轮自动修复、真实模型循环中的 `request_dependency` 调用和跨物理设备仍未验证。
+2026-11-23 状态：`HarnessAdapter`、`OpenCodeHttpAdapter`、server 进程管理、事件归一化、真实 session／prompt／permission／interrupt、pause-gate 和真实模型工具调用／自然完成已通过；`DependencyPolicy`、`DependencyBridge`、`request_dependency` 工作区插件、一次性审批和 uv／pip 真实安装已补并有测试与安装冒烟；构建 trace、出口代理、站点详情最小控制、选择器预检和自动修复 1 轮（fake adapter 测试，bennytex 真实 schema 错误验证）已落地。完整构建会话 UI、自然规则缺陷连续多轮、生产依赖安装器接线、权限请求的真实触发和跨物理设备仍未验证；两轮修复已用真实模型加注入主机验证失败走查，真实模型 `request_dependency` 已在证据专用策略下安装并验证。
 
 ## 参考
 

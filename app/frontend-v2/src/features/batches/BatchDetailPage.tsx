@@ -249,7 +249,7 @@ function DetailSkeleton() {
         <div className="mt-3 h-3 w-96 animate-pulse rounded bg-surface-sunken" />
       </div>
       <div className="h-36 animate-pulse rounded-panel border border-line bg-surface" />
-      <div className="grid grid-cols-[minmax(0,8fr)_minmax(320px,4fr)] items-start gap-6">
+      <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,8fr)_minmax(320px,4fr)]">
         <div className="h-[440px] animate-pulse rounded-panel border border-line bg-surface" />
         <div className="space-y-4">
           <div className="h-40 animate-pulse rounded-panel border border-line bg-surface" />
@@ -902,11 +902,7 @@ export function BatchDetailPage() {
     },
     {
       key: "result",
-      header: (
-        <span title="有效商品／失败商品" aria-label="有效商品／失败商品">
-          结果
-        </span>
-      ),
+      header: <span title="有效商品／失败商品">结果</span>,
       width: "12%",
       align: "right",
       cell: (site) => {
@@ -1013,7 +1009,7 @@ export function BatchDetailPage() {
 
   return (
     <div className={cn("space-y-6", selection.selectedCount > 0 && "pb-20")}>
-      <header className="rounded-panel border border-line bg-surface px-6 py-5">
+      <header className="rounded-panel border border-line bg-surface px-4 py-5 sm:px-6">
         <div className="flex items-center justify-between gap-4">
           <Link
             className="inline-flex items-center gap-1.5 text-sm font-medium text-ink-2 hover:text-ink"
@@ -1022,13 +1018,15 @@ export function BatchDetailPage() {
             <ArrowLeft size={15} aria-hidden="true" />
             返回批次列表
           </Link>
-          <span className="font-mono text-[11px] text-ink-3">{batch.batch_id}</span>
+          <span className="min-w-0 truncate font-mono text-[11px] text-ink-3">
+            {batch.batch_id}
+          </span>
         </div>
 
-        <div className="mt-4 flex items-start justify-between gap-8">
+        <div className="mt-4 flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between lg:gap-8">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-3">
-              <h1 className="text-[28px] leading-9 font-semibold tracking-[-0.02em] text-ink">
+              <h1 className="text-[24px] leading-8 font-semibold tracking-[-0.02em] text-ink sm:text-[28px] sm:leading-9">
                 {batch.name}
               </h1>
               <BatchStatusBadge status={batch.status} />
@@ -1046,7 +1044,7 @@ export function BatchDetailPage() {
             </div>
           </div>
 
-          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:shrink-0 lg:justify-end">
             {primaryKind === "restore" ? (
               <Button
                 variant="primary"
@@ -1123,15 +1121,15 @@ export function BatchDetailPage() {
 
       <BatchStatusBand batch={batch} activeFilter={filter} onFilter={setFilter} />
 
-      <div className="grid grid-cols-[minmax(0,8fr)_minmax(320px,4fr)] items-start gap-6">
+      <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,8fr)_minmax(320px,4fr)]">
         <section
           ref={siteListRef}
           tabIndex={-1}
           aria-label="站点清单"
-          className="min-w-0 overflow-clip rounded-panel border border-line bg-surface"
+          className="min-w-0 overflow-hidden rounded-panel border border-line bg-surface"
         >
           <div className="border-b border-line px-5 py-4">
-            <div className="flex items-start justify-between gap-4">
+            <div className="flex flex-col items-start gap-3 sm:flex-row sm:justify-between">
               <div>
                 <h2 className="text-[17px] leading-6 font-semibold text-ink">
                   站点清单

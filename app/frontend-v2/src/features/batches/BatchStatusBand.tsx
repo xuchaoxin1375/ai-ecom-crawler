@@ -74,7 +74,7 @@ export function BatchStatusBand({
       className="overflow-hidden rounded-panel border border-line bg-surface"
       aria-label="批次状态带"
     >
-      <div className="grid grid-cols-[1.25fr_1.15fr_1fr] divide-x divide-line">
+      <div className="grid grid-cols-1 divide-y divide-line sm:grid-cols-[1.25fr_1.15fr_1fr] sm:divide-x sm:divide-y-0">
         <div className="px-5 py-4">
           <div className="flex items-baseline justify-between gap-3">
             <h2 className="text-xs font-semibold tracking-[0.04em] text-ink-3">站点</h2>

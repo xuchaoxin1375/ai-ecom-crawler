@@ -630,7 +630,7 @@ export function TasksPage() {
 
       <section
         aria-label="任务列表"
-        className="overflow-clip rounded-panel border border-line bg-surface"
+        className="overflow-hidden rounded-panel border border-line bg-surface"
       >
         <div className="flex items-center justify-between gap-4 border-b border-line px-6 py-4">
           <div>
@@ -673,11 +673,11 @@ export function TasksPage() {
           }
         />
 
-        <div className="flex items-center justify-between gap-4 border-t border-line px-6 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-4 py-3 sm:px-6">
           <p className="text-xs text-ink-3">
             {total ? `第 ${page} / ${pageCount} 页` : "没有可翻页的数据"}
           </p>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               size="sm"
               disabled={offset === 0 || query.isFetching}

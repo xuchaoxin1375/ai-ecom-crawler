@@ -299,6 +299,10 @@ class BuildServiceTests(unittest.TestCase):
             == ["req-unknown"],
             "request was not held for approval",
         )
+        details = self.service.pending_dependency_requests(task.build_id)
+        self.assertEqual(len(details), 1)
+        self.assertEqual(details[0]["request_id"], "req-unknown")
+        self.assertEqual(details[0]["package"], "unknownpkg")
         self.assertIsNone(self._response(task.build_id, "req-unknown"))
         decision = self.service.reply_dependency(
             task.build_id, "req-unknown", "once"

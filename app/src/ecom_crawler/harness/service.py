@@ -441,6 +441,12 @@ class BuildService:
             bridge = self.bridges.get(build_id)
         return bridge.pending_ids() if bridge is not None else []
 
+    def pending_dependency_requests(self, build_id: str) -> list[dict[str, Any]]:
+        with self._lock:
+            self._require(build_id)
+            bridge = self.bridges.get(build_id)
+        return bridge.pending_requests() if bridge is not None else []
+
     def reply_dependency(
         self,
         build_id: str,

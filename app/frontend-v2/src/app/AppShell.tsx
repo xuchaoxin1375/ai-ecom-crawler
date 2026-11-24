@@ -2,6 +2,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type CSSProperties,
   type FocusEvent,
   type KeyboardEvent,
   type ReactNode,
@@ -12,10 +13,12 @@ import {
   Layers,
   LayoutList,
   ListTodo,
+  Menu,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
   Wrench,
+  X,
 } from "lucide-react";
 import { getHealth } from "../lib/api";
 import { cn } from "../lib/cn";
@@ -146,6 +149,7 @@ function ServicePill() {
         ? "服务正常 · 托管 worker"
         : "服务正常 · 外部 worker"
       : "读取中";
+  const shortText = health.isError ? "异常" : health.data ? "正常" : "读取中";
   const title = health.isError
     ? health.error instanceof Error
       ? health.error.message
@@ -157,16 +161,18 @@ function ServicePill() {
   return (
     <span
       className={cn(
-        "inline-flex min-w-[176px] items-center justify-center gap-2 rounded-full border px-3 py-1 text-xs whitespace-nowrap",
+        "inline-flex min-w-0 items-center justify-center gap-1.5 rounded-full border px-2.5 py-1 text-xs whitespace-nowrap lg:min-w-[176px] lg:gap-2 lg:px-3",
         tone === "success" && "border-success/20 bg-success-soft text-success",
         tone === "danger" && "border-danger/20 bg-danger-soft text-danger",
         tone === "neutral" && "border-line bg-surface-muted text-ink-3",
       )}
       title={title}
+      aria-label={text}
       role="status"
     >
       <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true" />
-      {text}
+      <span className="hidden lg:inline">{text}</span>
+      <span className="lg:hidden">{shortText}</span>
     </span>
   );
 }
@@ -176,11 +182,16 @@ export function AppShell() {
   const mainRef = useRef<HTMLElement | null>(null);
   const panelRef = useRef<HTMLElement | null>(null);
   const toggleRef = useRef<HTMLButtonElement | null>(null);
+  const mobilePanelRef = useRef<HTMLElement | null>(null);
+  const mobileTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const mobileCloseRef = useRef<HTMLButtonElement | null>(null);
+  const mobileReturnFocusRef = useRef<HTMLElement | null>(null);
   const keyboardFocusRef = useRef(false);
   const [pinned, setPinned] = useState(readPinned);
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   const [suppressed, setSuppressed] = useState(false);
+  const [mobileOpenPath, setMobileOpenPath] = useState<string | null>(null);
   const siteMatch = location.pathname.match(/^\/batches\/([^/]+)\/sites\/[^/]+/);
   const batchMatch = location.pathname.match(/^\/batches\/([^/]+)/);
   const isTaskDetail = /^\/tasks\/[^/]+/.test(location.pathname);
@@ -191,6 +202,7 @@ export function AppShell() {
 
   const visualOpen = pinned || (!suppressed && (hovered || focused));
   const peeking = !pinned && visualOpen;
+  const mobileOpen = mobileOpenPath === location.pathname;
   const slotWidth = pinned ? SIDEBAR_EXPANDED : SIDEBAR_RAIL;
   const visualWidth = visualOpen ? SIDEBAR_EXPANDED : SIDEBAR_RAIL;
   const toggleLabel = pinned
@@ -240,6 +252,59 @@ export function AppShell() {
     window.scrollTo({ top: 0, behavior: "auto" });
   }, [location.pathname]);
 
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 1024px)");
+    function onChange() {
+      if (media.matches) setMobileOpenPath(null);
+    }
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, []);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const timer = window.setTimeout(() => mobileCloseRef.current?.focus(), 0);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.clearTimeout(timer);
+      mobileReturnFocusRef.current?.focus?.({ preventScroll: true });
+    };
+  }, [mobileOpen]);
+
+  function openMobile() {
+    mobileReturnFocusRef.current = document.activeElement as HTMLElement | null;
+    setMobileOpenPath(location.pathname);
+  }
+
+  function closeMobile() {
+    setMobileOpenPath(null);
+  }
+
+  function handleMobileKeyDown(event: KeyboardEvent<HTMLElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeMobile();
+      mobileTriggerRef.current?.focus();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const focusable = mobilePanelRef.current?.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    );
+    if (!focusable?.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
   function togglePinned() {
     const next = !pinned;
     setPinned(next);
@@ -279,7 +344,10 @@ export function AppShell() {
   }
 
   return (
-    <div className="min-w-[1180px] bg-canvas text-ink">
+    <div
+      className="bg-canvas text-ink"
+      style={{ "--sidebar-slot": `${slotWidth}px` } as CSSProperties}
+    >
       <a
         className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-control focus:bg-accent focus:px-4 focus:py-2 focus:text-sm focus:text-white"
         href="#main"
@@ -287,9 +355,9 @@ export function AppShell() {
         跳到主要内容
       </a>
 
-      <header className="fixed inset-x-0 top-0 z-50 flex h-14 items-center border-b border-line bg-surface pr-8">
+      <header className="fixed inset-x-0 top-0 z-50 flex h-14 items-center border-b border-line bg-surface pr-3 sm:pr-6 lg:pr-8">
         <div
-          className="flex h-full shrink-0 items-center border-r border-line transition-[width] duration-300 ease-out"
+          className="hidden h-full shrink-0 items-center border-r border-line transition-[width] duration-300 ease-out lg:flex"
           style={{ width: slotWidth }}
         >
           <a
@@ -311,9 +379,35 @@ export function AppShell() {
           </a>
         </div>
 
+        <div className="flex min-w-0 items-center gap-1 lg:hidden">
+          <button
+            ref={mobileTriggerRef}
+            type="button"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-control text-ink-2 transition-colors hover:bg-surface-muted hover:text-ink"
+            aria-label="打开导航菜单"
+            aria-expanded={mobileOpen}
+            aria-controls="mobile-sidebar"
+            onClick={openMobile}
+          >
+            <Menu size={20} aria-hidden="true" />
+          </button>
+          <a
+            className="flex min-w-0 items-center gap-2 rounded-control text-ink"
+            href="#/batches"
+            aria-label="电商采集首页"
+          >
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] bg-accent text-white">
+              <Layers size={16} strokeWidth={1.75} aria-hidden="true" />
+            </span>
+            <span className="hidden truncate text-[15px] font-semibold tracking-[0.01em] sm:inline">
+              电商采集
+            </span>
+          </a>
+        </div>
+
         {showBreadcrumb ? (
           <nav
-            className="flex min-w-0 items-center gap-2 px-8 text-xs text-ink-3"
+            className="hidden min-w-0 items-center gap-2 px-4 text-xs text-ink-3 md:flex lg:px-8"
             aria-label="面包屑"
           >
             {isTaskDetail ? (
@@ -365,7 +459,7 @@ export function AppShell() {
           </nav>
         ) : null}
 
-        <div className="ml-auto flex shrink-0 items-center gap-3">
+        <div className="ml-auto flex shrink-0 items-center gap-2 pl-2">
           <ServicePill />
         </div>
       </header>
@@ -377,7 +471,7 @@ export function AppShell() {
         ref={panelRef}
         aria-label="侧边栏"
         className={cn(
-          "fixed bottom-0 left-0 top-14 z-40 overflow-hidden border-r border-line bg-surface transition-[width] duration-300 ease-out",
+          "fixed bottom-0 left-0 top-14 z-40 hidden overflow-hidden border-r border-line bg-surface transition-[width] duration-300 ease-out lg:block",
           peeking && "shadow-overlay",
         )}
         style={{ width: visualWidth }}
@@ -460,14 +554,97 @@ export function AppShell() {
         </div>
       </aside>
 
+      {mobileOpen ? (
+        <div className="fixed inset-0 z-[60] lg:hidden">
+          <button
+            type="button"
+            tabIndex={-1}
+            aria-hidden="true"
+            className="animate-overlay-in absolute inset-0 bg-ink/35"
+            onClick={closeMobile}
+          />
+          {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions */}
+          <aside
+            id="mobile-sidebar"
+            ref={mobilePanelRef}
+            role="dialog"
+            aria-modal="true"
+            aria-label="导航菜单"
+            className="animate-menu-in absolute inset-y-0 left-0 flex w-[min(320px,calc(100vw-48px))] flex-col border-r border-line bg-surface shadow-overlay"
+            onKeyDown={handleMobileKeyDown}
+          >
+            <div className="flex h-14 items-center justify-between gap-3 border-b border-line px-4">
+              <a
+                className="flex min-w-0 items-center gap-2.5 rounded-control text-ink"
+                href="#/batches"
+                aria-label="电商采集首页"
+                onClick={closeMobile}
+              >
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] bg-accent text-white">
+                  <Layers size={16} strokeWidth={1.75} aria-hidden="true" />
+                </span>
+                <span className="truncate text-[15px] font-semibold tracking-[0.01em]">
+                  电商采集
+                </span>
+              </a>
+              <button
+                ref={mobileCloseRef}
+                type="button"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-control text-ink-3 hover:bg-surface-muted hover:text-ink"
+                aria-label="关闭导航菜单"
+                onClick={closeMobile}
+              >
+                <X size={18} aria-hidden="true" />
+              </button>
+            </div>
+            <nav className="flex-1 overflow-y-auto px-3 py-4" aria-label="主导航">
+              <div className="space-y-0.5">
+                <SidebarLink
+                  to="/batches"
+                  icon={<LayoutList size={17} />}
+                  label="采集批次"
+                  expanded
+                  onPointerNavigate={closeMobile}
+                />
+                <SidebarLink
+                  to="/tasks"
+                  icon={<ListTodo size={17} />}
+                  label="全部任务"
+                  expanded
+                  onPointerNavigate={closeMobile}
+                />
+                <SidebarLink
+                  to="/builds"
+                  icon={<Wrench size={17} />}
+                  label="构建记录"
+                  expanded
+                  onPointerNavigate={closeMobile}
+                />
+                <SidebarAction
+                  href="#/batches?new=1"
+                  icon={<Plus size={17} />}
+                  label="新建批次"
+                  expanded
+                  onPointerNavigate={closeMobile}
+                />
+              </div>
+            </nav>
+            <div className="border-t border-line px-4 py-3">
+              <p className="text-xs leading-5 text-ink-3">
+                本地单用户工作台；服务地址由当前浏览器决定。
+              </p>
+            </div>
+          </aside>
+        </div>
+      ) : null}
+
       <main
         id="main"
         ref={mainRef}
-        className="min-h-screen pt-14 transition-[margin-left] duration-300 ease-out"
-        style={{ marginLeft: slotWidth }}
+        className="min-h-screen pt-14 transition-[margin-left] duration-300 ease-out lg:ml-[var(--sidebar-slot)]"
         tabIndex={-1}
       >
-        <div className="mx-auto w-full max-w-[1560px] px-8 py-8">
+        <div className="mx-auto w-full max-w-[1560px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
           <Outlet />
         </div>
       </main>

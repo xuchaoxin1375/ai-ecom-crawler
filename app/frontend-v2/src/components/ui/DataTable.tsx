@@ -1,3 +1,5 @@
+/* eslint-disable jsx-a11y/no-noninteractive-tabindex -- A horizontally
+   scrollable table region needs a keyboard entry point. */
 import type { ReactNode } from "react";
 import { cn } from "../../lib/cn";
 
@@ -41,93 +43,102 @@ export function DataTable<T>({
   const headerPadding = density === "compact" ? "px-3 py-2" : "px-4 py-2.5";
 
   return (
-    <table
-      className="w-full table-fixed border-collapse text-sm"
-      aria-busy={loading || undefined}
+    <div
+      className="max-w-full overflow-x-auto lg:overflow-x-visible"
+      role="region"
+      aria-label={caption}
+      tabIndex={0}
     >
-      <caption className="sr-only">{caption}</caption>
-      <colgroup>
-        {columns.map((column) => (
-          <col
-            key={column.key}
-            style={column.width ? { width: column.width } : undefined}
-          />
-        ))}
-      </colgroup>
-      <thead>
-        <tr>
+      <table
+        className="w-full min-w-[720px] table-fixed border-collapse text-sm lg:min-w-0"
+        aria-busy={loading || undefined}
+      >
+        <caption className="sr-only">{caption}</caption>
+        <colgroup>
           {columns.map((column) => (
-            <th
+            <col
               key={column.key}
-              scope="col"
-              className={cn(
-                "sticky top-14 z-10 border-b border-line bg-surface-muted text-xs font-medium text-ink-3",
-                headerPadding,
-                column.align === "right" ? "text-right" : "text-left",
-                column.headerClassName,
-              )}
-            >
-              {column.header}
-            </th>
+              style={column.width ? { width: column.width } : undefined}
+            />
           ))}
-        </tr>
-      </thead>
-      <tbody>
-        {loading
-          ? Array.from({ length: loadingRows }, (_, rowIndex) => (
-              <tr
-                key={`skeleton-${rowIndex}`}
-                className="border-b border-line last:border-0"
-              >
-                {columns.map((column, columnIndex) => (
-                  <td
-                    key={column.key}
-                    className={cn(cellPadding, column.cellClassName)}
-                  >
-                    {column.skeleton === false ? null : (
-                      <div
-                        className={cn(
-                          "h-3 animate-pulse rounded bg-surface-sunken",
-                          column.align === "right" ? "ml-auto" : "",
-                          columnIndex === 0 ? "w-3/4" : "w-1/2",
-                        )}
-                      />
-                    )}
-                  </td>
-                ))}
-              </tr>
-            ))
-          : rows.map((row) => (
-              <tr
-                key={rowKey(row)}
+        </colgroup>
+        <thead>
+          <tr>
+            {columns.map((column) => (
+              <th
+                key={column.key}
+                scope="col"
                 className={cn(
-                  "border-b border-line transition-colors duration-150 last:border-0 hover:bg-surface-muted/60",
-                  typeof rowClassName === "function" ? rowClassName(row) : rowClassName,
+                  "sticky top-0 z-10 border-b border-line bg-surface-muted text-xs font-medium text-ink-3 lg:top-14",
+                  headerPadding,
+                  column.align === "right" ? "text-right" : "text-left",
+                  column.headerClassName,
                 )}
               >
-                {columns.map((column) => (
-                  <td
-                    key={column.key}
-                    className={cn(
-                      cellPadding,
-                      "align-middle",
-                      column.align === "right" ? "text-right tabular" : "text-left",
-                      column.cellClassName,
-                    )}
-                  >
-                    {column.cell(row)}
-                  </td>
-                ))}
-              </tr>
+                {column.header}
+              </th>
             ))}
-        {!loading && rows.length === 0 ? (
-          <tr>
-            <td colSpan={colSpan} className="p-0">
-              {empty}
-            </td>
           </tr>
-        ) : null}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {loading
+            ? Array.from({ length: loadingRows }, (_, rowIndex) => (
+                <tr
+                  key={`skeleton-${rowIndex}`}
+                  className="border-b border-line last:border-0"
+                >
+                  {columns.map((column, columnIndex) => (
+                    <td
+                      key={column.key}
+                      className={cn(cellPadding, column.cellClassName)}
+                    >
+                      {column.skeleton === false ? null : (
+                        <div
+                          className={cn(
+                            "h-3 animate-pulse rounded bg-surface-sunken",
+                            column.align === "right" ? "ml-auto" : "",
+                            columnIndex === 0 ? "w-3/4" : "w-1/2",
+                          )}
+                        />
+                      )}
+                    </td>
+                  ))}
+                </tr>
+              ))
+            : rows.map((row) => (
+                <tr
+                  key={rowKey(row)}
+                  className={cn(
+                    "border-b border-line transition-colors duration-150 last:border-0 hover:bg-surface-muted/60",
+                    typeof rowClassName === "function"
+                      ? rowClassName(row)
+                      : rowClassName,
+                  )}
+                >
+                  {columns.map((column) => (
+                    <td
+                      key={column.key}
+                      className={cn(
+                        cellPadding,
+                        "align-middle",
+                        column.align === "right" ? "text-right tabular" : "text-left",
+                        column.cellClassName,
+                      )}
+                    >
+                      {column.cell(row)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+          {!loading && rows.length === 0 ? (
+            <tr>
+              <td colSpan={colSpan} className="p-0">
+                {empty}
+              </td>
+            </tr>
+          ) : null}
+        </tbody>
+      </table>
+    </div>
   );
 }

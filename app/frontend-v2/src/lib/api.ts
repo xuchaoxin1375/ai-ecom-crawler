@@ -408,6 +408,17 @@ export interface BuildArchiveStats {
   [key: string]: unknown;
 }
 
+export interface BuildDependencyRequest {
+  request_id: string;
+  package: string;
+  version: string | null;
+  manager: string | null;
+  scope: string | null;
+  reason: string | null;
+  source: string | null;
+  fallback: string | null;
+}
+
 export interface BuildStatus {
   build_id: string;
   batch_id: string;
@@ -438,6 +449,7 @@ export interface BuildStatus {
   events: BuildEvent[];
   pending_permissions: Array<Record<string, unknown>>;
   pending_dependencies: string[];
+  pending_dependency_requests?: BuildDependencyRequest[];
   trace_available: boolean;
   reasoning_capture_enabled: boolean;
   reasoning_live: boolean;

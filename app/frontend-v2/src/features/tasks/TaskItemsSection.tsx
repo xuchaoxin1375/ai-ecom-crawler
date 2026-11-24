@@ -206,11 +206,11 @@ export function TaskItemsSection({ taskId, taskActive }: TaskItemsSectionProps) 
         empty={<EmptyState title="没有明细" description="任务还没有产生这类条目。" />}
       />
 
-      <div className="flex items-center justify-between gap-4 border-t border-line px-5 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-4 py-3 sm:px-5">
         <p className="text-xs text-ink-3">
           {total ? `第 ${page + 1} / ${pageCount} 页` : "没有可翻页的数据"}
         </p>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             size="sm"
             disabled={page === 0 || itemsQuery.isFetching}

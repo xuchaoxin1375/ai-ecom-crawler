@@ -7,7 +7,7 @@ updated: 2026-11-23
 
 ## 状态与适用范围
 
-**Proposed**。方向已由项目方确认（harness 中立、构建期 AI、运行期确定性）；具体会话协议、工具权限和验收门禁尚未全部实现验证。2026-11-23 已用真实模型完成工具调用、自然完成、主机验证和候选规则安装，`BuildTask`／事件／pause-gate／trace 已有实现，选择器预检和自动修复 1 轮已通过 fake adapter 测试并在 bennytex 真实 schema 错误上验证；完整构建会话 UI、多轮自动修复、独立人工签字和 build-task JSON Schema 仍未闭合，因此保持 Proposed。G0（2026-11-20）保留 Proposed；退出条件：build-task schema、HarnessAdapter、会话事件、pause-gate 和交付门禁完成端到端验证。
+**Proposed**。方向已由项目方确认（harness 中立、构建期 AI、运行期确定性）；具体会话协议、工具权限和验收门禁尚未全部实现验证。2026-11-23 已用真实模型完成工具调用、自然完成、主机验证和候选规则安装，`BuildTask`／事件／pause-gate／trace 已有实现，选择器预检和自动修复 1 轮已通过 fake adapter 测试并在 bennytex 真实 schema 错误上验证；完整构建会话 UI、自然规则缺陷连续多轮、独立人工签字和 build-task JSON Schema 仍未闭合，因此保持 Proposed；两轮修复的控制流与状态语义已用真实模型加注入主机验证失败走查。G0（2026-11-20）保留 Proposed；退出条件：build-task schema、HarnessAdapter、会话事件、pause-gate 和交付门禁完成端到端验证。
 
 本文把[Agent工作约定](../07-Agent工作约定.md)的原则补成可实现的构建期契约。采集任务状态、计数和运行时以 `09`／`19` 为准；方案包以 `08` 为准；本文不改变执行期。
 

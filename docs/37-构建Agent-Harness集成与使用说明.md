@@ -104,7 +104,9 @@ OpenCode 的项目技能优先级高于全局技能。使用联接／符号链�
 
 `pause-gate` 插件在权限 hook 中把动作提升为 `ask` 并扣住请求；恢复时回复 `once`。它不暂停模型推理，已启动的工具可能跑完。取消走 `interrupt`，拒绝 pending 权限并回收 session／server；迟到事件按构建 ID 拒收。
 
-`request_dependency` 工具把依赖请求写到 `control/dependencies/`，宿主侧 `DependencyBridge` 按基线／allowlist 自动安装，未知包或系统级包走一次性审批。直接 `pip install`／`npm install` 到全局环境不属于允许范围。
+`request_dependency` 工具把依赖请求写到 `control/dependencies/`，宿主侧 `DependencyBridge` 按基线／allowlist 自动安装，未知包或系统级包走一次性审批。直接 `pip install`／`npm install` 到全局环境不属于允许范围。构建详情现在显示待审批依赖的包名、版本、manager、scope 和原因，不只显示请求 ID。
+
+**依赖策略接线边界（2026-11-24）**：当前 `serve` 构造的构建适配器仍使用 `DependencyPolicy.empty()`，没有安装器和 allowlist，因此审批“批准一次”后会返回“no installer is configured”，不会修改构建环境。2026-11-24 的审批走查使用证据专用服务：临时 venv、`DependencyPolicy` 的 pip 安装器和验证器，真实模型请求 `six==1.17.0` 后由 UI 批准并安装成功。生产环境是否把某个构建解释器和 allowlist 接入 `serve` 尚未决定；在此之前，依赖安装仍由操作者手工完成。
 
 `shell` 仍以宿主用户权限运行，文件权限规则不能阻止它读取宿主文件；这是当前 guardrail 的已知边界，不是安全沙箱。需要强隔离时使用专用用户、容器或独立设备。
 
@@ -166,7 +168,7 @@ python -m uv run --project app ecom-crawler serve `
 - **模型调用有费用**。一次构建可能持续数分钟；先用小预算和单站验证，再放大。
 - **出口与市场必须一致**。浏览器样本、静态请求和主机验证走不同出口时，币种／促销价可能不同；换出口视为新的市场上下文。
 - **robots 只取 Sitemap 行**。不要读整份 robots、不解析 `Disallow`／`Crawl-delay`，也不要把它当停止信号。
-- **一次只支持一个运行中的构建**。不同站点会进入 FIFO 队列，但没有优先级；并发构建、完整多轮会话 UI、权限／依赖审批页面和真实模型多轮修复仍未完成；跨重启会接管并保留会话，但需要用户显式继续，恢复依赖本机 OpenCode 数据目录。
+- **一次只支持一个运行中的构建**。不同站点会进入 FIFO 队列，但没有优先级；并发构建、完整多轮会话 UI 和自然规则缺陷连续多轮仍未完成；构建详情已提供权限／依赖审批页面，真实模型两轮修复已用注入主机验证失败走查；依赖审批已用真实模型和临时 venv 安装走查，权限请求未被 OpenCode 实际触发，生产安装器仍未接线；跨重启会接管并保留会话，但需要用户显式继续，恢复依赖本机 OpenCode 数据目录。
 - **跨平台差异**。Windows 的进程树回收、浏览器 profile 锁、目录联接和路径大小写需要单独验证；WSL 只验证过 fake server／适配器和部分安装路径。
 
 ## 排障入口
@@ -195,7 +197,7 @@ python -m uv run --project app ecom-crawler serve `
 - 适配器、权限、暂停门、依赖桥和构建工作区有单元测试；`app/tests/test_builds.py`、`test_harness.py`、`test_service.py`、`test_dependency_bridge.py` 覆盖主要路径。
 - 真实 `opencode serve` 无模型 smoke 通过：session、事件、权限请求、关闭和 server 回收。
 - 真实模型构建已在 `familidoo.fr`、`sixmoondesigns.com` 等站点完成工具调用、自然完成、主机验证和 candidate 安装；证据在 `experiments/build-agent/`。
-- 未完成：完整会话 UI、多轮自动修复、真实模型循环中的 `request_dependency` 调用、安全沙箱和跨物理设备复现。
+- 未完成：完整会话 UI、自然规则缺陷连续多轮、生产依赖安装器接线、权限请求的真实触发核查、安全沙箱和跨物理设备复现。
 
 ## 参考
 

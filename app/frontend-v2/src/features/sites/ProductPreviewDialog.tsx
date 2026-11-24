@@ -111,8 +111,8 @@ export function ProductPreviewDialog({
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className="animate-overlay-in fixed inset-0 z-50 bg-ink/55" />
-        <Dialog.Content className="animate-dialog-in fixed left-1/2 top-1/2 z-50 flex max-h-[90vh] w-[min(960px,calc(100vw-64px))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-overlay border border-line bg-surface shadow-overlay">
-          <header className="flex items-start justify-between gap-6 border-b border-line px-6 py-4">
+        <Dialog.Content className="animate-dialog-in fixed left-1/2 top-1/2 z-50 flex max-h-[92vh] w-[min(960px,calc(100vw-24px))] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-overlay border border-line bg-surface shadow-overlay">
+          <header className="flex items-start justify-between gap-4 border-b border-line px-4 py-4 sm:gap-6 sm:px-6">
             <div className="min-w-0">
               <Dialog.Title className="truncate text-[20px] leading-7 font-semibold tracking-[-0.01em] text-ink">
                 {title}
@@ -134,7 +134,7 @@ export function ProductPreviewDialog({
 
           {hasImage && hasDescription ? (
             <div
-              className="flex items-center gap-1 border-b border-line px-6 py-2"
+              className="flex items-center gap-1 overflow-x-auto border-b border-line px-4 py-2 sm:px-6"
               role="tablist"
               aria-label="预览内容"
             >
@@ -163,7 +163,7 @@ export function ProductPreviewDialog({
             </div>
           ) : null}
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
             {tab === "image" && hasImage ? (
               <div className="space-y-3">
                 <div className="flex min-h-[320px] items-center justify-center overflow-auto rounded-panel border border-line bg-surface-muted p-4">
@@ -279,7 +279,7 @@ export function ProductPreviewDialog({
             )}
           </div>
 
-          <footer className="flex items-center justify-between gap-4 border-t border-line px-6 py-3">
+          <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-4 py-3 sm:px-6">
             <p className="min-w-0 truncate text-xs text-ink-3" title={item?.url}>
               {item?.url || ""}
             </p>
