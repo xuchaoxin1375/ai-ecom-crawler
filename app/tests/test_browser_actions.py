@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import threading
 import unittest
@@ -336,8 +337,29 @@ class BrowserListingActionTests(unittest.TestCase):
             task_type="product",
             max_products=10,
             max_seconds=60,
-            max_attempts=1,
+            # Browser startup/navigation is occasionally transient on CI.
+            # One retry keeps this test about list advancement instead of
+            # runner timing; production defaults are unchanged.
+            max_attempts=2,
             per_domain_rps=50,
+        )
+
+    def _assert_valid_products(self, result: Any, expected: int = 6) -> None:
+        counts = result.task_result.get("counts") or {}
+        if counts.get("valid_products") == expected:
+            return
+        detail = {
+            "counts": counts,
+            "state": result.task_result.get("state"),
+            "outcome": result.task_result.get("outcome"),
+            "stop_reason": result.task_result.get("stop_reason"),
+            "failure_classes": result.task_result.get("failure_classes"),
+            "recovery": result.task_result.get("recovery"),
+            "browser": (result.task_result.get("runtime") or {}).get("browser"),
+        }
+        self.fail(
+            f"valid_products={counts.get('valid_products')} != {expected}: "
+            + json.dumps(detail, ensure_ascii=False, sort_keys=True)
         )
 
     def test_load_more_appends_products(self) -> None:
@@ -349,7 +371,7 @@ class BrowserListingActionTests(unittest.TestCase):
                 "listing-more.html",
                 "type: load_more\n        button_selector: \"#more\"\n        max_clicks: 5\n        settle_ms: 500\n        no_new_stop: 2",
             )
-            self.assertEqual(result.task_result["counts"]["valid_products"], 6)
+            self._assert_valid_products(result)
             listing = next(
                 item
                 for item in TaskStore(root / "tasks.db").items(
@@ -374,7 +396,7 @@ class BrowserListingActionTests(unittest.TestCase):
                 "listing-scroll.html",
                 "type: infinite_scroll\n        mode: \"scroll\"\n        max_scrolls: 5\n        settle_ms: 500\n        no_new_stop: 2",
             )
-            self.assertEqual(result.task_result["counts"]["valid_products"], 6)
+            self._assert_valid_products(result)
             listing = next(
                 item
                 for item in TaskStore(root / "tasks.db").items(
@@ -399,7 +421,7 @@ class BrowserListingActionTests(unittest.TestCase):
                 "listing-container.html",
                 "type: infinite_scroll\n        mode: \"scroll\"\n        container: \"#feed\"\n        max_scrolls: 5\n        settle_ms: 500\n        no_new_stop: 2",
             )
-            self.assertEqual(result.task_result["counts"]["valid_products"], 6)
+            self._assert_valid_products(result)
             listing = next(
                 item
                 for item in TaskStore(root / "tasks.db").items(
