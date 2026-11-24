@@ -1,6 +1,6 @@
 # 前端 v2（默认入口）
 
-本目录是 v2 前端：React 19 + TypeScript + Vite + Tailwind CSS v4，覆盖应用外壳、批次列表、新建批次弹窗、批次详情、继续导入、站点详情、站点级构建、任务列表、任务详情、结果验收反馈、构建记录列表和构建详情；批次列表与站点清单提供行末操作菜单和勾选批量操作。它已是默认入口：FastAPI 根路径 307 到 `/next/`，v2 构建挂载在 `/next/`。v2 导航不再提供旧版工作台、旧版任务列表或技术兜底入口；旧 Vue 构建仍由后端在 `/batch/` 托管，只作直访兜底和退役演练，不进入 v2 界面。
+本目录是 v2 前端：React 19 + TypeScript + Vite + Tailwind CSS v4，覆盖应用外壳、批次列表、新建批次弹窗、批次详情、继续导入、站点详情、站点级构建、任务列表、任务详情、结果验收反馈、构建记录列表和构建详情；批次列表与站点清单提供行末操作菜单和勾选批量操作。它已是默认入口：FastAPI 根路径 307 到 `/next/`，v2 构建挂载在 `/next/`。v2 导航不再提供旧版工作台、旧版任务列表或技术兜底入口；旧 Vue 构建默认不再挂载，`/batch/` 和 `/legacy` 都 307 到 `/next/`，仅设置 `ECOM_LEGACY_UI=on` 时恢复旧版直访回退。
 
 ## 范围
 
@@ -17,7 +17,7 @@ npm install
 npm run dev
 ```
 
-前端地址是 `http://127.0.0.1:5175/next/#/batches`，批次详情按 `http://127.0.0.1:5175/next/#/batches/<batch_id>` 访问，站点详情按 `http://127.0.0.1:5175/next/#/batches/<batch_id>/sites/<site_key>` 访问，任务列表和详情按 `http://127.0.0.1:5175/next/#/tasks`、`/next/#/tasks/<task_id>` 访问，构建记录和详情按 `http://127.0.0.1:5175/next/#/builds`、`/next/#/builds/<build_id>` 访问，新建批次弹窗可用 `http://127.0.0.1:5175/next/#/batches?new=1` 直接打开。FastAPI 启动后根路径 `http://127.0.0.1:8775/` 会跳到 `/next/`；v2 不再提供旧版入口。Vite 仍把 `/api`、`/batch` 和 `/legacy` 代理到 `http://127.0.0.1:8775`，其中 `/batch`、`/legacy` 只用于直接访问旧构建兜底；写请求会按后端要求把代理后的 `Host`／`Origin` 对齐到 API 源，需要另开一个 shell 启动本地服务：
+前端地址是 `http://127.0.0.1:5175/next/#/batches`，批次详情按 `http://127.0.0.1:5175/next/#/batches/<batch_id>` 访问，站点详情按 `http://127.0.0.1:5175/next/#/batches/<batch_id>/sites/<site_key>` 访问，任务列表和详情按 `http://127.0.0.1:5175/next/#/tasks`、`/next/#/tasks/<task_id>` 访问，构建记录和详情按 `http://127.0.0.1:5175/next/#/builds`、`/next/#/builds/<build_id>` 访问，新建批次弹窗可用 `http://127.0.0.1:5175/next/#/batches?new=1` 直接打开。FastAPI 启动后根路径 `http://127.0.0.1:8775/` 会跳到 `/next/`；v2 不再提供旧版入口。Vite 仍把 `/api`、`/batch` 和 `/legacy` 代理到 `http://127.0.0.1:8775`，其中 `/batch`、`/legacy` 只在 `ECOM_LEGACY_UI=on` 时可用；写请求会按后端要求把代理后的 `Host`／`Origin` 对齐到 API 源，需要另开一个 shell 启动本地服务：
 
 ```powershell
 app\.venv\Scripts\python.exe -m ecom_crawler serve `
@@ -40,7 +40,7 @@ npm run format:check
 
 ## 验证记录（2026-11-23）
 
-- FastAPI 根路径 307 到 `/next/`；`/next/` 返回 v2 构建。v2 导航已移除旧版工作台、旧版任务列表、技术兜底和“返回旧版”入口；`/batch/`、`/legacy` 仅保留为服务端直访兜底，不在 v2 界面出现。
+- FastAPI 根路径 307 到 `/next/`；`/next/` 返回 v2 构建。v2 导航已移除旧版工作台、旧版任务列表、技术兜底和“返回旧版”入口；旧 Vue 与 `/legacy` 默认关闭并 307 到 `/next/`，仅 `ECOM_LEGACY_UI=on` 时恢复直访回退。
 - 全量启动通过浏览器请求拦截核对：启动请求的 `limits` 为 `{max_urls:null, max_products:null, max_seconds:null, max_attempts:2}`，不再发送 8000／3000／14400；`archive_mode=sample`、`archive_sample_limit=20`。后端 `test_web`／`test_execution`、`test_batches` 和 `test_feedback` 用例通过，覆盖 `Limits` 空值、`build_task` 持久化、无上限运行器哨兵、继续导入写入、单站点启动、构建 SSE 快照／结束、任务批次／站点过滤和反馈分诊。
 - `lint`、`typecheck`、`test`（47 个用例）、`build`、`format:check` 通过；首屏 JS 约 218 KB gzip，Vite 仍提示单 chunk 超过 500 KB。
 - 本地临时账本 10+ 个批次（合成站点列表，仅用于布局和状态走查，未入库）：1280／1440 无页面级横向溢出；列表筛选“草稿”后 4 行，搜索“德国”后 1 行；筛选写入 URL。
@@ -60,7 +60,7 @@ npm run format:check
 - 任务列表与详情（2026-11-23）：`/tasks` 支持状态、类型、批次 ID、站点 ID、包含归档筛选，任务列表进入详情、行菜单控制、归档／恢复和导出；`/tasks/web-5a6ef774c604` 显示 989 条有效、990 条明细、批次／站点深链、结果预览、质量异常、CSV、任务事实和内容完整度；任务详情订阅 `/api/tasks/{id}/events`，终态任务收到 snapshot 和 end，hook 测试覆盖 snapshot、update、end 和断线回退；站点详情任务历史列出站点任务并可跳到 `site`／`archived` 过滤的全部任务。1280／1440 走查通过，长明细表头吸附在顶栏下方。结果验收创建反馈后列表显示分类、样本、期望和状态；分诊提交“规则修复”后状态变为 `TRIAGED` 并显示分诊说明。任务列表和详情的真实写操作在预览副本账本上执行，正式账本未写入。
 - 候选规则（2026-11-24）：站点详情规则版本卡显示当前 active、候选、过期任务和未关闭反馈；人工种子候选经 UI 激活后 active 切到新版本，旧任务显示“结果基于旧规则”，反馈进入 `AWAITING_RERUN`；回滚后 active 回到旧版本，新版本保留为 `superseded`。候选卡显示主机验证摘要、字段级变更、证据哈希和可展开的问题样本。任务反馈卡按状态显示启动修复／创建复跑／标记解决／不处理。真实激活和回滚走预览副本账本；截图在仓库外 `workbench/ui-v2-tasks-2026-11-23/` 和 `workbench/ui-v2-rules-candidate-2026-11-24/`。
 - 构建记录与多轮修复（2026-11-24）：`/builds` 显示 6 条预览构建，状态／模式筛选和搜索可用；`/builds/build-f23d50810e5f` 显示 1 轮已解决修复、构建事实、站点／批次深链和 trace；`/builds/build-preview-candidate-2` 显示 PASSED 验证、有效 6、审计 6 条和字段变更。列表、详情、验证明细 axe 均 0 violations、0 incomplete，截图在仓库外 `workbench/ui-v2-build-pages-2026-11-24/`。
-- 未执行：真实模型手动继续与修复构建 UI 走查、跨重启会话恢复、构建队列、活动真实任务上的暂停／继续／取消、导出 ZIP 下载内容、自动激活、真实批次 `b-586052683409` 对照、完整视觉评审、768／390／320、移动抽屉、触屏、跨浏览器和读屏、旧版实际下线、回退演练和生产环境实际部署验证。
+- 未执行：跨重启会话恢复、构建队列、导出 ZIP 下载内容、自动激活、真实批次 `b-586052683409` 对照、完整视觉评审、768／390／320、移动抽屉、触屏、跨浏览器和读屏、生产环境实际部署验证。
 
 截图和临时账本按根目录 `AGENTS.md` 放在仓库外，不提交。
 
@@ -71,6 +71,6 @@ npm run format:check
 
 ## 边界
 
-- v2 已是默认入口，但整体仍按 **Provisional** 管理；v2 已移除旧版入口，任务 SSE 和站点任务历史已补齐，旧构建仍由服务端托管，退役开关已演练，待实际下线和窄屏验收后再移除旧构建。
+- v2 已是默认入口，但整体仍按 **Provisional** 管理；v2 已移除旧版入口，任务 SSE 和站点任务历史已补齐，旧构建默认下线（`ECOM_LEGACY_UI=on` 仅作短期回退），待窄屏和跨浏览器验收后再转 Accepted。
 - 截图、运行期数据库和其他运行产物不提交到仓库；按根目录 `AGENTS.md` 和 `experiments/README.md` 的约定放到仓库外证据库。
 - 旧 Vue 应用已弃用，只修阻断缺陷，不再扩展视觉或新页面。

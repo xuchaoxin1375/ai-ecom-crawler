@@ -574,6 +574,18 @@ def _error(
     )
 
 
+def _legacy_ui_enabled() -> bool:
+    """Return True only when the retired UI is explicitly enabled."""
+
+    return os.environ.get("ECOM_LEGACY_UI", "off").strip().lower() in {
+        "1",
+        "on",
+        "true",
+        "yes",
+        "enabled",
+    }
+
+
 def _forbidden(message: str) -> JSONResponse:
     return JSONResponse(
         status_code=403,
@@ -712,12 +724,7 @@ def create_app(
     root.mkdir(parents=True, exist_ok=True)
     rules = Path(rules_dir).resolve() if rules_dir is not None else None
     builds_disabled = os.environ.get("ECOM_BUILD_DISABLED") == "1"
-    legacy_ui_enabled = os.environ.get("ECOM_LEGACY_UI", "on").strip().lower() not in {
-        "0",
-        "off",
-        "false",
-        "no",
-    }
+    legacy_ui_enabled = _legacy_ui_enabled()
     if build_manager is None and rules is not None:
         build_manager = BuildManager(store, root, rules, default_proxy=proxy)
 
@@ -1429,7 +1436,13 @@ def create_app(
             return RedirectResponse(url="/next/", status_code=307)
         if legacy_ui_enabled and (BATCH_DIST_DIR / "index.html").is_file():
             return RedirectResponse(url="/batch/", status_code=307)
-        return FileResponse(STATIC_DIR / "index.html")
+        if legacy_ui_enabled:
+            return FileResponse(STATIC_DIR / "index.html")
+        raise _error(
+            "UI_NOT_BUILT",
+            "v2 UI build not found; build app/frontend-v2/dist or set ECOM_LEGACY_UI=on",
+            503,
+        )
 
     @app.get("/legacy", include_in_schema=False)
     def legacy_index() -> Response:
@@ -1444,6 +1457,12 @@ def create_app(
         @app.get("/batch", include_in_schema=False)
         @app.get("/batch/{path:path}", include_in_schema=False)
         def retired_batch(path: str = "") -> Response:
+            if (V2_DIST_DIR / "index.html").is_file():
+                return RedirectResponse(url="/next/", status_code=307)
+            raise _error("NOT_FOUND", "legacy UI is disabled", 404)
+
+        @app.get("/static/index.html", include_in_schema=False)
+        def retired_static_index() -> Response:
             if (V2_DIST_DIR / "index.html").is_file():
                 return RedirectResponse(url="/next/", status_code=307)
             raise _error("NOT_FOUND", "legacy UI is disabled", 404)

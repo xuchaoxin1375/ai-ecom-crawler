@@ -18,6 +18,7 @@ from ecom_crawler.web.app import (
     BATCH_DIST_DIR,
     V2_DIST_DIR,
     Limits,
+    _legacy_ui_enabled,
     create_app,
 )
 
@@ -112,6 +113,9 @@ class WebApiTests(unittest.TestCase):
             / "familidoo-d03.yaml"
         )
         shutil.copy(self.rule_source, self.rules_dir / "familidoo.yaml")
+        self.legacy_env = mock.patch.dict(os.environ, {"ECOM_LEGACY_UI": "off"})
+        self.legacy_env.start()
+        self.addCleanup(self.legacy_env.stop)
         self.client = TestClient(
             create_app(self.db_path, self.out_root, self.rules_dir),
             headers=CLIENT_HEADERS,
@@ -130,39 +134,88 @@ class WebApiTests(unittest.TestCase):
         health = self.client.get("/api/health")
         self.assertEqual(health.status_code, 200)
         self.assertEqual(health.json()["status"], "ok")
-        self.assertEqual(health.json()["legacy_ui"], "enabled")
-        legacy = self.client.get("/legacy")
-        self.assertEqual(legacy.status_code, 200)
-        self.assertIn("采集", legacy.text)
-        index = self.client.get("/", follow_redirects=False)
+        self.assertEqual(health.json()["legacy_ui"], "disabled")
         if (V2_DIST_DIR / "index.html").is_file():
+            legacy = self.client.get("/legacy", follow_redirects=False)
+            self.assertEqual(legacy.status_code, 307)
+            self.assertEqual(legacy.headers["location"], "/next/")
+            batch = self.client.get("/batch/", follow_redirects=False)
+            self.assertEqual(batch.status_code, 307, batch.text)
+            self.assertEqual(batch.headers["location"], "/next/")
+            nested = self.client.get("/batch/tasks/web-1", follow_redirects=False)
+            self.assertEqual(nested.status_code, 307, nested.text)
+            static_index = self.client.get("/static/index.html", follow_redirects=False)
+            self.assertEqual(static_index.status_code, 307, static_index.text)
+            self.assertEqual(static_index.headers["location"], "/next/")
+            index = self.client.get("/", follow_redirects=False)
             self.assertEqual(index.status_code, 307)
             self.assertEqual(index.headers["location"], "/next/")
             next_ui = self.client.get("/next/")
             self.assertEqual(next_ui.status_code, 200)
             self.assertIn("采集", next_ui.text)
-        elif (BATCH_DIST_DIR / "index.html").is_file():
-            self.assertEqual(index.status_code, 307)
-            self.assertEqual(index.headers["location"], "/batch/")
         else:
-            self.assertEqual(index.status_code, 200)
-            self.assertIn("采集", index.text)
+            self.assertEqual(self.client.get("/legacy").status_code, 404)
+            self.assertEqual(self.client.get("/batch/").status_code, 404)
+            self.assertEqual(self.client.get("/static/index.html").status_code, 404)
+            index = self.client.get("/", follow_redirects=False)
+            self.assertEqual(index.status_code, 503)
+            self.assertEqual(index.json()["error"]["code"], "UI_NOT_BUILT")
 
-    def test_legacy_ui_can_be_retired_by_env(self) -> None:
-        with mock.patch.dict(os.environ, {"ECOM_LEGACY_UI": "off"}):
+    def test_legacy_ui_can_be_reenabled_by_env(self) -> None:
+        with mock.patch.dict(os.environ, {"ECOM_LEGACY_UI": "on"}):
             app = create_app(self.db_path, self.out_root, self.rules_dir)
             client = TestClient(app, headers=CLIENT_HEADERS)
             health = client.get("/api/health")
             self.assertEqual(health.status_code, 200)
-            self.assertEqual(health.json()["legacy_ui"], "disabled")
+            self.assertEqual(health.json()["legacy_ui"], "enabled")
+            legacy = client.get("/legacy")
+            self.assertEqual(legacy.status_code, 200)
+            self.assertIn("采集", legacy.text)
+            static_index = client.get("/static/index.html")
+            self.assertEqual(static_index.status_code, 200)
+            self.assertIn("采集", static_index.text)
             batch = client.get("/batch/", follow_redirects=False)
-            self.assertEqual(batch.status_code, 307, batch.text)
-            self.assertEqual(batch.headers["location"], "/next/")
-            legacy = client.get("/legacy", follow_redirects=False)
-            self.assertEqual(legacy.status_code, 307, legacy.text)
-            self.assertEqual(legacy.headers["location"], "/next/")
-            nested = client.get("/batch/tasks/web-1", follow_redirects=False)
-            self.assertEqual(nested.status_code, 307, nested.text)
+            if (BATCH_DIST_DIR / "index.html").is_file():
+                self.assertEqual(batch.status_code, 200, batch.text)
+                self.assertIn("采集", batch.text)
+            else:
+                self.assertEqual(batch.status_code, 404)
+
+    def test_root_does_not_fall_back_to_legacy_console_by_default(self) -> None:
+        missing = self.root / "missing-dist"
+        with (
+            mock.patch("ecom_crawler.web.app.V2_DIST_DIR", missing),
+            mock.patch("ecom_crawler.web.app.BATCH_DIST_DIR", missing),
+        ):
+            client = TestClient(
+                create_app(self.db_path, self.out_root, self.rules_dir),
+                headers=CLIENT_HEADERS,
+            )
+            index = client.get("/", follow_redirects=False)
+            self.assertEqual(index.status_code, 503)
+            self.assertEqual(index.json()["error"]["code"], "UI_NOT_BUILT")
+        with (
+            mock.patch.dict(os.environ, {"ECOM_LEGACY_UI": "on"}),
+            mock.patch("ecom_crawler.web.app.V2_DIST_DIR", missing),
+            mock.patch("ecom_crawler.web.app.BATCH_DIST_DIR", missing),
+        ):
+            client = TestClient(
+                create_app(self.db_path, self.out_root, self.rules_dir),
+                headers=CLIENT_HEADERS,
+            )
+            index = client.get("/", follow_redirects=False)
+            self.assertEqual(index.status_code, 200)
+            self.assertIn("采集", index.text)
+
+    def test_legacy_ui_env_is_off_by_default(self) -> None:
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertFalse(_legacy_ui_enabled())
+        for value in ("1", "on", "true", "yes", "enabled", " ON "):
+            with mock.patch.dict(os.environ, {"ECOM_LEGACY_UI": value}):
+                self.assertTrue(_legacy_ui_enabled(), value)
+        for value in ("0", "off", "false", "no", "disabled", ""):
+            with mock.patch.dict(os.environ, {"ECOM_LEGACY_UI": value}):
+                self.assertFalse(_legacy_ui_enabled(), value)
 
     def test_limits_accept_unbounded_full_catalog(self) -> None:
         limits = Limits(
