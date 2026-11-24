@@ -7,7 +7,9 @@ import type {
 } from "../../lib/api";
 import {
   buildIsActive,
+  buildServiceBlockReason,
   candidateActivationBlockedReason,
+  hasPendingBuildApprovals,
   siteNextStep,
   taskIsActive,
 } from "./site";
@@ -296,6 +298,53 @@ describe("siteNextStep", () => {
   it("does not offer collection for invalid or duplicate entries", () => {
     expect(siteNextStep(site({ readiness: "invalid" }), null).action).toBe("none");
     expect(siteNextStep(site({ readiness: "duplicate" }), null).action).toBe("none");
+  });
+});
+
+describe("build service availability", () => {
+  const config = (available: boolean) => ({
+    available,
+    reasoning_capture_enabled: false,
+    max_repair_rounds: 0,
+  });
+
+  it("allows build actions only when the service reports available", () => {
+    expect(buildServiceBlockReason(config(true))).toBeNull();
+  });
+
+  it("distinguishes unavailable from a configuration read failure", () => {
+    expect(buildServiceBlockReason(config(false))).toContain("未配置构建 Agent");
+    expect(buildServiceBlockReason(null, { error: true })).toContain(
+      "无法读取构建服务配置",
+    );
+  });
+
+  it("explains read-only and disabled build services", () => {
+    expect(
+      buildServiceBlockReason({ ...config(false), unavailable_reason: "read_only" }),
+    ).toContain("只读预览");
+    expect(
+      buildServiceBlockReason({ ...config(false), unavailable_reason: "disabled" }),
+    ).toContain("服务端关闭");
+  });
+
+  it("does not treat a pending first read as unavailable", () => {
+    const reason = buildServiceBlockReason(null, { loading: true });
+    expect(reason).toContain("正在读取");
+    expect(reason).not.toContain("未配置");
+  });
+
+  it("detects pending build approvals", () => {
+    expect(hasPendingBuildApprovals(null)).toBe(false);
+    expect(hasPendingBuildApprovals(build())).toBe(false);
+    expect(
+      hasPendingBuildApprovals(
+        build({ pending_permissions: [{ id: "perm-1", action: "shell" }] }),
+      ),
+    ).toBe(true);
+    expect(hasPendingBuildApprovals(build({ pending_dependencies: ["dep-1"] }))).toBe(
+      true,
+    );
   });
 });
 

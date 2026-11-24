@@ -21,6 +21,7 @@ interface BuildStartDialogProps {
   batchId: string;
   site: BatchSite;
   config: BuildConfig | null;
+  blockedReason?: string | null;
   initialMode: "build" | "repair";
   onOpenChange: (open: boolean) => void;
   onStarted: (response: BuildResponse) => void;
@@ -31,6 +32,7 @@ export function BuildStartDialog({
   batchId,
   site,
   config,
+  blockedReason = null,
   initialMode,
   onOpenChange,
   onStarted,
@@ -53,7 +55,7 @@ export function BuildStartDialog({
   const [checkError, setCheckError] = useState("");
   const [checks, setChecks] = useState<Record<string, BuildModelHealth>>({});
 
-  const available = config?.available !== false;
+  const available = !blockedReason;
   const reasoningDisabled =
     Boolean(config && !config.reasoning_capture_enabled) || busy;
   const repairDisabled = Boolean(config && config.max_repair_rounds < 1) || busy;
@@ -162,7 +164,7 @@ export function BuildStartDialog({
             {!available ? (
               <ErrorNotice
                 title="构建不可用"
-                message="服务端未配置构建 Agent。请用 --rules-dir 启动服务后再试。"
+                message={blockedReason ?? "构建服务暂不可用，请稍后重试。"}
                 compact
               />
             ) : null}

@@ -33,7 +33,7 @@ import {
   buildOutcomeLabel,
   formatTime,
 } from "../../lib/format";
-import { buildIsActive } from "../sites/site";
+import { buildIsActive, buildServiceBlockReason } from "../sites/site";
 import {
   buildModeLabel,
   buildModelLabel,
@@ -169,8 +169,13 @@ export function BuildDetailPage() {
     queryKey: ["build-config"],
     queryFn: ({ signal }) => getBuildConfig(signal),
     staleTime: 60_000,
+    retry: false,
   });
   const buildConfig = configQuery.data ?? null;
+  const configBlockReason = buildServiceBlockReason(buildConfig, {
+    loading: configQuery.isPending,
+    error: configQuery.isError,
+  });
 
   const stream = useBuildStream(
     buildId,
@@ -301,7 +306,7 @@ export function BuildDetailPage() {
     build?.state === "FINISHED" &&
     (build.outcome === "failed" || build.outcome === "interrupted");
   const continuations = build?.continuations ?? [];
-  const continueDisabled = continueBusy || !buildConfig?.available;
+  const continueDisabled = continueBusy || Boolean(configBlockReason);
   const canPause = build?.state === "RUNNING";
   const canResume = build?.state === "PAUSED";
   const permissions = permissionItems(build);
@@ -488,6 +493,109 @@ export function BuildDetailPage() {
           tone={interrupted ? "warning" : "danger"}
           compact
         />
+      ) : null}
+
+      {build.pending_dependencies.length || permissions.length ? (
+        <section
+          aria-label="构建等待审批"
+          className="rounded-panel border border-warning/25 bg-warning-soft px-5 py-4"
+        >
+          <h2 className="flex items-center gap-1.5 text-[15px] leading-6 font-semibold text-warning">
+            <ShieldAlert size={15} aria-hidden="true" />
+            构建等待审批
+          </h2>
+          <p className="mt-0.5 text-xs leading-5 text-ink-2">
+            构建会话在等待你的决定；批准后会继续执行，拒绝会按拒绝结果继续或结束。处理结果会写回本次构建记录。
+          </p>
+          <div className="mt-3 space-y-2">
+            {build.pending_dependencies.map((requestId) => {
+              const detail = dependencyDetails.get(requestId);
+              return (
+                <div
+                  key={requestId}
+                  className="flex flex-wrap items-center gap-2 rounded-control border border-warning/20 bg-surface px-3 py-2 text-xs"
+                >
+                  <span className="font-medium text-ink">
+                    {detail?.package ? `依赖 ${detail.package}` : "依赖安装"}
+                  </span>
+                  {detail?.version ? (
+                    <code className="font-mono text-[11px] text-ink-2">
+                      @{detail.version}
+                    </code>
+                  ) : null}
+                  <span className="text-ink-3">
+                    {detail?.manager
+                      ? `${detail.manager} · ${detail.scope ?? "build"}`
+                      : requestId}
+                  </span>
+                  {detail?.reason ? (
+                    <p className="w-full text-[11px] leading-5 text-ink-3">
+                      {detail.reason}
+                    </p>
+                  ) : null}
+                  {!dependencyInstallerConfigured ? (
+                    <p className="w-full text-[11px] leading-5 text-warning">
+                      当前服务未配置依赖安装器；请操作者手工安装，批准不会执行安装。
+                    </p>
+                  ) : null}
+                  <div className="ml-auto flex gap-1.5">
+                    <Button
+                      size="sm"
+                      disabled={Boolean(busy) || !dependencyInstallerConfigured}
+                      onClick={() => void replyDependency(requestId, "once")}
+                    >
+                      批准一次
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={Boolean(busy)}
+                      onClick={() => void replyDependency(requestId, "reject")}
+                    >
+                      拒绝
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+            {permissions.map((request) => {
+              const requestId = String(request.id);
+              return (
+                <div
+                  key={requestId}
+                  className="flex flex-wrap items-center gap-2 rounded-control border border-warning/20 bg-surface px-3 py-2 text-xs"
+                >
+                  <span className="font-medium text-ink">权限请求</span>
+                  <code className="font-mono text-[11px] text-ink-2">
+                    {String(request.action || "permission")}
+                  </code>
+                  {request.resource ? (
+                    <span className="truncate text-ink-3">
+                      {String(request.resource)}
+                    </span>
+                  ) : null}
+                  <div className="ml-auto flex gap-1.5">
+                    <Button
+                      size="sm"
+                      disabled={Boolean(busy)}
+                      onClick={() => void replyPermission(requestId, "once")}
+                    >
+                      允许一次
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={Boolean(busy)}
+                      onClick={() => void replyPermission(requestId, "reject")}
+                    >
+                      拒绝
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
       ) : null}
 
       <MetricStrip
@@ -691,10 +799,19 @@ export function BuildDetailPage() {
                     </Button>
                   </div>
                 </div>
-                {!buildConfig?.available ? (
-                  <p className="rounded-control border border-warning/25 bg-warning-soft px-3 py-2 text-xs leading-5 text-warning">
-                    构建入口已关闭（例如只读预览或服务未配置构建），不能继续会话。
-                  </p>
+                {configBlockReason ? (
+                  <div className="flex flex-wrap items-center gap-2 rounded-control border border-warning/25 bg-warning-soft px-3 py-2 text-xs leading-5 text-warning">
+                    <p>{configBlockReason}</p>
+                    {configQuery.isError ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => void configQuery.refetch()}
+                      >
+                        重试读取配置
+                      </Button>
+                    ) : null}
+                  </div>
                 ) : null}
               </>
             ) : (
@@ -730,106 +847,6 @@ export function BuildDetailPage() {
                 </ul>
               </div>
             ) : null}
-          </div>
-        </section>
-      ) : null}
-
-      {build.pending_dependencies.length || permissions.length ? (
-        <section className="rounded-panel border border-warning/25 bg-warning-soft px-5 py-4">
-          <h2 className="flex items-center gap-1.5 text-[15px] leading-6 font-semibold text-warning">
-            <ShieldAlert size={15} aria-hidden="true" />
-            待处理请求
-          </h2>
-          <p className="mt-0.5 text-xs leading-5 text-ink-2">
-            构建会话在等待你的决定；处理后会继续执行。
-          </p>
-          <div className="mt-3 space-y-2">
-            {build.pending_dependencies.map((requestId) => {
-              const detail = dependencyDetails.get(requestId);
-              return (
-                <div
-                  key={requestId}
-                  className="flex flex-wrap items-center gap-2 rounded-control border border-warning/20 bg-surface px-3 py-2 text-xs"
-                >
-                  <span className="font-medium text-ink">
-                    {detail?.package ? `依赖 ${detail.package}` : "依赖安装"}
-                  </span>
-                  {detail?.version ? (
-                    <code className="font-mono text-[11px] text-ink-2">
-                      @{detail.version}
-                    </code>
-                  ) : null}
-                  <span className="text-ink-3">
-                    {detail?.manager
-                      ? `${detail.manager} · ${detail.scope ?? "build"}`
-                      : requestId}
-                  </span>
-                  {detail?.reason ? (
-                    <p className="w-full text-[11px] leading-5 text-ink-3">
-                      {detail.reason}
-                    </p>
-                  ) : null}
-                  {!dependencyInstallerConfigured ? (
-                    <p className="w-full text-[11px] leading-5 text-warning">
-                      当前服务未配置依赖安装器；请操作者手工安装，批准不会执行安装。
-                    </p>
-                  ) : null}
-                  <div className="ml-auto flex gap-1.5">
-                    <Button
-                      size="sm"
-                      disabled={Boolean(busy) || !dependencyInstallerConfigured}
-                      onClick={() => void replyDependency(requestId, "once")}
-                    >
-                      批准一次
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      disabled={Boolean(busy)}
-                      onClick={() => void replyDependency(requestId, "reject")}
-                    >
-                      拒绝
-                    </Button>
-                  </div>
-                </div>
-              );
-            })}
-            {permissions.map((request) => {
-              const requestId = String(request.id);
-              return (
-                <div
-                  key={requestId}
-                  className="flex flex-wrap items-center gap-2 rounded-control border border-warning/20 bg-surface px-3 py-2 text-xs"
-                >
-                  <span className="font-medium text-ink">权限请求</span>
-                  <code className="font-mono text-[11px] text-ink-2">
-                    {String(request.action || "permission")}
-                  </code>
-                  {request.resource ? (
-                    <span className="truncate text-ink-3">
-                      {String(request.resource)}
-                    </span>
-                  ) : null}
-                  <div className="ml-auto flex gap-1.5">
-                    <Button
-                      size="sm"
-                      disabled={Boolean(busy)}
-                      onClick={() => void replyPermission(requestId, "once")}
-                    >
-                      允许一次
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      disabled={Boolean(busy)}
-                      onClick={() => void replyPermission(requestId, "reject")}
-                    >
-                      拒绝
-                    </Button>
-                  </div>
-                </div>
-              );
-            })}
           </div>
         </section>
       ) : null}

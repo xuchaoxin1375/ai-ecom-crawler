@@ -3,7 +3,6 @@ import { Link, useLocation, useParams } from "react-router-dom";
 import { readSiteListReturn } from "../batches/siteListReturn";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  AlertTriangle,
   ArrowLeft,
   ArrowRight,
   Ban,
@@ -61,12 +60,14 @@ import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { ErrorNotice } from "../../components/ui/ErrorNotice";
+import { InlineNotice } from "../../components/ui/InlineNotice";
 import { MetricStrip } from "../../components/ui/MetricStrip";
 import { ConfirmBatchActionDialog } from "../batches/ConfirmBatchActionDialog";
 import { taskExportLabel } from "../batches/actions";
 import { ProductPreviewSection } from "../tasks/ProductPreviewSection";
 import { QualityExceptionsSection } from "../tasks/QualityExceptionsSection";
 import { TaskItemsSection } from "../tasks/TaskItemsSection";
+import { BuildApprovals } from "./BuildApprovals";
 import { BuildPanel } from "./BuildPanel";
 import { BuildStartDialog } from "./BuildStartDialog";
 import { StartSiteDialog } from "./StartSiteDialog";
@@ -75,6 +76,7 @@ import { useBuildStream } from "./useBuildStream";
 import { RuleEvidence } from "../rules/RuleEvidence";
 import {
   buildIsActive,
+  buildServiceBlockReason,
   candidateActivationBlockedReason,
   siteHasActiveWork,
   siteNextStep,
@@ -276,6 +278,7 @@ export function SiteDetailPage() {
     queryKey: ["build-config"],
     queryFn: ({ signal }) => getBuildConfig(signal),
     staleTime: 60_000,
+    retry: false,
   });
 
   const siteRuleQuery = useQuery({
@@ -304,6 +307,13 @@ export function SiteDetailPage() {
   const step = site ? siteNextStep(site, build) : null;
   const messages: BuildMessages | null = stream.messages ?? messagesQuery.data ?? null;
   const config: BuildConfig | null = configQuery.data ?? null;
+  const configBlockReason = buildServiceBlockReason(config, {
+    loading: configQuery.isPending,
+    error: configQuery.isError,
+  });
+  const buildStepBlocked =
+    Boolean(configBlockReason) &&
+    (step?.action === "build" || step?.action === "repair");
   const quality = task?.quality_exceptions ?? [];
 
   function applyBatch(next: BatchDetail) {
@@ -532,6 +542,9 @@ export function SiteDetailPage() {
 
   function handleStep() {
     if (!step) return;
+    if ((step.action === "build" || step.action === "repair") && buildStepBlocked) {
+      return;
+    }
     switch (step.action) {
       case "build":
         openBuild("build");
@@ -686,20 +699,15 @@ export function SiteDetailPage() {
       site={site}
       build={build}
       messages={messages}
-      config={config}
       busy={buildBusy}
       error={buildActionError}
       refreshing={buildQuery.isFetching || messagesQuery.isFetching}
       streamConnected={stream.connected}
       streamError={stream.error}
       streamEnded={stream.ended}
+      blockedReason={configBlockReason}
+      onRetryConfig={configQuery.isError ? () => void configQuery.refetch() : undefined}
       onOpenStart={openBuild}
-      onReplyDependency={(requestId, decision) =>
-        void replyDependency(requestId, decision)
-      }
-      onReplyPermission={(requestId, decision) =>
-        void replyPermission(requestId, decision)
-      }
       onRefresh={() => {
         void buildQuery.refetch();
         void messagesQuery.refetch();
@@ -783,7 +791,10 @@ export function SiteDetailPage() {
                       : "primary"
                   }
                   onClick={handleStep}
-                  disabled={stepBusy}
+                  disabled={stepBusy || buildStepBlocked}
+                  title={
+                    buildStepBlocked ? (configBlockReason ?? undefined) : undefined
+                  }
                 >
                   {stepBusy ? "处理中…" : step.actionLabel}
                 </Button>
@@ -824,6 +835,33 @@ export function SiteDetailPage() {
 
       {actionError ? (
         <ErrorNotice title="操作失败" message={actionError} compact />
+      ) : null}
+
+      <BuildApprovals
+        build={build}
+        busy={buildBusy}
+        error={buildActionError}
+        onReplyDependency={(requestId, decision) =>
+          void replyDependency(requestId, decision)
+        }
+        onReplyPermission={(requestId, decision) =>
+          void replyPermission(requestId, decision)
+        }
+      />
+
+      {buildStepBlocked ? (
+        <InlineNotice tone="warning" title="构建服务不可用">
+          <p>{configBlockReason}</p>
+          {configQuery.isError ? (
+            <Button
+              className="mt-2"
+              size="sm"
+              onClick={() => void configQuery.refetch()}
+            >
+              重试读取配置
+            </Button>
+          ) : null}
+        </InlineNotice>
       ) : null}
 
       <MetricStrip items={statusItems} label="站点状态" />
@@ -1076,7 +1114,10 @@ export function SiteDetailPage() {
                     size="sm"
                     variant="secondary"
                     onClick={handleStep}
-                    disabled={stepBusy}
+                    disabled={stepBusy || buildStepBlocked}
+                    title={
+                      buildStepBlocked ? (configBlockReason ?? undefined) : undefined
+                    }
                   >
                     {stepBusy ? "处理中…" : step.actionLabel}
                   </Button>
@@ -1362,13 +1403,6 @@ export function SiteDetailPage() {
               </p>
             </div>
           </section>
-
-          {config && !config.available ? (
-            <p className="flex items-start gap-2 rounded-panel border border-warning/25 bg-warning-soft px-4 py-3 text-xs leading-5 text-warning">
-              <AlertTriangle className="mt-0.5 shrink-0" size={14} aria-hidden="true" />
-              服务端未配置构建 Agent；启动构建会返回不可用。
-            </p>
-          ) : null}
         </aside>
       </div>
 
@@ -1378,6 +1412,7 @@ export function SiteDetailPage() {
           batchId={batch.batch_id}
           site={site}
           config={config}
+          blockedReason={configBlockReason}
           initialMode={buildMode}
           onOpenChange={(next) => {
             if (!next) setDialog("");

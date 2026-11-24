@@ -1,5 +1,6 @@
 import type {
   BatchSite,
+  BuildConfig,
   BuildStatus,
   BuildSummary,
   QualityException,
@@ -64,6 +65,41 @@ export function buildIsActive(build: BuildLike | null | undefined): boolean {
 
 export function taskIsActive(task: TaskSummary | null | undefined): boolean {
   return Boolean(task && TASK_ACTIVE_STATES.has(task.state));
+}
+
+export interface BuildConfigState {
+  loading?: boolean;
+  error?: boolean;
+}
+
+export function buildServiceBlockReason(
+  config: BuildConfig | null,
+  state: BuildConfigState = {},
+): string | null {
+  if (state.loading) return "正在读取构建服务配置…";
+  if (state.error) {
+    return "无法读取构建服务配置，暂时不能启动或修复构建；请重试。";
+  }
+  if (config && config.available === false) {
+    if (config.unavailable_reason === "read_only") {
+      return "只读预览已关闭构建入口，启动构建和修复规则不可用。";
+    }
+    if (config.unavailable_reason === "disabled") {
+      return "构建 Agent 已在服务端关闭，启动构建和修复规则不可用。";
+    }
+    return "服务端未配置构建 Agent，启动构建和修复规则不可用。";
+  }
+  return null;
+}
+
+export function hasPendingBuildApprovals(
+  build: BuildStatus | null | undefined,
+): boolean {
+  if (!build) return false;
+  return (
+    (build.pending_dependencies?.length ?? 0) > 0 ||
+    (build.pending_permissions?.length ?? 0) > 0
+  );
 }
 
 export function candidateActivationBlockedReason(

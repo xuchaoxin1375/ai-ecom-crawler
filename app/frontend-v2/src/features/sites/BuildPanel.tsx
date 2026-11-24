@@ -6,13 +6,11 @@ import {
   FileText,
   RefreshCw,
   RotateCcw,
-  ShieldAlert,
   Wrench,
 } from "lucide-react";
 import {
   buildTraceUrl,
   type BatchSite,
-  type BuildConfig,
   type BuildMessages,
   type BuildStatus,
 } from "../../lib/api";
@@ -31,7 +29,6 @@ import {
   buildEventTone,
   buildModelLabel,
   formatBytes,
-  permissionItems,
   visibleBuildEvents,
 } from "./build";
 import { BuildTimeline } from "./BuildTimeline";
@@ -41,19 +38,15 @@ interface BuildPanelProps {
   site: BatchSite;
   build: BuildStatus | null;
   messages: BuildMessages | null;
-  config: BuildConfig | null;
   busy: string;
   error: string;
   refreshing: boolean;
   streamConnected: boolean;
   streamError: string;
   streamEnded: boolean;
+  blockedReason?: string | null;
+  onRetryConfig?: () => void;
   onOpenStart: (mode: "build" | "repair") => void;
-  onReplyDependency: (requestId: string, decision: "once" | "reject") => void;
-  onReplyPermission: (
-    requestId: string,
-    decision: "once" | "always" | "reject",
-  ) => void;
   onRefresh: () => void;
 }
 
@@ -70,16 +63,15 @@ export function BuildPanel({
   site,
   build,
   messages,
-  config,
   busy,
   error,
   refreshing,
   streamConnected,
   streamError,
   streamEnded,
+  blockedReason = null,
+  onRetryConfig,
   onOpenStart,
-  onReplyDependency,
-  onReplyPermission,
   onRefresh,
 }: BuildPanelProps) {
   const active = buildIsActive(build);
@@ -91,12 +83,6 @@ export function BuildPanel({
   const canRepair =
     !active && !taskActive && site.readiness === "ready" && Boolean(site.rule);
   const events = visibleBuildEvents(build);
-  const permissions = permissionItems(build);
-  const dependencyDetails = new Map(
-    (build?.pending_dependency_requests ?? []).map((item) => [item.request_id, item]),
-  );
-  const dependencyInstallerConfigured =
-    build?.dependency_installer_configured !== false;
   const repair = activeRepair(build);
 
   if (!build && !canStartBuild && !canRepair) return null;
@@ -118,13 +104,24 @@ export function BuildPanel({
                 }。可对已安装规则重新验证并修复描述块、规格和缺失字段；不删除已有采集数据。`
               : "新站由构建 Agent 生成候选规则；主机完成有界验证后站点才变为可采。构建会话与采集任务分开，默认只运行一个构建。"}
           </p>
+          {blockedReason ? (
+            <div className="mt-1 flex flex-wrap items-center gap-2">
+              <p className="text-xs leading-5 text-warning">{blockedReason}</p>
+              {onRetryConfig ? (
+                <Button size="sm" variant="ghost" onClick={onRetryConfig}>
+                  重试读取配置
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
         </div>
         <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:shrink-0 sm:justify-end">
           {canRepair ? (
             <Button
               size="sm"
               variant="primary"
-              disabled={Boolean(busy)}
+              disabled={Boolean(busy) || Boolean(blockedReason)}
+              title={blockedReason ?? undefined}
               onClick={() => onOpenStart("repair")}
             >
               <Wrench size={13} aria-hidden="true" />
@@ -253,95 +250,6 @@ export function BuildPanel({
             </div>
           ) : null}
 
-          {build.pending_dependencies.length ? (
-            <div className="space-y-2 rounded-control border border-warning/25 bg-warning-soft px-3 py-2">
-              <p className="flex items-center gap-1.5 text-sm font-semibold text-warning">
-                <ShieldAlert size={14} aria-hidden="true" />
-                依赖审批
-              </p>
-              {build.pending_dependencies.map((requestId) => {
-                const detail = dependencyDetails.get(requestId);
-                return (
-                  <div
-                    key={requestId}
-                    className="flex flex-wrap items-center gap-2 text-xs"
-                  >
-                    <span className="font-medium text-ink">
-                      {detail?.package ? `依赖 ${detail.package}` : "依赖安装"}
-                    </span>
-                    {detail?.version ? (
-                      <code className="font-mono text-[11px]">@{detail.version}</code>
-                    ) : null}
-                    {detail?.reason ? (
-                      <span className="text-ink-3">{detail.reason}</span>
-                    ) : null}
-                    {!dependencyInstallerConfigured ? (
-                      <span className="basis-full text-[11px] leading-5 text-warning">
-                        当前服务未配置依赖安装器；请操作者手工安装。
-                      </span>
-                    ) : null}
-                    <Button
-                      size="sm"
-                      disabled={Boolean(busy) || !dependencyInstallerConfigured}
-                      onClick={() => onReplyDependency(requestId, "once")}
-                    >
-                      批准
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      disabled={Boolean(busy)}
-                      onClick={() => onReplyDependency(requestId, "reject")}
-                    >
-                      拒绝
-                    </Button>
-                  </div>
-                );
-              })}
-            </div>
-          ) : null}
-
-          {permissions.length ? (
-            <div className="space-y-2 rounded-control border border-warning/25 bg-warning-soft px-3 py-2">
-              <p className="flex items-center gap-1.5 text-sm font-semibold text-warning">
-                <ShieldAlert size={14} aria-hidden="true" />
-                权限请求
-              </p>
-              {permissions.map((request) => (
-                <div
-                  key={String(request.id)}
-                  className="flex flex-wrap items-center gap-2 text-xs"
-                >
-                  <code className="font-mono text-[11px]">
-                    {String(request.action || "permission")}
-                  </code>
-                  {request.resources ? (
-                    <span className="text-ink-3">
-                      {Array.isArray(request.resources)
-                        ? request.resources.join("、")
-                        : String(request.resources)}
-                    </span>
-                  ) : null}
-                  <Button
-                    size="sm"
-                    disabled={Boolean(busy)}
-                    onClick={() => onReplyPermission(String(request.id), "once")}
-                  >
-                    允许一次
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    disabled={Boolean(busy)}
-                    onClick={() => onReplyPermission(String(request.id), "reject")}
-                  >
-                    拒绝
-                  </Button>
-                </div>
-              ))}
-            </div>
-          ) : null}
-
           {events.length ? (
             <ol className="space-y-1.5" aria-label="构建事件">
               {events.map((event, index) => (
@@ -390,11 +298,6 @@ export function BuildPanel({
               ? "当前没有修复记录。点击“修复规则”会把已安装规则和样例页交给构建 Agent，只做定向修复并重新验证；失败保留原规则和已有采集数据。"
               : "当前没有构建记录。开始构建会调用模型分析站点并生成规则，产生模型费用；构建完成后自动做一次有界验证，通过后站点变为可采。"}
           </p>
-          {config && !config.available ? (
-            <p className="text-xs text-warning">
-              服务端未配置构建 Agent；启动构建会返回不可用。
-            </p>
-          ) : null}
         </div>
       )}
 

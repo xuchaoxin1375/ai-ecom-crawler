@@ -500,6 +500,7 @@ export interface BuildModelCatalogEntry {
 
 export interface BuildConfig {
   available: boolean;
+  unavailable_reason?: "read_only" | "disabled" | "unconfigured" | null;
   reasoning_capture_enabled: boolean;
   max_repair_rounds: number;
   models?: BuildModelOption[];
