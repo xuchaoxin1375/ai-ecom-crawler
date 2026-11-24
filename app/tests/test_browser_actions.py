@@ -344,10 +344,24 @@ class BrowserListingActionTests(unittest.TestCase):
             per_domain_rps=50,
         )
 
-    def _assert_valid_products(self, result: Any, expected: int = 6) -> None:
+    def _assert_valid_products(
+        self, result: Any, root: Path, expected: int = 6
+    ) -> None:
         counts = result.task_result.get("counts") or {}
         if counts.get("valid_products") == expected:
             return
+        navigation = [
+            {
+                "url": item.url,
+                "state": item.state,
+                "attempts": item.attempts,
+                "failure_class": item.failure_class,
+                "result": item.result,
+            }
+            for item in TaskStore(root / "tasks.db").items(
+                "browser-listing", "navigation"
+            )
+        ]
         detail = {
             "counts": counts,
             "state": result.task_result.get("state"),
@@ -356,6 +370,7 @@ class BrowserListingActionTests(unittest.TestCase):
             "failure_classes": result.task_result.get("failure_classes"),
             "recovery": result.task_result.get("recovery"),
             "browser": (result.task_result.get("runtime") or {}).get("browser"),
+            "navigation": navigation,
         }
         self.fail(
             f"valid_products={counts.get('valid_products')} != {expected}: "
@@ -371,7 +386,7 @@ class BrowserListingActionTests(unittest.TestCase):
                 "listing-more.html",
                 "type: load_more\n        button_selector: \"#more\"\n        max_clicks: 5\n        settle_ms: 500\n        no_new_stop: 2",
             )
-            self._assert_valid_products(result)
+            self._assert_valid_products(result, root)
             listing = next(
                 item
                 for item in TaskStore(root / "tasks.db").items(
@@ -396,7 +411,7 @@ class BrowserListingActionTests(unittest.TestCase):
                 "listing-scroll.html",
                 "type: infinite_scroll\n        mode: \"scroll\"\n        max_scrolls: 5\n        settle_ms: 500\n        no_new_stop: 2",
             )
-            self._assert_valid_products(result)
+            self._assert_valid_products(result, root)
             listing = next(
                 item
                 for item in TaskStore(root / "tasks.db").items(
@@ -421,7 +436,7 @@ class BrowserListingActionTests(unittest.TestCase):
                 "listing-container.html",
                 "type: infinite_scroll\n        mode: \"scroll\"\n        container: \"#feed\"\n        max_scrolls: 5\n        settle_ms: 500\n        no_new_stop: 2",
             )
-            self._assert_valid_products(result)
+            self._assert_valid_products(result, root)
             listing = next(
                 item
                 for item in TaskStore(root / "tasks.db").items(
