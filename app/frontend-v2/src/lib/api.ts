@@ -493,6 +493,23 @@ export interface BuildConfig {
   available: boolean;
   reasoning_capture_enabled: boolean;
   max_repair_rounds: number;
+  models?: BuildModelOption[];
+}
+
+export interface BuildModelHealth {
+  status: "ok" | "failed";
+  code: string | null;
+  checked_at: string;
+  latency_ms: number;
+}
+
+export interface BuildModelOption {
+  id: string;
+  label: string;
+  variant: string;
+  variants: string[];
+  probe_supported: boolean;
+  health: Record<string, BuildModelHealth | undefined>;
 }
 
 export interface BuildMessage {
@@ -527,6 +544,7 @@ export interface BuildMessages {
 
 export interface BuildStartOptions {
   mode?: "build" | "repair";
+  model_ref?: string;
   reason?: string;
   max_products?: number;
   max_seconds?: number;
@@ -1155,6 +1173,12 @@ export function buildEventsUrl(buildId: string): string {
 
 export function getBuildConfig(signal?: AbortSignal): Promise<BuildConfig> {
   return getJson<BuildConfig>("/api/builds/config", signal);
+}
+
+export function checkBuildModel(modelRef: string): Promise<BuildModelHealth> {
+  return sendJson<BuildModelHealth>("/api/builds/models/check", "POST", {
+    model_ref: modelRef,
+  });
 }
 
 export function pauseBuild(buildId: string): Promise<BuildResponse> {

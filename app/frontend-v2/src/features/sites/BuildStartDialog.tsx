@@ -1,15 +1,19 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Hammer, Wrench, X } from "lucide-react";
 import {
+  checkBuildModel,
   startSiteBuild,
   type BatchSite,
   type BuildConfig,
+  type BuildModelHealth,
   type BuildResponse,
 } from "../../lib/api";
 import { Button } from "../../components/ui/Button";
-import { Checkbox, Input } from "../../components/ui/Input";
+import { Checkbox, Input, Select } from "../../components/ui/Input";
 import { ErrorNotice } from "../../components/ui/ErrorNotice";
+import { formatTime } from "../../lib/format";
 
 interface BuildStartDialogProps {
   open: boolean;
@@ -21,6 +25,12 @@ interface BuildStartDialogProps {
   onStarted: (response: BuildResponse) => void;
 }
 
+const probeErrorLabels: Record<string, string> = {
+  MODEL_UNAVAILABLE: "此 OpenCode 进程未识别该模型，请检查模型配置和凭据",
+  CONNECTION_ERROR: "连接失败或超时",
+  NO_OUTPUT: "未收到有效输出",
+};
+
 export function BuildStartDialog({
   open,
   batchId,
@@ -30,6 +40,7 @@ export function BuildStartDialog({
   onOpenChange,
   onStarted,
 }: BuildStartDialogProps) {
+  const queryClient = useQueryClient();
   const [mode] = useState<"build" | "repair">(initialMode);
   const [proxy, setProxy] = useState("");
   const [reason, setReason] = useState("");
@@ -41,20 +52,52 @@ export function BuildStartDialog({
   const [archiveSample, setArchiveSample] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [modelId, setModelId] = useState("");
+  const [variantOverride, setVariantOverride] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [checkError, setCheckError] = useState("");
+  const [checks, setChecks] = useState<Record<string, BuildModelHealth>>({});
 
   const available = config?.available !== false;
   const reasoningDisabled =
     Boolean(config && !config.reasoning_capture_enabled) || busy;
   const repairDisabled = Boolean(config && config.max_repair_rounds < 1) || busy;
   const isRepair = mode === "repair";
+  const models = config?.models ?? [];
+  const selected = models.find((model) => model.id === modelId);
+  const variant = variantOverride ?? selected?.variant ?? "";
+  const modelRef = modelId ? modelId + (variant ? `#${variant}` : "") : undefined;
+  const blocked =
+    !selected &&
+    models.length > 0 &&
+    models.every((model) => {
+      const ref = model.id + (model.variant ? `#${model.variant}` : "");
+      return (checks[ref] ?? model.health[model.variant])?.status === "failed";
+    });
+
+  async function runCheck() {
+    if (!modelRef || !available || busy || checking) return;
+    setChecking(true);
+    setCheckError("");
+    try {
+      const result = await checkBuildModel(modelRef);
+      setChecks((previous) => ({ ...previous, [modelRef]: result }));
+      void queryClient.invalidateQueries({ queryKey: ["build-config"] });
+    } catch (exc) {
+      setCheckError(exc instanceof Error ? exc.message : String(exc));
+    } finally {
+      setChecking(false);
+    }
+  }
 
   async function runStart() {
-    if (!available || busy) return;
+    if (!available || busy || checking || blocked) return;
     setBusy(true);
     setError("");
     try {
       const response = await startSiteBuild(batchId, site.site_key, {
         mode,
+        model_ref: modelRef,
         reason: isRepair ? reason.trim() || undefined : undefined,
         max_products: 6,
         max_seconds: catalogFull ? 900 : 600,
@@ -127,6 +170,90 @@ export function BuildStartDialog({
                 message="服务端未配置构建 Agent。请用 --rules-dir 启动服务后再试。"
                 compact
               />
+            ) : null}
+
+            {models.length > 0 ? (
+              <fieldset
+                className="min-w-0 space-y-2"
+                disabled={busy || checking || !available}
+              >
+                <legend className="mb-1 text-sm font-medium text-ink">构建模型</legend>
+                <div className="grid min-w-0 gap-2 sm:grid-cols-2">
+                  <Select
+                    aria-label="分配方式或模型"
+                    value={modelId}
+                    onChange={(event) => {
+                      setModelId(event.target.value);
+                      setVariantOverride(null);
+                      setCheckError("");
+                    }}
+                  >
+                    <option value="">均衡分配（默认）</option>
+                    {models.map((model) => (
+                      <option key={model.id} value={model.id}>
+                        {model.label}
+                      </option>
+                    ))}
+                  </Select>
+                  {selected ? (
+                    <Select
+                      aria-label="思考等级"
+                      value={variant}
+                      onChange={(event) => {
+                        setVariantOverride(event.target.value);
+                        setCheckError("");
+                      }}
+                    >
+                      {selected.variants.map((level) => (
+                        <option key={level} value={level}>
+                          {level || "供应商默认"}
+                        </option>
+                      ))}
+                    </Select>
+                  ) : null}
+                </div>
+                {!selected ? (
+                  <p className="text-xs leading-5 text-ink-3">
+                    按新建的站点规则构建或修复轮流分配。只分配一次，不影响已有规则的采集。
+                  </p>
+                ) : null}
+                <ul
+                  className="space-y-1 break-words text-xs leading-5 text-ink-2"
+                  aria-live="polite"
+                >
+                  {(selected ? [selected] : models).map((model) => {
+                    const level = selected ? variant : model.variant;
+                    const ref = model.id + (level ? `#${level}` : "");
+                    const result = checks[ref] ?? model.health[level];
+                    return (
+                      <li key={model.id}>
+                        {model.label} · {level || "供应商默认"} ·{" "}
+                        {result
+                          ? `${result.status === "ok" ? "探测通过" : "探测失败"} · ${formatTime(result.checked_at)} · ${result.latency_ms} ms${result.code ? ` · ${probeErrorLabels[result.code] ?? result.code}` : ""}`
+                          : "已配置，尚未探测"}
+                      </li>
+                    );
+                  })}
+                </ul>
+                {selected?.probe_supported ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button variant="secondary" onClick={() => void runCheck()}>
+                      {checking ? "正在测试…" : "测试可用性"}
+                    </Button>
+                    <span className="text-xs text-ink-3">
+                      不启动构建；短请求可能计费。
+                    </span>
+                  </div>
+                ) : null}
+                {checkError ? (
+                  <ErrorNotice title="未完成探测" message={checkError} compact />
+                ) : null}
+                {blocked ? (
+                  <p className="text-xs text-warning">
+                    默认档位均探测失败。请选择模型重测，或手动指定。
+                  </p>
+                ) : null}
+              </fieldset>
             ) : null}
 
             <div>
@@ -287,7 +414,7 @@ export function BuildStartDialog({
               <Button
                 variant="primary"
                 onClick={() => void runStart()}
-                disabled={!available || busy}
+                disabled={!available || busy || checking || blocked}
               >
                 {busy ? "启动中…" : isRepair ? "启动修复" : "启动构建"}
               </Button>

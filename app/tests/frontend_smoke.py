@@ -29,6 +29,9 @@ APP = Path(__file__).resolve().parents[1]
 DIST = APP / "frontend-v2" / "dist" / "index.html"
 SITE = "workbench-fixture.test"
 TIMEOUT = 90
+BUILD_SITE = "build-model-fixture.test"
+TERRA = "yjwd-gpt-enterprise/gpt-6.1-terra"
+DEEPSEEK = "opencode-go/deepseek-v4.1-flash"
 
 
 def check(condition: bool, message: str) -> None:
@@ -234,10 +237,11 @@ def exercise(page: Page, origin: str, fixture: str, root: Path) -> None:
 
 
 def browser_check(origin: str, fixture: str, root: Path) -> None:
-    from patchright.sync_api import Route, sync_playwright
+    from patchright.sync_api import Route, expect, sync_playwright
 
     problems: list[str] = []
     allowed = {urlsplit(origin).netloc, urlsplit(fixture).netloc}
+    missing_rule_url = f"{origin}/api/sites/{BUILD_SITE}/rule"
 
     def local_only(route: Route) -> None:
         url = urlsplit(route.request.url)
@@ -262,20 +266,64 @@ def browser_check(origin: str, fixture: str, root: Path) -> None:
                 page.on(
                     "console",
                     lambda msg: (
-                        problems.append(f"console: {msg.text}") if msg.type == "error" else None
+                        problems.append(f"console: {msg.text}")
+                        if msg.type == "error" and not (
+                            msg.location.get("url") == missing_rule_url and "404" in msg.text
+                        ) else None
                     ),
                 )
                 page.on(
                     "response",
                     lambda res: (
                         problems.append(f"HTTP {res.status} {res.url}")
-                        if res.status >= 400
+                        if res.status >= 400 and not (res.url == missing_rule_url and res.status == 404)
                         else None
                     ),
                 )
                 context.tracing.start(screenshots=True, snapshots=True)
                 try:
                     exercise(page, origin, fixture, root)
+                    seeded = page.request.post(
+                        f"{origin}/api/batches", data={"name": "模型池测试", "sites": [BUILD_SITE]},
+                        headers={"Origin": origin, "X-Requested-With": "XMLHttpRequest"},
+                    )
+                    check(seeded.status == 201, f"Could not create model fixture: {seeded.text()}")
+                    batch_id = seeded.json()["batch"]["batch_id"]
+                    no_rule = page.request.get(missing_rule_url)
+                    check(no_rule.status == 404 and no_rule.json()["error"]["code"] == "SITE_NOT_FOUND",
+                          f"Unexpected response for a station with no rule or build: {no_rule.status}")
+                    site_path = f"/api/batches/{batch_id}/sites/{BUILD_SITE}/build"
+                    page.goto(f"{origin}/next/#/batches/{batch_id}/sites/{BUILD_SITE}")
+                    page.get_by_role("button", name="启动构建", exact=True).first.click()
+                    dialog = page.get_by_role("dialog", name="启动方案构建")
+                    select = dialog.get_by_label("分配方式或模型")
+                    expect(select).to_have_value("")
+                    expect(dialog.get_by_text(re.compile(r"Terra.*尚未探测"))).to_be_visible()
+                    select.select_option(TERRA)
+                    level = dialog.get_by_label("思考等级")
+                    expect(level).to_have_value("medium")
+                    level.select_option("high")
+                    health = post(
+                        page, dialog.get_by_role("button", name="测试可用性"), origin,
+                        "/api/builds/models/check", 200,
+                    )
+                    check(health["status"] == "ok", f"Fixture probe did not pass: {health}")
+                    expect(dialog.get_by_text(re.compile(r"Terra.*high.*探测通过"))).to_be_visible()
+                    for width in (1280, 390, 320):
+                        page.set_viewport_size({"width": width, "height": 900 if width == 1280 else 700})
+                        expect(dialog.get_by_role("button", name="启动构建")).to_be_in_viewport()
+                        check(dialog.evaluate("el => el.scrollWidth <= el.clientWidth + 1"),
+                              f"Build dialog overflows at {width}px")
+                    if evidence := os.environ.get("ECOM_SMOKE_SCREENSHOT_DIR"):
+                        page.screenshot(path=str(Path(evidence) / "model-dialog-320.png"))
+                        page.set_viewport_size({"width": 1280, "height": 900})
+                        page.screenshot(path=str(Path(evidence) / "model-dialog-1280.png"))
+                    started = post(page, dialog.get_by_role("button", name="启动构建"), origin, site_path, 202)
+                    check(started["build"]["model"] == {
+                        "providerID": "yjwd-gpt-enterprise", "id": "gpt-6.1-terra", "variant": "high",
+                    }, f"Wrong selected model: {started['build']['model']}")
+                    expect(dialog).to_be_hidden()
+                    print("Verified default allocation, variant selection, explicit mock probe, and model pinning.", flush=True)
                     check(not problems, "Unexpected browser errors:\n" + "\n".join(problems))
                 except Exception:
                     print(f"Failed at {page.url}; browser errors: {problems}", file=sys.stderr)
@@ -290,17 +338,31 @@ def browser_check(origin: str, fixture: str, root: Path) -> None:
 
 
 def run_scenario(root: Path) -> None:
+    from unittest.mock import patch
+
     import uvicorn
 
+    from ecom_crawler.builds import BuildManager
+    from ecom_crawler.runtime.store import TaskStore
     from ecom_crawler.web.app import create_app
+    from tests.test_builds import FakeBuildAdapter
     from tests.test_execution import fixture_server
 
-    with fixture_server() as fixture, socket.socket() as listener:
+    with (
+        fixture_server() as fixture,
+        socket.socket() as listener,
+        patch("ecom_crawler.build_models.probe_chat", return_value=6),
+    ):
         listener.bind(("127.0.0.1", 0))
         origin = f"http://127.0.0.1:{listener.getsockname()[1]}"
         rules = seed_rule(root, fixture)
+        manager = BuildManager(
+            TaskStore(root / "tasks.db"), root / "tasks", rules,
+            adapter=FakeBuildAdapter(root, hang=True), robots_probe=lambda *_: ("fixture", []),
+        )
         app = create_app(
-            root / "tasks.db", root / "tasks", rules, manage_worker=True, per_domain_rps=20
+            root / "tasks.db", root / "tasks", rules, manage_worker=True, per_domain_rps=20,
+            build_manager=manager,
         )
         server = uvicorn.Server(uvicorn.Config(app, access_log=False, timeout_graceful_shutdown=5))
         thread = threading.Thread(target=server.run, kwargs={"sockets": [listener]}, daemon=True)
@@ -359,9 +421,12 @@ def supervise(root: Path) -> None:
         TEMP=str(scratch),
         TMPDIR=str(scratch),
         ECOM_LEGACY_UI="off",
-        ECOM_BUILD_DISABLED="1",
+        ECOM_BUILD_DISABLED="0",
+        ECOM_BUILD_MODEL_POOL=f"{DEEPSEEK}#high,{TERRA}#medium",
         NO_PROXY="127.0.0.1",
     )
+    if screenshot_dir := os.environ.get("ECOM_SMOKE_SCREENSHOT_DIR"):
+        env["ECOM_SMOKE_SCREENSHOT_DIR"] = screenshot_dir
     job = _Job() if windows else None
     worker = None
     try:

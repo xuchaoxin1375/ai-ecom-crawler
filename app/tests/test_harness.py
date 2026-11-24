@@ -127,6 +127,12 @@ class FakeHandler(BaseHTTPRequestHandler):
                 },
             )
             return
+        if self.path == f"/api/session/{SESSION_ID}/generate":
+            if self._body() != {"prompt": "Reply OK."}:
+                self._json(400, {"message": "unexpected probe request"})
+                return
+            self._json(200, {"data": {"text": "OK", "tokens": {"output": 1}}})
+            return
         if self.path == f"/api/session/{SESSION_ID}/permission":
             body = self._body()
             request = {
@@ -286,6 +292,7 @@ class HarnessTests(unittest.TestCase):
             title="Test build",
         )
         self.assertEqual(session["id"], SESSION_ID)
+        self.assertEqual(self.client.generate_probe(SESSION_ID), 1)
         self.client.send_prompt(SESSION_ID, "build a plan")
         self.assertEqual(FakeHandler.state.prompt, "build a plan")
         created = self.client.create_permission_request(

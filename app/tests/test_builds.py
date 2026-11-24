@@ -20,6 +20,7 @@ from unittest import mock
 import yaml
 from fastapi.testclient import TestClient
 
+from ecom_crawler.build_models import BuildModelPool
 from ecom_crawler.builds import (
     BuildError,
     BuildManager,
@@ -862,6 +863,66 @@ class BuildWorkflowTests(unittest.TestCase):
             self.assertEqual(task.input["archive"]["mode"], "sample")
             self.assertEqual(task.input["archive"]["sample_limit"], 5)
             self.assertEqual(task.limits["max_products"], 100)
+
+    def test_model_pool_rotates_and_pins_queued_builds(self) -> None:
+        manager = self._manager(FakeBuildAdapter(self.root, hang=True))
+        pool = "opencode-go/deepseek-v4.1-flash#high,yjwd-gpt-enterprise/gpt-6.1-terra#medium"
+        manager.model_pool = BuildModelPool(pool)
+        self.store.add_batch_sites([
+            BatchSite(batch_id="b-1", site_key=key, domain=key, input_value=f"https://{key}/",
+                      readiness="needs_onboarding")
+            for key in ("manual.test", "second.test", "third.test", "invalid.test")
+        ])
+        with self._client(manager) as client:
+            def submit(site: str, ref: str | None = None):
+                return client.post(f"/api/batches/b-1/sites/{site}/build", json={"model_ref": ref})
+
+            self.assertEqual(submit("invalid.test", "opencode-go/deepseek-v4.1-flash#medium").status_code, 409)
+            allocations = []
+            for site, ref in (
+                ("example.fr", None),
+                ("manual.test", "yjwd-gpt-enterprise/gpt-6.1-terra#high"),
+                ("second.test", None),
+                ("third.test", None),
+            ):
+                response = submit(site, ref)
+                self.assertEqual(response.status_code, 202, response.text)
+                allocations.append(response.json()["build"])
+                # Recreating the in-memory pool does not reset the ledger cursor.
+                manager.model_pool = BuildModelPool(pool)
+            self.assertEqual([(item["model"]["id"], item["model"]["variant"]) for item in allocations], [
+                ("deepseek-v4.1-flash", "high"), ("gpt-6.1-terra", "high"),
+                ("gpt-6.1-terra", "medium"), ("deepseek-v4.1-flash", "high"),
+            ])
+            self.assertEqual(allocations[2]["state"], "QUEUED")
+            self.assertEqual(self.store.get_build(allocations[2]["build_id"]).model, allocations[2]["model"])
+
+    def test_model_pool_probe_only_on_post_and_excludes_failed_default(self) -> None:
+        manager = self._manager(FakeBuildAdapter(self.root))
+        terra = "yjwd-gpt-enterprise/gpt-6.1-terra"
+        deepseek = "opencode-go/deepseek-v4.1-flash"
+        manager.model_pool = BuildModelPool(f"{deepseek}#high,{terra}#medium")
+        with (
+            mock.patch("ecom_crawler.build_models.probe_chat", side_effect=[0, 5, 0]) as probe,
+            self._client(manager) as client,
+        ):
+            self.assertEqual(client.get("/api/builds/config").json()["models"][1]["health"], {})
+            probe.assert_not_called()
+            for ref, expected in ((f"{terra}#medium", "failed"), (f"{terra}#high", "ok"),
+                                  (f"{deepseek}#high", "failed")):
+                response = client.post("/api/builds/models/check", json={"model_ref": ref})
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(response.json()["status"], expected)
+                self.assertIn("checked_at", response.json())
+                if ref == f"{terra}#medium":
+                    self.assertEqual(manager.model_pool.balanced(deepseek)["id"], "deepseek-v4.1-flash")
+            self.assertEqual(probe.call_count, 3)
+            health = client.get("/api/builds/config").json()["models"][1]["health"]
+            self.assertEqual({variant: result["status"] for variant, result in health.items()},
+                             {"medium": "failed", "high": "ok"})
+            response = client.post("/api/batches/b-1/sites/example.fr/build", json={})
+            self.assertEqual(response.status_code, 409, response.text)
+            self.assertEqual(manager.adapter.started, [])
 
     def test_pilot_rehearsal_validates_six_and_exports_ten(self) -> None:
         site = "pilot-fixture.test"

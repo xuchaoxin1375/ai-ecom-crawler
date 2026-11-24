@@ -34,6 +34,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import yaml
 
+from .build_models import BuildModelPool, ModelPoolError
 from .execution import run_task
 from .executor.preflight import check_rule_selectors, format_selector_errors
 from .harness import (
@@ -889,6 +890,9 @@ class BuildManager:
             else os.environ.get("ECOM_BUILD_ISOLATE_ENV") == "1"
         )
         self.model = model if model is not None else default_model()
+        self.model_pool = BuildModelPool(
+            os.environ.get("ECOM_BUILD_MODEL_POOL", ""), inherit_env=not self.isolate_env,
+        )
         self.default_proxy = (
             default_proxy
             or os.environ.get("ECOM_BUILD_PROXY")
@@ -1072,6 +1076,7 @@ class BuildManager:
         repair_reason: str | None = None,
         feedback_id: str | None = None,
         request_id: str | None = None,
+        model_ref: str | None = None,
     ) -> BuildRecord:
         if self.read_only:
             raise BuildError("build manager is read-only")
@@ -1121,6 +1126,18 @@ class BuildManager:
             latest = self.store.latest_build_for_site(batch.batch_id, site.site_key)
             if latest is not None and latest.state in ACTIVE_BUILD_STATES:
                 raise BuildError(f"site already has an active build: {latest.build_id}")
+
+            selected_model = self.model
+            selection = "default"
+            try:
+                if model_ref is not None:
+                    selected_model = self.model_pool.manual(model_ref)
+                    selection = "manual"
+                elif self.model_pool.models:
+                    selected_model = self.model_pool.balanced(self.store.last_balanced_build_model())
+                    selection = "balanced"
+            except ModelPoolError as exc:
+                raise BuildError(str(exc)) from exc
 
             build_id = f"build-{uuid.uuid4().hex[:12]}"
             self._trace_reasoning[build_id] = bool(
@@ -1181,13 +1198,14 @@ class BuildManager:
                 "robots_sitemaps": robots_sitemaps,
                 "archive": dict(self._archive_configs[build_id]),
                 "catalog": dict(self._catalog_configs[build_id]),
+                "model_selection": selection,
             }
             record = BuildRecord(
                 build_id=build_id,
                 batch_id=batch.batch_id,
                 site_key=site.site_key,
                 state="QUEUED",
-                model=self.model,
+                model=selected_model,
                 proxy=resolved_proxy,
                 workspace=str(self.workspace_root / build_id),
                 mode="repair" if repair else "build",
@@ -1230,6 +1248,7 @@ class BuildManager:
         archive_max_bytes: int | None = None,
         feedback_id: str | None = None,
         request_id: str | None = None,
+        model_ref: str | None = None,
     ) -> BuildRecord:
         """Revalidate and repair an installed rule without clearing task data."""
         return self.start(
@@ -1249,6 +1268,7 @@ class BuildManager:
             repair_reason=reason,
             feedback_id=feedback_id,
             request_id=request_id,
+            model_ref=model_ref,
         )
 
     # ----------------------------------------------------------------- queue

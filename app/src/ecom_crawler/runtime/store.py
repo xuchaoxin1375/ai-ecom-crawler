@@ -1807,6 +1807,18 @@ class TaskStore:
             rows = connection.execute(query, values).fetchall()
         return [_build_from_row(row) for row in rows]
 
+    def last_balanced_build_model(self) -> str | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT model_json FROM builds "
+                "WHERE json_extract(request_json, '$.model_selection') = 'balanced' "
+                "ORDER BY rowid DESC LIMIT 1"
+            ).fetchone()
+        model = json_loads(row[0], {}) if row else {}
+        if model.get("providerID") and model.get("id"):
+            return f"{model['providerID']}/{model['id']}"
+        return None
+
     def latest_build_for_site(
         self, batch_id: str, site_key: str
     ) -> BuildRecord | None:

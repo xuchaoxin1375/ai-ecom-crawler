@@ -33,6 +33,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .. import __version__
+from ..build_models import ModelPoolError
 from ..builds import ACTIVE_BUILD_STATES, BuildError, BuildManager
 from ..execution import build_task
 from ..executor.runner import CSV_COLUMNS
@@ -190,6 +191,7 @@ class FeedbackTriageResponse(BaseModel):
 
 class FeedbackRepairRequest(BaseModel):
     request_id: str = Field(min_length=1, max_length=200)
+    model_ref: str | None = Field(default=None, max_length=200)
     reason: str | None = Field(default=None, max_length=2000)
     max_products: int = Field(default=6, ge=1, le=50)
     max_seconds: int = Field(default=600, ge=60, le=3600)
@@ -323,6 +325,7 @@ class BatchStartRequest(BaseModel):
 
 class BuildStartRequest(BaseModel):
     mode: Literal["build", "repair"] = "build"
+    model_ref: str | None = Field(default=None, max_length=200)
     reason: str | None = Field(default=None, max_length=2000)
     max_products: int = Field(default=6, ge=1, le=50)
     max_seconds: int = Field(default=600, ge=60, le=3600)
@@ -337,6 +340,10 @@ class BuildStartRequest(BaseModel):
     catalog_products: int = Field(default=2000, ge=1, le=10000)
     feedback_id: str | None = Field(default=None, max_length=200)
     request_id: str | None = Field(default=None, max_length=200)
+
+
+class BuildModelCheckRequest(BaseModel):
+    model_ref: str = Field(min_length=1, max_length=200)
 
 
 class BuildPermissionRequest(BaseModel):
@@ -2264,6 +2271,7 @@ def create_app(
                 archive_max_bytes=payload.archive_max_bytes,
                 feedback_id=feedback_id,
                 request_id=payload.request_id,
+                model_ref=payload.model_ref,
             )
         except BuildError as exc:
             store.update_feedback(feedback_id, status="TRIAGED")
@@ -3156,6 +3164,7 @@ def create_app(
                     archive_max_bytes=request.archive_max_bytes,
                     feedback_id=request.feedback_id,
                     request_id=request.request_id,
+                    model_ref=request.model_ref,
                 )
                 if request.feedback_id:
                     store.update_feedback(
@@ -3177,6 +3186,7 @@ def create_app(
                     archive_max_bytes=request.archive_max_bytes,
                     catalog_scope=request.catalog_scope,
                     catalog_products=request.catalog_products,
+                    model_ref=request.model_ref,
                 )
         except BuildError as exc:
             raise _error("BUILD_CONFLICT", str(exc), 409) from exc
@@ -3197,7 +3207,17 @@ def create_app(
             "available": not builds_disabled,
             "reasoning_capture_enabled": build_manager.reasoning_capture_enabled,
             "max_repair_rounds": build_manager.max_repair_rounds,
+            "models": build_manager.model_pool.describe(),
         }
+
+    @app.post("/api/builds/models/check")
+    def check_build_model(payload: BuildModelCheckRequest) -> dict[str, Any]:
+        if build_manager is None or builds_disabled:
+            raise _error("BUILD_UNAVAILABLE", "build service unavailable", 409)
+        try:
+            return build_manager.model_pool.check(payload.model_ref)
+        except ModelPoolError as exc:
+            raise _error("MODEL_CHECK_UNAVAILABLE", str(exc), 409) from exc
 
     @app.get("/api/builds/{build_id}")
     def get_build(build_id: str) -> dict[str, Any]:

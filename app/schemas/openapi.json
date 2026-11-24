@@ -249,6 +249,21 @@
         "title": "BuildDependencyRequest",
         "type": "object"
       },
+      "BuildModelCheckRequest": {
+        "properties": {
+          "model_ref": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Model Ref",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_ref"
+        ],
+        "title": "BuildModelCheckRequest",
+        "type": "object"
+      },
       "BuildPermissionRequest": {
         "properties": {
           "decision": {
@@ -375,6 +390,18 @@
             ],
             "title": "Mode",
             "type": "string"
+          },
+          "model_ref": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Ref"
           },
           "proxy": {
             "anyOf": [
@@ -903,6 +930,18 @@
             "minimum": 60.0,
             "title": "Max Seconds",
             "type": "integer"
+          },
+          "model_ref": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Ref"
           },
           "reason": {
             "anyOf": [
@@ -2497,6 +2536,46 @@
           }
         },
         "summary": "Get Build Config"
+      }
+    },
+    "/api/builds/models/check": {
+      "post": {
+        "operationId": "check_build_model_api_builds_models_check_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BuildModelCheckRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Check Build Model Api Builds Models Check Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Check Build Model"
       }
     },
     "/api/builds/{build_id}": {

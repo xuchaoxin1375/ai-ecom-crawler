@@ -269,6 +269,7 @@ class OpenCodeClient:
         title: str | None = None,
         model: dict[str, Any] | None = None,
         permissions: list[dict[str, Any]] | None = None,
+        timeout: float | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {"location": {"directory": directory}}
         if title:
@@ -277,7 +278,7 @@ class OpenCodeClient:
             payload["model"] = model
         if permissions is not None:
             payload["permissions"] = permissions
-        response = self._request("POST", "/api/session", payload)
+        response = self._request("POST", "/api/session", payload, timeout=timeout)
         data = response.get("data") if isinstance(response, dict) else None
         if not isinstance(data, dict) or not data.get("id"):
             raise OpenCodeProtocolError("session.create returned no data.id")
@@ -290,8 +291,21 @@ class OpenCodeClient:
             raise OpenCodeProtocolError("session.get returned no data")
         return data
 
-    def delete_session(self, session_id: str) -> None:
-        self._request("DELETE", f"/api/session/{_quote(session_id)}")
+    def delete_session(self, session_id: str, *, timeout: float | None = None) -> None:
+        self._request("DELETE", f"/api/session/{_quote(session_id)}", timeout=timeout)
+
+    def generate_probe(self, session_id: str) -> int:
+        result = self._request(
+            "POST", f"/api/session/{_quote(session_id)}/generate", {"prompt": "Reply OK."}, timeout=10
+        )
+        data = result.get("data") if isinstance(result, dict) else None
+        tokens = data.get("tokens") if isinstance(data, dict) else None
+        output = tokens.get("output") if isinstance(tokens, dict) else None
+        return output if type(output) is int else 0
+
+    def initialize_probe_plugins(self, directory: str) -> None:
+        location = urllib.parse.urlencode({"location[directory]": directory})
+        self._request("GET", f"/api/plugin?{location}", timeout=5)
 
     def send_prompt(self, session_id: str, text: str, **extra: Any) -> dict[str, Any]:
         payload = {"text": text, **extra}
