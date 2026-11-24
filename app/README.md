@@ -64,10 +64,15 @@
 
 ## 环境与测试
 
+从仓库根目录运行。需要 Python 3.11+、`uv` 和应用的开发依赖；首次准备环境用 `python -m uv sync --project app --extra dev --frozen`。以下命令用 `--no-sync` 复用已准备好的环境，不在每次运行时同步依赖。
+
 ```powershell
-python -m uv run --project app --extra dev python -m unittest discover -s app/tests -t app -v
-python -m uv run --project app --extra dev ruff check app
+python -m uv run --project app --extra dev --frozen --no-sync python app/tests/run.py
+python -m uv run --project app --extra dev --frozen --no-sync python app/tests/run.py build -k price_regression
+python -m uv run --project app --extra dev --frozen --no-sync ruff check app
 ```
+
+不带参数时跑日常快跑组；关于其他分组、完整回归和失败判定，见[后端测试怎么跑](../docs/23-测试策略.md#后端测试怎么跑)。
 
 `jsonschema`、`httpx` 和 `ruff` 是开发依赖；`jsonschema`／`httpx` 缺失时测试会失败，不会 skip。应用运行依赖包括 `lxml`、`pyyaml`、`scrapling[fetchers]`、`patchright`、`protego`、`fastapi` 和 `uvicorn`；`scrapling[fetchers]` 会带 `curl_cffi`、`playwright`、`browserforge` 和 `msgspec`。浏览器模式还需要 Chromium：
 

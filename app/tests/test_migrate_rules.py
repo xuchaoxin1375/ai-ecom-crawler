@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -41,7 +42,8 @@ def write_rule(
 
 class MigrateRulesTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.temporary = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.db = self.root / "tasks.db"
         self.rules = self.root / "rules"
@@ -197,9 +199,6 @@ class MigrateRulesTests(unittest.TestCase):
             )
         )
 
-    def tearDown(self) -> None:
-        self.temporary.cleanup()
-
     def _set_site_pointer(
         self,
         batch_id: str,
@@ -209,7 +208,8 @@ class MigrateRulesTests(unittest.TestCase):
         rule_path: str,
         updated_at: str | None = None,
     ) -> None:
-        with sqlite3.connect(self.db) as connection:
+        # The connection context commits the transaction but does not close it.
+        with closing(sqlite3.connect(self.db)) as connection, connection:
             connection.execute(
                 """
                 UPDATE batch_sites

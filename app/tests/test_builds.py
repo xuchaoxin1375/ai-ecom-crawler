@@ -216,6 +216,7 @@ class FakeBuildAdapter:
         self.adopted: list[str] = []
         self.detached: list[str] = []
         self.shutdown_called = False
+        self._stop = threading.Event()
 
     def start_build(self, task: BuildTask) -> BuildSession:
         workspace = BuildWorkspace.create(
@@ -291,15 +292,28 @@ class FakeBuildAdapter:
 
     def shutdown(self) -> None:
         self.shutdown_called = True
+        self._stop.set()
+        for events in tuple(self.queues.values()):
+            events.put(None)
 
     def _complete_async(self, build_id: str, index: int) -> None:
         self.sessions[build_id].state = "RUNNING"
 
         def complete() -> None:
-            time.sleep(0.05)
-            if self.gate is not None:
-                self.gate.wait(timeout=10)
+            # Keep the simulated prompt asynchronous, but do not let a gated
+            # completion write to the workspace after cancellation or teardown.
             session = self.sessions[build_id]
+            if self.gate is not None:
+                deadline = time.monotonic() + 10
+                while not self.gate.wait(timeout=0.05):
+                    if (
+                        self._stop.is_set()
+                        or session.state in {"FINISHED", "CANCELLED"}
+                        or time.monotonic() >= deadline
+                    ):
+                        return
+            if self._stop.is_set() or session.state in {"FINISHED", "CANCELLED"}:
+                return
             if self.write_rule:
                 plan = session.workspace.out_dir / "plan"
                 plan.mkdir(parents=True, exist_ok=True)
@@ -316,14 +330,15 @@ class FakeBuildAdapter:
                 self.emit(
                     "finished",
                     "session.execution.succeeded",
+                    build_id=build_id,
                     outcome="succeeded",
                 )
 
-        threading.Thread(target=complete, daemon=True).start()
+        threading.Thread(target=complete, name=f"fake-build-{build_id}", daemon=True).start()
 
     def stream_events(self, build_id: str) -> Iterator[HarnessEvent]:
         events = self.queues[build_id]
-        while True:
+        while not self._stop.is_set():
             event = events.get()
             if event is None:
                 return
@@ -378,8 +393,11 @@ class FakeBuildAdapter:
         self.queues[build_id].put(None)
         return session
 
-    def emit(self, event_type: str, source_type: str, **data: Any) -> None:
-        if self.current_build is None:
+    def emit(
+        self, event_type: str, source_type: str, *, build_id: str | None = None, **data: Any
+    ) -> None:
+        target = build_id or self.current_build
+        if target is None:
             self.queue.put(
                 HarnessEvent(
                     type=event_type,
@@ -390,7 +408,7 @@ class FakeBuildAdapter:
                 )
             )
             return
-        self.queues[self.current_build].put(
+        self.queues[target].put(
             HarnessEvent(
                 type=event_type,
                 source_type=source_type,
@@ -403,7 +421,9 @@ class FakeBuildAdapter:
 
 class BuildWorkflowTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.temporary = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self._existing_threads = set(threading.enumerate())
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self._clean_workspace)
         self.root = Path(self.temporary.name)
         self.store = TaskStore(self.root / "tasks.db")
         self.rules = self.root / "rules"
@@ -422,8 +442,29 @@ class BuildWorkflowTests(unittest.TestCase):
             ]
         )
 
-    def tearDown(self) -> None:
+    def _clean_workspace(self) -> None:
+        # BuildManager releases its slot before dispatching the next build. A
+        # watcher can already have removed itself from the manager's registry
+        # but still be dispatching. Wait for the test's threads, not the slot.
+        prefixes = ("build-watch-", "build-events-", "dependency-bridge-", "fake-build-")
+        deadline = time.monotonic() + 5
+        while True:
+            pending = [
+                thread
+                for thread in threading.enumerate()
+                if thread not in self._existing_threads and thread.name.startswith(prefixes)
+            ]
+            if not pending:
+                break
+            if time.monotonic() >= deadline:
+                self.fail(f"Build fixture left threads running: {[thread.name for thread in pending]}")
+            for thread in pending:
+                thread.join(timeout=max(0, deadline - time.monotonic()))
         self.temporary.cleanup()
+
+    def _stop_manager(self, manager: BuildManager, adapter: FakeBuildAdapter) -> None:
+        if not adapter.shutdown_called:
+            manager.shutdown()
 
     def _manager(
         self,
@@ -474,7 +515,7 @@ class BuildWorkflowTests(unittest.TestCase):
                     "product_samples": samples,
                 }
 
-        return BuildManager(
+        manager = BuildManager(
             self.store,
             self.root / "out",
             self.rules,
@@ -495,6 +536,8 @@ class BuildWorkflowTests(unittest.TestCase):
             extra_permissions=extra_permissions,
             dependency_policy=dependency_policy,
         )
+        self.addCleanup(self._stop_manager, manager, adapter)
+        return manager
 
     def _client(self, manager: BuildManager) -> TestClient:
         app = create_app(
@@ -506,17 +549,28 @@ class BuildWorkflowTests(unittest.TestCase):
         )
         return TestClient(app, headers=CLIENT_HEADERS)
 
-    def _wait_ready(self, client: TestClient, build_id: str, timeout: float = 10) -> dict[str, Any]:
+    def _wait_for_build_state(
+        self, client: TestClient, build_id: str, *states: str, timeout: float = 10
+    ) -> dict[str, Any]:
         deadline = time.monotonic() + timeout
         last: dict[str, Any] = {}
         while time.monotonic() < deadline:
             response = client.get(f"/api/builds/{build_id}")
             self.assertEqual(response.status_code, 200, response.text)
             last = response.json()["build"]
+            if last["state"] in states:
+                return last
             if last["state"] in {"FINISHED", "CANCELLED"}:
                 break
             time.sleep(0.05)
-        return last
+        self.fail(
+            f"Build {build_id} did not reach {states}: "
+            f"state={last.get('state')}, outcome={last.get('outcome')}, "
+            f"error={last.get('error')}"
+        )
+
+    def _wait_ready(self, client: TestClient, build_id: str, timeout: float = 10) -> dict[str, Any]:
+        return self._wait_for_build_state(client, build_id, "FINISHED", "CANCELLED", timeout=timeout)
 
     def test_seconds_since_accepts_naive_legacy_timestamps(self) -> None:
         self.assertEqual(
@@ -2369,7 +2423,7 @@ class BuildWorkflowTests(unittest.TestCase):
                 json={},
                 headers=CLIENT_HEADERS,
             ).json()["build"]
-            self.assertEqual(blocking["state"], "RUNNING")
+            self._wait_for_build_state(client, blocking["build_id"], "RUNNING")
             repair = client.post(
                 "/api/batches/b-1/sites/example.fr/build",
                 json={"mode": "repair", "reason": "queued repair"},
@@ -2430,7 +2484,7 @@ class BuildWorkflowTests(unittest.TestCase):
                 json={},
                 headers=CLIENT_HEADERS,
             ).json()["build"]
-            self.assertEqual(running["state"], "RUNNING")
+            self._wait_for_build_state(client, running["build_id"], "RUNNING")
 
             response = client.post(
                 f"/api/builds/{failed['build_id']}/continue",
@@ -2444,10 +2498,12 @@ class BuildWorkflowTests(unittest.TestCase):
             self.assertEqual(response.json()["error"]["code"], "BUILD_CONFLICT")
             self.assertIn("another build is still active", response.text)
 
-            client.post(
+            cancelled = client.post(
                 f"/api/builds/{running['build_id']}/cancel",
                 headers=CLIENT_HEADERS,
             )
+            self.assertEqual(cancelled.status_code, 202, cancelled.text)
+            self._wait_for_build_state(client, running["build_id"], "CANCELLED")
 
     def test_shutdown_marks_build_interrupted_and_continue_reloads_session(self) -> None:
         adapter = FakeBuildAdapter(self.root, hang=True)

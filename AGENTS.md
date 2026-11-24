@@ -54,6 +54,6 @@
 
 ## App 校验
 
-- 后端：`python -m uv run --project app --extra dev --frozen python -m unittest discover -s app/tests -t app -v`；静态检查 `python -m uv run --project app --extra dev --frozen ruff check app`。
+- 后端：日常从[后端测试分组](docs/23-测试策略.md#后端测试怎么跑)选 `quick` 或受影响分组；合并前运行不带筛选的 `all`。静态检查 `python -m uv run --project app --extra dev --frozen ruff check app`。
 - 前端：`cd app/frontend-v2` 后运行 `npm run lint`、`npm run typecheck`、`npm test`、`npm run format:check`、`npm run build`；首次或依赖变化后先 `npm install`。
-- 细节见 [`app/README.md`](app/README.md#环境与测试)；缺 Chromium 时按该页安装，skip 不计通过。CI 的同一套命令见 [`.github/workflows/app.yml`](.github/workflows/app.yml)。
+- 细节见[应用环境与测试](app/README.md#环境与测试)；缺 Chromium 时按该页安装，跳过不计通过。持续集成(Continuous Integration, CI)仍由[应用工作流](.github/workflows/app.yml)运行完整发现。
