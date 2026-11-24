@@ -2274,13 +2274,24 @@ class TaskStore:
                     """
                     UPDATE batch_sites
                     SET rule_id = ?, rule_version = ?, rule_path = ?,
+                        note = CASE
+                            WHEN note LIKE '候选方案：%'
+                              OR note LIKE '已激活方案：%' THEN ?
+                            ELSE note END,
                         readiness = CASE
                             WHEN readiness IN ('needs_onboarding', 'building')
                             THEN 'ready' ELSE readiness END,
                         updated_at = ?
                     WHERE site_key = ?
                     """,
-                    (rule_id, rule_version, target.path, now, site_key),
+                    (
+                        rule_id,
+                        rule_version,
+                        target.path,
+                        f"已激活方案：{rule_id}@{rule_version}",
+                        now,
+                        site_key,
+                    ),
                 )
                 linked_feedback = feedback_id or target.source_feedback_id
                 if linked_feedback:

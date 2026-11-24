@@ -1255,6 +1255,25 @@ class BuildWorkflowTests(unittest.TestCase):
 
             pending = client.get(f"/api/feedback/{feedback_id}").json()
             self.assertEqual(pending["status"], "AWAITING_ACTIVATION")
+            batch_before = client.get("/api/batches/b-1").json()
+            site_before = next(
+                item
+                for item in batch_before["sites"]
+                if item["site_key"] == "example.fr"
+            )
+            self.assertTrue(
+                site_before["note"].startswith(
+                    "候选方案：example-fr-build@2026.11.23-2，"
+                )
+            )
+            self.store.update_batch_site(
+                "b-1",
+                "example.fr",
+                note=(
+                    "候选方案：example-fr-build@2026.11.23-9，"
+                    "有界验证 6 条有效、0 失败；待人工激活"
+                ),
+            )
             site_rule = client.get("/api/sites/example.fr/rule").json()
             self.assertEqual(site_rule["active"]["rule_version"], "2026.11.23-1")
             self.assertEqual(
@@ -1312,6 +1331,16 @@ class BuildWorkflowTests(unittest.TestCase):
                 active_after["active"]["rule_version"], "2026.11.23-2"
             )
             self.assertEqual(active_after["stale_tasks"], 1)
+            batch_after = client.get("/api/batches/b-1").json()
+            site_after = next(
+                item
+                for item in batch_after["sites"]
+                if item["site_key"] == "example.fr"
+            )
+            self.assertEqual(
+                site_after["note"],
+                "已激活方案：example-fr-build@2026.11.23-2",
+            )
 
             rerun = client.post(
                 f"/api/feedback/{feedback_id}/rerun",
@@ -1364,6 +1393,16 @@ class BuildWorkflowTests(unittest.TestCase):
                     "rule_version"
                 ],
                 "2026.11.23-1",
+            )
+            batch_rollback = client.get("/api/batches/b-1").json()
+            site_rollback = next(
+                item
+                for item in batch_rollback["sites"]
+                if item["site_key"] == "example.fr"
+            )
+            self.assertEqual(
+                site_rollback["note"],
+                "已激活方案：example-fr-build@2026.11.23-1",
             )
 
             candidate = self.store.create_rule_version(
