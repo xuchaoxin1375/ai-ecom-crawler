@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useParams } from "react-router-dom";
+import { readSiteListReturn } from "../batches/siteListReturn";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -194,10 +195,13 @@ function newRuleRequest(prefix: string): string {
 }
 
 export function SiteDetailPage() {
+  const location = useLocation();
   const { batchId = "", siteKey = "" } = useParams<{
     batchId: string;
     siteKey: string;
   }>();
+  const batchPath = `/batches/${encodeURIComponent(batchId)}`;
+  const returnPosition = readSiteListReturn(location.state, batchPath);
   const queryClient = useQueryClient();
 
   const [dialog, setDialog] = useState<DialogKind>("");
@@ -604,7 +608,8 @@ export function SiteDetailPage() {
       <div className="space-y-6">
         <Link
           className="inline-flex items-center gap-1.5 text-sm font-medium text-ink-2 hover:text-ink"
-          to={`/batches/${encodeURIComponent(batch.batch_id)}`}
+          to={returnPosition?.href ?? batchPath}
+          state={returnPosition ? { siteListReturn: returnPosition } : undefined}
         >
           <ArrowLeft size={15} aria-hidden="true" />
           返回 {batch.name}
@@ -615,7 +620,12 @@ export function SiteDetailPage() {
             description="站点可能已被移除，或链接不完整。"
             action={
               <Button asChild size="sm">
-                <Link to={`/batches/${encodeURIComponent(batch.batch_id)}`}>
+                <Link
+                  to={returnPosition?.href ?? batchPath}
+                  state={
+                    returnPosition ? { siteListReturn: returnPosition } : undefined
+                  }
+                >
                   返回批次详情
                 </Link>
               </Button>
@@ -704,7 +714,8 @@ export function SiteDetailPage() {
         <div className="flex items-center justify-between gap-4">
           <Link
             className="inline-flex items-center gap-1.5 text-sm font-medium text-ink-2 hover:text-ink"
-            to={`/batches/${encodeURIComponent(batch.batch_id)}`}
+            to={returnPosition?.href ?? batchPath}
+            state={returnPosition ? { siteListReturn: returnPosition } : undefined}
           >
             <ArrowLeft size={15} aria-hidden="true" />
             返回 {batch.name}

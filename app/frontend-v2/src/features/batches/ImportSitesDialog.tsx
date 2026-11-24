@@ -17,6 +17,7 @@ interface ImportSitesDialogProps {
   batch: BatchDetail;
   onOpenChange: (open: boolean) => void;
   onImported: (response: BatchImportResponse) => void;
+  onCloseFocus: () => void;
 }
 
 function issueItems(report: ImportReport | null) {
@@ -31,6 +32,7 @@ export function ImportSitesDialog({
   batch,
   onOpenChange,
   onImported,
+  onCloseFocus,
 }: ImportSitesDialogProps) {
   const [text, setText] = useState("");
   const [fileName, setFileName] = useState("");
@@ -104,11 +106,15 @@ export function ImportSitesDialog({
             event.preventDefault();
             document.getElementById("import-sites-text")?.focus();
           }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            onCloseFocus();
+          }}
         >
           <header className="flex items-start justify-between gap-4 border-b border-line px-4 py-4 sm:gap-6 sm:px-6">
             <div>
               <Dialog.Title className="text-[22px] leading-8 font-semibold tracking-[-0.01em] text-ink">
-                继续导入站点
+                导入站点
               </Dialog.Title>
               <Dialog.Description className="mt-1 text-sm text-ink-2">
                 把站点追加到“{batch.name}”；导入会立即匹配规则包并写入批次。
@@ -117,7 +123,7 @@ export function ImportSitesDialog({
             <button
               type="button"
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded-control text-ink-3 hover:bg-surface-muted hover:text-ink"
-              aria-label="关闭继续导入"
+              aria-label="关闭导入站点"
               disabled={busy}
               onClick={() => requestOpenChange(false)}
             >

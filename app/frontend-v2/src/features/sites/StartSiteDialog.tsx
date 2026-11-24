@@ -70,7 +70,7 @@ export function StartSiteDialog({
           <header className="flex items-start justify-between gap-4 border-b border-line px-4 py-4 sm:gap-6 sm:px-6">
             <div>
               <Dialog.Title className="text-[22px] leading-8 font-semibold tracking-[-0.01em] text-ink">
-                {rerun ? "复跑站点采集" : "启动站点采集"}
+                {rerun ? "重新采集此站点" : "启动站点采集"}
               </Dialog.Title>
               <Dialog.Description className="mt-1 text-sm leading-6 text-ink-2">
                 {rerun
@@ -93,7 +93,9 @@ export function StartSiteDialog({
           <div className="space-y-4 px-4 py-5 sm:px-6">
             <div className="flex items-baseline justify-between gap-4 rounded-panel border border-line bg-surface-muted px-4 py-3">
               <div>
-                <p className="text-xs text-ink-3">{rerun ? "本次复跑" : "本次启动"}</p>
+                <p className="text-xs text-ink-3">
+                  {rerun ? "本次重新采集" : "本次启动"}
+                </p>
                 <p className="mt-0.5 text-xl leading-7 font-semibold text-ink tabular">
                   1 个站点
                 </p>
@@ -131,7 +133,7 @@ export function StartSiteDialog({
 
             {error ? (
               <ErrorNotice
-                title={rerun ? "复跑失败" : "启动失败"}
+                title={rerun ? "重新采集失败" : "启动失败"}
                 message={error}
                 compact
               />
@@ -153,10 +155,10 @@ export function StartSiteDialog({
                 <Play size={14} aria-hidden="true" />
                 {busy
                   ? rerun
-                    ? "复跑中…"
+                    ? "正在加入队列…"
                     : "启动中…"
                   : rerun
-                    ? "开始复跑"
+                    ? "重新采集"
                     : "启动采集"}
               </Button>
             </div>

@@ -15,6 +15,7 @@ interface ConfirmBatchActionDialogProps {
   error?: string;
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void;
+  onCloseFocus?: () => void;
 }
 
 export function ConfirmBatchActionDialog({
@@ -28,6 +29,7 @@ export function ConfirmBatchActionDialog({
   error = "",
   onOpenChange,
   onConfirm,
+  onCloseFocus,
 }: ConfirmBatchActionDialogProps) {
   return (
     <Dialog.Root open={open} onOpenChange={(next) => !busy && onOpenChange(next)}>
@@ -38,6 +40,11 @@ export function ConfirmBatchActionDialog({
           onOpenAutoFocus={(event) => {
             event.preventDefault();
             document.getElementById("confirm-batch-cancel")?.focus();
+          }}
+          onCloseAutoFocus={(event) => {
+            if (!onCloseFocus) return;
+            event.preventDefault();
+            onCloseFocus();
           }}
         >
           <header className="flex items-start justify-between gap-4 border-b border-line px-4 py-4 sm:gap-6 sm:px-6">

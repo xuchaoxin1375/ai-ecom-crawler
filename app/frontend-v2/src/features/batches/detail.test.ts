@@ -3,8 +3,9 @@ import type { BatchCounts, BatchDetail, BatchSite, TaskSummary } from "../../lib
 import {
   batchHasActiveTasks,
   filterSites,
-  nextStepFor,
+  batchPrimaryAction,
   siteFilterCounts,
+  siteFilterOptions,
 } from "./detail";
 
 const EMPTY_COUNTS: BatchCounts = {
@@ -141,9 +142,9 @@ describe("batch detail filters", () => {
   });
 });
 
-describe("batch next step", () => {
+describe("batch detail primary action", () => {
   it("asks to start when startable sites exist", () => {
-    const step = nextStepFor(
+    const action = batchPrimaryAction(
       batch({
         status: "PARTIAL_READY",
         counts: {
@@ -155,14 +156,14 @@ describe("batch next step", () => {
         },
       }),
     );
-    expect(step.action).toEqual({ kind: "start" });
-    expect(step.title).toContain("2");
+    expect(action).toBe("start");
   });
 
-  it("points to running sites while tasks are active", () => {
-    const step = nextStepFor(
+  it("offers pause while a task can actually be paused", () => {
+    const action = batchPrimaryAction(
       batch({
         status: "RUNNING",
+        sites: [site({ task: task() })],
         counts: {
           ...EMPTY_COUNTS,
           sites: 2,
@@ -174,11 +175,32 @@ describe("batch next step", () => {
         },
       }),
     );
-    expect(step.action).toEqual({ kind: "filter", filter: "running" });
+    expect(action).toBe("pause");
   });
 
-  it("points to failed sites after tasks finish", () => {
-    const step = nextStepFor(
+  it("exposes the queue in the filter, without claiming queued tasks are running", () => {
+    const sites = [site({ task_id: "t-1", task: task({ state: "QUEUED" }) })];
+    const current = batch({
+      sites,
+      counts: { ...EMPTY_COUNTS, sites: 1, tasks: 1, queued: 1 },
+    });
+    expect(batchPrimaryAction(current)).toBe("export");
+    expect(siteFilterOptions(sites, "all").map(({ key }) => key)).toEqual([
+      "all",
+      "ready",
+      "queued",
+    ]);
+    expect(filterSites(sites, "queued")).toEqual(sites);
+    expect(filterSites(sites, "running")).toEqual([]);
+    expect(siteFilterOptions(sites, "running")).toContainEqual({
+      key: "running",
+      label: "处理中",
+      count: 0,
+    });
+  });
+
+  it("keeps export accessible after unsuccessful tasks finish", () => {
+    const action = batchPrimaryAction(
       batch({
         status: "PARTIAL",
         counts: {
@@ -192,18 +214,15 @@ describe("batch next step", () => {
         },
       }),
     );
-    expect(step.action).toEqual({ kind: "filter", filter: "failed" });
+    expect(action).toBe("export");
   });
 
   it("offers restore for archived batches", () => {
-    const step = nextStepFor(batch({ status: "ARCHIVED" }));
-    expect(step.action).toEqual({ kind: "restore" });
+    expect(batchPrimaryAction(batch({ status: "ARCHIVED" }))).toBe("unarchive");
   });
 
   it("offers import when the batch has no sites", () => {
-    const step = nextStepFor(batch({ counts: { ...EMPTY_COUNTS } }));
-    expect(step.action).toEqual({ kind: "import" });
-    expect(step.actionLabel).toBe("继续导入站点");
+    expect(batchPrimaryAction(batch())).toBe("import");
   });
 });
 

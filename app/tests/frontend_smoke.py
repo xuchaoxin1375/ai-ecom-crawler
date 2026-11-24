@@ -181,13 +181,80 @@ def exercise(page: Page, origin: str, fixture: str, root: Path) -> None:
     page.reload(wait_until="domcontentloaded")
     page.get_by_role("link", name=name, exact=True).click()
     expect(page).to_have_url(re.compile(rf"/next/#/batches/{batch}$"))
-    expect(page.get_by_role("link", name=SITE, exact=True)).to_be_visible()
+    row_link = page.get_by_role("link", name=SITE, exact=True)
+    action = page.get_by_role("button", name="启动 1 个可采站点", exact=True)
+    region = page.get_by_role("region", name="站点清单", exact=True)
+    for width in (1280, 1279, 768, 390, 320):
+        page.set_viewport_size({"width": width, "height": 900})
+        if width < 1024:
+            page.wait_for_function("document.querySelector('main').getBoundingClientRect().left === 0")
+        expect(row_link).to_be_in_viewport()
+        scroll_width = page.evaluate("document.documentElement.scrollWidth")
+        check(scroll_width <= width, f"Batch detail is {scroll_width}px wide at {width}px")
+        check(region.locator("table").evaluate("""table => {
+          const header = [...table.tHead.rows[0].cells];
+          const body = [...table.tBodies[0].rows[0].cells];
+          return header.every((cell, i) => {
+            const a = cell.getBoundingClientRect(), b = body[i].getBoundingClientRect();
+            return a.bottom <= b.top + 1 && Math.abs(a.x - b.x) <= 1
+              && Math.abs(a.width - b.width) <= 1;
+          });
+        }"""), f"Misaligned batch table at {width}px")
+        if width in (1280, 390) and (evidence := os.environ.get("ECOM_SMOKE_SCREENSHOT_DIR")):
+            page.screenshot(path=str(Path(evidence) / f"batch-ready-{width}.png"), animations="disabled")
+        if width == 390:
+            table = region.get_by_role("region", name="批次站点清单")
+            menu = region.get_by_role("button", name=f"打开站点「{SITE}」的操作菜单")
+            initial_menu_x = menu.bounding_box()["x"]
+            table.evaluate("el => { el.scrollLeft = 180; }")
+            expect(menu).to_be_in_viewport()
+            check(abs(menu.bounding_box()["x"] - initial_menu_x) <= 1,
+                  "Site menu moved when the table was scrolled horizontally")
+            menu.click()
+            expect(page.get_by_role("menuitem", name="查看站点详情")).to_be_visible()
+            page.keyboard.press("Escape")
+            expect(menu).to_be_focused()
+            table.evaluate("el => { el.scrollLeft = 0; }")
+    page.set_viewport_size({"width": 1280, "height": 900})
+    axe_script = APP / "frontend-v2" / "node_modules" / "axe-core" / "axe.min.js"
+    page.add_script_tag(path=axe_script)
+    violations = page.evaluate("async () => (await axe.run()).violations.map(v => v.id)", isolated_context=False)
+    check(not violations, f"Batch detail axe violations: {violations}")
 
-    page.get_by_role("button", name="启动 1 个", exact=True).click()
+    search = region.get_by_role("textbox", name="搜索站点")
+    filters = region.get_by_role("combobox", name="筛选站点状态")
+    search.fill("workbench-fixture")
+    filters.select_option("startable")
+    row_link.click()
+    expect(page).to_have_url(re.compile(rf"/sites/{re.escape(SITE)}$"))
+    page.get_by_role("link", name=f"返回 {name}", exact=True).click()
+    expect(search).to_have_value("workbench-fixture")
+    expect(filters).to_have_value("startable")
+    expect(row_link).to_be_focused()
+    row_link.press("Enter")
+    expect(page).to_have_url(re.compile(rf"/sites/{re.escape(SITE)}$"))
+    page.go_back()
+    expect(filters).to_have_value("startable")
+    expect(row_link).to_be_focused()
+    page.goto(f"{origin}/next/#/batches/{batch}/sites/{SITE}")
+    page.get_by_role("link", name=f"返回 {name}", exact=True).click()
+    expect(search).to_have_value("")
+    expect(filters).to_have_value("all")
+
+    more = page.get_by_role("button", name="更多批次操作")
+    more.press("Enter")
+    page.get_by_role("menuitem", name="归档批次…").press("Enter")
+    archive = page.get_by_role("dialog", name="归档这个批次？")
+    expect(archive.get_by_role("button", name="返回")).to_be_focused()
+    page.keyboard.press("Escape")
+    expect(archive).to_be_hidden()
+    expect(more).to_be_focused()
+
+    action.click()
     start = page.get_by_role("dialog", name="启动可采站点")
     accepted = post(
         page,
-        start.get_by_role("button", name="启动 1 个", exact=True),
+        start.get_by_role("button", name="将 1 个站点加入队列", exact=True),
         origin,
         f"/api/batches/{batch}/start",
         202,
@@ -216,11 +283,10 @@ def exercise(page: Page, origin: str, fixture: str, root: Path) -> None:
     )
 
     page.get_by_role("main").locator("header").get_by_role("link", name=batch, exact=True).click()
-    export = (
-        page.locator("section")
-        .filter(has=page.get_by_role("heading", name="导出与批次管理"))
-        .get_by_role("button", name="导出批次 ZIP", exact=True)
-    )
+    export = page.get_by_role("button", name="导出批次 ZIP", exact=True)
+    expect(export).to_have_count(1)
+    if evidence := os.environ.get("ECOM_SMOKE_SCREENSHOT_DIR"):
+        page.screenshot(path=str(Path(evidence) / "batch-completed-1280.png"))
     with page.expect_download() as pending:
         export.click()
     download = pending.value
@@ -235,6 +301,43 @@ def exercise(page: Page, origin: str, fixture: str, root: Path) -> None:
         flush=True,
     )
 
+    exercise_many_sites(page, origin)
+
+
+def exercise_many_sites(page: Page, origin: str) -> None:
+    from patchright.sync_api import expect
+
+    name = "多站点批次 · 返回位置"
+    urls = [f"https://sample-{number:02d}.example.test/" for number in range(24)]
+    seeded = page.request.post(
+        f"{origin}/api/batches",
+        data={"name": name, "country": "GB", "market": "GB", "sites": urls},
+        headers={"Origin": origin, "X-Requested-With": "XMLHttpRequest"},
+    )
+    check(seeded.status == 201, f"Could not seed many-site batch: {seeded.text()}")
+    batch = seeded.json()["batch"]["batch_id"]
+    page.goto(f"{origin}/next/#/batches/{batch}")
+    region = page.get_by_role("region", name="站点清单", exact=True)
+    search = region.get_by_role("textbox", name="搜索站点")
+    search.fill("not-present")
+    expect(region.get_by_text("没有符合条件的站点", exact=True)).to_be_visible()
+    region.get_by_role("button", name="重置筛选").click()
+    expect(search).to_have_value("")
+    status = region.get_by_role("combobox", name="筛选站点状态")
+    status.select_option("needs")
+    expect(status).to_have_value("needs")
+    # Use the last rendered row, rather than relying on API row ordering.
+    row = region.get_by_role("link", name=re.compile(r"sample-\d{2}\.example\.test")).last
+    row.scroll_into_view_if_needed()
+    before = page.evaluate("window.scrollY")
+    check(before > 0, "Many-site fixture did not require scrolling")
+    row.click()
+    page.get_by_role("link", name=f"返回 {name}", exact=True).click()
+    expect(status).to_have_value("needs")
+    expect(row).to_be_focused()
+    check(abs(page.evaluate("window.scrollY") - before) <= 2, "Batch scroll position was not restored")
+    print("Verified scroll position, filter, and row focus on the many-site batch.", flush=True)
+
 
 def browser_check(origin: str, fixture: str, root: Path) -> None:
     from patchright.sync_api import Route, expect, sync_playwright
@@ -242,12 +345,18 @@ def browser_check(origin: str, fixture: str, root: Path) -> None:
     problems: list[str] = []
     allowed = {urlsplit(origin).netloc, urlsplit(fixture).netloc}
     missing_rule_url = f"{origin}/api/sites/{BUILD_SITE}/rule"
+    missing_rule_urls = {missing_rule_url} | {
+        f"{origin}/api/sites/sample-{number:02d}.example.test/rule" for number in range(24)
+    }
 
     def local_only(route: Route) -> None:
         url = urlsplit(route.request.url)
         if url.scheme != "http" or url.netloc not in allowed:
             problems.append(f"External request blocked: {url.scheme}://{url.netloc}{url.path}")
             route.abort()
+        elif url.netloc == urlsplit(fixture).netloc and route.request.resource_type == "image":
+            # Deliver the fixture image without relying on permissions for cross-port loopback requests.
+            route.fulfill(response=route.fetch(max_redirects=0))
         else:
             route.continue_()
 
@@ -268,7 +377,7 @@ def browser_check(origin: str, fixture: str, root: Path) -> None:
                     lambda msg: (
                         problems.append(f"console: {msg.text}")
                         if msg.type == "error" and not (
-                            msg.location.get("url") == missing_rule_url and "404" in msg.text
+                            msg.location.get("url") in missing_rule_urls and "404" in msg.text
                         ) else None
                     ),
                 )
@@ -276,7 +385,7 @@ def browser_check(origin: str, fixture: str, root: Path) -> None:
                     "response",
                     lambda res: (
                         problems.append(f"HTTP {res.status} {res.url}")
-                        if res.status >= 400 and not (res.url == missing_rule_url and res.status == 404)
+                        if res.status >= 400 and not (res.url in missing_rule_urls and res.status == 404)
                         else None
                     ),
                 )

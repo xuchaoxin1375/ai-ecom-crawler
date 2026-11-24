@@ -1,4 +1,11 @@
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
 import {
   Link,
   useLocation,
@@ -14,6 +21,7 @@ import {
   Download,
   Eye,
   FileUp,
+  MoreHorizontal,
   Pause,
   Play,
   RefreshCw,
@@ -63,7 +71,6 @@ import { RowActionsMenu, type RowActionItem } from "../../components/ui/Dropdown
 import { BulkActionBar, type BulkAction } from "../../components/ui/BulkActionBar";
 import { Toast, useToast } from "../../components/ui/Toast";
 import { useRowSelection } from "../../components/ui/useRowSelection";
-import { BatchNextStep } from "./BatchNextStep";
 import { BatchStatusBand } from "./BatchStatusBand";
 import { ConfirmBatchActionDialog } from "./ConfirmBatchActionDialog";
 import { ImportSitesDialog } from "./ImportSitesDialog";
@@ -82,12 +89,19 @@ import {
 } from "./actions";
 import {
   batchHasActiveTasks,
-  batchSummarySentence,
+  batchPrimaryAction,
+  batchRerunnableSites,
+  canCancelBatch,
   filterSites,
-  nextStepFor,
+  parseFilter,
   siteFilterOptions,
   type SiteFilter,
 } from "./detail";
+import {
+  readSiteListReturn,
+  rememberSiteList,
+  takeSiteListDeparture,
+} from "./siteListReturn";
 
 type DialogKind = "" | "start" | "import" | "cancel" | "archive";
 type BusyKind = "" | "pause" | "cancel" | "archive" | "restore";
@@ -103,27 +117,10 @@ interface Notice {
   text: string;
 }
 
-const FILTERS: SiteFilter[] = [
-  "all",
-  "startable",
-  "ready",
-  "needs",
-  "running",
-  "paused",
-  "queued",
-  "finished",
-  "failed",
-  "invalid",
-];
-
-function parseFilter(value: string | null): SiteFilter {
-  return FILTERS.includes(value as SiteFilter) ? (value as SiteFilter) : "all";
-}
-
 function backHrefFromState(state: unknown): string {
   if (state && typeof state === "object" && "from" in state) {
     const from = (state as { from?: unknown }).from;
-    if (typeof from === "string" && from.startsWith("/batches")) return from;
+    if (typeof from === "string" && /^\/batches(?:\?|$)/.test(from)) return from;
   }
   return "/batches";
 }
@@ -210,35 +207,6 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-function SiteFilterChip({
-  label,
-  count,
-  active,
-  onClick,
-}: {
-  label: string;
-  count: number;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      aria-pressed={active}
-      className={cn(
-        "inline-flex h-7 items-center gap-1 rounded-full border px-2.5 text-[11px] font-medium transition-colors",
-        active
-          ? "border-accent/30 bg-accent-soft text-accent"
-          : "border-line bg-surface text-ink-2 hover:bg-surface-muted hover:text-ink",
-      )}
-      onClick={onClick}
-    >
-      {label}
-      <span className="tabular">{formatNumber(count)}</span>
-    </button>
-  );
-}
-
 function DetailSkeleton() {
   return (
     <div className="space-y-6" aria-busy="true">
@@ -247,17 +215,10 @@ function DetailSkeleton() {
       </span>
       <div className="rounded-panel border border-line bg-surface p-6">
         <div className="h-3 w-24 animate-pulse rounded bg-surface-sunken" />
-        <div className="mt-5 h-7 w-72 animate-pulse rounded bg-surface-sunken" />
-        <div className="mt-3 h-3 w-96 animate-pulse rounded bg-surface-sunken" />
+        <div className="mt-5 h-7 w-72 max-w-full animate-pulse rounded bg-surface-sunken" />
       </div>
-      <div className="h-36 animate-pulse rounded-panel border border-line bg-surface" />
-      <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,8fr)_minmax(320px,4fr)]">
-        <div className="h-[440px] animate-pulse rounded-panel border border-line bg-surface" />
-        <div className="space-y-4">
-          <div className="h-40 animate-pulse rounded-panel border border-line bg-surface" />
-          <div className="h-56 animate-pulse rounded-panel border border-line bg-surface" />
-        </div>
-      </div>
+      <div className="h-12 animate-pulse rounded-panel border border-line bg-surface" />
+      <div className="h-64 animate-pulse rounded-panel border border-line bg-surface" />
     </div>
   );
 }
@@ -270,8 +231,11 @@ export function BatchDetailPage() {
   const queryClient = useQueryClient();
   const { toast, showToast, dismissToast } = useToast();
   const siteListRef = useRef<HTMLElement>(null);
-  const exportSectionRef = useRef<HTMLElement>(null);
-  const backHref = backHrefFromState(location.state);
+  const batchActionsRef = useRef<HTMLDivElement>(null);
+  const batchPath = `/batches/${encodeURIComponent(batchId)}`;
+  const returnPosition = readSiteListReturn(location.state, batchPath);
+  const backHref = returnPosition?.from ?? backHrefFromState(location.state);
+  const restoredKey = useRef<string | null>(null);
 
   const filter = parseFilter(searchParams.get("site"));
   const queryParam = searchParams.get("q") ?? "";
@@ -292,6 +256,7 @@ export function BatchDetailPage() {
     queryKey: ["batch", batchId],
     queryFn: ({ signal }) => getBatch(batchId, signal),
     enabled: Boolean(batchId),
+    refetchOnMount: "always",
     refetchInterval: (current) => {
       const data = current.state.data;
       return data && batchHasActiveTasks(data) ? 5000 : false;
@@ -304,8 +269,36 @@ export function BatchDetailPage() {
     () => filterSites(sites, filter, queryParam),
     [sites, filter, queryParam],
   );
-  const filterOptions = useMemo(() => siteFilterOptions(sites), [sites]);
-  const step = batch ? nextStepFor(batch) : null;
+  const filterOptions = useMemo(
+    () => siteFilterOptions(sites, filter),
+    [sites, filter],
+  );
+  const locationKey = location.key;
+  const siteListReady = Boolean(batch);
+  const navigationState = location.state;
+  useEffect(() => {
+    if (!siteListReady || restoredKey.current === locationKey) return;
+    const frame = window.requestAnimationFrame(() => {
+      const position =
+        takeSiteListDeparture(locationKey) ??
+        readSiteListReturn(navigationState, batchPath);
+      if (!position) return;
+      restoredKey.current = locationKey;
+      const links =
+        siteListRef.current?.querySelectorAll<HTMLAnchorElement>("a[data-site-key]");
+      const rowLink = Array.from(links ?? []).find(
+        (link) => link.dataset.siteKey === position.siteKey,
+      );
+      window.scrollTo({ top: position.scrollTop, behavior: "instant" });
+      if (rowLink) {
+        const rect = rowLink.getBoundingClientRect();
+        if (rect.top < 56 || rect.bottom > window.innerHeight)
+          rowLink.scrollIntoView({ block: "center" });
+      }
+      (rowLink ?? siteListRef.current)?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [batchPath, locationKey, navigationState, siteListReady]);
   const selection = useRowSelection(sites, (site) => site.site_key);
   const visibleSiteIds = useMemo(
     () => new Set(visibleSites.map((site) => site.site_key)),
@@ -316,21 +309,14 @@ export function BatchDetailPage() {
   ).length;
 
   const canExport = Boolean(batch && batch.counts.tasks > 0);
-  const canCancel = Boolean(
-    batch &&
-    batch.counts.running +
-      batch.counts.queued +
-      batch.counts.paused +
-      batch.counts.draft >
-      0,
-  );
+  const canCancel = Boolean(batch && canCancelBatch(batch));
   const partialExport = Boolean(batch && batchHasActiveTasks(batch));
 
   function updateParam(key: string, value: string) {
     const next = new URLSearchParams(searchParams);
     if (value) next.set(key, value);
     else next.delete(key);
-    setSearchParams(next, { replace: true });
+    setSearchParams(next, { replace: true, state: { from: backHref } });
   }
 
   function setFilter(next: SiteFilter) {
@@ -347,24 +333,49 @@ export function BatchDetailPage() {
   }
 
   function resetFilters() {
-    setSearchParams(new URLSearchParams(), { replace: true });
+    setSearchParams(new URLSearchParams(), {
+      replace: true,
+      state: { from: backHref },
+    });
   }
 
   function focusSiteList() {
     siteListRef.current?.focus();
   }
 
-  function focusExportPanel() {
-    const section = exportSectionRef.current;
-    if (!section) return;
-    const reduceMotion = window.matchMedia?.(
-      "(prefers-reduced-motion: reduce)",
-    ).matches;
-    section.scrollIntoView({
-      block: "center",
-      behavior: reduceMotion ? "auto" : "smooth",
+  function restoreBatchFocus(fromMenu: boolean) {
+    const button = batchActionsRef.current?.querySelector<HTMLButtonElement>(
+      fromMenu ? '[aria-haspopup="menu"]' : "button[data-primary-action]",
+    );
+    if (button && !button.disabled) button.focus({ preventScroll: true });
+    else siteListRef.current?.focus({ preventScroll: true });
+  }
+
+  function siteHref(site: BatchSite) {
+    return `${batchPath}/sites/${encodeURIComponent(site.site_key)}`;
+  }
+
+  function openSite(site: BatchSite, event?: MouseEvent<HTMLAnchorElement>) {
+    if (event) {
+      if (
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      )
+        return;
+      event.preventDefault();
+    }
+    navigate(siteHref(site), {
+      state: rememberSiteList(locationKey, {
+        href: batchPath + location.search,
+        siteKey: site.site_key,
+        scrollTop: window.scrollY,
+        from: backHref,
+      }),
     });
-    section.querySelector<HTMLButtonElement>("button")?.focus({ preventScroll: true });
   }
 
   function applyBatch(next: BatchDetail) {
@@ -402,12 +413,12 @@ export function BatchDetailPage() {
         selection.clear();
         setNotice({
           tone: "success",
-          text: "批次已归档，可在列表中恢复。",
+          text: "批次已归档，可在列表中取消归档。",
         });
       } else {
         const response = await restoreBatch(batch.batch_id);
         applyBatch(response.batch);
-        setNotice({ tone: "success", text: "批次已恢复。" });
+        setNotice({ tone: "success", text: "已取消归档，批次会重新显示在默认列表。" });
       }
       setDialog("");
     } catch (exc) {
@@ -608,7 +619,7 @@ export function BatchDetailPage() {
           excluded.length > 0
             ? "warning"
             : "success",
-        title: rerun ? "批量启动／复跑已受理" : "批量启动已受理",
+        title: rerun ? "启动／重新采集已受理" : "批量启动已受理",
         text: `受理 ${formatNumber(response.accepted.length)} 个${
           response.skipped.length
             ? `，任务侧跳过 ${formatNumber(response.skipped.length)} 个`
@@ -673,12 +684,7 @@ export function BatchDetailPage() {
           key: "open",
           label: "查看站点详情",
           icon: <Eye size={14} />,
-          onSelect: () =>
-            navigate(
-              `/batches/${encodeURIComponent(batchId)}/sites/${encodeURIComponent(
-                site.site_key,
-              )}`,
-            ),
+          onSelect: () => openSite(site),
         },
       ],
     ];
@@ -689,7 +695,7 @@ export function BatchDetailPage() {
         groups.push([
           {
             key: "start",
-            label: mode === "rerun" ? "复跑站点采集…" : "启动站点采集…",
+            label: mode === "rerun" ? "重新采集此站点…" : "启动此站点采集…",
             icon: <Play size={14} />,
             onSelect: () => openStartSite(site),
           },
@@ -700,7 +706,7 @@ export function BatchDetailPage() {
       if (siteCanPauseTask(site)) {
         taskActions.push({
           key: "pause",
-          label: "暂停任务",
+          label: "暂停采集",
           icon: <Pause size={14} />,
           onSelect: () => void runTaskControl(site, "pause"),
         });
@@ -708,7 +714,7 @@ export function BatchDetailPage() {
       if (siteCanResumeTask(site)) {
         taskActions.push({
           key: "resume",
-          label: "继续任务",
+          label: "继续采集",
           icon: <Play size={14} />,
           onSelect: () => void runTaskControl(site, "resume"),
         });
@@ -739,32 +745,6 @@ export function BatchDetailPage() {
     return groups;
   }
 
-  function handleNextAction() {
-    if (!batch || !step) return;
-    switch (step.action.kind) {
-      case "start":
-        openStart();
-        break;
-      case "filter":
-        setFilter(step.action.filter);
-        break;
-      case "export":
-        focusExportPanel();
-        break;
-      case "restore":
-        void runBatchAction("restore");
-        break;
-      case "pause":
-        void runBatchAction("pause");
-        break;
-      case "import":
-        openImport();
-        break;
-      case "none":
-        break;
-    }
-  }
-
   if (query.isPending) return <DetailSkeleton />;
 
   if (!batch) {
@@ -790,26 +770,78 @@ export function BatchDetailPage() {
     );
   }
 
-  const primaryKind =
-    batch.status === "ARCHIVED"
-      ? "restore"
-      : batch.counts.startable > 0
-        ? "start"
-        : batch.counts.running > 0
-          ? "pause"
-          : "";
-  const finishedOrCancelled = batch.counts.finished + batch.counts.cancelled;
-
-  const stepDisabled =
-    step?.action.kind === "start"
-      ? batch.counts.startable === 0
-      : step?.action.kind === "export"
-        ? !canExport
-        : step?.action.kind === "pause"
-          ? batch.counts.running === 0
-          : false;
-
+  const primaryKind = batchPrimaryAction(batch);
   const archived = batch.status === "ARCHIVED";
+  const importAction: RowActionItem = {
+    key: "import",
+    label: "导入站点",
+    icon: <FileUp size={14} />,
+    onSelect: openImport,
+  };
+  const exportAction: RowActionItem = {
+    key: "export",
+    label: batchExportLabel(batch),
+    icon: <Download size={14} />,
+    onSelect: () => downloadBatch(partialExport),
+  };
+  const pauseAction: RowActionItem = {
+    key: "pause",
+    label: "暂停批次采集",
+    icon: <Pause size={14} />,
+    onSelect: () => void runBatchAction("pause"),
+  };
+  const primaryActions: Record<typeof primaryKind, RowActionItem> = {
+    import: importAction,
+    export: exportAction,
+    pause: pauseAction,
+    start: {
+      key: "start",
+      label: `启动 ${formatNumber(batch.counts.startable)} 个可采站点`,
+      icon: <Play size={14} />,
+      onSelect: () => openStart(),
+    },
+    unarchive: {
+      key: "unarchive",
+      label: "取消归档",
+      icon: <RotateCcw size={14} />,
+      onSelect: () => void runBatchAction("restore"),
+    },
+  };
+  const primary = primaryActions[primaryKind];
+  const moreActions: RowActionItem[][] = [[], []];
+  if (!archived && primaryKind !== "import") moreActions[0].push(importAction);
+  if (canExport && primaryKind !== "export") moreActions[0].push(exportAction);
+  if (!archived && primaryKind !== "pause" && sites.some(siteCanPauseTask))
+    moreActions[0].push(pauseAction);
+  if (!archived && batch.counts.startable === 0 && batchRerunnableSites(batch) > 0) {
+    moreActions[0].push({
+      key: "rerun",
+      label: "重新采集已结束站点…",
+      icon: <RotateCcw size={14} />,
+      onSelect: () => openStart(true),
+    });
+  }
+  if (!archived)
+    moreActions[1].push({
+      key: "archive",
+      label: "归档批次…",
+      icon: <Archive size={14} />,
+      onSelect: () => {
+        setConfirmError("");
+        setDialog("archive");
+      },
+    });
+  if (canCancel)
+    moreActions[1].push({
+      key: "cancel",
+      label: "取消批次内未结束任务…",
+      icon: <Ban size={14} />,
+      danger: true,
+      onSelect: () => {
+        setConfirmError("");
+        setDialog("cancel");
+      },
+    });
 
   const columns: DataTableColumn<BatchSite>[] = [
     {
@@ -844,9 +876,9 @@ export function BatchDetailPage() {
         <div className="min-w-0">
           <Link
             className="inline-flex max-w-full items-center gap-1 font-semibold text-ink hover:text-accent hover:underline"
-            to={`/batches/${encodeURIComponent(
-              batch.batch_id,
-            )}/sites/${encodeURIComponent(site.site_key)}`}
+            to={siteHref(site)}
+            onClick={(event) => openSite(site, event)}
+            data-site-key={site.site_key}
             title={`${site.domain}：查看站点详情`}
           >
             <span className="truncate">{site.domain}</span>
@@ -950,8 +982,9 @@ export function BatchDetailPage() {
       header: <span className="sr-only">操作</span>,
       width: "40px",
       align: "right",
-      headerClassName: "px-1",
-      cellClassName: "px-1",
+      headerClassName: "px-1 max-lg:right-0 max-lg:z-20",
+      cellClassName:
+        "px-1 max-lg:sticky max-lg:right-0 max-lg:z-10 max-lg:border-l max-lg:border-line max-lg:bg-surface",
       skeleton: false,
       cell: (site) => (
         <RowActionsMenu
@@ -969,19 +1002,16 @@ export function BatchDetailPage() {
       description={
         sites.length
           ? "换一个筛选条件，或清空搜索后查看全部站点。"
-          : "继续导入站点并匹配规则包，然后回到这里启动采集。"
+          : archived
+            ? "批次已归档。取消归档后可导入站点。"
+            : "使用页头的「导入站点」，导入后即可查看哪些站点可启动。"
       }
       action={
         sites.length ? (
           <Button size="sm" onClick={resetFilters}>
             重置筛选
           </Button>
-        ) : (
-          <Button size="sm" onClick={openImport}>
-            <FileUp size={14} aria-hidden="true" />
-            继续导入站点
-          </Button>
-        )
+        ) : undefined
       }
     />
   );
@@ -989,7 +1019,7 @@ export function BatchDetailPage() {
   const bulkActions: BulkAction[] = [
     {
       key: "start",
-      label: "启动／复跑",
+      label: "启动／重新采集",
       icon: <Play size={13} aria-hidden="true" />,
       onClick: () => void bulkStartSelected(),
       disabled:
@@ -998,14 +1028,14 @@ export function BatchDetailPage() {
     },
     {
       key: "pause",
-      label: "暂停任务",
+      label: "暂停所选采集",
       icon: <Pause size={13} aria-hidden="true" />,
       onClick: () => void bulkTaskControl("pause"),
       disabled: archived || !selection.selectedRows.some(siteCanPauseTask),
     },
     {
       key: "resume",
-      label: "继续任务",
+      label: "继续所选采集",
       icon: <Play size={13} aria-hidden="true" />,
       onClick: () => void bulkTaskControl("resume"),
       disabled: archived || !selection.selectedRows.some(siteCanResumeTask),
@@ -1023,7 +1053,7 @@ export function BatchDetailPage() {
 
   return (
     <div className={cn("space-y-6", selection.selectedCount > 0 && "pb-20")}>
-      <header className="rounded-panel border border-line bg-surface px-4 py-5 sm:px-6">
+      <header>
         <div className="flex items-center justify-between gap-4">
           <Link
             className="inline-flex items-center gap-1.5 text-sm font-medium text-ink-2 hover:text-ink"
@@ -1032,83 +1062,45 @@ export function BatchDetailPage() {
             <ArrowLeft size={15} aria-hidden="true" />
             返回批次列表
           </Link>
-          <span className="hidden min-w-0 truncate font-mono text-[11px] text-ink-3 sm:inline">
-            {batch.batch_id}
-          </span>
         </div>
 
-        <div className="mt-4 flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between lg:gap-8">
+        <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-3">
-              <h1 className="text-[24px] leading-8 font-semibold tracking-[-0.02em] text-ink sm:text-[28px] sm:leading-9">
+              <h1 className="text-[24px] leading-8 font-semibold tracking-[-0.02em] break-words text-ink sm:text-[28px] sm:leading-9">
                 {batch.name}
               </h1>
               <BatchStatusBadge status={batch.status} />
             </div>
-            <p className="mt-1 text-sm leading-6 text-ink-2">
-              {batchSummarySentence(batch)}
-            </p>
-            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-3">
-              <span>
-                {batch.country || "未设置国家"} / {batch.market || "未设置市场"}
-              </span>
-              <span>{batch.language || "未设置语言"}</span>
-              <span>{batch.category || "未设置品类"}</span>
-              <span>更新 {formatTime(batch.updated_at)}</span>
-            </div>
           </div>
 
-          <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:shrink-0 lg:justify-end">
-            {primaryKind === "restore" ? (
-              <Button
-                variant="primary"
-                onClick={() => void runBatchAction("restore")}
+          <div ref={batchActionsRef} className="flex flex-wrap items-center gap-2">
+            <Button
+              data-primary-action
+              variant="primary"
+              onClick={primary.onSelect}
+              disabled={Boolean(busy)}
+            >
+              <span aria-hidden="true">{primary.icon}</span>
+              {busy === "pause" && primaryKind === "pause"
+                ? "正在暂停…"
+                : busy === "restore" && primaryKind === "unarchive"
+                  ? "正在取消归档…"
+                  : primary.label}
+            </Button>
+            {moreActions.some((group) => group.length > 0) && (
+              <RowActionsMenu
+                label="更多批次操作"
+                groups={moreActions}
                 disabled={Boolean(busy)}
-              >
-                <RotateCcw size={14} aria-hidden="true" />
-                {busy === "restore" ? "恢复中…" : "恢复批次"}
-              </Button>
-            ) : null}
-            {primaryKind === "start" ? (
-              <Button variant="primary" onClick={() => openStart()}>
-                <Play size={14} aria-hidden="true" />
-                启动 {formatNumber(batch.counts.startable)} 个
-              </Button>
-            ) : null}
-            {primaryKind === "pause" ? (
-              <Button
-                variant="primary"
-                onClick={() => void runBatchAction("pause")}
-                disabled={Boolean(busy)}
-              >
-                <Pause size={14} aria-hidden="true" />
-                {busy === "pause" ? "暂停中…" : "暂停批次"}
-              </Button>
-            ) : null}
-            {batch.status !== "ARCHIVED" &&
-            batch.counts.startable === 0 &&
-            finishedOrCancelled > 0 ? (
-              <Button onClick={() => openStart(true)}>
-                <RotateCcw size={14} aria-hidden="true" />
-                复跑站点
-              </Button>
-            ) : null}
-            {batch.status !== "ARCHIVED" ? (
-              <Button onClick={openImport}>
-                <FileUp size={14} aria-hidden="true" />
-                继续导入
-              </Button>
-            ) : null}
-
-            {batch.counts.startable > 0 && batch.counts.running > 0 ? (
-              <Button
-                onClick={() => void runBatchAction("pause")}
-                disabled={Boolean(busy)}
-              >
-                <Pause size={14} aria-hidden="true" />
-                暂停
-              </Button>
-            ) : null}
+                trigger={
+                  <Button aria-label="更多批次操作">
+                    <MoreHorizontal size={16} aria-hidden="true" />
+                    更多
+                  </Button>
+                }
+              />
+            )}
           </div>
         </div>
       </header>
@@ -1121,105 +1113,108 @@ export function BatchDetailPage() {
         <ErrorNotice title="操作失败" message={actionError} compact />
       ) : null}
 
-      <BatchStatusBand batch={batch} activeFilter={filter} onFilter={setFilter} />
+      <BatchStatusBand batch={batch} />
 
-      <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,8fr)_minmax(320px,4fr)]">
-        <section
-          ref={siteListRef}
-          tabIndex={-1}
-          aria-label="站点清单"
-          className="min-w-0 overflow-hidden rounded-panel border border-line bg-surface"
-        >
-          <div className="border-b border-line px-5 py-4">
-            <div className="flex flex-col items-start gap-3 sm:flex-row sm:justify-between">
-              <div>
-                <h2 className="text-[17px] leading-6 font-semibold text-ink">
-                  站点清单
-                </h2>
-                <p className="mt-0.5 text-xs leading-5 text-ink-3" role="status">
-                  {query.isFetching
-                    ? "更新中…"
-                    : `共 ${formatNumber(sites.length)} 个站点，显示 ${formatNumber(
-                        visibleSites.length,
-                      )} 个`}
-                  ；未接入和无效条目保留在批次中，不计入任务失败。
-                </p>
-              </div>
-              <Button
-                size="sm"
-                onClick={() => void query.refetch()}
-                disabled={query.isFetching}
-              >
-                <RefreshCw
-                  className={query.isFetching ? "animate-spin" : undefined}
-                  size={14}
-                  aria-hidden="true"
-                />
-                刷新
-              </Button>
+      <section
+        ref={siteListRef}
+        tabIndex={-1}
+        aria-label="站点清单"
+        className="min-w-0 scroll-mt-16 rounded-panel border border-line bg-surface"
+      >
+        <div className="border-b border-line px-5 py-4">
+          <div className="flex flex-col items-start gap-3 sm:flex-row sm:justify-between">
+            <div>
+              <h2 className="text-[17px] leading-6 font-semibold text-ink">站点清单</h2>
+              <p className="mt-0.5 text-xs leading-5 text-ink-3" role="status">
+                {query.isFetching
+                  ? "更新中…"
+                  : `显示 ${formatNumber(
+                      visibleSites.length,
+                    )} / ${formatNumber(sites.length)} 个站点`}
+              </p>
             </div>
-
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              {filterOptions.map((option) => (
-                <SiteFilterChip
-                  key={option.key}
-                  label={option.label}
-                  count={option.count}
-                  active={filter === option.key}
-                  onClick={() => setFilter(filter === option.key ? "all" : option.key)}
-                />
-              ))}
-              <div className="relative ml-auto w-52">
-                <Search
-                  className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-3"
-                  size={14}
-                  aria-hidden="true"
-                />
-                <Input
-                  className="h-8 pl-8 text-xs"
-                  value={queryParam}
-                  placeholder="域名、备注或任务 ID"
-                  aria-label="搜索站点"
-                  onChange={(event) => updateParam("q", event.target.value)}
-                />
-              </div>
-            </div>
+            <Button
+              size="sm"
+              onClick={() => void query.refetch()}
+              disabled={query.isFetching}
+            >
+              <RefreshCw
+                className={query.isFetching ? "animate-spin" : undefined}
+                size={14}
+                aria-hidden="true"
+              />
+              刷新清单
+            </Button>
           </div>
 
-          {query.isError ? (
-            <div className="px-4 pt-4">
-              <ErrorNotice
-                title="刷新批次失败"
-                message={
-                  query.error instanceof Error
-                    ? query.error.message
-                    : "暂时无法更新批次。"
-                }
-                compact
-                onRetry={() => void query.refetch()}
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <div className="relative min-w-0 basis-48 grow">
+              <Search
+                className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-3"
+                size={14}
+                aria-hidden="true"
+              />
+              <Input
+                className="pl-8 text-sm"
+                value={queryParam}
+                placeholder="域名、备注或任务 ID"
+                aria-label="搜索站点"
+                onChange={(event) => updateParam("q", event.target.value)}
               />
             </div>
-          ) : null}
+            <select
+              aria-label="筛选站点状态"
+              className="h-9 max-w-full rounded-control border border-line-strong bg-surface px-3 text-sm text-ink"
+              value={filter}
+              onChange={(event) => setFilter(parseFilter(event.target.value))}
+            >
+              {filterOptions.map(({ key, label, count }) => (
+                <option key={key} value={key}>
+                  {label}（{formatNumber(count)}）
+                </option>
+              ))}
+            </select>
+          </div>
+          {visibleSites.length > 0 && (
+            <p className="mt-2 text-xs text-ink-3 lg:hidden">横向滚动可查看其他列</p>
+          )}
+        </div>
 
-          {bulkNotice ? (
-            <div className="px-4 pt-4">
-              <InlineNotice
-                tone={bulkNotice.tone}
-                title={bulkNotice.title}
-                onDismiss={() => setBulkNotice(null)}
-              >
-                <p>{bulkNotice.text}</p>
-                {bulkNotice.details?.length ? (
-                  <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs">
-                    {bulkNotice.details.map((detail, index) => (
-                      <li key={`${index}-${detail}`}>{detail}</li>
-                    ))}
-                  </ul>
-                ) : null}
-              </InlineNotice>
-            </div>
-          ) : null}
+        {query.isError ? (
+          <div className="px-4 pt-4">
+            <ErrorNotice
+              title="刷新批次失败"
+              message={
+                query.error instanceof Error
+                  ? query.error.message
+                  : "暂时无法更新批次。"
+              }
+              compact
+              onRetry={() => void query.refetch()}
+            />
+          </div>
+        ) : null}
 
+        {bulkNotice ? (
+          <div className="px-4 pt-4">
+            <InlineNotice
+              tone={bulkNotice.tone}
+              title={bulkNotice.title}
+              onDismiss={() => setBulkNotice(null)}
+            >
+              <p>{bulkNotice.text}</p>
+              {bulkNotice.details?.length ? (
+                <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs">
+                  {bulkNotice.details.map((detail, index) => (
+                    <li key={`${index}-${detail}`}>{detail}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </InlineNotice>
+          </div>
+        ) : null}
+
+        {visibleSites.length ? (
           <DataTable
             caption="批次站点清单"
             columns={columns}
@@ -1229,126 +1224,53 @@ export function BatchDetailPage() {
               selection.isSelected(site) ? "bg-accent-soft/40" : ""
             }
             density="compact"
-            empty={emptyState}
           />
-        </section>
+        ) : (
+          emptyState
+        )}
+      </section>
 
-        <aside className="space-y-4">
-          {step ? (
-            <BatchNextStep
-              step={step}
-              onAction={handleNextAction}
-              disabled={stepDisabled}
-              busy={step.action.kind === busy}
-            />
+      <details className="rounded-panel border border-line bg-surface">
+        <summary className="cursor-pointer rounded-control px-4 py-3 text-sm font-semibold text-ink">
+          批次资料
+        </summary>
+        <dl className="divide-y divide-line">
+          <Fact label="批次 ID">
+            <code className="break-all font-mono">{batch.batch_id}</code>
+          </Fact>
+          <Fact label="国家／市场">
+            {batch.country || "—"} / {batch.market || "—"}
+          </Fact>
+          <Fact label="语言">{batch.language || "—"}</Fact>
+          <Fact label="品类">{batch.category || "—"}</Fact>
+          {batch.note ? (
+            <Fact label="备注">
+              <span className="whitespace-pre-wrap break-words">{batch.note}</span>
+            </Fact>
           ) : null}
-
-          <section className="rounded-panel border border-line bg-surface">
-            <div className="border-b border-line px-4 py-3">
-              <h2 className="text-[15px] leading-6 font-semibold text-ink">批次事实</h2>
-            </div>
-            <dl className="divide-y divide-line">
-              <Fact label="国家／市场">
-                {batch.country || "—"} / {batch.market || "—"}
-              </Fact>
-              <Fact label="语言">{batch.language || "—"}</Fact>
-              <Fact label="品类">{batch.category || "—"}</Fact>
-              {batch.note ? (
-                <Fact label="备注">
-                  <span className="whitespace-pre-wrap break-words">{batch.note}</span>
-                </Fact>
-              ) : null}
-              <Fact label="创建">
-                <span className="tabular">{formatTime(batch.created_at)}</span>
-              </Fact>
-              <Fact label="更新">
-                <span className="tabular">{formatTime(batch.updated_at)}</span>
-              </Fact>
-            </dl>
-          </section>
-
-          <section
-            ref={exportSectionRef}
-            aria-label="导出与批次管理"
-            className="rounded-panel border border-line bg-surface"
-          >
-            <div className="border-b border-line px-4 py-3">
-              <h2 className="text-[15px] leading-6 font-semibold text-ink">
-                导出与批次管理
-              </h2>
-            </div>
-            <div className="space-y-3 px-4 py-4">
-              {canExport ? (
-                <Button
-                  className="w-full justify-start"
-                  size="sm"
-                  onClick={() => downloadBatch(partialExport)}
-                >
-                  <Download size={14} aria-hidden="true" />
-                  {batchExportLabel(batch)}
-                </Button>
-              ) : (
-                <p className="text-xs leading-5 text-ink-3">
-                  还没有任务结果。启动可采站点后可导出批次 ZIP。
-                </p>
-              )}
-              <p className="text-xs leading-5 text-ink-3">
-                {partialExport
-                  ? "批次仍有未结束任务。导出当前已生成的部分结果；压缩包清单会标出未开始、运行中、失败和部分完成的站点。"
-                  : "所有任务已结束。导出批次 ZIP；压缩包清单仍会区分失败、部分完成和未启动的站点，不代表每个站点都采集成功。"}
-              </p>
-            </div>
-
-            <div className="space-y-2 border-t border-line px-4 py-4">
-              <h3 className="text-xs font-semibold tracking-[0.04em] text-ink-3">
-                批次管理
-              </h3>
-              {batch.status === "ARCHIVED" ? (
-                <p className="text-xs leading-5 text-ink-3">
-                  批次已归档；使用页头的“恢复批次”回到列表。
-                </p>
-              ) : (
-                <Button
-                  className="w-full justify-start"
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => {
-                    setConfirmError("");
-                    setDialog("archive");
-                  }}
-                >
-                  <Archive size={14} aria-hidden="true" />
-                  归档批次
-                </Button>
-              )}
-              {canCancel ? (
-                <Button
-                  className="w-full justify-start text-danger hover:bg-danger-soft hover:text-danger"
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => {
-                    setConfirmError("");
-                    setDialog("cancel");
-                  }}
-                >
-                  <Ban size={14} aria-hidden="true" />
-                  取消批次
-                </Button>
-              ) : (
-                <p className="text-xs leading-5 text-ink-3">
-                  没有排队、运行或暂停中的任务，无需取消。
-                </p>
-              )}
-            </div>
-          </section>
-        </aside>
-      </div>
+          <Fact label="创建">
+            <span className="tabular">{formatTime(batch.created_at)}</span>
+          </Fact>
+          <Fact label="更新">
+            <span className="tabular">{formatTime(batch.updated_at)}</span>
+          </Fact>
+          {canExport && (
+            <Fact label="导出范围">
+              {partialExport
+                ? "仍有未结束任务，只导出当前已生成的结果。"
+                : "导出全部已生成的批次结果；不代表所有站点都采集成功。"}
+              压缩包清单会标出各站点的状态。
+            </Fact>
+          )}
+        </dl>
+      </details>
 
       {dialog === "start" ? (
         <StartBatchDialog
           open
           batch={batch}
           initialRerun={startRerun}
+          onCloseFocus={() => restoreBatchFocus(startRerun)}
           onOpenChange={(next) => {
             if (!next) setDialog("");
           }}
@@ -1360,6 +1282,7 @@ export function BatchDetailPage() {
         <ImportSitesDialog
           open
           batch={batch}
+          onCloseFocus={() => restoreBatchFocus(primaryKind !== "import")}
           onOpenChange={(next) => {
             if (!next) setDialog("");
           }}
@@ -1370,13 +1293,14 @@ export function BatchDetailPage() {
       {dialog === "cancel" ? (
         <ConfirmBatchActionDialog
           open
-          title="取消整个批次？"
+          title="取消批次内未结束任务？"
           description="将取消排队、运行和暂停中的任务；已经产生的部分结果保留，可继续导出。"
           consequence="取消是批次级操作，不会删除批次和站点；未开始的可采站点仍保留在批次中。"
-          confirmLabel="确认取消批次"
+          confirmLabel="确认取消这些任务"
           tone="danger"
           busy={busy === "cancel"}
           error={confirmError}
+          onCloseFocus={() => restoreBatchFocus(true)}
           onOpenChange={(next) => {
             if (!next) setDialog("");
           }}
@@ -1388,12 +1312,13 @@ export function BatchDetailPage() {
         <ConfirmBatchActionDialog
           open
           title="归档这个批次？"
-          description="归档只影响列表可见性，不删除任务和结果；可在批次列表的“包含归档”中恢复。"
-          consequence="归档后仍可通过批次 ID 访问；恢复后重新出现在默认列表中。"
+          description="归档只影响列表可见性，不删除任务和结果；可在批次列表的「包含归档」中找到它。"
+          consequence="归档后仍可通过批次 ID 访问；取消归档后重新出现在默认列表中，不会重新采集。"
           confirmLabel="确认归档"
           tone="warning"
           busy={busy === "archive"}
           error={confirmError}
+          onCloseFocus={() => restoreBatchFocus(true)}
           onOpenChange={(next) => {
             if (!next) setDialog("");
           }}
@@ -1427,7 +1352,7 @@ export function BatchDetailPage() {
             .slice(0, 3)
             .map((site) => site.domain)
             .join("、")}${siteDialog.sites.length > 3 ? " 等" : ""}。`}
-          consequence="取消是任务级操作，不会删除批次和站点；已经产生的部分结果保留，可回批次详情复跑该站点。"
+          consequence="不会删除批次、站点或已生成的结果；之后可为该站点重新采集。"
           confirmLabel="确认取消任务"
           tone="danger"
           busy={siteConfirmBusy}

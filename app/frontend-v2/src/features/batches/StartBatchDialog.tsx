@@ -6,6 +6,7 @@ import { formatNumber } from "../../lib/format";
 import { Button } from "../../components/ui/Button";
 import { Checkbox } from "../../components/ui/Input";
 import { ErrorNotice } from "../../components/ui/ErrorNotice";
+import { batchRerunnableSites } from "./detail";
 
 interface StartBatchDialogProps {
   open: boolean;
@@ -13,6 +14,7 @@ interface StartBatchDialogProps {
   initialRerun?: boolean;
   onOpenChange: (open: boolean) => void;
   onStarted: (response: BatchActionResponse) => void;
+  onCloseFocus?: () => void;
 }
 
 export function StartBatchDialog({
@@ -21,14 +23,15 @@ export function StartBatchDialog({
   initialRerun = false,
   onOpenChange,
   onStarted,
+  onCloseFocus,
 }: StartBatchDialogProps) {
   const [fullCatalog, setFullCatalog] = useState(false);
   const [rerunFinished, setRerunFinished] = useState(initialRerun);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  const finishedOrCancelled = batch.counts.finished + batch.counts.cancelled;
-  const startCount = rerunFinished ? batch.counts.ready : batch.counts.startable;
+  const finishedOrCancelled = batchRerunnableSites(batch);
+  const startCount = batch.counts.startable + (rerunFinished ? finishedOrCancelled : 0);
   const canStart = startCount > 0 && !busy;
 
   async function runStart() {
@@ -69,14 +72,19 @@ export function StartBatchDialog({
             event.preventDefault();
             document.getElementById("start-batch-cancel")?.focus();
           }}
+          onCloseAutoFocus={(event) => {
+            if (!onCloseFocus) return;
+            event.preventDefault();
+            onCloseFocus();
+          }}
         >
           <header className="flex items-start justify-between gap-4 border-b border-line px-4 py-4 sm:gap-6 sm:px-6">
             <div>
               <Dialog.Title className="text-[22px] leading-8 font-semibold tracking-[-0.01em] text-ink">
-                启动可采站点
+                {initialRerun ? "重新采集已结束站点" : "启动可采站点"}
               </Dialog.Title>
               <Dialog.Description className="mt-1 text-sm text-ink-2">
-                任务会进入队列；待接入、无效和重复站点不会被启动。默认使用规则包预算，勾选全量采集时不设数量或时长上限。
+                确认后会创建新任务并加入队列；正在处理或已暂停的任务不受影响。
               </Dialog.Description>
             </div>
             <Dialog.Close asChild>
@@ -94,14 +102,14 @@ export function StartBatchDialog({
           <div className="space-y-4 px-4 py-5 sm:px-6">
             <div className="flex items-baseline justify-between gap-4 rounded-panel border border-line bg-surface-muted px-4 py-3">
               <div>
-                <p className="text-xs text-ink-3">本次启动</p>
+                <p className="text-xs text-ink-3">本次加入队列</p>
                 <p className="mt-0.5 text-xl leading-7 font-semibold text-ink tabular">
                   {formatNumber(startCount)} 个站点
                 </p>
               </div>
               <p className="text-xs text-ink-3">
-                可采 {formatNumber(batch.counts.ready)} · 未启动{" "}
-                {formatNumber(batch.counts.startable)}
+                首次采集 {formatNumber(batch.counts.startable)} · 重新采集{" "}
+                {formatNumber(rerunFinished ? finishedOrCancelled : 0)}
               </p>
             </div>
 
@@ -118,7 +126,7 @@ export function StartBatchDialog({
                   className="block text-sm font-medium text-ink"
                   htmlFor="start-full-catalog"
                 >
-                  全量采集
+                  不设采集数量或时长上限
                 </label>
                 <p className="mt-0.5 text-xs leading-5 text-ink-3">
                   不设
@@ -141,12 +149,12 @@ export function StartBatchDialog({
                   className="block text-sm font-medium text-ink"
                   htmlFor="start-rerun-finished"
                 >
-                  复跑已完成或已取消站点
+                  包含任务已结束的站点
                 </label>
                 <p className="mt-0.5 text-xs leading-5 text-ink-3">
                   {finishedOrCancelled > 0
-                    ? "为这些站点创建新任务；旧任务和结果保留。"
-                    : "当前没有已完成或已取消的站点。"}
+                    ? "为可采且任务已结束（含取消）的站点创建新任务；尚未启动的可采站点也会加入队列，旧结果保留。"
+                    : "当前没有可重新采集的站点。"}
                 </p>
               </div>
             </div>
@@ -172,7 +180,9 @@ export function StartBatchDialog({
                 title={startCount === 0 ? "没有可启动的站点" : undefined}
               >
                 <Play size={14} aria-hidden="true" />
-                {busy ? "启动中…" : `启动 ${formatNumber(startCount)} 个`}
+                {busy
+                  ? "正在加入队列…"
+                  : `将 ${formatNumber(startCount)} 个站点加入队列`}
               </Button>
             </div>
           </footer>
