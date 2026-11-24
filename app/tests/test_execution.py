@@ -180,6 +180,15 @@ def fixture_server() -> Iterator[str]:
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             base = f"http://127.0.0.1:{self.server.server_port}"  # type: ignore[attr-defined]
+            if self.path in {"/img/1.jpg", "/img/2.jpg", "/img/3.jpg"}:
+                # One-pixel GIF; the fixture uses .jpg URLs for extraction tests.
+                body = bytes.fromhex("47494638396101000100800000000000ffffff21f90401000000002c00000000010001000002024401003b")
+                self.send_response(200)
+                self.send_header("Content-Type", "image/gif")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
             if self.path == "/":
                 body = (
                     b"<html><body>"

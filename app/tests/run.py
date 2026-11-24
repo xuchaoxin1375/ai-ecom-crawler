@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import os
 import sys
 import unittest
 from collections.abc import Iterator
@@ -111,11 +110,9 @@ def run_suite(suite: unittest.TestSuite, scope: str, *, quiet: bool) -> int:
 
 def _run_child(group: str, expected: str, receipt: str, quiet: str) -> int:
     # No test imports or subprocesses before the parent has assigned the job.
-    marker = Path(receipt).with_suffix(".pid")
-    staging = marker.with_suffix(".pid.tmp")
-    staging.write_text(str(os.getpid()), encoding="ascii")
-    staging.replace(marker)
-    if sys.stdin.buffer.read(1) != b"1":
+    from tests.parallel_runner import wait_for_start_gate
+
+    if not wait_for_start_gate(Path(receipt).with_suffix(".pid")):
         return 1
     try:
         suite = load_suite(group, [])

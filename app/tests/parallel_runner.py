@@ -126,6 +126,28 @@ class _Worker:
         )
 
 
+def admit_windows_worker(
+    job: _Job, process: subprocess.Popen[bytes], marker: Path, deadline: float,
+) -> None:
+    job.assign(process.pid)
+    # The venv launcher can spawn the actual interpreter before assignment.
+    # Bind the interpreter too, while it is still waiting on stdin.
+    while not marker.is_file():
+        if process.poll() is not None:
+            raise OSError(f"Worker exited before its start gate: {marker.name}")
+        if time.monotonic() >= deadline:
+            raise TimeoutError(f"Worker did not reach its start gate in time: {marker.name}")
+        time.sleep(0.02)
+    job.assign(int(marker.read_text(encoding="ascii")))
+
+
+def wait_for_start_gate(marker: Path) -> bool:
+    staging = marker.with_suffix(".pid.tmp")
+    staging.write_text(str(os.getpid()), encoding="ascii")
+    staging.replace(marker)
+    return sys.stdin.buffer.read(1) == b"1"
+
+
 def _start_worker(
     job: _Job, command: list[str], root: Path, name: str, fingerprint: str, quiet: bool,
     deadline: float,
@@ -145,17 +167,7 @@ def _start_worker(
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
         try:
-            job.assign(process.pid)
-            # A Windows venv launcher may have spawned the real Python before
-            # job assignment. Bind that interpreter too before opening the gate.
-            marker = receipt.with_suffix(".pid")
-            while not marker.is_file():
-                if process.poll() is not None:
-                    raise OSError(f"{name} exited before its start gate")
-                if time.monotonic() >= deadline:
-                    raise TimeoutError(f"{name} did not reach its start gate in time")
-                time.sleep(0.02)
-            job.assign(int(marker.read_text(encoding="ascii")))
+            admit_windows_worker(job, process, receipt.with_suffix(".pid"), deadline)
             assert process.stdin is not None
             with process.stdin as gate:
                 gate.write(b"1")
