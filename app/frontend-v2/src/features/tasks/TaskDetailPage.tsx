@@ -1,14 +1,20 @@
-import { useEffect, useState, type ReactNode } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
+import {
+  Link,
+  useLocation,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Archive,
   ArrowLeft,
-  ArrowRight,
   Ban,
   Copy,
   Download,
   ExternalLink,
+  MoreHorizontal,
   Pause,
   Play,
   RefreshCw,
@@ -40,7 +46,6 @@ import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { ErrorNotice } from "../../components/ui/ErrorNotice";
-import { MetricStrip } from "../../components/ui/MetricStrip";
 import { RowActionsMenu, type RowActionItem } from "../../components/ui/DropdownMenu";
 import { ConfirmBatchActionDialog } from "../batches/ConfirmBatchActionDialog";
 import { TaskCsvPreview } from "../sites/TaskCsvPreview";
@@ -84,6 +89,20 @@ function DetailSkeleton() {
   );
 }
 
+const TASK_VIEWS = ["results", "quality", "data", "detail"] as const;
+type TaskView = (typeof TASK_VIEWS)[number];
+
+const TASK_VIEW_LABELS: Record<TaskView, string> = {
+  results: "结果",
+  quality: "质量与验收",
+  data: "数据明细",
+  detail: "运行明细",
+};
+
+function parseTaskView(value: string | null): TaskView {
+  return TASK_VIEWS.find((item) => item === value) ?? "results";
+}
+
 async function copyText(value: string): Promise<void> {
   if (navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(value);
@@ -104,6 +123,9 @@ async function copyText(value: string): Promise<void> {
 export function TaskDetailPage() {
   const { taskId = "" } = useParams<{ taskId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeView = parseTaskView(searchParams.get("view"));
   const queryClient = useQueryClient();
 
   const [busy, setBusy] = useState("");
@@ -147,6 +169,14 @@ export function TaskDetailPage() {
     void queryClient.invalidateQueries({ queryKey: ["tasks"] });
   }, [queryClient, stream.ended, taskId]);
 
+  useEffect(() => {
+    const raw = searchParams.get("view");
+    if (!raw || TASK_VIEWS.includes(raw as TaskView)) return;
+    const params = new URLSearchParams(searchParams);
+    params.delete("view");
+    setSearchParams(params, { replace: true, state: location.state });
+  }, [searchParams, setSearchParams, location.state]);
+
   const batchQuery = useQuery({
     queryKey: ["batch", taskQuery.data?.batch_id],
     queryFn: ({ signal }) => getBatch(taskQuery.data?.batch_id ?? "", signal),
@@ -172,6 +202,32 @@ export function TaskDetailPage() {
 
   function refresh() {
     void taskQuery.refetch();
+  }
+
+  function setView(next: TaskView) {
+    const params = new URLSearchParams(searchParams);
+    if (next === "results") params.delete("view");
+    else params.set("view", next);
+    setSearchParams(params, { replace: true, state: location.state });
+  }
+
+  function handleViewKey(event: KeyboardEvent<HTMLButtonElement>, current: TaskView) {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const index = TASK_VIEWS.indexOf(current);
+    const next =
+      event.key === "Home"
+        ? TASK_VIEWS[0]
+        : event.key === "End"
+          ? TASK_VIEWS[TASK_VIEWS.length - 1]
+          : TASK_VIEWS[
+              (index + (event.key === "ArrowRight" ? 1 : -1) + TASK_VIEWS.length) %
+                TASK_VIEWS.length
+            ];
+    setView(next);
+    window.requestAnimationFrame(() => {
+      document.getElementById(`task-tab-${next}`)?.focus();
+    });
   }
 
   function downloadTask() {
@@ -276,64 +332,356 @@ export function TaskDetailPage() {
   const siteHref = siteTaskHref(task);
   const batchLink = batchHref(task);
   const isDiscovery = task.task_type === "discovery";
-  const metrics = [
-    {
-      label: isDiscovery ? "发现网址" : "有效商品",
-      value: formatNumber(
-        isDiscovery
-          ? (task.counts.discovered_urls ?? 0)
-          : (task.counts.valid_products ?? 0),
-      ),
-      hint: isDiscovery ? "网址发现任务不产生商品 CSV" : "进入导出与验收",
-    },
-    {
-      label: "失败／排除",
-      value: `${formatNumber(task.counts.failed_products ?? 0)} / ${formatNumber(
-        task.counts.excluded_products ?? 0,
-      )}`,
-      hint: "失败进入诊断，排除不计失败",
-    },
-    {
-      label: "覆盖",
-      value: coverageLabel(task.coverage?.status),
-      hint:
-        task.coverage?.status === "UNKNOWN" || !task.coverage
-          ? "无可靠分母"
-          : `${task.coverage.covered ?? "—"} / ${task.coverage.denominator ?? "—"}`,
-    },
-    {
-      label: "质量异常",
-      value: formatNumber(quality.length),
-      hint: "正文不完整或非可选字段缺失",
-    },
-  ];
+  const resultCount = isDiscovery
+    ? (task.counts.discovered_urls ?? 0)
+    : (task.counts.valid_products ?? 0);
+  const summaryLabel = isDiscovery ? "发现网址" : "有效商品";
 
-  const moreActions: RowActionItem[] = [
-    {
-      key: "copy",
-      label: "复制任务 ID",
-      icon: <Copy size={14} />,
-      onSelect: () => void copyId(),
-    },
-    {
-      key: "archive",
-      label: task.archived_at ? "恢复任务" : "归档任务",
-      icon: task.archived_at ? <RotateCcw size={14} /> : <Archive size={14} />,
-      onSelect: () => void toggleArchive(),
-      disabled: Boolean(busy) || active,
-      hint: active ? "运行中不能归档" : undefined,
-    },
-    ...(siteHref
-      ? [
-          {
-            key: "site",
-            label: "打开站点详情",
-            icon: <ExternalLink size={14} />,
-            onSelect: () => navigate(siteHref),
-          },
-        ]
-      : []),
-  ];
+  const summary = (
+    <section
+      aria-label="任务概览"
+      className="rounded-panel border border-line bg-surface px-4 py-3"
+    >
+      <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm leading-5 xl:grid-cols-4">
+        <div className="flex min-w-0 flex-wrap gap-x-2">
+          <dt className="font-semibold text-ink">{summaryLabel}</dt>
+          <dd className="min-w-0 text-ink-2">{formatNumber(resultCount)}</dd>
+        </div>
+        <div className="flex min-w-0 flex-wrap gap-x-2">
+          <dt className="font-semibold text-ink">失败／排除</dt>
+          <dd className="min-w-0 text-ink-2">
+            {formatNumber(task.counts.failed_products ?? 0)} /{" "}
+            {formatNumber(task.counts.excluded_products ?? 0)}
+          </dd>
+        </div>
+        <div className="flex min-w-0 flex-wrap gap-x-2">
+          <dt className="font-semibold text-ink">覆盖</dt>
+          <dd className="min-w-0 text-ink-2">{coverageLabel(task.coverage?.status)}</dd>
+        </div>
+        <div className="flex min-w-0 flex-wrap gap-x-2">
+          <dt className="font-semibold text-ink">质量异常</dt>
+          <dd className="min-w-0 text-ink-2">{formatNumber(quality.length)}</dd>
+        </div>
+      </dl>
+    </section>
+  );
+
+  const primary =
+    task.state === "RUNNING" || task.state === "PAUSING"
+      ? { kind: "pause" as const, label: "暂停任务" }
+      : task.state === "PAUSED"
+        ? { kind: "resume" as const, label: "继续任务" }
+        : task.state === "DRAFT" || task.state === "QUEUED"
+          ? { kind: "cancel" as const, label: "取消任务" }
+          : task.state === "FINISHED" || task.state === "CANCELLED"
+            ? { kind: "export" as const, label: "导出 ZIP" }
+            : null;
+
+  const moreGroups: RowActionItem[][] = [];
+  if (primary?.kind !== "export") {
+    moreGroups.push([
+      {
+        key: "export",
+        label: active ? "导出部分结果" : "导出 ZIP",
+        icon: <Download size={14} />,
+        onSelect: downloadTask,
+      },
+    ]);
+  }
+  const controlActions: RowActionItem[] = [];
+  if (active && primary?.kind !== "cancel") {
+    controlActions.push({
+      key: "cancel",
+      label: "取消任务…",
+      icon: <Ban size={14} />,
+      danger: true,
+      onSelect: () => {
+        setConfirmError("");
+        setDialog("cancel");
+      },
+    });
+  }
+  controlActions.push({
+    key: "copy",
+    label: "复制任务 ID",
+    icon: <Copy size={14} />,
+    onSelect: () => void copyId(),
+  });
+  controlActions.push({
+    key: "archive",
+    label: task.archived_at ? "恢复任务" : "归档任务",
+    icon: task.archived_at ? <RotateCcw size={14} /> : <Archive size={14} />,
+    onSelect: () => void toggleArchive(),
+    disabled: Boolean(busy) || active,
+    hint: active ? "运行中不能归档" : undefined,
+  });
+  moreGroups.push(controlActions);
+  if (siteHref || batchLink) {
+    moreGroups.push([
+      ...(siteHref
+        ? [
+            {
+              key: "site",
+              label: "打开站点详情",
+              icon: <ExternalLink size={14} />,
+              onSelect: () => navigate(siteHref),
+            },
+          ]
+        : []),
+      ...(batchLink
+        ? [
+            {
+              key: "batch",
+              label: "打开批次详情",
+              icon: <ExternalLink size={14} />,
+              onSelect: () => navigate(batchLink),
+            },
+          ]
+        : []),
+    ]);
+  }
+
+  const tabCounts: Record<TaskView, string> = {
+    results: formatNumber(resultCount),
+    quality: formatNumber(quality.length + (task.feedback?.open ?? 0)),
+    data: isDiscovery
+      ? ""
+      : formatNumber(
+          (task.counts.valid_products ?? 0) + (task.counts.failed_products ?? 0),
+        ),
+    detail: "",
+  };
+
+  const qualitySummary = (
+    <section className="rounded-panel border border-line bg-surface px-4 py-4 sm:px-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <h2 className="text-[17px] leading-6 font-semibold text-ink">
+            质量异常 {formatNumber(quality.length)}
+          </h2>
+          <p className="mt-1 text-xs leading-5 text-ink-3">
+            正文不完整或非可选字段缺失；先看具体商品和原因，再决定修复规则或复跑。
+          </p>
+        </div>
+        <Button size="sm" onClick={() => setView("quality")}>
+          查看质量与验收
+        </Button>
+      </div>
+    </section>
+  );
+
+  const dataEntry = (
+    <section className="rounded-panel border border-line bg-surface px-4 py-4 sm:px-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <h2 className="text-[17px] leading-6 font-semibold text-ink">数据明细</h2>
+          <p className="mt-1 text-xs leading-5 text-ink-3">
+            CSV 预览和全部商品／网址明细在「数据明细」；结果视图只保留预览。
+          </p>
+        </div>
+        <Button size="sm" onClick={() => setView("data")}>
+          查看数据明细
+        </Button>
+      </div>
+    </section>
+  );
+
+  const emptyResults = (
+    <section className="rounded-panel border border-line bg-surface">
+      <EmptyState
+        title="本次没有有效商品"
+        description="先看质量异常和全部明细，确认是范围、访问还是规则问题；导出仍会包含失败记录。"
+        action={
+          <div className="flex flex-wrap justify-center gap-2">
+            <Button size="sm" onClick={() => setView("quality")}>
+              查看质量与验收
+            </Button>
+            <Button size="sm" onClick={() => setView("data")}>
+              查看数据明细
+            </Button>
+          </div>
+        }
+      />
+    </section>
+  );
+
+  const resultsContent = isDiscovery ? (
+    <>
+      <TaskItemsSection taskId={task.task_id} taskActive={active} />
+      {dataEntry}
+    </>
+  ) : resultCount > 0 ? (
+    <>
+      <ProductPreviewSection
+        taskId={task.task_id}
+        taskActive={active}
+        validCount={task.counts.valid_products ?? 0}
+      />
+      {qualitySummary}
+      {dataEntry}
+    </>
+  ) : (
+    emptyResults
+  );
+
+  const qualityContent = (
+    <>
+      <FeedbackPanel task={task} />
+      {isDiscovery ? (
+        <section className="rounded-panel border border-line bg-surface px-4 py-4 sm:px-5">
+          <p className="text-xs leading-5 text-ink-3">
+            网址发现任务不产生商品质量异常；如果发现问题，请在结果验收中记录访问或范围问题。
+          </p>
+        </section>
+      ) : (
+        <QualityExceptionsSection exceptions={quality} />
+      )}
+    </>
+  );
+
+  const dataContent = isDiscovery ? (
+    <section className="rounded-panel border border-line bg-surface px-4 py-6 sm:px-5">
+      <h2 className="text-[17px] leading-6 font-semibold text-ink">数据明细</h2>
+      <p className="mt-1 text-xs leading-5 text-ink-3">
+        网址发现任务不产生商品 CSV；全部网址已列在「结果」视图。
+      </p>
+      <Button className="mt-3" size="sm" onClick={() => setView("results")}>
+        查看网址结果
+      </Button>
+    </section>
+  ) : (
+    <>
+      <TaskCsvPreview taskId={task.task_id} live={active} />
+      <TaskItemsSection taskId={task.task_id} taskActive={active} />
+    </>
+  );
+
+  const detailContent = (
+    <>
+      <section className="rounded-panel border border-line bg-surface">
+        <div className="border-b border-line px-4 py-4 sm:px-5">
+          <h2 className="text-[17px] leading-6 font-semibold text-ink">任务事实</h2>
+          <p className="mt-0.5 text-xs leading-5 text-ink-3">
+            状态、规则、站点和批次；低频技术信息不占结果首屏。
+          </p>
+        </div>
+        <dl className="grid grid-cols-1 gap-x-6 px-4 py-2 sm:grid-cols-2 sm:px-5">
+          <Fact label="任务 ID">
+            <code className="break-all font-mono text-[11px]">{task.task_id}</code>
+          </Fact>
+          <Fact label="类型">{taskTypeLabel(task.task_type)}</Fact>
+          <Fact label="结果规则">
+            <code className="font-mono text-[11px]">
+              {task.plan_id}@{task.plan_version}
+            </code>
+          </Fact>
+          <Fact label="站点当前规则">
+            {activeVersion ? (
+              <span>
+                <code className="font-mono text-[11px]">
+                  {task.rule?.rule_id ?? task.plan_id}@{activeVersion}
+                </code>
+                <span className="ml-1 text-ink-3">
+                  {stale ? "（新于结果）" : "（与结果一致）"}
+                </span>
+              </span>
+            ) : (
+              "—"
+            )}
+          </Fact>
+          <Fact label="市场">{task.market || "—"}</Fact>
+          <Fact label="站点">
+            {siteHref ? (
+              <Link className="text-accent hover:underline" to={siteHref}>
+                {task.site_key}
+              </Link>
+            ) : (
+              task.site_key || "—"
+            )}
+          </Fact>
+          <Fact label="批次">
+            {batchLink ? (
+              <Link className="text-accent hover:underline" to={batchLink}>
+                {task.batch_id}
+              </Link>
+            ) : (
+              "—"
+            )}
+          </Fact>
+          <Fact label="停止原因">{stopReasonLabel(task.stop_reason)}</Fact>
+          <Fact label="更新方式">
+            {active ? (stream.connected ? "实时更新" : "轮询更新") : "已结束"}
+          </Fact>
+          <Fact label="创建">
+            <span className="tabular">{formatTime(task.created_at)}</span>
+          </Fact>
+          <Fact label="开始">
+            <span className="tabular">{formatTime(task.started_at)}</span>
+          </Fact>
+          <Fact label="结束">
+            <span className="tabular">{formatTime(task.finished_at)}</span>
+          </Fact>
+          <Fact label="更新">
+            <span className="tabular">{formatTime(task.updated_at)}</span>
+          </Fact>
+        </dl>
+      </section>
+
+      {task.content_audit &&
+      ((task.content_audit.products_checked ?? 0) > 0 ||
+        (task.content_audit.description_gaps ?? 0) > 0) ? (
+        <section className="rounded-panel border border-line bg-surface">
+          <div className="border-b border-line px-4 py-4 sm:px-5">
+            <h2 className="text-[17px] leading-6 font-semibold text-ink">内容完整度</h2>
+            <p className="mt-0.5 text-xs leading-5 text-ink-3">
+              主机按样本检查描述缺口；品牌等可空字段不计入质量异常。
+            </p>
+          </div>
+          <dl className="grid grid-cols-1 gap-x-6 px-4 py-2 sm:grid-cols-2 sm:px-5">
+            <Fact label="检查商品">
+              <span className="tabular">
+                {formatNumber(task.content_audit.products_checked ?? 0)}
+              </span>
+            </Fact>
+            <Fact label="描述缺口">
+              <span className="tabular">
+                {formatNumber(task.content_audit.description_gaps ?? 0)}
+              </span>
+            </Fact>
+            {task.content_audit.samples?.length ? (
+              <Fact label="缺口样本">
+                <ul className="space-y-1">
+                  {task.content_audit.samples.slice(0, 5).map((sample) => (
+                    <li key={sample.source_url} className="break-all">
+                      <a
+                        className="text-accent hover:underline"
+                        href={sample.source_url}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {sample.source_url}
+                      </a>
+                      <span className="text-ink-3">
+                        {" "}
+                        · {sample.missing_blocks.join("、")}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </Fact>
+            ) : null}
+          </dl>
+        </section>
+      ) : null}
+    </>
+  );
+
+  const panels: Record<TaskView, ReactNode> = {
+    results: resultsContent,
+    quality: qualityContent,
+    data: dataContent,
+    detail: detailContent,
+  };
 
   return (
     <div className="space-y-6">
@@ -351,10 +699,10 @@ export function TaskDetailPage() {
           </span>
         </div>
 
-        <div className="mt-4 flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between lg:gap-8">
-          <div className="min-w-0">
+        <div className="mt-3 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between lg:gap-8">
+          <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2.5">
-              <h1 className="text-[24px] leading-8 font-semibold tracking-[-0.02em] text-ink sm:text-[28px] sm:leading-9">
+              <h1 className="text-[24px] leading-8 font-semibold tracking-[-0.02em] break-words text-ink sm:text-[28px] sm:leading-9">
                 {task.site_key || task.plan_id}
               </h1>
               <Badge tone={taskStateTone(task.state)} dot={false}>
@@ -427,46 +775,44 @@ export function TaskDetailPage() {
           </div>
 
           <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:shrink-0 lg:justify-end">
-            {task.state === "RUNNING" || task.state === "PAUSING" ? (
+            {primary ? (
               <Button
-                variant="primary"
-                onClick={() => void control("pause")}
+                variant={primary.kind === "cancel" ? "danger" : "primary"}
+                onClick={
+                  primary.kind === "export"
+                    ? downloadTask
+                    : primary.kind === "cancel"
+                      ? () => {
+                          setConfirmError("");
+                          setDialog("cancel");
+                        }
+                      : () => void control(primary.kind)
+                }
                 disabled={Boolean(busy)}
               >
-                <Pause size={14} aria-hidden="true" />
-                暂停任务
+                {primary.kind === "pause" ? (
+                  <Pause size={14} aria-hidden="true" />
+                ) : primary.kind === "resume" ? (
+                  <Play size={14} aria-hidden="true" />
+                ) : primary.kind === "cancel" ? (
+                  <Ban size={14} aria-hidden="true" />
+                ) : (
+                  <Download size={14} aria-hidden="true" />
+                )}
+                {busy && primary.kind !== "export" ? "处理中…" : primary.label}
               </Button>
             ) : null}
-            {task.state === "PAUSED" ? (
-              <Button
-                variant="primary"
-                onClick={() => void control("resume")}
-                disabled={Boolean(busy)}
-              >
-                <Play size={14} aria-hidden="true" />
-                继续任务
-              </Button>
-            ) : null}
-            {["DRAFT", "QUEUED", "RUNNING", "PAUSING", "PAUSED"].includes(
-              task.state,
-            ) ? (
-              <Button
-                variant="ghost"
-                className="text-danger hover:bg-danger-soft hover:text-danger"
-                disabled={Boolean(busy)}
-                onClick={() => {
-                  setConfirmError("");
-                  setDialog("cancel");
-                }}
-              >
-                <Ban size={14} aria-hidden="true" />
-                取消任务
-              </Button>
-            ) : null}
-            <Button onClick={downloadTask} disabled={Boolean(busy)}>
-              <Download size={14} aria-hidden="true" />
-              {active ? "导出部分结果" : "导出 ZIP"}
-            </Button>
+            <RowActionsMenu
+              label="更多任务操作"
+              groups={moreGroups}
+              busy={busy === "archive"}
+              trigger={
+                <Button aria-label="更多任务操作">
+                  <MoreHorizontal size={16} aria-hidden="true" />
+                  更多
+                </Button>
+              }
+            />
             <Button onClick={refresh} disabled={taskQuery.isFetching}>
               <RefreshCw
                 className={taskQuery.isFetching ? "animate-spin" : undefined}
@@ -475,11 +821,6 @@ export function TaskDetailPage() {
               />
               刷新
             </Button>
-            <RowActionsMenu
-              label="更多任务操作"
-              groups={[moreActions]}
-              busy={busy === "archive"}
-            />
           </div>
         </div>
       </header>
@@ -532,191 +873,77 @@ export function TaskDetailPage() {
 
       {error ? <ErrorNotice title="操作失败" message={error} compact /> : null}
 
-      <MetricStrip items={metrics} label="任务概览" />
+      {summary}
 
-      <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,8fr)_minmax(320px,4fr)]">
-        <div className="min-w-0 space-y-5">
-          <FeedbackPanel task={task} />
-
-          {task.task_type === "product" ? (
-            <ProductPreviewSection
-              taskId={task.task_id}
-              taskActive={active}
-              validCount={task.counts.valid_products ?? 0}
-            />
-          ) : null}
-
-          {task.task_type === "product" ? (
-            <QualityExceptionsSection exceptions={quality} />
-          ) : null}
-
-          {task.task_type === "product" ? (
-            <TaskCsvPreview taskId={task.task_id} live={active} />
-          ) : null}
-
-          <TaskItemsSection taskId={task.task_id} taskActive={active} />
-        </div>
-
-        <aside className="space-y-4">
-          <section className="rounded-panel border border-line bg-surface">
-            <div className="border-b border-line px-4 py-3">
-              <h2 className="text-[15px] leading-6 font-semibold text-ink">任务事实</h2>
-            </div>
-            <dl className="divide-y divide-line">
-              <Fact label="任务 ID">
-                <code className="break-all font-mono text-[11px]">{task.task_id}</code>
-              </Fact>
-              <Fact label="类型">{taskTypeLabel(task.task_type)}</Fact>
-              <Fact label="规则">
-                <code className="font-mono text-[11px]">
-                  {task.plan_id}@{task.plan_version}
-                </code>
-              </Fact>
-              <Fact label="站点当前规则">
-                {activeVersion ? (
-                  <span>
-                    <code className="font-mono text-[11px]">
-                      {task.rule?.rule_id ?? task.plan_id}@{activeVersion}
-                    </code>
-                    <span className="ml-1 text-ink-3">
-                      {stale ? "（新于结果）" : "（与结果一致）"}
-                    </span>
-                  </span>
-                ) : (
-                  "—"
-                )}
-              </Fact>
-              <Fact label="市场">{task.market || "—"}</Fact>
-              <Fact label="站点">
-                {siteHref ? (
-                  <Link className="text-accent hover:underline" to={siteHref}>
-                    {task.site_key}
-                  </Link>
-                ) : (
-                  task.site_key || "—"
-                )}
-              </Fact>
-              <Fact label="批次">
-                {batchLink ? (
-                  <Link className="text-accent hover:underline" to={batchLink}>
-                    {task.batch_id}
-                  </Link>
-                ) : (
-                  "—"
-                )}
-              </Fact>
-              <Fact label="停止原因">{stopReasonLabel(task.stop_reason)}</Fact>
-              <Fact label="创建">
-                <span className="tabular">{formatTime(task.created_at)}</span>
-              </Fact>
-              <Fact label="开始">
-                <span className="tabular">{formatTime(task.started_at)}</span>
-              </Fact>
-              <Fact label="结束">
-                <span className="tabular">{formatTime(task.finished_at)}</span>
-              </Fact>
-              <Fact label="更新">
-                <span className="tabular">{formatTime(task.updated_at)}</span>
-              </Fact>
-            </dl>
-          </section>
-
-          {task.content_audit &&
-          ((task.content_audit.products_checked ?? 0) > 0 ||
-            (task.content_audit.description_gaps ?? 0) > 0) ? (
-            <section className="rounded-panel border border-line bg-surface">
-              <div className="border-b border-line px-4 py-3">
-                <h2 className="text-[15px] leading-6 font-semibold text-ink">
-                  内容完整度
-                </h2>
-              </div>
-              <dl className="divide-y divide-line">
-                <Fact label="检查商品">
-                  <span className="tabular">
-                    {formatNumber(task.content_audit.products_checked ?? 0)}
-                  </span>
-                </Fact>
-                <Fact label="描述缺口">
-                  <span className="tabular">
-                    {formatNumber(task.content_audit.description_gaps ?? 0)}
-                  </span>
-                </Fact>
-                {task.content_audit.samples?.length ? (
-                  <Fact label="缺口样本">
-                    <ul className="space-y-1">
-                      {task.content_audit.samples.slice(0, 5).map((sample) => (
-                        <li key={sample.source_url} className="break-all">
-                          <a
-                            className="text-accent hover:underline"
-                            href={sample.source_url}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            {sample.source_url}
-                          </a>
-                          <span className="text-ink-3">
-                            {" "}
-                            · {sample.missing_blocks.join("、")}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  </Fact>
-                ) : null}
-              </dl>
-            </section>
-          ) : null}
-
-          <section className="rounded-panel border border-line bg-surface">
-            <div className="border-b border-line px-4 py-3">
-              <h2 className="text-[15px] leading-6 font-semibold text-ink">
-                导出与返回
-              </h2>
-            </div>
-            <div className="space-y-3 px-4 py-4">
-              <Button className="w-full justify-start" size="sm" onClick={downloadTask}>
-                <Download size={14} aria-hidden="true" />
-                {active ? "导出部分结果" : "导出任务 ZIP"}
-              </Button>
-              {batchLink ? (
-                <Button asChild className="w-full justify-start" size="sm">
-                  <Link to={batchLink}>
-                    <ArrowLeft size={14} aria-hidden="true" />
-                    返回批次详情
-                  </Link>
-                </Button>
-              ) : null}
-              {siteHref ? (
-                <Button asChild className="w-full justify-start" size="sm">
-                  <Link to={siteHref}>
-                    打开站点详情
-                    <ArrowRight size={14} aria-hidden="true" />
-                  </Link>
-                </Button>
-              ) : null}
-              <p className="text-xs leading-5 text-ink-3">
-                导出包含当前任务的有效商品和失败记录；任务仍在运行时会使用部分导出。
-              </p>
-            </div>
-          </section>
-
-          {task.task_type === "product" &&
-          !task.counts.valid_products &&
-          task.state === "FINISHED" ? (
-            <section className="rounded-panel border border-line bg-surface">
-              <EmptyState
-                title="本次没有有效商品"
-                description="查看质量异常和明细，确认是范围、访问还是规则问题。"
-                action={
-                  <Button asChild size="sm">
-                    <Link to="/tasks">返回全部任务</Link>
-                  </Button>
-                }
-              />
-            </section>
-          ) : null}
-        </aside>
+      <div className="sm:hidden">
+        <label className="sr-only" htmlFor="task-view-select">
+          切换任务视图
+        </label>
+        <select
+          id="task-view-select"
+          className="h-9 w-full rounded-control border border-line-strong bg-surface px-3 text-sm text-ink"
+          value={activeView}
+          onChange={(event) => setView(event.target.value as TaskView)}
+        >
+          {TASK_VIEWS.map((view) => (
+            <option key={view} value={view}>
+              {TASK_VIEW_LABELS[view]}
+              {tabCounts[view] ? `（${tabCounts[view]}）` : ""}
+            </option>
+          ))}
+        </select>
       </div>
+
+      <div
+        className="hidden gap-1 overflow-x-auto border-b border-line sm:flex"
+        role="tablist"
+        aria-label="任务视图"
+      >
+        {TASK_VIEWS.map((view) => {
+          const selected = activeView === view;
+          const count = tabCounts[view];
+          return (
+            <button
+              key={view}
+              id={`task-tab-${view}`}
+              type="button"
+              role="tab"
+              aria-selected={selected}
+              aria-controls={`task-panel-${view}`}
+              tabIndex={selected ? 0 : -1}
+              className={cn(
+                "flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-semibold transition-colors",
+                selected
+                  ? "border-accent text-accent"
+                  : "border-transparent text-ink-2 hover:text-ink",
+              )}
+              onClick={() => setView(view)}
+              onKeyDown={(event) => handleViewKey(event, view)}
+            >
+              {TASK_VIEW_LABELS[view]}
+              {count && count !== "0" ? (
+                <span className="rounded-full bg-surface-sunken px-1.5 text-[10px] leading-[18px] text-ink-3">
+                  {count}
+                </span>
+              ) : null}
+            </button>
+          );
+        })}
+      </div>
+
+      {TASK_VIEWS.map((view) => (
+        <section
+          key={view}
+          id={`task-panel-${view}`}
+          role="tabpanel"
+          aria-labelledby={`task-tab-${view}`}
+          hidden={activeView !== view}
+          tabIndex={0}
+          className="space-y-5"
+        >
+          {activeView === view ? panels[view] : null}
+        </section>
+      ))}
 
       <ConfirmBatchActionDialog
         open={dialog === "cancel"}

@@ -24,8 +24,8 @@ const task: TaskSummary = {
   finished_at: null,
 };
 
-function openTaskPage() {
-  const getTask = vi.fn(() => task);
+function openTaskPage(initial: TaskSummary = task, entry = "/tasks/web-1") {
+  const getTask = vi.fn(() => initial);
   const cancelTask = vi.fn(() =>
     Response.json({ error: { message: "服务暂不可用，请重试" } }, { status: 503 }),
   );
@@ -58,7 +58,7 @@ function openTaskPage() {
       throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url}`);
     }),
   );
-  const { unmount } = renderPage("/tasks/:taskId", "/tasks/web-1", <TaskDetailPage />);
+  const { unmount } = renderPage("/tasks/:taskId", entry, <TaskDetailPage />);
   return { getTask, cancelTask, sources, unmount };
 }
 
@@ -66,6 +66,27 @@ function productCount() {
   const overview = screen.getByRole("region", { name: "任务概览" });
   return within(overview).getByText("有效商品").parentElement!;
 }
+
+const finishedTask: TaskSummary = {
+  ...task,
+  state: "FINISHED",
+  outcome: "COMPLETED",
+  counts: { valid_products: 20, failed_products: 0, excluded_products: 0 },
+  finished_at: "2026-11-24T10:20:00Z",
+};
+
+const emptyTask: TaskSummary = {
+  ...finishedTask,
+  counts: { valid_products: 0, failed_products: 2, excluded_products: 0 },
+  quality_exceptions: [{ source_url: "https://fixture.test/p/1" }],
+};
+
+const discoveryTask: TaskSummary = {
+  ...finishedTask,
+  task_type: "discovery",
+  counts: { discovered_urls: 30, failed_products: 0, excluded_products: 0 },
+  plan_id: "fixture-discovery",
+};
 
 describe("task detail recovery", () => {
   afterEach(() => {
@@ -103,7 +124,9 @@ describe("task detail recovery", () => {
 
   it("keeps the cancellation dialog retryable when the request fails", async () => {
     const { cancelTask } = openTaskPage();
-    fireEvent.click(await screen.findByRole("button", { name: "取消任务" }));
+    const more = await screen.findByRole("button", { name: "更多任务操作" });
+    fireEvent.pointerDown(more, { button: 0 });
+    fireEvent.click(await screen.findByRole("menuitem", { name: /取消任务/ }));
     const dialog = within(screen.getByRole("dialog"));
     fireEvent.click(dialog.getByRole("button", { name: "确认取消任务" }));
     expect(await dialog.findByText("服务暂不可用，请重试")).toBeVisible();
@@ -113,5 +136,78 @@ describe("task detail recovery", () => {
     fireEvent.click(dialog.getByRole("button", { name: "确认取消任务" }));
     expect(await dialog.findByText("服务暂不可用，请重试")).toBeVisible();
     expect(cancelTask).toHaveBeenCalledTimes(2);
+  });
+
+  it("switches task views from the tab bar", async () => {
+    const { unmount } = openTaskPage();
+    try {
+      expect(
+        await screen.findByRole("heading", { name: "已采数据预览" }),
+      ).toBeVisible();
+
+      fireEvent.click(screen.getByRole("tab", { name: /质量与验收/ }));
+      expect(await screen.findByRole("heading", { name: "结果验收" })).toBeVisible();
+
+      fireEvent.click(screen.getByRole("tab", { name: /数据明细/ }));
+      expect(
+        await screen.findByRole("heading", { name: "CSV 表格预览" }),
+      ).toBeVisible();
+
+      fireEvent.click(screen.getByRole("tab", { name: /运行明细/ }));
+      expect(await screen.findByRole("heading", { name: "任务事实" })).toBeVisible();
+    } finally {
+      unmount();
+    }
+  });
+
+  it("opens the quality view from a deep link", async () => {
+    const { unmount } = openTaskPage(task, "/tasks/web-1?view=quality");
+    try {
+      expect(await screen.findByRole("tab", { name: /质量与验收/ })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+      expect(await screen.findByRole("heading", { name: "结果验收" })).toBeVisible();
+    } finally {
+      unmount();
+    }
+  });
+
+  it("keeps one export entry for a finished task", async () => {
+    const { unmount } = openTaskPage(finishedTask);
+    try {
+      expect(await screen.findByRole("button", { name: "导出 ZIP" })).toBeVisible();
+      expect(screen.getAllByRole("button", { name: /导出 ZIP/ })).toHaveLength(1);
+      const more = screen.getByRole("button", { name: "更多任务操作" });
+      fireEvent.pointerDown(more, { button: 0 });
+      expect(screen.queryByRole("menuitem", { name: /导出/ })).not.toBeInTheDocument();
+    } finally {
+      unmount();
+    }
+  });
+
+  it("shows URL results for discovery tasks without a product CSV", async () => {
+    const { unmount } = openTaskPage(discoveryTask);
+    try {
+      expect(await screen.findByRole("heading", { name: "任务明细" })).toBeVisible();
+      expect(
+        screen.queryByRole("heading", { name: "已采数据预览" }),
+      ).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("tab", { name: /数据明细/ }));
+      expect(await screen.findByText(/不产生商品 CSV/)).toBeVisible();
+    } finally {
+      unmount();
+    }
+  });
+
+  it("keeps empty results in the results view with quality entry", async () => {
+    const { unmount } = openTaskPage(emptyTask);
+    try {
+      expect(await screen.findByText("本次没有有效商品")).toBeVisible();
+      expect(screen.getByRole("button", { name: "查看质量与验收" })).toBeVisible();
+      expect(screen.getByRole("button", { name: "查看数据明细" })).toBeVisible();
+    } finally {
+      unmount();
+    }
   });
 });
