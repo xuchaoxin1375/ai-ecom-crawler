@@ -3205,6 +3205,7 @@ def create_app(
         if build_manager is None:
             return {
                 "available": False,
+                "unavailable_reason": "unconfigured",
                 "reasoning_capture_enabled": False,
                 "max_repair_rounds": 0,
                 "models": [],
@@ -3213,8 +3214,12 @@ def create_app(
                 "model_pool_override": False,
                 "model_catalog": known_models(),
             }
+        unavailable_reason = (
+            "read_only" if read_only else ("disabled" if builds_disabled else None)
+        )
         return {
-            "available": not builds_disabled,
+            "available": not builds_disabled and not read_only,
+            "unavailable_reason": unavailable_reason,
             "reasoning_capture_enabled": build_manager.reasoning_capture_enabled,
             "max_repair_rounds": build_manager.max_repair_rounds,
             "models": build_manager.model_pool.describe(),

@@ -178,6 +178,12 @@ class WebApiTests(unittest.TestCase):
             self.assertEqual(body["worker"], "read-only")
             self.assertFalse(body["builds_available"])
             self.assertTrue(body["builds_readable"])
+            build_config = client.get("/api/builds/config")
+            self.assertEqual(build_config.status_code, 200, build_config.text)
+            self.assertFalse(build_config.json()["available"])
+            self.assertEqual(
+                build_config.json()["unavailable_reason"], "read_only"
+            )
             self.assertEqual(client.get("/api/batches").status_code, 200)
             self.assertEqual(client.get("/api/builds").status_code, 200)
             created = client.post(
