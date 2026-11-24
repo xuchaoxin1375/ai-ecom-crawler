@@ -1,6 +1,11 @@
 **ai-ecom-crawler 仓库代理约定**
 
-本仓库是公开电商采集的业务与验收文档包，不是采集应用源码。业务口径以 `docs/` 为唯一入口，当前状态以 [`docs/15-交接.md`](docs/15-交接.md) 为准；本文件只补充代理执行约定，不复制业务规则。
+本仓库是公开电商采集的 monorepo：`docs/` 是业务与验收口径，`app/` 是生产应用，`experiments/` 是原型与证据。业务口径以 `docs/` 为唯一入口，当前状态以 [`docs/15-交接.md`](docs/15-交接.md) 为准；本文件只补充代理执行约定，不复制业务规则。
+
+## 当前切片与并发协作
+
+- 当前状态和下一步以 [`docs/15-交接.md`](docs/15-交接.md) 顶部和 `git status` 为准；开始修改前先读，不要只依赖历史段落。
+- 同一仓库可能同时有多个 agent 或用户编辑；发现非本次改动先保留并说明，不用全量 `checkout`／`restore` 清掉，提交前区分本次与并行改动。
 
 ## 目录与许可边界
 
@@ -8,6 +13,11 @@
 - `docs/` 仍是业务口径与验收的唯一入口；`experiments/` 是实验与原型，不作为生产代码。
 - 采集运行产物（CSV、结果 JSON、NDJSON、trace、截图、导出 zip、运行期数据库）不进版本控制；放仓库外私有证据库，`experiments/` 只保留规则、脚本、测试、README 和合成 fixture，见 [`experiments/README.md`](experiments/README.md)。
 - 项目最终闭源，未授予开源复用许可；第三方依赖保留各自许可证。
+
+## Skill 路由
+
+- 架构、契约、存量体检：`swe-gov`；规格、任务、验收与证据：`ai-verified-delivery`；测试：`web-app-testing`；界面：`frontend-design`／`frontend-qa`；文档：`project-docs`。
+- 采集领域：`product-crawl-workflow`、`resilient-browser-fetch`；只加载当前任务需要的入口，不复制 skill 正文。
 
 ## 站点评估入口
 
@@ -23,6 +33,7 @@
 - 启动或更换开发服务后，主动在交付说明中给出完整可点击地址，不把地址只留在终端日志或后台输出里让用户自己找；默认入口 `http://127.0.0.1:8765/next/#/batches`，站点详情按 `/next/#/batches/<batch_id>/sites/<site_key>` 给出。
 - 同一时间只保留一个面向用户的入口。端口固定使用 `8765`，启动、重启都沿用上次端口，不为了绕开占用而换端口；端口被占用时先停掉旧实例，再在原端口重启。确需换端口时先说明原因并对齐；旧地址失效时明确说明新地址和旧地址状态，不让用户继续看旧页面。
 - 有前端构建产物时 `/` 跳 `/next/`，旧 Vue 工作台在 `/batch/`（已弃用），旧原生控制台在 `/legacy`；服务启动后才构建 `frontend-v2/dist` 时需要重启服务。验收说明写清端口、入口和启动命令，截图或证据附当前地址。
+- 只改 `app/frontend-v2/`；`app/frontend/` 和 `/legacy` 已弃用，只作 `ECOM_LEGACY_UI=on` 的短期回退；除非任务明确要求，不在旧前端加功能。
 - 端口或入口变化后同步更新 `app/README.md`、交接页和本次交付说明；不要把测试端口当作长期地址。
 
 ## 记录与交付
@@ -30,6 +41,7 @@
 - 新增或复核站点后，把日期、实际出口、客户端、请求数、结论写回对应 probe 的 `probe.json` / `README.md`，或 `docs/12` 的初筛表；不要只留在会话里。
 - 技术选型是开写前的硬门：前端、后端及每个进入生产路径的层都要有决策记录；不知道哪个更好时也要按已知信息给出推荐、成功机会、开发效率、可维护性、可扩展性、风险和复审条件，不得开工后即兴选择。Proposed 只用于实验或验证原型，进入 `app/` 生产路径须 Accepted 或登记 Provisional 例外；逐层状态见 `docs/21` 的“技术选型覆盖”。
 - 文档改动后运行 `python scripts/export_docs.py`，再用 `python scripts/export_docs.py --check dist/ai-ecom-crawler-docs.zip` 复核；纯 Markdown 改动至少检查相对链接。
+- 新增或移动 ADR／文档后先纳入 git，再跑 `check_docs_links.py --require-tracked`；未跟踪文件会让本地导出通过、CI 断链。
 - 不提交 `dist/`、密钥、Cookie、浏览器 profile、整页原文或运行期任务数据库（`tasks.db` 等）；需要证据时保留任务结果、CSV、事件摘要或可重跑命令。
 
 ## 仓库校验
@@ -39,3 +51,9 @@
 - Schema 测试不得默认跳过；缺 `jsonschema` 时先补依赖再跑，带 skip 的结果不算完整通过。
 - 行尾：以 `.gitattributes` 和 `.editorconfig` 为准；`.sh`／`.bash` 必须 LF，`.bat`／`.cmd` 必须 CRLF。出现 `CRLF will be replaced by LF` 时先看 `git ls-files --eol`，按 [`docs/30`](docs/30-经验教训.md) 处理；不要用 `core.autocrlf`／`core.safecrlf=false` 静音。
 - 真实站点验证仍按预算和证据要求手工执行，不纳入默认校验。
+
+## App 校验
+
+- 后端：`python -m uv run --project app --extra dev --frozen python -m unittest discover -s app/tests -t app -v`；静态检查 `python -m uv run --project app --extra dev --frozen ruff check app`。
+- 前端：`cd app/frontend-v2` 后运行 `npm run lint`、`npm run typecheck`、`npm test`、`npm run format:check`、`npm run build`；首次或依赖变化后先 `npm install`。
+- 细节见 [`app/README.md`](app/README.md#环境与测试)；缺 Chromium 时按该页安装，skip 不计通过。CI 的同一套命令见 [`.github/workflows/app.yml`](.github/workflows/app.yml)。
