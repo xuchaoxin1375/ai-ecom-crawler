@@ -371,7 +371,7 @@ class TaskRunner:
                 result = get_listing(
                     item.url,
                     advance=advance,
-                    item_selector=item.result.get("link_selector"),
+                    item_selector=self._listing_selector(item),
                     item_type=item.item_type,
                 )
             else:
@@ -601,6 +601,26 @@ class TaskRunner:
             "depth": depth,
         }
 
+    def _listing_selector(self, item: WorkItem) -> str:
+        """Return the listing link selector from the item or its source.
+
+        Re-seeded or restored navigation items may not carry
+        ``link_selector`` in ``item.result``; fall back to the matching rule
+        source instead of requiring a top-level discovery selector.
+        """
+        selector = str(item.result.get("link_selector") or "")
+        if selector:
+            return selector
+        for source in self.rule.sources:
+            if str(source.get("type")) != "listing":
+                continue
+            source_url = str(source.get("url") or source.get("seed") or "")
+            if source_url and _normalize_url(source_url) == item.normalized_url:
+                selector = str(source.get("product_link_selector") or "")
+                if selector:
+                    return selector
+        return str(self.rule.discovery.get("link_selector") or "")
+
     def _process_listing(
         self, item: WorkItem, result: Any
     ) -> tuple[str, dict[str, Any]]:
@@ -608,7 +628,7 @@ class TaskRunner:
         remaining = self._remaining_product_limit()
         if remaining <= 0:
             return "DONE", {"links": 0, "added": 0, "limit_reached": True}
-        selector = str(item.result.get("link_selector") or "")
+        selector = self._listing_selector(item)
         urls = discover_urls(
             page,
             self.rule.raw,

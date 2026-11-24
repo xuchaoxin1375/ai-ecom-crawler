@@ -241,7 +241,10 @@ def discover_urls(
 
     results: list[str] = []
     seen: set[str] = set()
-    for element in page.css(selector or discovery["link_selector"]):
+    selector = selector or discovery.get("link_selector", "")
+    if not selector:
+        raise PlanError("discovery.link_selector is required to discover product links")
+    for element in page.css(selector):
         href = element.get("href")
         if not href:
             continue
