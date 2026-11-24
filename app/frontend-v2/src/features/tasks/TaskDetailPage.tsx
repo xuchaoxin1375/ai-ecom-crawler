@@ -888,7 +888,9 @@ export function TaskDetailPage() {
           {TASK_VIEWS.map((view) => (
             <option key={view} value={view}>
               {TASK_VIEW_LABELS[view]}
-              {tabCounts[view] ? `（${tabCounts[view]}）` : ""}
+              {tabCounts[view] && tabCounts[view] !== "0"
+                ? `（${tabCounts[view]}）`
+                : ""}
             </option>
           ))}
         </select>
