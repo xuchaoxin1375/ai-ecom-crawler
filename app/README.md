@@ -69,10 +69,11 @@
 ```powershell
 python -m uv run --project app --extra dev --frozen --no-sync python app/tests/run.py
 python -m uv run --project app --extra dev --frozen --no-sync python app/tests/run.py build -k price_regression
+python -m uv run --project app --extra dev --frozen --no-sync python app/tests/run.py parallel -q
 python -m uv run --project app --extra dev --frozen --no-sync ruff check app
 ```
 
-不带参数时跑日常快跑组；关于其他分组、完整回归和失败判定，见[后端测试怎么跑](../docs/23-测试策略.md#后端测试怎么跑)。
+不带参数时跑日常快跑组；`parallel` 仅在 Windows 同时跑 `build` 和 `runtime`，需要 Node.js，不替代合并前的串行 `all`。其他分组和失败判定见[后端测试怎么跑](../docs/23-测试策略.md#后端测试怎么跑)。
 
 `jsonschema`、`httpx` 和 `ruff` 是开发依赖；`jsonschema`／`httpx` 缺失时测试会失败，不会 skip。应用运行依赖包括 `lxml`、`pyyaml`、`scrapling[fetchers]`、`patchright`、`protego`、`fastapi` 和 `uvicorn`；`scrapling[fetchers]` 会带 `curl_cffi`、`playwright`、`browserforge` 和 `msgspec`。浏览器模式还需要 Chromium：
 
