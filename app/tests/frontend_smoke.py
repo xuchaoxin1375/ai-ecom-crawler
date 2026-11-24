@@ -283,6 +283,29 @@ def exercise(page: Page, origin: str, fixture: str, root: Path) -> None:
     )
 
     page.get_by_role("main").locator("header").get_by_role("link", name=batch, exact=True).click()
+    page.get_by_role("region", name="站点清单", exact=True).get_by_role(
+        "link", name=SITE, exact=True
+    ).click()
+    expect(page.get_by_role("tab", name=re.compile("当前采集"))).to_be_visible()
+    expect(page.get_by_role("button", name="导出当前任务 ZIP", exact=True)).to_have_count(1)
+    page.get_by_role("tab", name=re.compile("规则与构建")).click()
+    expect(page.get_by_role("heading", name="规则版本", exact=True)).to_be_visible()
+    page.get_by_role("tab", name=re.compile("站点资料")).click()
+    expect(page.get_by_text("站点 ID", exact=True)).to_be_visible()
+    page.get_by_role("tab", name=re.compile("当前采集")).click()
+    expect(page.get_by_text("CSV 预览和任务明细在任务详情中查看", exact=False)).to_be_visible()
+    page.set_viewport_size({"width": 390, "height": 900})
+    page.wait_for_timeout(200)
+    check(
+        page.evaluate("document.documentElement.scrollWidth") <= 390,
+        "Site detail is wider than 390px",
+    )
+    expect(page.get_by_role("heading", name="已采数据预览", exact=True)).to_be_visible()
+    if evidence := os.environ.get("ECOM_SMOKE_SCREENSHOT_DIR"):
+        page.screenshot(path=str(Path(evidence) / "site-current-390.png"))
+    page.set_viewport_size({"width": 1280, "height": 900})
+    page.get_by_role("link", name=f"返回 {name}", exact=True).click()
+    expect(page.get_by_role("button", name="导出批次 ZIP", exact=True)).to_be_visible()
     export = page.get_by_role("button", name="导出批次 ZIP", exact=True)
     expect(export).to_have_count(1)
     if evidence := os.environ.get("ECOM_SMOKE_SCREENSHOT_DIR"):

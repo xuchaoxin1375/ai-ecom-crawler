@@ -5,6 +5,7 @@ import type {
   BuildMessages,
   BuildStatus,
   SiteRuleResponse,
+  TaskSummary,
 } from "../../lib/api";
 import { renderPage } from "../../test/renderPage";
 import { SiteDetailPage } from "./SiteDetailPage";
@@ -117,6 +118,8 @@ it("keeps the active rule and blocks activation when the repair lacks regression
     "/batches/b-fixture/sites/fixture.test",
     <SiteDetailPage />,
   );
+
+  fireEvent.click(await screen.findByRole("tab", { name: /规则与构建/ }));
 
   const activate = await screen.findByRole("button", { name: "激活" });
   const candidate = within(activate.closest("li")!);
@@ -304,6 +307,222 @@ it("puts pending build approvals above the work area", async () => {
   expect(approvals).toBeVisible();
   expect(within(approvals).getByRole("button", { name: "允许一次" })).toBeVisible();
   expect(approvals.closest("details")).toBeNull();
+});
+
+it("switches site views without losing the batch return link", async () => {
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    const path = url.split("?")[0];
+    if (path === "/api/batches/b-fixture") return Response.json(batch);
+    if (path === "/api/sites/fixture.test/rule") return Response.json(siteRule);
+    if (path === "/api/tasks") return Response.json({ items: [], total: 0 });
+    if (path === "/api/builds/config")
+      return Response.json({
+        available: true,
+        reasoning_capture_enabled: false,
+        max_repair_rounds: 0,
+      });
+    throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  renderPage(
+    "/batches/:batchId/sites/:siteKey",
+    "/batches/b-fixture/sites/fixture.test",
+    <SiteDetailPage />,
+  );
+
+  expect(await screen.findByRole("tab", { name: /当前采集/ })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  expect(
+    within(screen.getByRole("tabpanel")).getByText(/站点可采，但还没有任务/),
+  ).toBeVisible();
+
+  fireEvent.click(screen.getByRole("tab", { name: /任务历史/ }));
+  expect(screen.getByRole("tab", { name: /任务历史/ })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  expect(
+    within(screen.getByRole("tabpanel")).getByRole("heading", {
+      name: "任务历史",
+    }),
+  ).toBeVisible();
+
+  fireEvent.click(screen.getByRole("tab", { name: /规则与构建/ }));
+  expect(
+    within(screen.getByRole("tabpanel")).getByRole("heading", {
+      name: "规则版本",
+    }),
+  ).toBeVisible();
+
+  fireEvent.click(screen.getByRole("tab", { name: /站点资料/ }));
+  expect(within(screen.getByRole("tabpanel")).getByText("站点 ID")).toBeVisible();
+  expect(screen.getByRole("link", { name: /返回 批次夹具/ })).toHaveAttribute(
+    "href",
+    "/batches/b-fixture",
+  );
+});
+
+it("opens the rules view directly from a deep link", async () => {
+  const fetchMock = vi.fn(async (url: string) => {
+    const path = url.split("?")[0];
+    if (path === "/api/batches/b-fixture") return Response.json(batch);
+    if (path === "/api/sites/fixture.test/rule") return Response.json(siteRule);
+    if (path === "/api/tasks") return Response.json({ items: [], total: 0 });
+    if (path === "/api/builds/config")
+      return Response.json({
+        available: true,
+        reasoning_capture_enabled: false,
+        max_repair_rounds: 0,
+      });
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  renderPage(
+    "/batches/:batchId/sites/:siteKey",
+    "/batches/b-fixture/sites/fixture.test?view=rules",
+    <SiteDetailPage />,
+  );
+
+  expect(await screen.findByRole("tab", { name: /规则与构建/ })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  expect(
+    within(screen.getByRole("tabpanel")).getByRole("heading", {
+      name: "规则版本",
+    }),
+  ).toBeVisible();
+});
+
+it("keeps a single export entry for a finished task", async () => {
+  const doneTask: TaskSummary = {
+    task_id: "web-done",
+    task_type: "product",
+    plan_id: "fixture-plan",
+    plan_version: "1",
+    site_key: "fixture.test",
+    domain_key: "fixture.test",
+    batch_id: "b-fixture",
+    market: "GB",
+    state: "FINISHED",
+    outcome: "COMPLETED",
+    stop_reason: "natural",
+    counts: { valid_products: 20, failed_products: 0, excluded_products: 0 },
+    created_at: date,
+    updated_at: date,
+    started_at: date,
+    finished_at: date,
+  };
+  const doneBatch: BatchDetail = {
+    ...batch,
+    counts: { ...batch.counts, tasks: 1, finished: 1 },
+    sites: [
+      {
+        ...batch.sites[0],
+        task_id: doneTask.task_id,
+        task: doneTask,
+      },
+    ],
+  };
+  const fetchMock = vi.fn(async (url: string) => {
+    const path = url.split("?")[0];
+    if (path === "/api/batches/b-fixture") return Response.json(doneBatch);
+    if (path === "/api/sites/fixture.test/rule") return Response.json(siteRule);
+    if (path === "/api/tasks") return Response.json({ items: [], total: 0 });
+    if (path === "/api/tasks/web-done/items")
+      return Response.json({ items: [], total: 0 });
+    if (path === "/api/builds/config")
+      return Response.json({
+        available: true,
+        reasoning_capture_enabled: false,
+        max_repair_rounds: 0,
+      });
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  renderPage(
+    "/batches/:batchId/sites/:siteKey",
+    "/batches/b-fixture/sites/fixture.test",
+    <SiteDetailPage />,
+  );
+
+  expect(await screen.findByRole("button", { name: "导出当前任务 ZIP" })).toBeVisible();
+  expect(screen.getAllByRole("button", { name: /导出当前任务/ })).toHaveLength(1);
+  expect(
+    screen.queryByRole("button", { name: "更多站点操作" }),
+  ).not.toBeInTheDocument();
+});
+
+it("shows an active build as a strip without hiding current results", async () => {
+  const doneTask: TaskSummary = {
+    task_id: "web-done",
+    task_type: "product",
+    plan_id: "fixture-plan",
+    plan_version: "1",
+    site_key: "fixture.test",
+    domain_key: "fixture.test",
+    batch_id: "b-fixture",
+    market: "GB",
+    state: "FINISHED",
+    outcome: "COMPLETED",
+    stop_reason: "natural",
+    counts: { valid_products: 20, failed_products: 0, excluded_products: 0 },
+    created_at: date,
+    updated_at: date,
+    started_at: date,
+    finished_at: date,
+  };
+  const build = buildFixture({ mode: "repair" });
+  const repairBatch: BatchDetail = {
+    ...batch,
+    counts: { ...batch.counts, tasks: 1, finished: 1 },
+    sites: [
+      {
+        ...batch.sites[0],
+        task_id: doneTask.task_id,
+        task: doneTask,
+        build_id: build.build_id,
+      },
+    ],
+  };
+  const fetchMock = vi.fn(async (url: string) => {
+    const path = url.split("?")[0];
+    if (path === "/api/batches/b-fixture") return Response.json(repairBatch);
+    if (path === "/api/builds/build-1") return Response.json({ build });
+    if (path === "/api/builds/build-1/messages") return Response.json(buildMessages);
+    if (path === "/api/tasks/web-done/items")
+      return Response.json({ items: [], total: 0 });
+    if (path === "/api/sites/fixture.test/rule") return Response.json(siteRule);
+    if (path === "/api/tasks") return Response.json({ items: [], total: 0 });
+    if (path === "/api/builds/config")
+      return Response.json({
+        available: true,
+        reasoning_capture_enabled: false,
+        max_repair_rounds: 1,
+      });
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  renderPage(
+    "/batches/:batchId/sites/:siteKey",
+    "/batches/b-fixture/sites/fixture.test",
+    <SiteDetailPage />,
+  );
+
+  const strip = await screen.findByRole("region", { name: "构建状态" });
+  expect(strip).toBeVisible();
+  expect(
+    within(screen.getByRole("tabpanel")).getByRole("heading", {
+      name: "当前任务",
+    }),
+  ).toBeVisible();
+  fireEvent.click(within(strip).getByRole("button", { name: "查看构建" }));
+  expect(await screen.findByRole("tab", { name: /规则与构建/ })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
 });
 
 it("keeps approval actions retryable after a failed submit", async () => {

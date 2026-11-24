@@ -1,17 +1,14 @@
-import { useEffect, useState, type ReactNode } from "react";
-import { Link, useLocation, useParams } from "react-router-dom";
+import { useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
+import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { readSiteListReturn } from "../batches/siteListReturn";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
   ArrowRight,
   Ban,
-  Circle,
   Download,
-  Pause,
-  Play,
+  MoreHorizontal,
   RefreshCw,
-  Wrench,
   X,
 } from "lucide-react";
 import {
@@ -61,17 +58,15 @@ import { Button } from "../../components/ui/Button";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { ErrorNotice } from "../../components/ui/ErrorNotice";
 import { InlineNotice } from "../../components/ui/InlineNotice";
-import { MetricStrip } from "../../components/ui/MetricStrip";
+import { RowActionsMenu, type RowActionItem } from "../../components/ui/DropdownMenu";
 import { ConfirmBatchActionDialog } from "../batches/ConfirmBatchActionDialog";
-import { taskExportLabel } from "../batches/actions";
+import { siteCanCancelTask, taskExportLabel } from "../batches/actions";
 import { ProductPreviewSection } from "../tasks/ProductPreviewSection";
 import { QualityExceptionsSection } from "../tasks/QualityExceptionsSection";
-import { TaskItemsSection } from "../tasks/TaskItemsSection";
 import { BuildApprovals } from "./BuildApprovals";
 import { BuildPanel } from "./BuildPanel";
 import { BuildStartDialog } from "./BuildStartDialog";
 import { StartSiteDialog } from "./StartSiteDialog";
-import { TaskCsvPreview } from "./TaskCsvPreview";
 import { useBuildStream } from "./useBuildStream";
 import { RuleEvidence } from "../rules/RuleEvidence";
 import {
@@ -82,7 +77,6 @@ import {
   siteNextStep,
   siteStatusSentence,
   taskIsActive,
-  type SiteActionKind,
 } from "./site";
 
 type DialogKind =
@@ -93,31 +87,18 @@ interface Notice {
   text: string;
 }
 
-const toneClasses: Record<string, string> = {
-  neutral: "border-line bg-surface-muted text-ink-3",
-  success: "border-success/20 bg-success-soft text-success",
-  warning: "border-warning/25 bg-warning-soft text-warning",
-  danger: "border-danger/25 bg-danger-soft text-danger",
-  info: "border-info/20 bg-info-soft text-info",
+const SITE_VIEWS = ["current", "history", "rules", "info"] as const;
+type SiteView = (typeof SITE_VIEWS)[number];
+
+const SITE_VIEW_LABELS: Record<SiteView, string> = {
+  current: "当前采集",
+  history: "任务历史",
+  rules: "规则与构建",
+  info: "站点资料",
 };
 
-function StepIcon({ action }: { action: SiteActionKind }) {
-  const props = { size: 18, strokeWidth: 1.75, "aria-hidden": true } as const;
-  if (action === "build" || action === "repair") return <Wrench {...props} />;
-  if (action === "pause-build" || action === "pause-task") {
-    return <Pause {...props} />;
-  }
-  if (action === "resume-build" || action === "resume-task") {
-    return <Play {...props} />;
-  }
-  if (action === "cancel-build" || action === "cancel-task") {
-    return <Ban {...props} />;
-  }
-  if (action === "start") return <Play {...props} />;
-  if (action === "export") return <Download {...props} />;
-  if (action === "batch") return <ArrowRight {...props} />;
-  if (action === "none") return <Circle {...props} />;
-  return <Circle {...props} />;
+function parseSiteView(value: string | null): SiteView {
+  return SITE_VIEWS.find((item) => item === value) ?? "current";
 }
 
 function Fact({ label, children }: { label: string; children: ReactNode }) {
@@ -202,6 +183,8 @@ export function SiteDetailPage() {
     batchId: string;
     siteKey: string;
   }>();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeView = parseSiteView(searchParams.get("view"));
   const batchPath = `/batches/${encodeURIComponent(batchId)}`;
   const returnPosition = readSiteListReturn(location.state, batchPath);
   const queryClient = useQueryClient();
@@ -259,6 +242,14 @@ export function SiteDetailPage() {
     if (!build || buildIsActive(build)) return;
     void queryClient.invalidateQueries({ queryKey: ["batch", batchId] });
   }, [build, batchId, queryClient]);
+
+  useEffect(() => {
+    const raw = searchParams.get("view");
+    if (!raw || SITE_VIEWS.includes(raw as SiteView)) return;
+    const params = new URLSearchParams(searchParams);
+    params.delete("view");
+    setSearchParams(params, { replace: true, state: location.state });
+  }, [searchParams, setSearchParams, location.state]);
 
   const stream = useBuildStream(buildId, Boolean(buildId));
   const streamHealthy = stream.connected || stream.ended;
@@ -323,6 +314,32 @@ export function SiteDetailPage() {
 
   function invalidateBatch() {
     void queryClient.invalidateQueries({ queryKey: ["batch", batchId] });
+  }
+
+  function setView(next: SiteView) {
+    const params = new URLSearchParams(searchParams);
+    if (next === "current") params.delete("view");
+    else params.set("view", next);
+    setSearchParams(params, { replace: true, state: location.state });
+  }
+
+  function handleViewKey(event: KeyboardEvent<HTMLButtonElement>, current: SiteView) {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const index = SITE_VIEWS.indexOf(current);
+    const next =
+      event.key === "Home"
+        ? SITE_VIEWS[0]
+        : event.key === "End"
+          ? SITE_VIEWS[SITE_VIEWS.length - 1]
+          : SITE_VIEWS[
+              (index + (event.key === "ArrowRight" ? 1 : -1) + SITE_VIEWS.length) %
+                SITE_VIEWS.length
+            ];
+    setView(next);
+    window.requestAnimationFrame(() => {
+      document.getElementById(`site-tab-${next}`)?.focus();
+    });
   }
 
   function openBuild(mode: "build" | "repair") {
@@ -649,50 +666,11 @@ export function SiteDetailPage() {
     );
   }
 
-  const statusItems = [
-    {
-      label: "任务",
-      value: task ? taskStateLabel(task.state) : "—",
-      hint: task
-        ? task.outcome
-          ? outcomeLabel(task.outcome)
-          : "未结束"
-        : siteStatusSentence(site, build),
-    },
-    {
-      label: "有效／失败",
-      value: task
-        ? `${formatNumber(task.counts.valid_products ?? 0)} / ${formatNumber(
-            task.counts.failed_products ?? 0,
-          )}`
-        : "—",
-      hint: task
-        ? `排除 ${formatNumber(task.counts.excluded_products ?? 0)}`
-        : "尚未创建任务",
-    },
-    {
-      label: "覆盖",
-      value: task ? coverageLabel(task.coverage?.status) : "—",
-      hint: !task
-        ? "尚未创建任务"
-        : task.coverage?.status === "UNKNOWN" || !task.coverage
-          ? "无可靠分母"
-          : `覆盖 ${task.coverage.covered ?? "—"} / 分母 ${
-              task.coverage.denominator ?? "—"
-            }`,
-    },
-    {
-      label: "质量异常",
-      value: formatNumber(quality.length),
-      hint: "正文不完整或非可选字段缺失",
-    },
-  ];
-
   const needsBuildFirst =
     !task &&
     (site.readiness === "needs_onboarding" ||
       site.readiness === "building" ||
-      Boolean(build));
+      buildIsActive(build));
 
   const buildPanel = (
     <BuildPanel
@@ -706,6 +684,7 @@ export function SiteDetailPage() {
       streamError={stream.error}
       streamEnded={stream.ended}
       blockedReason={configBlockReason}
+      showRepair={step?.action !== "repair"}
       onRetryConfig={configQuery.isError ? () => void configQuery.refetch() : undefined}
       onOpenStart={openBuild}
       onRefresh={() => {
@@ -715,6 +694,534 @@ export function SiteDetailPage() {
       }}
     />
   );
+
+  const buildNeedsAttention = Boolean(
+    build &&
+    task &&
+    (buildIsActive(build) ||
+      (build.state === "FINISHED" && build.outcome === "interrupted")),
+  );
+
+  const buildStrip =
+    build && buildNeedsAttention ? (
+      <section
+        aria-label="构建状态"
+        className="flex flex-wrap items-center gap-3 rounded-panel border border-warning/25 bg-warning-soft px-4 py-3"
+      >
+        <Badge tone={buildTone(build.state, build.outcome)}>
+          {buildStateLabel(build.state)}
+        </Badge>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium text-ink">
+            {build.mode === "repair" ? "规则修复构建" : "方案构建"}
+            {build.outcome ? ` · ${buildOutcomeLabel(build.outcome)}` : ""}
+          </p>
+          <p className="text-xs leading-5 text-ink-3">
+            更新 {formatTime(build.updated_at)} · 审批和构建详情在「规则与构建」
+          </p>
+        </div>
+        <Button size="sm" onClick={() => setView("rules")}>
+          查看构建
+        </Button>
+      </section>
+    ) : null;
+
+  const summary = (
+    <dl
+      aria-label="站点进度"
+      className="grid grid-cols-2 gap-x-6 gap-y-2 rounded-panel border border-line bg-surface px-4 py-3 text-sm leading-5 xl:grid-cols-4"
+    >
+      <div className="flex min-w-0 flex-wrap gap-x-2">
+        <dt className="font-semibold text-ink">任务</dt>
+        <dd className="min-w-0 text-ink-2">
+          {task
+            ? `${taskStateLabel(task.state)}${
+                task.outcome ? ` · ${outcomeLabel(task.outcome)}` : ""
+              }`
+            : "—"}
+        </dd>
+      </div>
+      <div className="flex min-w-0 flex-wrap gap-x-2">
+        <dt className="font-semibold text-ink">有效／失败</dt>
+        <dd className="min-w-0 text-ink-2">
+          {task
+            ? `${formatNumber(task.counts.valid_products ?? 0)} / ${formatNumber(
+                task.counts.failed_products ?? 0,
+              )}`
+            : "—"}
+        </dd>
+      </div>
+      <div className="flex min-w-0 flex-wrap gap-x-2">
+        <dt className="font-semibold text-ink">覆盖</dt>
+        <dd className="min-w-0 text-ink-2">
+          {task ? coverageLabel(task.coverage?.status) : "—"}
+        </dd>
+      </div>
+      <div className="flex min-w-0 flex-wrap gap-x-2">
+        <dt className="font-semibold text-ink">质量异常</dt>
+        <dd className="min-w-0 text-ink-2">{formatNumber(quality.length)}</dd>
+      </div>
+    </dl>
+  );
+
+  const tabCounts: Record<SiteView, string> = {
+    current: task ? formatNumber(task.counts.valid_products ?? 0) : "",
+    history: historyQuery.data?.items.length
+      ? formatNumber(historyQuery.data.items.length)
+      : "",
+    rules: siteRuleQuery.data?.candidates.length
+      ? formatNumber(siteRuleQuery.data.candidates.length)
+      : "",
+    info: "",
+  };
+
+  const moreActions: RowActionItem[][] = [];
+  if (task && step?.action !== "export") {
+    moreActions.push([
+      {
+        key: "export",
+        label: taskExportLabel(taskActive),
+        icon: <Download size={14} />,
+        onSelect: downloadTask,
+      },
+    ]);
+  }
+  const dangerActions: RowActionItem[] = [];
+  if (task && siteCanCancelTask(site) && step?.action !== "cancel-task") {
+    dangerActions.push({
+      key: "cancel-task",
+      label: "取消任务…",
+      icon: <Ban size={14} />,
+      danger: true,
+      onSelect: () => {
+        setConfirmError("");
+        setDialog("cancel-task");
+      },
+    });
+  }
+  if (
+    build &&
+    buildIsActive(build) &&
+    build.state !== "CANCELLING" &&
+    step?.action !== "cancel-build"
+  ) {
+    dangerActions.push({
+      key: "cancel-build",
+      label: "取消构建…",
+      icon: <Ban size={14} />,
+      danger: true,
+      onSelect: () => {
+        setConfirmError("");
+        setDialog("cancel-build");
+      },
+    });
+  }
+  if (dangerActions.length) moreActions.push(dangerActions);
+
+  const emptyState = (
+    <section className="rounded-panel border border-line bg-surface">
+      <EmptyState
+        title={
+          site.readiness === "ready"
+            ? "站点可采，但还没有任务"
+            : site.readiness === "needs_onboarding"
+              ? "站点待接入"
+              : site.readiness === "building"
+                ? "规则包构建中"
+                : "该条目无效或重复，不进入采集"
+        }
+        description={
+          site.readiness === "ready"
+            ? "使用页头的「启动采集」创建任务；任务会进入队列，已有结果和历史任务不受影响。"
+            : site.readiness === "needs_onboarding"
+              ? configBlockReason
+                ? "构建入口当前不可用；先处理上方提示，再启动构建。"
+                : "使用页头的「启动构建」生成候选规则；验证通过后站点自动变为可采。"
+              : site.readiness === "building"
+                ? "规则包正在构建或验证；构建状态和审批在上方，站点不会被显示成可启动。"
+                : "无效和重复条目只保留在批次记录中，不创建任务、不计为失败。"
+        }
+      />
+    </section>
+  );
+
+  const taskSection = task ? (
+    <section className="rounded-panel border border-line bg-surface">
+      <div className="flex flex-col items-start gap-3 border-b border-line px-4 py-4 sm:flex-row sm:items-start sm:justify-between sm:px-5">
+        <div className="min-w-0">
+          <h2 className="text-[17px] leading-6 font-semibold text-ink">当前任务</h2>
+          <p className="mt-0.5 text-xs leading-5 text-ink-3">
+            任务 {task.task_id} · {task.plan_id}@{task.plan_version}
+          </p>
+        </div>
+        <Button asChild size="sm">
+          <Link to={`/tasks/${encodeURIComponent(task.task_id)}`}>打开任务详情</Link>
+        </Button>
+      </div>
+      <dl className="grid grid-cols-2 gap-px bg-line max-sm:hidden sm:grid-cols-4">
+        <div className="bg-surface px-4 py-3">
+          <dt className="text-xs text-ink-3">停止原因</dt>
+          <dd className="mt-0.5 text-sm text-ink">
+            {stopReasonLabel(task.stop_reason)}
+          </dd>
+        </div>
+        <div className="bg-surface px-4 py-3">
+          <dt className="text-xs text-ink-3">更新</dt>
+          <dd className="mt-0.5 text-sm text-ink tabular">
+            {formatTime(task.updated_at)}
+          </dd>
+        </div>
+        <div className="bg-surface px-4 py-3">
+          <dt className="text-xs text-ink-3">排除</dt>
+          <dd className="mt-0.5 text-sm text-ink tabular">
+            {formatNumber(task.counts.excluded_products ?? 0)}
+          </dd>
+        </div>
+        <div className="bg-surface px-4 py-3">
+          <dt className="text-xs text-ink-3">结果</dt>
+          <dd className="mt-0.5 text-sm text-ink">
+            {taskActive ? "任务未结束，结果会继续更新" : "已生成，可用于导出"}
+          </dd>
+        </div>
+      </dl>
+      <p className="px-4 py-2.5 text-xs leading-5 text-ink-3 max-sm:hidden sm:px-5">
+        导出只包含当前任务；任务运行中为部分结果，历史任务见「任务历史」。
+      </p>
+    </section>
+  ) : null;
+
+  const rawDataSection = task ? (
+    <section className="rounded-panel border border-line bg-surface px-4 py-4 sm:px-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <h2 className="text-[17px] leading-6 font-semibold text-ink">原始数据</h2>
+          <p className="mt-1 text-xs leading-5 text-ink-3">
+            CSV
+            预览和任务明细在任务详情中查看；站点页只保留结果、质量异常和入口，避免两处重复。
+          </p>
+        </div>
+        <Button asChild size="sm">
+          <Link to={`/tasks/${encodeURIComponent(task.task_id)}`}>查看 CSV 与明细</Link>
+        </Button>
+      </div>
+    </section>
+  ) : null;
+
+  const currentContent = needsBuildFirst ? (
+    <>
+      {buildPanel}
+      {emptyState}
+    </>
+  ) : task ? (
+    <>
+      {buildStrip}
+      {taskSection}
+      <ProductPreviewSection
+        taskId={task.task_id}
+        taskActive={taskActive}
+        validCount={task.counts.valid_products ?? 0}
+      />
+      <QualityExceptionsSection exceptions={quality} />
+      {rawDataSection}
+    </>
+  ) : (
+    <>
+      {emptyState}
+      {buildPanel}
+    </>
+  );
+
+  const rulesSection = (
+    <section className="rounded-panel border border-line bg-surface">
+      <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
+        <h2 className="text-[17px] leading-6 font-semibold text-ink">规则版本</h2>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => void siteRuleQuery.refetch()}
+          disabled={siteRuleQuery.isFetching}
+        >
+          刷新
+        </Button>
+      </div>
+      {siteRuleQuery.isError ? (
+        <p className="px-4 py-3 text-xs leading-5 text-danger">
+          读取规则版本失败：
+          {siteRuleQuery.error instanceof Error
+            ? siteRuleQuery.error.message
+            : "服务暂时不可用。"}
+        </p>
+      ) : (
+        <div className="space-y-3 px-4 py-4">
+          {ruleNotice ? (
+            <p className="rounded-control border border-success/20 bg-success-soft px-2.5 py-2 text-xs leading-5 text-success">
+              {ruleNotice}
+            </p>
+          ) : null}
+          {ruleError ? (
+            <p className="rounded-control border border-danger/20 bg-danger-soft px-2.5 py-2 text-xs leading-5 text-danger">
+              {ruleError}
+            </p>
+          ) : null}
+          <div>
+            <p className="text-[11px] text-ink-3">当前生效</p>
+            <p className="mt-0.5 font-mono text-xs text-ink">
+              {siteRuleQuery.data?.active
+                ? `${siteRuleQuery.data.rule_id}@${siteRuleQuery.data.active.rule_version}`
+                : "暂无生效规则"}
+            </p>
+            {siteRuleQuery.data?.active ? (
+              <p className="mt-0.5 text-[11px] text-ink-3">
+                过期任务 {siteRuleQuery.data.stale_tasks} · 未关闭反馈{" "}
+                {siteRuleQuery.data.open_feedback}
+              </p>
+            ) : null}
+            {siteRuleQuery.data?.active ? (
+              <Button
+                className="mt-2"
+                size="sm"
+                onClick={() => void rollbackRule()}
+                disabled={Boolean(ruleBusy)}
+              >
+                回滚上一版本
+              </Button>
+            ) : null}
+          </div>
+
+          <div className="border-t border-line pt-3">
+            <p className="text-[11px] text-ink-3">候选规则</p>
+            {siteRuleQuery.data?.candidates.length ? (
+              <ul className="mt-1.5 space-y-2">
+                {siteRuleQuery.data.candidates.map((candidate) => {
+                  const activationBlocked = candidateActivationBlockedReason(candidate);
+                  return (
+                    <li
+                      key={candidate.rule_version}
+                      className="rounded-control border border-warning/25 bg-warning-soft px-2.5 py-2"
+                    >
+                      <p className="flex items-center justify-between gap-2 font-mono text-[11px] text-ink">
+                        <span>{candidate.rule_version}</span>
+                        <Badge tone="warning" dot={false}>
+                          待激活
+                        </Badge>
+                      </p>
+                      <p className="mt-0.5 text-[11px] text-ink-3">
+                        {candidate.build_id || "未知构建"} ·{" "}
+                        {formatTime(candidate.created_at)}
+                      </p>
+                      <RuleEvidence
+                        change={candidate.change_summary}
+                        validation={candidate.validation}
+                        className="mt-1.5 border-t border-warning/20 pt-1.5"
+                      />
+                      <div className="mt-2 flex items-center gap-1.5">
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          onClick={() => void activateCandidate(candidate.rule_version)}
+                          disabled={
+                            Boolean(ruleBusy) ||
+                            siteHasActiveWork(site, build) ||
+                            Boolean(activationBlocked)
+                          }
+                          title={activationBlocked ?? undefined}
+                        >
+                          激活
+                        </Button>
+                        <Button
+                          size="sm"
+                          onClick={() => void rejectCandidate(candidate.rule_version)}
+                          disabled={Boolean(ruleBusy)}
+                        >
+                          放弃
+                        </Button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p className="mt-1 text-xs leading-5 text-ink-3">
+                {siteRuleQuery.isPending
+                  ? "正在读取…"
+                  : "没有候选规则；定向修复成功后会出现。"}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+
+  const rulesContent = (
+    <>
+      {buildPanel}
+      {rulesSection}
+    </>
+  );
+
+  const historyContent = (
+    <section className="rounded-panel border border-line bg-surface">
+      <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
+        <div>
+          <h2 className="text-[17px] leading-6 font-semibold text-ink">任务历史</h2>
+          <p className="mt-0.5 text-xs leading-5 text-ink-3">
+            最近任务；旧任务和结果保留，不随复跑删除。
+          </p>
+        </div>
+        <Link
+          className="text-xs text-accent hover:underline"
+          to={`/tasks?site=${encodeURIComponent(site.site_key)}&archived=1`}
+        >
+          全部任务
+        </Link>
+      </div>
+      {historyQuery.isError ? (
+        <div className="space-y-2 px-4 py-3">
+          <p className="text-xs leading-5 text-danger">
+            读取任务历史失败：
+            {historyQuery.error instanceof Error
+              ? historyQuery.error.message
+              : "服务暂时不可用。"}
+          </p>
+          <Button size="sm" onClick={() => void historyQuery.refetch()}>
+            重试
+          </Button>
+        </div>
+      ) : (historyQuery.data?.items.length ?? 0) > 0 ? (
+        <ul className="divide-y divide-line">
+          {historyQuery.data?.items.map((item) => (
+            <li key={item.task_id}>
+              <Link
+                className="block px-4 py-2.5 transition-colors hover:bg-surface-muted"
+                to={`/tasks/${encodeURIComponent(item.task_id)}`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <code className="truncate font-mono text-[11px] text-ink-2">
+                    {item.task_id}
+                  </code>
+                  <Badge tone={taskStateTone(item.state)} dot={false}>
+                    {taskStateLabel(item.state)}
+                  </Badge>
+                </div>
+                <p className="mt-0.5 text-[11px] text-ink-3">
+                  {item.outcome ? outcomeLabel(item.outcome) : "未结束"}
+                  {item.archived_at ? " · 已归档" : ""}
+                  {" · "}
+                  {item.task_type === "discovery" ? "网址" : "有效"}{" "}
+                  {formatNumber(
+                    item.task_type === "discovery"
+                      ? (item.counts.discovered_urls ?? 0)
+                      : (item.counts.valid_products ?? 0),
+                  )}
+                  {" · "}
+                  {formatTime(item.updated_at)}
+                </p>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="px-4 py-6 text-xs leading-5 text-ink-3">
+          {historyQuery.isPending ? "正在读取任务历史…" : "这个站点还没有任务记录。"}
+        </p>
+      )}
+    </section>
+  );
+
+  const infoContent = (
+    <section className="rounded-panel border border-line bg-surface">
+      <div className="border-b border-line px-4 py-4 sm:px-5">
+        <h2 className="text-[17px] leading-6 font-semibold text-ink">站点资料</h2>
+        <p className="mt-0.5 text-xs leading-5 text-ink-3">
+          批次、市场、规则路径和技术标识；低频信息集中在这里，不占结果首屏。
+        </p>
+      </div>
+      <dl className="grid grid-cols-1 gap-x-6 px-4 py-2 sm:grid-cols-2 sm:px-5">
+        <Fact label="批次">
+          <Link
+            className="text-accent hover:underline"
+            to={`/batches/${encodeURIComponent(batch.batch_id)}`}
+          >
+            {batch.name}
+          </Link>
+        </Fact>
+        <Fact label="站点 ID">
+          <code className="break-all font-mono text-[11px]">{site.site_key}</code>
+        </Fact>
+        <Fact label="国家／市场">
+          {batch.country || "—"} / {batch.market || "—"}
+        </Fact>
+        <Fact label="语言">{batch.language || "—"}</Fact>
+        <Fact label="品类">{batch.category || "—"}</Fact>
+        <Fact label="规则">
+          {site.rule ? (
+            <span className="font-mono text-[11px]">
+              {site.rule.rule_id}@{site.rule.rule_version}
+            </span>
+          ) : (
+            "—"
+          )}
+        </Fact>
+        <Fact label="规则路径">
+          <code className="break-all font-mono text-[11px]">
+            {site.rule?.path || "—"}
+          </code>
+        </Fact>
+        <Fact label="任务 ID">
+          {task ? <code className="font-mono text-[11px]">{task.task_id}</code> : "—"}
+        </Fact>
+        <Fact label="计划">
+          {task ? (
+            <code className="font-mono text-[11px]">
+              {task.plan_id}@{task.plan_version}
+            </code>
+          ) : (
+            "—"
+          )}
+        </Fact>
+        <Fact label="构建 ID">
+          {buildId ? <code className="font-mono text-[11px]">{buildId}</code> : "—"}
+        </Fact>
+        <Fact label="市场">{task?.market || batch.market || "—"}</Fact>
+        <Fact label="出口">
+          {site.proxy
+            ? site.proxy
+            : site.proxy_configured
+              ? "已配置"
+              : "服务默认／直连"}
+        </Fact>
+        <Fact label="创建">
+          <span className="tabular">{formatTime(site.created_at)}</span>
+        </Fact>
+        <Fact label="更新">
+          <span className="tabular">{formatTime(site.updated_at)}</span>
+        </Fact>
+        <Fact label="最近构建">
+          {build ? (
+            <span>
+              {buildStateLabel(build.state)}
+              {build.outcome ? ` · ${buildOutcomeLabel(build.outcome)}` : ""}
+            </span>
+          ) : site.build ? (
+            <span>
+              {buildStateLabel(site.build.state)}
+              {site.build.outcome ? ` · ${buildOutcomeLabel(site.build.outcome)}` : ""}
+            </span>
+          ) : (
+            "—"
+          )}
+        </Fact>
+      </dl>
+    </section>
+  );
+
+  const panels: Record<SiteView, ReactNode> = {
+    current: currentContent,
+    history: historyContent,
+    rules: rulesContent,
+    info: infoContent,
+  };
 
   return (
     <div className="space-y-6">
@@ -733,10 +1240,10 @@ export function SiteDetailPage() {
           </span>
         </div>
 
-        <div className="mt-4 flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between lg:gap-8">
-          <div className="min-w-0">
+        <div className="mt-3 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between lg:gap-8">
+          <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2.5">
-              <h1 className="text-[24px] leading-8 font-semibold tracking-[-0.02em] text-ink sm:text-[28px] sm:leading-9">
+              <h1 className="text-[24px] leading-8 font-semibold tracking-[-0.02em] break-words text-ink sm:text-[28px] sm:leading-9">
                 {site.domain}
               </h1>
               <Badge tone={readinessTone(site.readiness)}>
@@ -759,12 +1266,15 @@ export function SiteDetailPage() {
                 </Badge>
               ) : null}
             </div>
-            <p className="mt-1 max-w-3xl text-sm leading-6 text-ink-2">
+            <p
+              className="mt-1 max-w-3xl text-sm leading-6 text-ink-2 line-clamp-2 break-words lg:line-clamp-none"
+              title={`${site.input_value}${site.note ? ` · ${site.note}` : ""}`}
+            >
               {site.input_value}
               {site.note ? ` · ${site.note}` : ""}
             </p>
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-3">
-              <span>{siteStatusSentence(site, build)}</span>
+              <span>{step?.title ?? siteStatusSentence(site, build)}</span>
               <span>更新 {formatTime(task?.updated_at || site.updated_at)}</span>
               {site.rule ? (
                 <span className="font-mono">
@@ -800,11 +1310,17 @@ export function SiteDetailPage() {
                 </Button>
               )
             ) : null}
-            {task && step?.action !== "export" ? (
-              <Button onClick={downloadTask}>
-                <Download size={14} aria-hidden="true" />
-                {taskExportLabel(taskActive)}
-              </Button>
+            {moreActions.length ? (
+              <RowActionsMenu
+                label="更多站点操作"
+                groups={moreActions}
+                trigger={
+                  <Button aria-label="更多站点操作">
+                    <MoreHorizontal size={16} aria-hidden="true" />
+                    更多
+                  </Button>
+                }
+              />
             ) : null}
             <Button
               onClick={() => {
@@ -864,547 +1380,77 @@ export function SiteDetailPage() {
         </InlineNotice>
       ) : null}
 
-      <MetricStrip items={statusItems} label="站点状态" />
+      {summary}
 
-      <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,8fr)_minmax(320px,4fr)]">
-        <div className="min-w-0 space-y-5">
-          {needsBuildFirst ? buildPanel : null}
-
-          {task ? (
-            <>
-              <section className="rounded-panel border border-line bg-surface">
-                <div className="flex flex-col items-start gap-3 border-b border-line px-4 py-4 sm:flex-row sm:justify-between sm:px-5">
-                  <div>
-                    <h2 className="text-[17px] leading-6 font-semibold text-ink">
-                      当前任务
-                    </h2>
-                    <p className="mt-0.5 text-xs leading-5 text-ink-3">
-                      任务 {task.task_id} · {task.plan_id}@{task.plan_version}
-                    </p>
-                  </div>
-                  <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:shrink-0 sm:justify-end">
-                    <Button asChild size="sm">
-                      <Link to={`/tasks/${encodeURIComponent(task.task_id)}`}>
-                        打开任务详情
-                      </Link>
-                    </Button>
-                    {task.state === "RUNNING" || task.state === "PAUSING" ? (
-                      <Button
-                        size="sm"
-                        disabled={Boolean(taskBusy)}
-                        onClick={() => void runTaskControl("pause")}
-                      >
-                        <Pause size={13} aria-hidden="true" />
-                        暂停任务
-                      </Button>
-                    ) : null}
-                    {task.state === "PAUSED" ? (
-                      <Button
-                        size="sm"
-                        disabled={Boolean(taskBusy)}
-                        onClick={() => void runTaskControl("resume")}
-                      >
-                        <Play size={13} aria-hidden="true" />
-                        继续任务
-                      </Button>
-                    ) : null}
-                    {["DRAFT", "QUEUED", "RUNNING", "PAUSING", "PAUSED"].includes(
-                      task.state,
-                    ) ? (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="text-danger hover:bg-danger-soft hover:text-danger"
-                        disabled={Boolean(taskBusy)}
-                        onClick={() => {
-                          setConfirmError("");
-                          setDialog("cancel-task");
-                        }}
-                      >
-                        <Ban size={13} aria-hidden="true" />
-                        取消任务
-                      </Button>
-                    ) : null}
-                  </div>
-                </div>
-
-                <dl className="grid grid-cols-2 gap-px border-b border-line bg-line sm:grid-cols-4">
-                  <div className="bg-surface px-4 py-3">
-                    <dt className="text-xs text-ink-3">停止原因</dt>
-                    <dd className="mt-0.5 text-sm text-ink">
-                      {stopReasonLabel(task.stop_reason)}
-                    </dd>
-                  </div>
-                  <div className="bg-surface px-4 py-3">
-                    <dt className="text-xs text-ink-3">覆盖</dt>
-                    <dd className="mt-0.5 text-sm text-ink">
-                      {coverageLabel(task.coverage?.status)}
-                    </dd>
-                  </div>
-                  <div className="bg-surface px-4 py-3">
-                    <dt className="text-xs text-ink-3">质量异常</dt>
-                    <dd className="mt-0.5 text-sm text-ink tabular">
-                      {formatNumber(quality.length)}
-                    </dd>
-                  </div>
-                  <div className="bg-surface px-4 py-3">
-                    <dt className="text-xs text-ink-3">更新</dt>
-                    <dd className="mt-0.5 text-sm text-ink tabular">
-                      {formatTime(task.updated_at)}
-                    </dd>
-                  </div>
-                </dl>
-              </section>
-
-              <ProductPreviewSection
-                taskId={task.task_id}
-                taskActive={taskActive}
-                validCount={task.counts.valid_products ?? 0}
-              />
-
-              <QualityExceptionsSection exceptions={quality} />
-
-              <TaskCsvPreview
-                key={task.task_id}
-                taskId={task.task_id}
-                live={taskActive}
-              />
-
-              <TaskItemsSection taskId={task.task_id} taskActive={taskActive} />
-            </>
-          ) : (
-            <section className="rounded-panel border border-line bg-surface">
-              <EmptyState
-                title={
-                  site.readiness === "ready"
-                    ? "站点可采，但还没有任务"
-                    : site.readiness === "needs_onboarding"
-                      ? "站点待接入"
-                      : site.readiness === "building"
-                        ? "规则包构建中"
-                        : "该条目无效或重复，不进入采集"
-                }
-                description={
-                  site.readiness === "ready"
-                    ? "可以直接在当前页启动这个站点，任务会进入队列。"
-                    : site.readiness === "needs_onboarding"
-                      ? "没有匹配到受管规则包；在上方启动构建 Agent，验证通过后站点自动变为可采。"
-                      : site.readiness === "building"
-                        ? "规则包正在构建或验证，页面不会把它显示成可启动。"
-                        : "无效和重复条目只保留在批次记录中，不创建任务、不计为失败。"
-                }
-                action={
-                  site.readiness === "ready" ? (
-                    <Button size="sm" onClick={() => setDialog("start-site")}>
-                      <Play size={14} aria-hidden="true" />
-                      启动采集
-                    </Button>
-                  ) : (
-                    <Button asChild size="sm">
-                      <Link to={`/batches/${encodeURIComponent(batch.batch_id)}`}>
-                        返回批次详情
-                      </Link>
-                    </Button>
-                  )
-                }
-              />
-            </section>
-          )}
-
-          {!needsBuildFirst ? buildPanel : null}
-
-          <details className="rounded-panel border border-line bg-surface">
-            <summary className="cursor-pointer list-none px-5 py-4 text-sm font-semibold text-ink [&::-webkit-details-marker]:hidden">
-              技术详情
-            </summary>
-            <dl className="grid grid-cols-1 gap-x-6 gap-y-0 border-t border-line px-4 py-3 sm:grid-cols-2 sm:px-5">
-              <Fact label="站点 ID">
-                <code className="font-mono text-[11px]">{site.site_key}</code>
-              </Fact>
-              <Fact label="批次">
-                <Link
-                  className="text-accent hover:underline"
-                  to={`/batches/${encodeURIComponent(batch.batch_id)}`}
-                >
-                  {batch.name}
-                </Link>
-              </Fact>
-              <Fact label="任务 ID">
-                {task ? (
-                  <code className="font-mono text-[11px]">{task.task_id}</code>
-                ) : (
-                  "—"
-                )}
-              </Fact>
-              <Fact label="计划">
-                {task ? (
-                  <code className="font-mono text-[11px]">
-                    {task.plan_id}@{task.plan_version}
-                  </code>
-                ) : (
-                  "—"
-                )}
-              </Fact>
-              <Fact label="规则路径">
-                <code className="break-all font-mono text-[11px]">
-                  {site.rule?.path || "—"}
-                </code>
-              </Fact>
-              <Fact label="构建 ID">
-                {buildId ? (
-                  <code className="font-mono text-[11px]">{buildId}</code>
-                ) : (
-                  "—"
-                )}
-              </Fact>
-              <Fact label="市场">{task?.market || batch.market || "—"}</Fact>
-              <Fact label="出口">
-                {site.proxy
-                  ? site.proxy
-                  : site.proxy_configured
-                    ? "已配置"
-                    : "服务默认／直连"}
-              </Fact>
-              <Fact label="创建">
-                <span className="tabular">{formatTime(site.created_at)}</span>
-              </Fact>
-              <Fact label="更新">
-                <span className="tabular">{formatTime(site.updated_at)}</span>
-              </Fact>
-            </dl>
-          </details>
-        </div>
-
-        <aside className="space-y-4">
-          {step ? (
-            <section
-              className={cn("rounded-panel border px-4 py-4", toneClasses[step.tone])}
-              aria-labelledby="site-next-step-title"
-            >
-              <div className="flex items-start gap-2.5">
-                <span className="mt-0.5 shrink-0">
-                  <StepIcon action={step.action} />
-                </span>
-                <div className="min-w-0">
-                  <h2
-                    id="site-next-step-title"
-                    className="text-[15px] leading-6 font-semibold text-ink"
-                  >
-                    下一步
-                  </h2>
-                  <p className="mt-1 text-sm leading-6 font-medium text-ink">
-                    {step.title}
-                  </p>
-                  <p className="mt-1 text-xs leading-5 text-ink-2">
-                    {step.description}
-                  </p>
-                </div>
-              </div>
-              {step.action !== "none" ? (
-                step.action === "batch" ? (
-                  <Button asChild className="mt-3 w-full" size="sm">
-                    <Link to={`/batches/${encodeURIComponent(batch.batch_id)}`}>
-                      {step.actionLabel ?? "回批次详情"}
-                      <ArrowRight size={13} aria-hidden="true" />
-                    </Link>
-                  </Button>
-                ) : (
-                  <Button
-                    className="mt-3 w-full"
-                    size="sm"
-                    variant="secondary"
-                    onClick={handleStep}
-                    disabled={stepBusy || buildStepBlocked}
-                    title={
-                      buildStepBlocked ? (configBlockReason ?? undefined) : undefined
-                    }
-                  >
-                    {stepBusy ? "处理中…" : step.actionLabel}
-                  </Button>
-                )
-              ) : null}
-            </section>
-          ) : null}
-
-          <section className="rounded-panel border border-line bg-surface">
-            <div className="border-b border-line px-4 py-3">
-              <h2 className="text-[15px] leading-6 font-semibold text-ink">站点事实</h2>
-            </div>
-            <dl className="divide-y divide-line">
-              <Fact label="批次">
-                <Link
-                  className="text-accent hover:underline"
-                  to={`/batches/${encodeURIComponent(batch.batch_id)}`}
-                >
-                  {batch.name}
-                </Link>
-              </Fact>
-              <Fact label="国家／市场">
-                {batch.country || "—"} / {batch.market || "—"}
-              </Fact>
-              <Fact label="语言">{batch.language || "—"}</Fact>
-              <Fact label="品类">{batch.category || "—"}</Fact>
-              <Fact label="规则">
-                {site.rule ? (
-                  <span className="font-mono text-[11px]">
-                    {site.rule.rule_id}@{site.rule.rule_version}
-                  </span>
-                ) : (
-                  "—"
-                )}
-              </Fact>
-              <Fact label="最近构建">
-                {build ? (
-                  <span>
-                    {buildStateLabel(build.state)}
-                    {build.outcome ? ` · ${buildOutcomeLabel(build.outcome)}` : ""}
-                  </span>
-                ) : site.build ? (
-                  <span>
-                    {buildStateLabel(site.build.state)}
-                    {site.build.outcome
-                      ? ` · ${buildOutcomeLabel(site.build.outcome)}`
-                      : ""}
-                  </span>
-                ) : (
-                  "—"
-                )}
-              </Fact>
-              <Fact label="更新">
-                <span className="tabular">{formatTime(site.updated_at)}</span>
-              </Fact>
-            </dl>
-          </section>
-
-          <section className="rounded-panel border border-line bg-surface">
-            <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
-              <h2 className="text-[15px] leading-6 font-semibold text-ink">规则版本</h2>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => void siteRuleQuery.refetch()}
-                disabled={siteRuleQuery.isFetching}
-              >
-                刷新
-              </Button>
-            </div>
-            {siteRuleQuery.isError ? (
-              <p className="px-4 py-3 text-xs leading-5 text-danger">
-                读取规则版本失败：
-                {siteRuleQuery.error instanceof Error
-                  ? siteRuleQuery.error.message
-                  : "服务暂时不可用。"}
-              </p>
-            ) : (
-              <div className="space-y-3 px-4 py-3">
-                {ruleNotice ? (
-                  <p className="rounded-control border border-success/20 bg-success-soft px-2.5 py-2 text-xs leading-5 text-success">
-                    {ruleNotice}
-                  </p>
-                ) : null}
-                {ruleError ? (
-                  <p className="rounded-control border border-danger/20 bg-danger-soft px-2.5 py-2 text-xs leading-5 text-danger">
-                    {ruleError}
-                  </p>
-                ) : null}
-                <div>
-                  <p className="text-[11px] text-ink-3">当前生效</p>
-                  <p className="mt-0.5 font-mono text-xs text-ink">
-                    {siteRuleQuery.data?.active
-                      ? `${siteRuleQuery.data.rule_id}@${siteRuleQuery.data.active.rule_version}`
-                      : "暂无生效规则"}
-                  </p>
-                  {siteRuleQuery.data?.active ? (
-                    <p className="mt-0.5 text-[11px] text-ink-3">
-                      过期任务 {siteRuleQuery.data.stale_tasks} · 未关闭反馈{" "}
-                      {siteRuleQuery.data.open_feedback}
-                    </p>
-                  ) : null}
-                  {siteRuleQuery.data?.active ? (
-                    <Button
-                      className="mt-2"
-                      size="sm"
-                      onClick={() => void rollbackRule()}
-                      disabled={Boolean(ruleBusy)}
-                    >
-                      回滚上一版本
-                    </Button>
-                  ) : null}
-                </div>
-
-                <div className="border-t border-line pt-3">
-                  <p className="text-[11px] text-ink-3">候选规则</p>
-                  {siteRuleQuery.data?.candidates.length ? (
-                    <ul className="mt-1.5 space-y-2">
-                      {siteRuleQuery.data.candidates.map((candidate) => {
-                        const activationBlocked =
-                          candidateActivationBlockedReason(candidate);
-                        return (
-                          <li
-                            key={candidate.rule_version}
-                            className="rounded-control border border-warning/25 bg-warning-soft px-2.5 py-2"
-                          >
-                            <p className="flex items-center justify-between gap-2 font-mono text-[11px] text-ink">
-                              <span>{candidate.rule_version}</span>
-                              <Badge tone="warning" dot={false}>
-                                待激活
-                              </Badge>
-                            </p>
-                            <p className="mt-0.5 text-[11px] text-ink-3">
-                              {candidate.build_id || "未知构建"} ·{" "}
-                              {formatTime(candidate.created_at)}
-                            </p>
-                            <RuleEvidence
-                              change={candidate.change_summary}
-                              validation={candidate.validation}
-                              className="mt-1.5 border-t border-warning/20 pt-1.5"
-                            />
-                            <div className="mt-2 flex items-center gap-1.5">
-                              <Button
-                                size="sm"
-                                variant="primary"
-                                onClick={() =>
-                                  void activateCandidate(candidate.rule_version)
-                                }
-                                disabled={
-                                  Boolean(ruleBusy) ||
-                                  siteHasActiveWork(site, build) ||
-                                  Boolean(activationBlocked)
-                                }
-                                title={activationBlocked ?? undefined}
-                              >
-                                激活
-                              </Button>
-                              <Button
-                                size="sm"
-                                onClick={() =>
-                                  void rejectCandidate(candidate.rule_version)
-                                }
-                                disabled={Boolean(ruleBusy)}
-                              >
-                                放弃
-                              </Button>
-                            </div>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  ) : (
-                    <p className="mt-1 text-xs leading-5 text-ink-3">
-                      {siteRuleQuery.isPending
-                        ? "正在读取…"
-                        : "没有候选规则；定向修复成功后会出现。"}
-                    </p>
-                  )}
-                </div>
-              </div>
-            )}
-          </section>
-
-          <section className="rounded-panel border border-line bg-surface">
-            <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
-              <h2 className="text-[15px] leading-6 font-semibold text-ink">任务历史</h2>
-              <Link
-                className="text-xs text-accent hover:underline"
-                to={`/tasks?site=${encodeURIComponent(site.site_key)}&archived=1`}
-              >
-                全部任务
-              </Link>
-            </div>
-            {historyQuery.isError ? (
-              <div className="space-y-2 px-4 py-3">
-                <p className="text-xs leading-5 text-danger">
-                  读取任务历史失败：
-                  {historyQuery.error instanceof Error
-                    ? historyQuery.error.message
-                    : "服务暂时不可用。"}
-                </p>
-                <Button size="sm" onClick={() => void historyQuery.refetch()}>
-                  重试
-                </Button>
-              </div>
-            ) : (historyQuery.data?.items.length ?? 0) > 0 ? (
-              <ul className="divide-y divide-line">
-                {historyQuery.data?.items.map((item) => (
-                  <li key={item.task_id}>
-                    <Link
-                      className="block px-4 py-2.5 transition-colors hover:bg-surface-muted"
-                      to={`/tasks/${encodeURIComponent(item.task_id)}`}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <code className="truncate font-mono text-[11px] text-ink-2">
-                          {item.task_id}
-                        </code>
-                        <Badge tone={taskStateTone(item.state)} dot={false}>
-                          {taskStateLabel(item.state)}
-                        </Badge>
-                      </div>
-                      <p className="mt-0.5 text-[11px] text-ink-3">
-                        {item.outcome ? outcomeLabel(item.outcome) : "未结束"}
-                        {item.archived_at ? " · 已归档" : ""}
-                        {" · "}
-                        {item.task_type === "discovery" ? "网址" : "有效"}{" "}
-                        {formatNumber(
-                          item.task_type === "discovery"
-                            ? (item.counts.discovered_urls ?? 0)
-                            : (item.counts.valid_products ?? 0),
-                        )}
-                        {" · "}
-                        {formatTime(item.updated_at)}
-                      </p>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="px-4 py-6 text-xs leading-5 text-ink-3">
-                {historyQuery.isPending
-                  ? "正在读取任务历史…"
-                  : "这个站点还没有任务记录。"}
-              </p>
-            )}
-          </section>
-
-          <section className="rounded-panel border border-line bg-surface">
-            <div className="border-b border-line px-4 py-3">
-              <h2 className="text-[15px] leading-6 font-semibold text-ink">
-                导出与返回
-              </h2>
-            </div>
-            <div className="space-y-3 px-4 py-4">
-              {task ? (
-                <Button
-                  className="w-full justify-start"
-                  size="sm"
-                  onClick={downloadTask}
-                >
-                  <Download size={14} aria-hidden="true" />
-                  {taskExportLabel(taskActive)}
-                </Button>
-              ) : (
-                <p className="text-xs leading-5 text-ink-3">
-                  还没有任务结果。启动可采站点后可导出当前任务的结果。
-                </p>
-              )}
-              <Button asChild className="w-full justify-start" size="sm">
-                <Link to={`/batches/${encodeURIComponent(batch.batch_id)}`}>
-                  <ArrowLeft size={14} aria-hidden="true" />
-                  返回批次详情
-                </Link>
-              </Button>
-              <p className="text-xs leading-5 text-ink-3">
-                导出对象是当前任务
-                {task ? (
-                  <>
-                    （<code className="font-mono text-[11px]">{task.task_id}</code>）
-                  </>
-                ) : null}
-                ，包含该任务的有效商品和失败记录，不包含这个站点的其他历史任务；任务仍在运行时使用部分导出。
-              </p>
-            </div>
-          </section>
-        </aside>
+      <div className="sm:hidden">
+        <label className="sr-only" htmlFor="site-view-select">
+          切换站点视图
+        </label>
+        <select
+          id="site-view-select"
+          className="h-9 w-full rounded-control border border-line-strong bg-surface px-3 text-sm text-ink"
+          value={activeView}
+          onChange={(event) => setView(event.target.value as SiteView)}
+        >
+          {SITE_VIEWS.map((view) => (
+            <option key={view} value={view}>
+              {SITE_VIEW_LABELS[view]}
+              {tabCounts[view] ? `（${tabCounts[view]}）` : ""}
+            </option>
+          ))}
+        </select>
       </div>
+
+      <div
+        className="hidden gap-1 overflow-x-auto border-b border-line sm:flex"
+        role="tablist"
+        aria-label="站点视图"
+      >
+        {SITE_VIEWS.map((view) => {
+          const selected = activeView === view;
+          const count = tabCounts[view];
+          return (
+            <button
+              key={view}
+              id={`site-tab-${view}`}
+              type="button"
+              role="tab"
+              aria-selected={selected}
+              aria-controls={`site-panel-${view}`}
+              tabIndex={selected ? 0 : -1}
+              className={cn(
+                "flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-semibold transition-colors",
+                selected
+                  ? "border-accent text-accent"
+                  : "border-transparent text-ink-2 hover:text-ink",
+              )}
+              onClick={() => setView(view)}
+              onKeyDown={(event) => handleViewKey(event, view)}
+            >
+              {SITE_VIEW_LABELS[view]}
+              {count ? (
+                <span className="rounded-full bg-surface-sunken px-1.5 text-[10px] leading-[18px] text-ink-3">
+                  {count}
+                </span>
+              ) : null}
+            </button>
+          );
+        })}
+      </div>
+
+      {SITE_VIEWS.map((view) => (
+        <section
+          key={view}
+          id={`site-panel-${view}`}
+          role="tabpanel"
+          aria-labelledby={`site-tab-${view}`}
+          hidden={activeView !== view}
+          tabIndex={0}
+          className="space-y-5"
+        >
+          {panels[view]}
+        </section>
+      ))}
 
       {dialog === "build" || dialog === "repair" ? (
         <BuildStartDialog

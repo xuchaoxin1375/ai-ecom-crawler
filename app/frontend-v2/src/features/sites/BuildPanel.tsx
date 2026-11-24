@@ -45,6 +45,7 @@ interface BuildPanelProps {
   streamError: string;
   streamEnded: boolean;
   blockedReason?: string | null;
+  showRepair?: boolean;
   onRetryConfig?: () => void;
   onOpenStart: (mode: "build" | "repair") => void;
   onRefresh: () => void;
@@ -70,6 +71,7 @@ export function BuildPanel({
   streamError,
   streamEnded,
   blockedReason = null,
+  showRepair = true,
   onRetryConfig,
   onOpenStart,
   onRefresh,
@@ -81,7 +83,11 @@ export function BuildPanel({
     !site.task &&
     (site.readiness === "needs_onboarding" || site.readiness === "building");
   const canRepair =
-    !active && !taskActive && site.readiness === "ready" && Boolean(site.rule);
+    showRepair &&
+    !active &&
+    !taskActive &&
+    site.readiness === "ready" &&
+    Boolean(site.rule);
   const events = visibleBuildEvents(build);
   const repair = activeRepair(build);
 
