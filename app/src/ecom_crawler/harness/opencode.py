@@ -31,6 +31,73 @@ from ..runtime.resources import terminate_process
 OPENCODE_USERNAME = "opencode"
 SERVER_LOG_LINES = 200
 
+# A clean build server still needs the OS/runtime basics (PATH, temp and the
+# account's own config directories).  Ambient tokens, browser profiles and
+# project credentials are not inherited; callers pass anything else through
+# ``extra_env`` explicitly.
+BASELINE_ENV_KEYS = frozenset(
+    {
+        "PATH",
+        "PATHEXT",
+        "SYSTEMROOT",
+        "SYSTEMDRIVE",
+        "WINDIR",
+        "COMSPEC",
+        "TEMP",
+        "TMP",
+        "TMPDIR",
+        "HOME",
+        "USERPROFILE",
+        "HOMEDRIVE",
+        "HOMEPATH",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "PROGRAMDATA",
+        "PROGRAMFILES",
+        "PROGRAMFILES(X86)",
+        "PROGRAMW6432",
+        "COMMONPROGRAMFILES",
+        "COMMONPROGRAMFILES(X86)",
+        "NUMBER_OF_PROCESSORS",
+        "PROCESSOR_ARCHITECTURE",
+        "OS",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "SHELL",
+        "USER",
+        "LOGNAME",
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
+        "XDG_CACHE_HOME",
+        "XDG_STATE_HOME",
+        "NODE_EXTRA_CA_CERTS",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+    }
+)
+
+
+def child_environment(
+    extra: dict[str, str] | None = None, *, inherit: bool = True
+) -> dict[str, str]:
+    """Return the environment for the ``opencode serve`` child process.
+
+    ``inherit=False`` keeps only OS/runtime basics and explicit ``extra``
+    values.  It is the code-level part of the isolated build-account
+    baseline; it does not replace an OS user/VM boundary.
+    """
+    if inherit:
+        env = os.environ.copy()
+    else:
+        env = {
+            name: value
+            for name, value in os.environ.items()
+            if name.upper() in BASELINE_ENV_KEYS
+        }
+    env.update(extra or {})
+    return env
+
 
 class OpenCodeError(ValueError):
     """Base error for the OpenCode adapter."""
@@ -375,6 +442,7 @@ class OpenCodeServer:
         password: str | None = None,
         startup_timeout: float = 30.0,
         env: dict[str, str] | None = None,
+        inherit_env: bool = True,
         cwd: str | Path | None = None,
     ) -> None:
         self.command = list(command) if command else None
@@ -383,6 +451,7 @@ class OpenCodeServer:
         self.password = password or secrets.token_urlsafe(24)
         self.startup_timeout = max(float(startup_timeout), 1.0)
         self.extra_env = dict(env or {})
+        self.inherit_env = inherit_env
         self.cwd = Path(cwd).resolve() if cwd is not None else None
         self.process: subprocess.Popen[str] | None = None
         self.client: OpenCodeClient | None = None
@@ -399,9 +468,10 @@ class OpenCodeServer:
                 return self.client
             command = self.command or resolve_opencode_command()
             port = self.port or find_free_port(self.host)
-            env = os.environ.copy()
+            env = child_environment(
+                self.extra_env, inherit=self.inherit_env
+            )
             env["OPENCODE_PASSWORD"] = self.password
-            env.update(self.extra_env)
             try:
                 self.process = subprocess.Popen(
                     [

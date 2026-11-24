@@ -478,6 +478,7 @@ class BuildWorkflowTests(unittest.TestCase):
         activation_mode: str = "legacy",
         extra_permissions: list[dict[str, Any]] | None = None,
         dependency_policy: DependencyPolicy | None = None,
+        max_seconds: int = 10,
     ) -> BuildManager:
         if validator is None:
 
@@ -521,7 +522,7 @@ class BuildWorkflowTests(unittest.TestCase):
             self.rules,
             adapter=adapter,
             validator=validator,
-            max_seconds=10,
+            max_seconds=max_seconds,
             validation_seconds=5,
             max_products=2,
             max_repair_rounds=max_repair_rounds,
@@ -1100,6 +1101,38 @@ class BuildWorkflowTests(unittest.TestCase):
                 self.assertEqual(
                     continued.json()["error"]["code"], "BUILD_UNAVAILABLE"
                 )
+
+    def test_per_build_wall_clock_budget_times_out(self) -> None:
+        adapter = FakeBuildAdapter(self.root, hang=True)
+        manager = self._manager(adapter)
+        site = self.store.get_batch_site("b-1", "example.fr")
+        record = manager.start(self.batch, site, max_seconds=1)
+        deadline = time.monotonic() + 8
+        current = None
+        while time.monotonic() < deadline:
+            current = self.store.get_build(record.build_id)
+            if current is not None and current.state == "FINISHED":
+                break
+            time.sleep(0.05)
+        self.assertIsNotNone(current)
+        self.assertEqual(current.state, "FINISHED", current)
+        self.assertEqual(current.outcome, "failed", current)
+        self.assertIn("wall-clock budget", current.error or "")
+        self.assertIn("1s", current.error or "")
+        self.assertIn(record.build_id, adapter.canceled)
+        manager.shutdown()
+
+    def test_per_build_budget_overrides_shorter_global_default(self) -> None:
+        adapter = FakeBuildAdapter(self.root, hang=True)
+        manager = self._manager(adapter, max_seconds=1)
+        site = self.store.get_batch_site("b-1", "example.fr")
+        record = manager.start(self.batch, site, max_seconds=4)
+        time.sleep(2)
+        current = self.store.get_build(record.build_id)
+        self.assertIsNotNone(current)
+        self.assertEqual(current.state, "RUNNING", current)
+        self.assertNotIn(record.build_id, adapter.canceled)
+        manager.shutdown()
 
     def test_failed_build_can_continue_once(self) -> None:
         adapter = FakeBuildAdapter(self.root, write_rule=False, finish=True)

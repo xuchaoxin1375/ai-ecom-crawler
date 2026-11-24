@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -10,6 +11,7 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 from ecom_crawler.harness.adapter import (
     HarnessStateError,
@@ -19,7 +21,11 @@ from ecom_crawler.harness.adapter import (
 from ecom_crawler.harness.dependencies import DependencyPolicy
 from ecom_crawler.harness.events import normalize_event
 from ecom_crawler.harness.models import BuildTask
-from ecom_crawler.harness.opencode import OpenCodeClient, OpenCodeServer
+from ecom_crawler.harness.opencode import (
+    OpenCodeClient,
+    OpenCodeServer,
+    child_environment,
+)
 from ecom_crawler.harness.workspace import BuildWorkspace
 
 PASSWORD = "test-password"
@@ -551,6 +557,17 @@ class HarnessTests(unittest.TestCase):
         workspace.pause_path.write_text("{broken", encoding="utf-8")
         self.assertTrue(workspace.is_paused())
 
+    def test_child_environment_keeps_baseline_and_explicit_values(self) -> None:
+        with mock.patch.dict(
+            os.environ, {"ECOM_TEST_AMBIENT": "ambient-secret"}, clear=False
+        ):
+            env = child_environment(
+                {"ECOM_TEST_EXPLICIT": "explicit"}, inherit=False
+            )
+        self.assertNotIn("ECOM_TEST_AMBIENT", env)
+        self.assertEqual(env["ECOM_TEST_EXPLICIT"], "explicit")
+        self.assertEqual(env.get("PATH"), os.environ.get("PATH"))
+
     def test_server_process_manager_starts_and_stops(self) -> None:
         script = self.root / "fake_server.py"
         script.write_text(
@@ -574,7 +591,14 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(401)
             self.end_headers()
             return
-        body = json.dumps({"version": "fake-1.0", "pid": os.getpid()}).encode()
+        body = json.dumps(
+            {
+                "version": "fake-1.0",
+                "pid": os.getpid(),
+                "ambient": os.environ.get("ECOM_TEST_AMBIENT"),
+                "explicit": os.environ.get("ECOM_TEST_EXPLICIT"),
+            }
+        ).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
@@ -590,10 +614,18 @@ server.serve_forever()
         server = OpenCodeServer(
             command=[sys.executable, str(script)],
             startup_timeout=20,
+            env={"ECOM_TEST_EXPLICIT": "kept"},
+            inherit_env=False,
         )
         try:
-            client = server.start()
-            self.assertEqual(client.info()["version"], "fake-1.0")
+            with mock.patch.dict(
+                os.environ, {"ECOM_TEST_AMBIENT": "must-not-leak"}
+            ):
+                client = server.start()
+            info = client.info()
+            self.assertEqual(info["version"], "fake-1.0")
+            self.assertEqual(info["explicit"], "kept")
+            self.assertIsNone(info["ambient"])
             self.assertIsNotNone(server.process)
             self.assertIsNotNone(server.version)
         finally:

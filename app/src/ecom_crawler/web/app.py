@@ -722,10 +722,16 @@ def create_app(
     build_extra_permissions: list[dict[str, Any]] | None = None,
     build_dependency_policy: DependencyPolicy | None = None,
     proxy: str | None = None,
+    read_only: bool = False,
 ) -> FastAPI:
-    store = TaskStore(db_path)
+    if read_only and manage_worker:
+        raise ValueError("read_only mode cannot manage a worker")
+    if read_only and build_manager is not None:
+        raise ValueError("read_only mode cannot accept a build manager")
+    store = TaskStore(db_path, read_only=read_only)
     root = Path(out_root)
-    root.mkdir(parents=True, exist_ok=True)
+    if not read_only:
+        root.mkdir(parents=True, exist_ok=True)
     rules = Path(rules_dir).resolve() if rules_dir is not None else None
     builds_disabled = os.environ.get("ECOM_BUILD_DISABLED") == "1"
     legacy_ui_enabled = _legacy_ui_enabled()
@@ -737,11 +743,12 @@ def create_app(
             default_proxy=proxy,
             extra_permissions=build_extra_permissions,
             dependency_policy=build_dependency_policy,
+            read_only=read_only,
         )
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> Any:
-        if build_manager is not None:
+        if build_manager is not None and not read_only:
             build_manager.reconcile()
         stop = threading.Event() if manage_worker else None
         thread: threading.Thread | None = None
@@ -766,7 +773,7 @@ def create_app(
         try:
             yield
         finally:
-            if build_manager is not None:
+            if build_manager is not None and not read_only:
                 build_manager.shutdown()
             if stop is not None:
                 stop.set()
@@ -789,6 +796,7 @@ def create_app(
     app.state.worker_managed = manage_worker
     app.state.build_manager = build_manager
     app.state.proxy = proxy
+    app.state.read_only = read_only
 
     def rule_error(exc: Exception) -> HTTPException:
         if isinstance(exc, RuleActivationConflictError):
@@ -1137,6 +1145,21 @@ def create_app(
                 return _forbidden("write requests require a same-origin loopback Origin")
             if request.headers.get("x-requested-with") != "XMLHttpRequest":
                 return _forbidden("write requests require X-Requested-With: XMLHttpRequest")
+        return await call_next(request)
+
+    @app.middleware("http")
+    async def read_only_guard(request: Request, call_next: Any) -> Any:
+        if read_only and request.method.upper() in WRITE_METHODS:
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "error": {
+                        "code": "READ_ONLY",
+                        "message": "read-only mode rejects write operations",
+                        "details": {},
+                    }
+                },
+            )
         return await call_next(request)
 
     @app.exception_handler(HTTPException)
@@ -1699,10 +1722,21 @@ def create_app(
             "version": __version__,
             "db": str(store.path),
             "tasks": len(store.list_tasks()),
-            "worker": "managed" if manage_worker else "external",
+            "worker": (
+                "read-only"
+                if read_only
+                else ("managed" if manage_worker else "external")
+            ),
+            "read_only": read_only,
             "max_tasks": max_tasks if manage_worker else None,
             "max_browser_tasks": max_browser_tasks if manage_worker else None,
             "rules_configured": rules is not None and rules.is_dir(),
+            "builds_readable": build_manager is not None,
+            "builds_available": (
+                build_manager is not None
+                and not builds_disabled
+                and not read_only
+            ),
             "legacy_ui": "enabled" if legacy_ui_enabled else "disabled",
         }
 

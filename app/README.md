@@ -136,7 +136,7 @@ python -m uv run --project app ecom-crawler validate --task-result /path/to/task
 - `audit-content` 用渲染后的商品区文本和截图抽样核对规则提取覆盖：输出 `visual-audit.json`、未覆盖文本块和整页截图；这是人工审计工具，不替代批量提取。
 - `run` 的退出码表示任务是否实际执行；业务结论看 `task-result.json` 的 `outcome`。计划或用法错误返回 2。
 - `run` 是一次性入口，不提供可恢复的控制；需要暂停／恢复／取消时用 `submit` 入队，再在另一个 shell 运行 `worker`，用 `pause`／`resume`／`cancel` 控制。外部暂停 `run` 任务后，`run` 以 2 退出并提示用 `worker` 恢复。
-- `serve` 只绑定回环地址，默认启动托管 worker（持有 worker 单实例锁）；`--no-worker` 只提供 API／页面，执行由独立 `worker` 进程负责。页面关闭不会停止后台。
+- `serve` 只绑定回环地址，默认启动托管 worker（持有 worker 单实例锁）；`--no-worker` 只提供 API／页面，执行由独立 `worker` 进程负责，写接口仍然可用；`--read-only` 要求账本已存在，不启动 worker，不创建可写构建管理，所有非 `GET`／`HEAD`／`OPTIONS` 请求返回 403 `READ_ONLY`，SQLite 以 `mode=ro` 和 `PRAGMA query_only=ON` 打开。页面关闭不会停止后台。
 - 出口代理按任务或进程传入：`--proxy`、`ECOM_FETCH_PROXY`、`ECOM_BUILD_PROXY`；构建 API 的 `proxy` 会写入构建记录和站点，后续批次任务沿用。代理 URL 不接受凭据，API 展示会遮蔽 userinfo。
 - 构建 trace 默认不保存 reasoning；需要本地复盘时用 `ECOM_BUILD_CAPTURE_REASONING=1` 启动服务，或在构建 API 传 `capture_reasoning=true`。trace 会截断工具输出、消息和 reasoning，不保存原始导出或整页 HTML。
 - 站点详情的“模型输出”读取 `/api/builds/{id}/messages`：构建中显示流式时间线，结束后显示完整可见消息；`timeline` 按时间合并思考、工具调用和文本。reasoning 仅在显式保留时出现；未保留时页面会提示服务端开关和单次勾选条件。
@@ -144,6 +144,8 @@ python -m uv run --project app ecom-crawler validate --task-result /path/to/task
 - 旧版退役：旧 Vue `/batch` 与旧原生控制台入口（`/legacy`、`/static/index.html`）默认关闭并 307 到 `/next/`，`/api/health.legacy_ui` 显示 `disabled`；设置 `ECOM_LEGACY_UI=on` 可临时恢复直访回退。v2 构建缺失且旧版关闭时，根路径返回 503 `UI_NOT_BUILT`，不回退到旧静态页面。v1 API 和数据不受影响。构建时间线和任务时间线在 SSE 断开后按 3／6／9 秒重试，最多 3 次，同时继续轮询；`end` 事件后不再重连。
 - 规则账本迁移：服务停止后运行 `python -m ecom_crawler.migrate_rules --db <tasks.db> --rules-dir <rules>`；默认写 `<db>.migration-<timestamp>.json`，`--report` 可指定路径，`--dry-run` 只扫描。命令回填 `site_rules`、`rule_versions`、任务规则哈希和构建目标版本，不覆盖已有站点指针或版本，可重复执行；旧构建的 `change_summary`／validation 保持空对象，不伪造历史验证。
 - 自动修复：默认允许 1 轮，`ECOM_BUILD_MAX_REPAIR_ROUNDS` 可调整（0 关闭），`ECOM_BUILD_REPAIR_SECONDS` 控制每轮额外时间（默认 240 秒）。构建 API 可传 `repair_rounds` 单次覆盖；验证失败时用同一 OpenCode 会话继续提示，并重跑静态预检与主机验证。轮次、错误和是否解决写入构建状态与 trace。
+- 单次构建时间预算：构建 API 的 `max_seconds` 写入构建任务，watcher 以该值计算截止时间；`ECOM_BUILD_MAX_SECONDS` 只在请求未带预算时作为默认值。超时后取消会话，构建记录以 `build exceeded the wall-clock budget (<n>s)` 失败。
+- 构建子进程环境隔离：`ECOM_BUILD_ISOLATE_ENV=1` 时 `opencode serve` 只继承 OS／运行时基础变量和显式 `env`，不继承宿主 tokens、会话和浏览器凭据；provider 认证需放在该账号自己的 OpenCode 配置中。该开关尚未用真实模型验证，默认关闭。
 - 构建预检：`executor/preflight.py` 在联网验证前编译规则里的所有 lxml CSS 选择器；`:not(:first-of-type)` 这类 lxml 不支持的写法会在预检阶段直接报出，而不是等到商品页全部 `plan_error`。
 - 页面存档：`--archive-mode off|sample|full`、`--archive-root`、`--archive-sample-limit`、`--archive-max-bytes`、`--archive-reuse` 和 `--offline`；批次启动 API/UI 也支持同名参数。`sample` 默认只存有限页数，用于规则复验；`full` 保存所有响应，`--offline` 仅对 `full` 有效。存档为 `<archive-root>/<host>/<url-hash>.html.gz` + `.json` 元数据和 `index.jsonl`，不保存图片／字体资源。
 - 构建样例存档：构建面板勾选后，主机抓取 `evidence.sample_urls` 和入口／分类页到 archive；验证时优先复用。真实 bennytex 构建中预取 18 页、验证复用 14 次、只补抓 7 页。
@@ -283,7 +285,8 @@ runtime:
 ## Web 服务（serve）
 
 - `serve` 用 FastAPI 托管 `/api/*` 和 `static/`，默认 `127.0.0.1:8765`，拒绝非回环地址；`--rules-dir` 指向受管规则包目录。
-- 默认启动托管 worker（`--max-tasks` 默认 1），持有 `<db>.worker.lock`；`--no-worker` 可只读启动，便于另跑 `worker`。
+- 默认启动托管 worker（`--max-tasks` 默认 1），持有 `<db>.worker.lock`；`--no-worker` 只跳过托管 worker，写接口仍可用，便于另跑 `worker`。
+- `--read-only` 用于只读预览：要求账本已存在，不启动 worker，不运行构建启动对账／关闭调度，拒绝所有写请求（403 `READ_ONLY`），并以 SQLite `mode=ro` 加 `PRAGMA query_only=ON` 打开账本。`/api/health` 返回 `read_only=true`、`worker=read-only`、`builds_readable=true`、`builds_available=false`；构建历史可读，构建写操作为 403。
 - 只读 API：`GET /api/health`、`GET /api/rules`、`GET /api/tasks`（支持 `state`、`task_type`、`batch_id`、`site_key`、`include_archived`）、`GET /api/tasks/{id}`、`GET /api/tasks/{id}/items?kind=url|product`、`GET /api/tasks/{id}/export`；质量反馈：`GET /api/tasks/{id}/feedback`、`GET /api/feedback`、`GET /api/feedback/{id}`；批次与构建：`GET /api/batches`、`/api/batches/{id}`、`/api/builds`、`/api/builds/config`、`/api/builds/{id}`、`/api/builds/{id}/messages`、`/api/builds/{id}/events`、`/api/builds/{id}/trace`。
 - 写 API：`POST /api/tasks`（`DRAFT` + `request_id` 幂等）、`start`、`pause`、`resume`、`cancel`、`archive`、`restore`；质量反馈：`POST /api/tasks/{id}/feedback`、`POST /api/feedback/{id}/triage`；批次与构建：`POST /api/batches`、`/api/batches/{id}/import|start|pause|cancel|archive|restore`、`/api/batches/{id}/sites/{site_key}/build`、`/api/builds/{id}/pause|resume|cancel|continue`、`/api/builds/{id}/permissions|dependencies/{request_id}`。
 - `GET /api/openapi.json` 暴露 FastAPI OpenAPI；提交快照为 `app/schemas/openapi.json`，用 `python -m uv run --project app python app/tools/export_openapi.py` 重新生成，`tests/test_feedback.py` 会校验快照。前端用 `openapi-typescript` 从 `../schemas/openapi.json` 生成类型，不手写第二份接口契约；生成物不手改。

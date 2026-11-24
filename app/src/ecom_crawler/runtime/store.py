@@ -359,17 +359,39 @@ class RuleActivationNotFoundError(ValueError):
 
 
 class TaskStore:
-    def __init__(self, path: str | Path) -> None:
+    def __init__(self, path: str | Path, *, read_only: bool = False) -> None:
         self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._init_schema()
+        self.read_only = read_only
+        if read_only:
+            if not self.path.is_file():
+                raise FileNotFoundError(
+                    f"read-only task ledger does not exist: {self.path}"
+                )
+        else:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self._init_schema()
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
-        connection = sqlite3.connect(self.path, timeout=30, isolation_level=None)
+        if self.read_only:
+            # mode=ro refuses writes even if a handler forgets to check the
+            # flag; query_only is a second guard on the same connection.
+            connection = sqlite3.connect(
+                f"{self.path.resolve().as_uri()}?mode=ro",
+                uri=True,
+                timeout=30,
+                isolation_level=None,
+            )
+        else:
+            connection = sqlite3.connect(
+                self.path, timeout=30, isolation_level=None
+            )
         connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA journal_mode=WAL")
+        if not self.read_only:
+            connection.execute("PRAGMA journal_mode=WAL")
         connection.execute("PRAGMA busy_timeout=30000")
+        if self.read_only:
+            connection.execute("PRAGMA query_only=ON")
         try:
             yield connection
         finally:

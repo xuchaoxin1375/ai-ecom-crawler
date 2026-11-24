@@ -42,6 +42,7 @@ from .harness import (
     BuildWorkspace,
     HarnessEvent,
     OpenCodeHttpAdapter,
+    OpenCodeServer,
 )
 from .harness.adapter import BuildSession
 from .harness.dependencies import (
@@ -871,14 +872,22 @@ class BuildManager:
         skills_dir: str | Path | None = None,
         extra_permissions: list[dict[str, Any]] | None = None,
         dependency_policy: DependencyPolicy | None = None,
+        isolate_env: bool | None = None,
+        read_only: bool = False,
     ) -> None:
         self.store = store
         self.out_root = Path(out_root)
+        self.read_only = read_only
         self.rules_dir = Path(rules_dir)
         self.workspace_root = self.out_root / "builds"
         self.skills_dir = Path(skills_dir) if skills_dir is not None else None
         self.extra_permissions = normalize_permission_rules(extra_permissions)
         self.dependency_policy = dependency_policy or dependency_policy_from_env()
+        self.isolate_env = (
+            isolate_env
+            if isolate_env is not None
+            else os.environ.get("ECOM_BUILD_ISOLATE_ENV") == "1"
+        )
         self.model = model if model is not None else default_model()
         self.default_proxy = (
             default_proxy
@@ -980,6 +989,14 @@ class BuildManager:
                 dependency_policy=self.dependency_policy,
                 event_timeout=event_timeout,
                 capture_reasoning=self.reasoning_capture_enabled,
+                server=(
+                    OpenCodeServer(
+                        cwd=self.workspace_root,
+                        inherit_env=False,
+                    )
+                    if self.isolate_env
+                    else None
+                ),
             )
         self.adapter = adapter
         self.service = BuildService(adapter)
@@ -1028,7 +1045,7 @@ class BuildManager:
 
     def ensure_site_rule(self, site_key: str) -> SiteRule | None:
         current = self.store.get_site_rule(site_key)
-        if current is not None:
+        if current is not None or self.read_only:
             return current
         site = self.store.latest_batch_site_rule(site_key)
         if site is None:
@@ -1056,6 +1073,8 @@ class BuildManager:
         feedback_id: str | None = None,
         request_id: str | None = None,
     ) -> BuildRecord:
+        if self.read_only:
+            raise BuildError("build manager is read-only")
         if site.readiness in {"invalid", "duplicate"}:
             raise BuildError("invalid or duplicate sites cannot be built")
         if not repair and site.task_id:
@@ -1084,7 +1103,10 @@ class BuildManager:
                 ).hexdigest()
         entry_url = _entry_url(site)
         product_budget = max(1, int(max_products or self.max_products))
-        second_budget = max(60, int(max_seconds or self.max_seconds))
+        # Per-build budgets must be honored exactly; the web API already
+        # enforces its own minimum, while tests and internal callers may need
+        # a short budget to verify the deadline behavior.
+        second_budget = max(1, int(max_seconds or self.max_seconds))
         resolved_proxy = (proxy or site.proxy or self.default_proxy or "").strip() or None
         if resolved_proxy:
             _validate_proxy(resolved_proxy)
@@ -1296,7 +1318,7 @@ class BuildManager:
             1, int(request.get("max_products") or self.max_products)
         )
         second_budget = max(
-            60, int(request.get("max_seconds") or self.max_seconds)
+            1, int(request.get("max_seconds") or self.max_seconds)
         )
         archive = dict(request.get("archive") or {})
         catalog = dict(request.get("catalog") or {})
@@ -1430,6 +1452,8 @@ class BuildManager:
 
     def _drain_queue(self) -> None:
         """Start the oldest queued build when the single slot is free."""
+        if self.read_only:
+            return
         if os.environ.get("ECOM_BUILD_DISABLED") == "1":
             return
         while not self._stopping.is_set():
@@ -2076,10 +2100,19 @@ domain-mismatched, or produces no valid product.
         thread.start()
 
     def _watch(self, build_id: str) -> None:
-        deadline = time.monotonic() + self.max_seconds
         record = self.store.get_build(build_id)
         if record is None:
             return
+        # The build record carries its own wall-clock budget.  Using the
+        # global default here made the per-build limit advisory: a 60-second
+        # build would keep the manager's 600-second deadline or vice versa.
+        budget = max(
+            1,
+            int(
+                (record.request or {}).get("max_seconds") or self.max_seconds
+            ),
+        )
+        deadline = time.monotonic() + budget
         try:
             while not self._stopping.is_set():
                 record = self.store.get_build(build_id)
@@ -2107,7 +2140,10 @@ domain-mismatched, or produces no valid product.
                             error=f"build timed out and cancel failed: {exc}",
                         )
                         return
-                    self._finalize(build_id, error="build exceeded the wall-clock budget")
+                    self._finalize(
+                        build_id,
+                        error=f"build exceeded the wall-clock budget ({budget}s)",
+                    )
                     return
                 self._auto_approve(build_id, session)
                 if session.state != record.state:
@@ -3616,6 +3652,8 @@ domain-mismatched, or produces no valid product.
         builds become ``FINISHED`` / ``interrupted`` and can be continued
         explicitly from the build page; they do not hold the queue slot.
         """
+        if self.read_only:
+            return []
         interrupted: list[str] = []
         for record in self.store.list_builds(states=RUNNING_BUILD_STATES, limit=500):
             if record.state == "CANCELLING":
@@ -3724,6 +3762,8 @@ domain-mismatched, or produces no valid product.
 
     def shutdown(self) -> None:
         self._stopping.set()
+        if self.read_only:
+            return
         records = {
             record.build_id: record
             for record in self.store.list_builds(

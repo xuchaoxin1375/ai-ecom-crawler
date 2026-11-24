@@ -4,6 +4,7 @@ import io
 import json
 import os
 import shutil
+import sqlite3
 import tempfile
 import unittest
 import zipfile
@@ -160,6 +161,50 @@ class WebApiTests(unittest.TestCase):
             index = self.client.get("/", follow_redirects=False)
             self.assertEqual(index.status_code, 503)
             self.assertEqual(index.json()["error"]["code"], "UI_NOT_BUILT")
+
+    def test_read_only_mode_rejects_writes_and_opens_ledger_read_only(self) -> None:
+        app = create_app(
+            self.db_path, self.out_root, self.rules_dir, read_only=True
+        )
+        self.assertTrue(app.state.read_only)
+        self.assertFalse(app.state.worker_managed)
+        self.assertIsNotNone(app.state.build_manager)
+        self.assertTrue(app.state.build_manager.read_only)
+        with TestClient(app, headers=CLIENT_HEADERS) as client:
+            health = client.get("/api/health")
+            self.assertEqual(health.status_code, 200, health.text)
+            body = health.json()
+            self.assertTrue(body["read_only"])
+            self.assertEqual(body["worker"], "read-only")
+            self.assertFalse(body["builds_available"])
+            self.assertTrue(body["builds_readable"])
+            self.assertEqual(client.get("/api/batches").status_code, 200)
+            self.assertEqual(client.get("/api/builds").status_code, 200)
+            created = client.post(
+                "/api/batches",
+                json={"name": "blocked", "market": "FR"},
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(created.status_code, 403, created.text)
+            self.assertEqual(created.json()["error"]["code"], "READ_ONLY")
+            paused = client.post(
+                "/api/batches/b-1/pause",
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(paused.status_code, 403, paused.text)
+        store = TaskStore(self.db_path, read_only=True)
+        with self.assertRaises(sqlite3.OperationalError):
+            store.update_task("task-1", state="PAUSED")
+
+    def test_read_only_mode_cannot_manage_worker(self) -> None:
+        with self.assertRaises(ValueError):
+            create_app(
+                self.db_path,
+                self.out_root,
+                self.rules_dir,
+                manage_worker=True,
+                read_only=True,
+            )
 
     def test_legacy_ui_can_be_reenabled_by_env(self) -> None:
         with mock.patch.dict(os.environ, {"ECOM_LEGACY_UI": "on"}):

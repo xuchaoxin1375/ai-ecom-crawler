@@ -253,7 +253,7 @@ def build_parser() -> argparse.ArgumentParser:
     audit.add_argument("--timeout-ms", type=int, default=45000)
     serve = subparsers.add_parser(
         "serve",
-        help="serve the read-only local web UI and API",
+        help="serve the local web UI and API",
     )
     serve.add_argument("--db", required=True, type=Path, help="SQLite task ledger")
     serve.add_argument("--out-root", required=True, type=Path, help="task output root")
@@ -272,7 +272,18 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument(
         "--no-worker",
         action="store_true",
-        help="serve only; do not start an in-process worker",
+        help=(
+            "do not start an in-process worker; API writes remain enabled "
+            "for an external worker"
+        ),
+    )
+    serve.add_argument(
+        "--read-only",
+        action="store_true",
+        help=(
+            "reject all write requests and build scheduling; requires an "
+            "existing ledger and does not create a worker or build manager"
+        ),
     )
     serve.add_argument(
         "--max-tasks",
@@ -358,6 +369,10 @@ def _serve(args: argparse.Namespace) -> int:
             raise ContractError("--host must be localhost or a loopback address") from exc
         if not address.is_loopback:
             raise ContractError("--host must be a loopback address")
+    if args.read_only and not args.db.is_file():
+        raise ContractError(
+            f"--read-only requires an existing task ledger: {args.db}"
+        )
     import uvicorn
 
     from .web.app import create_app
@@ -366,19 +381,29 @@ def _serve(args: argparse.Namespace) -> int:
         args.db,
         args.out_root,
         args.rules_dir,
-        manage_worker=not args.no_worker,
+        manage_worker=not args.no_worker and not args.read_only,
         max_tasks=args.max_tasks,
         max_browser_tasks=args.max_browser_tasks,
         per_domain_rps=args.per_domain_rps,
         lease_ttl_seconds=args.lease_ttl,
         heartbeat_interval=args.heartbeat_interval,
         proxy=args.proxy,
+        read_only=args.read_only,
     )
-    mode = "read-only" if args.no_worker else "managed worker"
-    if args.allow_multi_worker:
+    if args.read_only:
+        mode = "read-only"
+    elif args.no_worker:
+        mode = "external worker"
+    else:
+        mode = "managed worker"
+    if args.allow_multi_worker and not args.read_only:
         mode += ", shared ledger"
     print(f"serving http://{host}:{args.port} ({mode})")
-    lock = nullcontext() if args.no_worker or args.allow_multi_worker else worker_lock(args.db)
+    lock = (
+        nullcontext()
+        if args.read_only or args.no_worker or args.allow_multi_worker
+        else worker_lock(args.db)
+    )
     with lock:
         uvicorn.run(app, host=host, port=args.port, log_level="info")
     return 0
