@@ -18,6 +18,7 @@ def main() -> None:
     target.write_text(
         json.dumps(schema, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
+        newline="\n",
     )
     print(target)
 
