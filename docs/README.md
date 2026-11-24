@@ -74,7 +74,7 @@ updated: 2026-11-25
 | 按需 | [未见站构建试点计划](38-未见站构建试点计划.md) | 3 个未见站的固定模型、预算、执行步骤、失败分类、成功判据和成本记录口径；Proposed，待费用和隔离确认 |
 | 按需 | [站点详情改版设计](39-站点详情改版设计.md) | 推广计划阶段 2 的首屏结构、操作位置、状态表、视图去向、深链接和已确认决策；可浏览 HTML 草稿在 `experiments/d08/site-detail-prototype/`；Accepted，已实现待验收 |
 | 按需 | [任务详情改版设计](40-任务详情改版设计.md) | 推广计划阶段 3 的首屏结构、操作位置、状态表、视图去向、深链接和已确认决策；可浏览 HTML 草稿在 `experiments/d08/task-detail-prototype/`；Accepted，已实现 |
-| 按需 | [构建详情与全局导航改版设计](41-构建详情与全局导航改版设计.md) | 推广计划阶段 4 的构建首屏、审批、继续／重新构建、验证／修复／日志视图、侧栏分组和已确认决策；可浏览 HTML 草稿在 `experiments/d08/build-detail-prototype/`；Accepted，已实现待验收 |
+| 按需 | [构建详情与全局导航改版设计](41-构建详情与全局导航改版设计.md) | 推广计划阶段 4 的构建首屏、审批、继续／重新构建、验证／修复／日志视图、侧栏分组和已确认决策；可浏览 HTML 草稿在 `experiments/d08/build-detail-prototype/`；Accepted，已实现并验收 |
 | 按需 | [方案 manifest JSON Schema](schema/manifest.schema.json) | 规则包（`rule_*`）与方案包（`plan_*`）的机器可校验结构；跨字段约束仍由执行器校验 |
 | 按需 | [系统 v2 规则／反馈 DDL](schema/v2-rules-feedback.sql) | 质量反馈、规则版本、站点规则指针和激活审计的 SQLite 建表／加列参考；迁移由 `TaskStore._init_schema()` 条件执行 |
 | 按需 | [系统 v2 构建变更摘要 Schema](schema/v2-build-change-summary.schema.json) | 修复构建 `change_summary` 的机器可校验结构；主机验证后记录 |
