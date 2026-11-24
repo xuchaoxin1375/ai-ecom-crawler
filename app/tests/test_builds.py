@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import csv
+import hashlib
+import io
 import json
 import os
 import queue
@@ -8,6 +11,7 @@ import tempfile
 import threading
 import time
 import unittest
+import zipfile
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -40,7 +44,9 @@ from ecom_crawler.runtime.models import (
     Task,
 )
 from ecom_crawler.runtime.store import TaskStore
+from ecom_crawler.runtime.worker import Worker
 from ecom_crawler.web.app import create_app
+from tests.test_execution import RULE_TEMPLATE, fixture_server
 
 CLIENT_HEADERS = {
     "Host": "127.0.0.1:8765",
@@ -856,6 +862,140 @@ class BuildWorkflowTests(unittest.TestCase):
             self.assertEqual(task.input["archive"]["mode"], "sample")
             self.assertEqual(task.input["archive"]["sample_limit"], 5)
             self.assertEqual(task.limits["max_products"], 100)
+
+    def test_pilot_rehearsal_validates_six_and_exports_ten(self) -> None:
+        site = "pilot-fixture.test"
+        origin = f"http://{site}"
+        good_rule = yaml.safe_load(RULE_TEMPLATE.replace("__BASE__", origin))
+        bad_rule = yaml.safe_load(RULE_TEMPLATE.replace("__BASE__", origin))
+        bad_rule["discovery"]["link_selector"] = "a.product:not(:first-of-type)"
+        adapter = FakeBuildAdapter(self.root, rule_payloads=[bad_rule, good_rule])
+        with (
+            mock.patch.dict(
+                os.environ,
+                {
+                    "ECOM_BUILD_DISABLED": "0",
+                    "ECOM_FETCH_PROXY": "",
+                    "NO_PROXY": "127.0.0.1",
+                    "no_proxy": "127.0.0.1",
+                },
+            ),
+            fixture_server(products=10, proxy_origin=origin) as proxy,
+        ):
+            manager = BuildManager(
+                self.store,
+                self.root / "out",
+                self.rules,
+                adapter=adapter,
+                model={"providerID": "fake", "id": "fixture"},
+                default_proxy=proxy,
+                max_products=6,
+                validation_seconds=120,
+                max_repair_rounds=1,
+                repair_seconds=240,
+                activation_mode="manual",
+                skills_dir=self.root / "skills",
+                dependency_policy=DependencyPolicy.empty(),
+            )
+            self.addCleanup(self._stop_manager, manager, adapter)
+            with self._client(manager) as client:
+                created = client.post(
+                    "/api/batches",
+                    json={"name": "Offline pilot", "market": "GB", "sites": [origin]},
+                )
+                self.assertEqual(created.status_code, 201, created.text)
+                batch = created.json()["batch"]["batch_id"]
+                site_path = f"/api/batches/{batch}/sites/{site}"
+                started = client.post(
+                    f"{site_path}/build",
+                    json={"max_products": 6, "max_seconds": 600, "repair_rounds": 1},
+                )
+                self.assertEqual(started.status_code, 202, started.text)
+                build_id = started.json()["build"]["build_id"]
+                build = self._wait_ready(client, build_id, timeout=25)
+                self.assertEqual(build["outcome"], "succeeded", build["error"])
+                self.assertEqual(len(build["repairs"]), 1)
+                self.assertTrue(build["repairs"][0]["resolved"])
+                validation = build["validation"]
+                self.assertEqual(validation["status"], "PASSED", validation)
+                smoke = validation["candidate_smoke"]
+                self.assertTrue(smoke["executed"])
+                self.assertEqual(smoke["valid_products"], 6)
+                self.assertEqual(smoke["failed_products"], 0)
+                self.assertEqual(smoke["currencies"], {"GBP": 6})
+
+                active = self.store.get_site_rule(site)
+                self.assertIsNotNone(active)
+                assert active is not None
+                digest = hashlib.sha256((self.rules / active.path).read_bytes()).hexdigest()
+                self.assertEqual(digest, active.sha256)
+                self.assertEqual(active.rule_version, good_rule["rule_version"])
+                trace = client.get(f"/api/builds/{build_id}/trace?format=json")
+                self.assertEqual(trace.status_code, 200, trace.text)
+                trace_data = trace.json()
+                self.assertEqual(trace_data["build_id"], build_id)
+                self.assertEqual(trace_data["validation"]["status"], "PASSED")
+                self.assertEqual(len(trace_data["repairs"]), 1)
+
+                submitted = client.post(
+                    f"/api/batches/{batch}/start",
+                    json={"limits": {"max_products": 10, "max_seconds": 180, "max_attempts": 2}},
+                )
+                self.assertEqual(submitted.status_code, 202, submitted.text)
+                self.assertEqual(submitted.json()["skipped"], [])
+                accepted = submitted.json()["accepted"]
+                self.assertEqual(len(accepted), 1)
+                task_id = accepted[0]["task_id"]
+                queued = self.store.get_task(task_id)
+                assert queued is not None
+                self.assertEqual(queued.input.get("proxy"), proxy)
+                worker = Worker(self.store, out_root=self.root / "out", max_tasks=1)
+                worker.run_once(poll_interval=0.05)
+                self.assertEqual(worker.active_leases, {})
+                self.assertEqual(adapter.started, [build_id])
+                task = self.store.get_task(task_id)
+                self.assertIsNotNone(task)
+                assert task is not None
+                self.assertEqual((task.state, task.outcome), ("FINISHED", "COMPLETED"), task)
+                self.assertEqual((task.plan_version, task.rule_sha256), (active.rule_version, digest))
+
+                export = client.get(f"/api/batches/{batch}/export")
+                self.assertEqual(export.status_code, 200, export.text[:400])
+                with zipfile.ZipFile(io.BytesIO(export.content)) as archive:
+                    manifest = json.loads(archive.read("batch.json"))
+                    self.assertEqual(manifest["batch"]["batch_id"], batch)
+                    self.assertEqual(manifest["sites"][0]["task_id"], task_id)
+                    self.assertEqual(manifest["sites"][0]["export_status"], "complete")
+                    task_dir = self.root / "out" / task_id
+                    result_bytes = archive.read(f"sites/{site}/task-result.json")
+                    csv_bytes = archive.read(f"sites/{site}/products.csv")
+                    self.assertEqual(result_bytes, (task_dir / "task-result.json").read_bytes())
+                    self.assertEqual(csv_bytes, (task_dir / "products.csv").read_bytes())
+                counts = json.loads(result_bytes)["counts"]
+                self.assertEqual(counts["valid_products"], 10)
+                self.assertEqual(counts["failed_products"], 0)
+                rows = csv.DictReader(io.StringIO(csv_bytes.decode("utf-8-sig")))
+                self.assertEqual(
+                    rows.fieldnames,
+                    [
+                        "name", "price_amount", "price_currency", "primary_image_url",
+                        "description_html", "category", "brand", "attributes", "source_url",
+                    ],
+                )
+                products = list(rows)
+                self.assertCountEqual(
+                    [row["name"] for row in products], [f"Product {i}" for i in range(1, 11)]
+                )
+                exported = {row["name"]: row for row in products}
+                for i in range(1, 11):
+                    with self.subTest(product=i):
+                        row = exported[f"Product {i}"]
+                        self.assertEqual((row["price_amount"], row["price_currency"]), ("10.00", "GBP"))
+                        self.assertEqual(row["primary_image_url"], f"{origin}/img/{i}.jpg")
+                        self.assertEqual(row["source_url"], f"{origin}/p{i}.html")
+                        self.assertIn(f"Body {i}.", row["description_html"])
+                        self.assertEqual(row["category"], "Fixtures")
+                        self.assertEqual(row["brand"], "Fixture Brand")
 
     def test_repair_ready_site_uses_existing_rule(self) -> None:
         adapter = FakeBuildAdapter(

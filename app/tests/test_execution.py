@@ -10,6 +10,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from ecom_crawler.cli import main
 from ecom_crawler.execution import build_task, run_and_export, run_task
@@ -176,11 +177,31 @@ def product_html(base: str, index: int) -> str:
 
 
 @contextmanager
-def fixture_server() -> Iterator[str]:
+def fixture_server(*, products: int = 2, proxy_origin: str | None = None) -> Iterator[str]:
+    # For batch tests, serve an exact synthetic origin in HTTP proxy form.
+    # Requests are never forwarded, and other origins are never served.
+    fixture_indices = range(1, max(products, 3) + 1)
+    image_paths = {f"/img/{i}.jpg" for i in fixture_indices}
+    product_paths = {f"/p{i}.html": i for i in fixture_indices}
+    links = "".join(
+        f'<a class="product" href="/p{i}.html">Product {i}</a>' for i in range(1, products + 1)
+    )
+    listing = f"<html><body>{links}</body></html>".encode()
+
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             base = f"http://127.0.0.1:{self.server.server_port}"  # type: ignore[attr-defined]
-            if self.path in {"/img/1.jpg", "/img/2.jpg", "/img/3.jpg"}:
+            path = self.path
+            if proxy_origin is not None:
+                target = urlsplit(path)
+                if f"{target.scheme}://{target.netloc}" != proxy_origin:
+                    self.send_error(404)
+                    return
+                base = proxy_origin
+                path = target.path
+                if target.query:
+                    path += f"?{target.query}"
+            if path in image_paths:
                 # One-pixel GIF; the fixture uses .jpg URLs for extraction tests.
                 body = bytes.fromhex("47494638396101000100800000000000ffffff21f90401000000002c00000000010001000002024401003b")
                 self.send_response(200)
@@ -189,32 +210,25 @@ def fixture_server() -> Iterator[str]:
                 self.end_headers()
                 self.wfile.write(body)
                 return
-            if self.path == "/":
-                body = (
-                    b"<html><body>"
-                    b'<a class="product" href="/p1.html">One</a>'
-                    b'<a class="product" href="/p2.html">Two</a>'
-                    b"</body></html>"
-                )
+            if path == "/":
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(listing)))
+                self.end_headers()
+                self.wfile.write(listing)
+                return
+            if path in product_paths:
+                body = product_html(base, product_paths[path]).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
                 return
-            if self.path in {"/p1.html", "/p2.html", "/p3.html"}:
-                index = int(self.path[2])
-                body = product_html(base, index).encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-                return
-            if self.path in {"/list", "/list?p=2", "/list?p=3"}:
+            if path in {"/list", "/list?p=2", "/list?p=3"}:
                 page = 1
-                if "p=" in self.path:
-                    page = int(self.path.rsplit("=", 1)[1])
+                if "p=" in path:
+                    page = int(path.rsplit("=", 1)[1])
                 body = (
                     f"<html><body><a class='product' href='/p{page}.html'>P{page}</a>"
                     "</body></html>"
