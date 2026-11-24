@@ -752,6 +752,7 @@ class BuildManager:
             )
         self._repair_limits: dict[str, int] = {}
         self._repairs: dict[str, list[dict[str, Any]]] = {}
+        self._repair_pending: set[str] = set()
         self._trace_meta_cache: dict[str, dict[str, Any]] = {}
         self._archive_configs: dict[str, dict[str, Any]] = {}
         self._catalog_configs: dict[str, dict[str, Any]] = {}
@@ -1220,11 +1221,13 @@ class BuildManager:
         plan_dir.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(existing, plan_dir / "rule.yaml")
         runtime_task = self._runtime_task_evidence(site)
+        existing_versions = self._existing_rule_versions(site.rule_id)
         context = {
             "previous_readiness": site.readiness,
             "previous_rule_id": site.rule_id,
             "previous_rule_version": site.rule_version,
             "previous_rule_path": site.rule_path,
+            "existing_rule_versions": existing_versions,
             "reason": reason,
             "runtime_task": runtime_task,
         }
@@ -1233,13 +1236,38 @@ class BuildManager:
             encoding="utf-8",
         )
         (input_dir / "repair-brief.md").write_text(
-            self._repair_brief(batch, site, task, reason, runtime_task),
+            self._repair_brief(
+                batch,
+                site,
+                task,
+                reason,
+                runtime_task,
+                existing_versions=existing_versions,
+            ),
             encoding="utf-8",
         )
         (session.workspace.work_dir / "AGENTS.md").write_text(
             self._agent_rules(),
             encoding="utf-8",
         )
+
+    def _existing_rule_versions(self, rule_id: str | None) -> list[str]:
+        """Return managed versions so the repair agent can avoid collisions."""
+        if not rule_id:
+            return []
+        versions: set[str] = set()
+        prefix = f"{_safe_filename(rule_id)}-"
+        if self.rules_dir.is_dir():
+            for path in self.rules_dir.glob(f"{prefix}*.yaml"):
+                if path.stem.startswith(prefix):
+                    versions.add(path.stem[len(prefix) :])
+        try:
+            items, _ = self.store.list_rule_versions(rule_id, limit=500)
+        except Exception:  # evidence is best effort
+            logger.debug("rule version list failed", exc_info=True)
+        else:
+            versions.update(item.rule_version for item in items)
+        return sorted(versions, reverse=True)
 
     def _runtime_task_evidence(self, site: BatchSite) -> dict[str, Any]:
         """Summarize the site's current run so repair starts from real gaps."""
@@ -1301,6 +1329,8 @@ class BuildManager:
         task: BuildTask,
         reason: str,
         runtime_task: dict[str, Any] | None = None,
+        *,
+        existing_versions: list[str] | None = None,
     ) -> str:
         try:
             payload = yaml.safe_load(
@@ -1323,6 +1353,10 @@ class BuildManager:
         sample_lines = "\n".join(f"- {url}" for url in sample_urls)
         reason_text = reason.strip() or "Host content audit found description or field gaps."
         runtime_lines = _runtime_task_lines(runtime)
+        version_text = (
+            ", ".join(f"`{version}`" for version in existing_versions or [])
+            or "none recorded"
+        )
         robots_note = str(task.extra.get("robots_note") or "robots.txt not probed")
         robots_sitemaps = [
             str(url) for url in (task.extra.get("robots_sitemaps") or [])
@@ -1344,6 +1378,7 @@ from scratch. The previous rule is available at
 - Entry URL: `{task.site["entry_urls"][0]}`
 - Market / locale: `{batch.market or "unknown"}` / `{batch.language or "unknown"}`
 - Previous rule: `{site.rule_id or "?"}@{site.rule_version or "?"}`
+- Existing managed versions: {version_text}
 - Host validation sample: `{task.limits.get("max_products")}` products
 - Repair reason: {reason_text}
 
@@ -1373,7 +1408,8 @@ from scratch. The previous rule is available at
   when a present block is missing from the final HTML.
 - Keep specification tables in `description_html`; `options`/`attributes` are
   only for purchasable options.
-- Bump `rule_version` to a new unique value.
+- Bump `rule_version` to a new unique value that is not in the existing managed
+  versions list; the host rejects a collision.
 - Write `../out/evidence/build-notes.md` with what changed and the sample URLs
   you checked.
 
@@ -2112,9 +2148,11 @@ domain-mismatched, or produces no valid product.
         }
         rounds.append(entry)
         prompt = self._repair_prompt(round_number, limit, message, validation)
+        self._repair_pending.add(build_id)
         try:
             self.service.continue_after_finish(build_id, prompt)
         except Exception as exc:  # noqa: BLE001 - continuation boundary
+            self._repair_pending.discard(build_id)
             entry.update(
                 {
                     "finished_at": utc_now(),
@@ -2184,7 +2222,14 @@ domain-mismatched, or produces no valid product.
     def _mark_repair_finished(self, build_id: str, *, resolved: bool) -> None:
         rounds = self._repairs.get(build_id) or []
         if not rounds:
+            self._repair_pending.discard(build_id)
             return
+        if resolved and build_id not in self._repair_pending:
+            # A successful manual continuation is not the auto-repair round's
+            # result. Keep the round unresolved so the build page shows that
+            # the user-supplied instruction, not the automatic round, fixed it.
+            return
+        self._repair_pending.discard(build_id)
         last = rounds[-1]
         last.setdefault("finished_at", utc_now())
         last["resolved"] = resolved
@@ -2692,6 +2737,14 @@ domain-mismatched, or produces no valid product.
         with self._lock:
             if build_id in self._watchers:
                 raise BuildError(f"build {build_id} already has an active watcher")
+        # Manual continuation is outside the automatic repair budget. If the
+        # last auto-repair round failed, keep it visibly unresolved and let the
+        # continuation record explain how the build eventually succeeded.
+        self._repair_pending.discard(build_id)
+        rounds = self._repairs.get(build_id) or []
+        if rounds:
+            rounds[-1].setdefault("finished_at", utc_now())
+            rounds[-1]["resolved"] = False
         try:
             self.service.continue_after_finish(build_id, message)
         except Exception as exc:

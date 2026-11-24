@@ -738,6 +738,7 @@ class BuildWorkflowTests(unittest.TestCase):
                 )
             )
             self.assertEqual(context["previous_rule_version"], "2026.11.23-1")
+            self.assertIn("2026.11.23-1", context["existing_rule_versions"])
             runtime = context["runtime_task"]
             self.assertEqual(runtime["task_id"], "task-existing")
             self.assertEqual(runtime["state"], "FINISHED")
@@ -753,6 +754,8 @@ class BuildWorkflowTests(unittest.TestCase):
                 encoding="utf-8"
             )
             self.assertIn("## Current task evidence", brief)
+            self.assertIn("Existing managed versions", brief)
+            self.assertIn("2026.11.23-1", brief)
             self.assertIn("task-existing", brief)
             self.assertIn("valid_products 9", brief)
             self.assertIn("2 description gaps", brief)
@@ -944,6 +947,51 @@ class BuildWorkflowTests(unittest.TestCase):
             self.assertEqual(
                 not_failed.json()["error"]["code"], "BUILD_NOT_CONTINUABLE"
             )
+
+    def test_manual_continue_keeps_failed_auto_repair_unresolved(self) -> None:
+        adapter = FakeBuildAdapter(
+            self.root,
+            rule_payloads=[
+                invalid_selector_payload(),
+                invalid_selector_payload(),
+                rule_payload(),
+            ],
+        )
+        manager = self._manager(adapter, max_repair_rounds=1)
+        with self._client(manager) as client:
+            started = client.post(
+                "/api/batches/b-1/sites/example.fr/build",
+                json={"repair_rounds": 1},
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(started.status_code, 202, started.text)
+            build_id = started.json()["build"]["build_id"]
+            failed = self._wait_ready(client, build_id)
+            self.assertEqual(failed["outcome"], "failed", failed)
+            self.assertEqual(failed["repair_round"], 1)
+            self.assertFalse(failed["repairs"][0]["resolved"])
+            deadline = time.monotonic() + 5
+            while build_id in manager._watchers and time.monotonic() < deadline:
+                time.sleep(0.05)
+
+            response = client.post(
+                f"/api/builds/{build_id}/continue",
+                json={
+                    "request_id": "continue-after-auto-repair",
+                    "message": "use a valid selector",
+                },
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(response.status_code, 202, response.text)
+            result = self._wait_ready(client, build_id)
+            self.assertEqual(result["outcome"], "succeeded", result["error"])
+            self.assertEqual(result["repair_round"], 1)
+            self.assertFalse(result["repairs"][0]["resolved"])
+            self.assertEqual(len(adapter.continued), 2)
+            self.assertIn("automatic repair round 1", adapter.continued[0][1])
+            self.assertEqual(adapter.continued[1][1], "use a valid selector")
+            trace = client.get(f"/api/builds/{build_id}/trace?format=json").json()
+            self.assertFalse(trace["repairs"][0]["resolved"])
 
     def test_continue_requires_live_session(self) -> None:
         self.store.create_build(

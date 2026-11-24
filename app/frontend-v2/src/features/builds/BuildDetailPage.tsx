@@ -475,7 +475,9 @@ export function BuildDetailPage() {
               : "0",
             hint: build.repairs.some((item) => item.resolved)
               ? "至少一轮已解决"
-              : "主机验证失败才触发",
+              : build.repair_round
+                ? "自动轮次未解决"
+                : "主机验证失败才触发",
           },
           {
             label: "耗时",
@@ -573,7 +575,9 @@ export function BuildDetailPage() {
                   ? "实时 + trace"
                   : build.reasoning_live
                     ? "实时，不写 trace"
-                    : "已开启，等待输出"}
+                    : build.state === "FINISHED" || build.state === "CANCELLED"
+                      ? "已结束，未写入 trace"
+                      : "已开启，等待输出"}
             </dd>
           </div>
           <div>
