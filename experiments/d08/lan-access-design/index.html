@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>局域网访问 · 设计草稿</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231f5c4a'/%3E%3Cpath d='M14 21h36v5H14zm0 9h36v5H14zm0 9h23v5H14z' fill='white'/%3E%3C/svg%3E" />
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+        color: #1a1d19;
+        background: #f4f5f1;
+        font-size: 14px;
+        line-height: 1.55;
+        --ink: #1a1d19;
+        --ink-2: #4f564d;
+        --ink-3: #666d63;
+        --line: #e0e3da;
+        --line-strong: #c7cbc0;
+        --accent: #1f5c4a;
+        --accent-soft: #e4f0ea;
+        --muted: #f8f9f5;
+        --warning: #765000;
+        --warning-soft: #faf0d9;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; }
+      button, input, select { font: inherit; }
+      button, select, summary { cursor: pointer; }
+      button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible {
+        outline: 3px solid #4d9880;
+        outline-offset: 2px;
+      }
+      button:disabled, input:disabled { cursor: not-allowed; opacity: .57; }
+      [hidden] { display: none !important; }
+      p, h1, h2, h3, h4 { margin: 0; }
+      .preview-bar { background: #e9efe9; border-bottom: 1px solid #d1ddd2; }
+      .preview-inner { max-width: 1200px; margin: 0 auto; padding: 13px 24px; }
+      .preview-line { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 4px 18px; }
+      .preview-line strong { color: #173d31; font-size: 14px; }
+      .preview-line span { color: #40594b; font-size: 12px; }
+      .picker { display: flex; align-items: end; flex-wrap: wrap; gap: 12px 24px; margin-top: 12px; }
+      .picker-group { display: grid; gap: 5px; }
+      .picker-label { font-size: 12px; font-weight: 600; color: #42564b; }
+      .tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+      .tab, .small-button, .copy-button, .refresh { min-height: 32px; border: 1px solid var(--line-strong); border-radius: 4px; background: #fff; color: var(--ink); padding: 4px 11px; white-space: nowrap; }
+      .tab { color: #4f5e54; }
+      .tab[aria-selected="true"] { border-color: var(--accent); background: var(--accent); color: #fff; font-weight: 600; }
+      select { min-height: 32px; border: 1px solid var(--line-strong); border-radius: 4px; background: #fff; padding: 4px 28px 4px 9px; color: var(--ink); }
+      .stage { max-width: 1072px; margin: 0 auto; padding: 28px 24px 60px; }
+      .eyebrow { color: var(--ink-3); font-size: 12px; font-weight: 600; }
+      .page-head { display: flex; align-items: start; justify-content: space-between; gap: 16px; margin-bottom: 22px; }
+      h1 { margin-top: 3px; font-size: 24px; line-height: 1.3; font-weight: 650; }
+      .page-desc { margin-top: 6px; color: var(--ink-2); font-size: 14px; line-height: 1.6; }
+      .refresh { color: var(--ink-2); }
+      .mock-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: 5px; background: #fff; margin-bottom: 20px; }
+      .metric { min-width: 0; padding: 13px 16px; }
+      .metric + .metric { border-left: 1px solid var(--line); }
+      .metric-label { color: var(--ink-3); font-size: 12px; }
+      .metric-value { margin-top: 3px; font-weight: 600; font-size: 14px; }
+      .metric-hint { margin-top: 2px; color: var(--ink-3); font-size: 12px; overflow-wrap: anywhere; }
+      .sheet { background: #fff; border: 1px solid var(--line); border-radius: 5px; }
+      .sheet-head { padding: 16px 24px; border-bottom: 1px solid var(--line); }
+      .title-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+      h2 { font-size: 17px; line-height: 1.45; font-weight: 650; }
+      h3 { font-size: 14px; font-weight: 650; }
+      .badge { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 999px; background: #e7f3eb; color: #245e3b; font-size: 11px; font-weight: 600; white-space: nowrap; }
+      .badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+      .badge.off { background: #faf0d9; color: #765000; }
+      .badge.info { background: #edf1f1; color: #4f6059; }
+      .badge.info::before { display: none; }
+      .sheet-desc, .description { color: var(--ink-2); line-height: 1.65; }
+      .sheet-desc { margin-top: 4px; }
+      .description { margin-top: 3px; }
+      .columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+      .column { min-width: 0; padding: 20px 24px; }
+      .column + .column { border-left: 1px solid var(--line); }
+      .control-top, .key-top { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
+      .control-top > div, .key-top > div { min-width: 0; }
+      .switch { position: relative; flex: 0 0 44px; width: 44px; height: 24px; border: 0; border-radius: 999px; background: #a3aaa0; padding: 0; }
+      .switch::after { position: absolute; top: 3px; left: 3px; content: ""; width: 18px; height: 18px; border-radius: 50%; background: white; box-shadow: 0 1px 2px #0003; }
+      .switch[aria-checked="true"] { background: var(--accent); }
+      .switch[aria-checked="true"]::after { left: 23px; }
+      .small-button:hover:not(:disabled), .copy-button:hover:not(:disabled), .refresh:hover:not(:disabled) { background: var(--muted); }
+      .small-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+      .icon { width: 15px; height: 15px; flex: none; vertical-align: -3px; }
+      .help { margin-top: 10px; font-size: 12px; color: var(--ink-3); line-height: 1.7; }
+      .key-form { margin-top: 16px; }
+      .key-form label { display: block; margin-bottom: 7px; font-weight: 600; }
+      .input-row { display: flex; gap: 8px; flex-wrap: wrap; }
+      input { min-width: 150px; flex: 1 1 180px; height: 36px; padding: 6px 11px; border: 1px solid var(--line-strong); border-radius: 4px; color: var(--ink); background: #fff; }
+      input::placeholder { color: #6b746a; }
+      .notice { display: flex; align-items: start; gap: 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--muted); padding: 9px 11px; color: var(--ink-2); font-size: 12px; line-height: 1.65; }
+      .notice.warning { background: var(--warning-soft); border-color: #eadbae; color: var(--warning); }
+      .notice .icon { margin-top: 2px; }
+      .key-notice { margin-top: 16px; }
+      .logout { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px 12px; margin-top: 16px; border-top: 1px solid var(--line); padding-top: 12px; }
+      .logout p { flex: 1 1 210px; color: var(--ink-3); font-size: 12px; line-height: 1.6; }
+      .ghost { border-color: transparent; }
+      .subsection { border-top: 1px solid var(--line); margin-top: 18px; padding-top: 16px; }
+      .urls { display: grid; gap: 8px; margin-top: 10px; }
+      .url-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; min-width: 0; }
+      code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+      .url { min-width: 0; max-width: 100%; padding: 3px 7px; border-radius: 3px; background: #f5f6f2; color: #384f42; font-size: 12px; overflow-wrap: anywhere; }
+      .current { color: #315b70; background: #eaf2f6; border: 1px solid #c9dae3; border-radius: 999px; padding: 1px 7px; font-size: 11px; }
+      .copy-button { border-color: transparent; padding: 3px 6px; color: var(--ink-2); font-size: 12px; }
+      .host-details { margin-top: 12px; border: 1px solid var(--line); border-radius: 4px; color: var(--ink-2); }
+      .host-details summary { padding: 7px 10px; font-size: 12px; font-weight: 600; }
+      .hosts { display: flex; flex-wrap: wrap; gap: 5px; padding: 0 10px 10px; }
+      .hosts code { background: var(--muted); border-radius: 3px; padding: 2px 5px; font-size: 11px; }
+      .full-address { padding: 16px 24px; border-top: 1px solid var(--line); }
+      .guide { margin-top: 24px; }
+      .guide h4 { color: var(--ink-2); font-size: 12px; font-weight: 600; }
+      .guide ol { list-style: none; margin: 12px 0 0 9px; padding: 0 0 0 19px; border-left: 1px solid #c6d7ca; }
+      .guide li { position: relative; padding: 0 0 17px 8px; }
+      .guide li:last-child { padding-bottom: 0; }
+      .guide .number { position: absolute; left: -29px; top: 1px; display: grid; place-items: center; width: 18px; height: 18px; border: 1px solid #c6d7ca; border-radius: 50%; background: #fff; color: var(--accent); font-size: 10px; font-weight: 700; }
+      .guide strong { font-size: 13px; }
+      .guide p { color: var(--ink-3); font-size: 12px; line-height: 1.65; margin-top: 2px; }
+      .flat-row { display: grid; grid-template-columns: minmax(150px, 31%) minmax(0, 1fr); gap: 24px; padding: 18px 24px; }
+      .flat-row + .flat-row { border-top: 1px solid var(--line); }
+      .flat-body { min-width: 0; }
+      .flat-control { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+      .flat-control p { color: var(--ink-2); }
+      .flat-body .urls { margin-top: 0; }
+      .flat-body .key-top { align-items: center; }
+      .flat-body .key-form { margin-top: 12px; }
+      .flat-row .help:first-of-type { margin-top: 4px; }
+      .flat-key-bottom { border-top: 1px solid var(--line); padding: 14px 24px 16px; }
+      .flat-key-bottom .logout { margin-top: 10px; }
+      .demo-message { position: fixed; right: 20px; bottom: 20px; max-width: min(400px, calc(100vw - 40px)); padding: 10px 14px; border: 1px solid #bbcec0; border-radius: 4px; background: #f2f8f3; color: #244d35; box-shadow: 0 4px 14px #1a1d1914; font-size: 13px; }
+      @media (max-width: 720px) {
+        .preview-inner { padding: 12px 16px; }
+        .stage { padding: 22px 16px 48px; }
+        .mock-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .metric:nth-child(3) { border-left: 0; border-top: 1px solid var(--line); }
+        .metric:nth-child(4) { border-top: 1px solid var(--line); }
+        .columns { grid-template-columns: minmax(0, 1fr); }
+        .column + .column { border-left: 0; border-top: 1px solid var(--line); }
+        .sheet-head, .column, .full-address { padding-left: 16px; padding-right: 16px; }
+        .flat-row { grid-template-columns: minmax(0, 1fr); gap: 10px; padding: 16px; }
+        .flat-key-bottom { padding: 14px 16px 16px; }
+        .key-top { flex-wrap: wrap; }
+      }
+      @media (max-width: 380px) {
+        .page-head { flex-wrap: wrap; }
+        .tab { padding-inline: 8px; }
+        .preview-inner, .stage { padding-left: 12px; padding-right: 12px; }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="preview-bar">
+      <div class="preview-inner">
+        <div class="preview-line">
+          <strong>局域网访问 · 设计草稿</strong>
+          <span>示例数据，不连接真实服务；按钮与开关仅供演示，不会修改设置。</span>
+        </div>
+        <div class="picker">
+          <div class="picker-group">
+            <span class="picker-label" id="draft-label">设计方向</span>
+            <div class="tabs" role="tablist" aria-labelledby="draft-label">
+              <button class="tab" role="tab" id="tab-a" aria-controls="design-panel" data-draft="a">A 地址归位</button>
+              <button class="tab" role="tab" id="tab-b" aria-controls="design-panel" data-draft="b">B 行式分组</button>
+              <button class="tab" role="tab" id="tab-c" aria-controls="design-panel" data-draft="c">C 连接引导</button>
+            </div>
+          </div>
+          <label class="picker-group" for="scenario">
+            <span class="picker-label">示例状态</span>
+            <select id="scenario">
+              <option value="on">局域网已开启</option>
+              <option value="off">局域网已关闭</option>
+              <option value="loopback">仅监听本机</option>
+              <option value="readonly">只读预览</option>
+            </select>
+          </label>
+        </div>
+      </div>
+    </header>
+
+    <main class="stage">
+      <div class="page-head">
+        <div>
+          <div class="eyebrow">系统</div>
+          <h1>系统设置</h1>
+          <p class="page-desc">查看访问、认证、资源和运行状态；局域网开关与访问密钥修改会立即生效并写入本地账本，绑定地址和端口由启动参数决定。</p>
+        </div>
+        <button class="refresh" type="button" data-demo-action>↻ 刷新</button>
+      </div>
+      <div class="mock-metrics" aria-label="系统概览（示例）">
+        <div class="metric"><div class="metric-label">服务状态</div><div class="metric-value" id="service-state">正常</div><div class="metric-hint">版本 2026.11.25</div></div>
+        <div class="metric"><div class="metric-label">访问范围</div><div class="metric-value" id="metric-access"></div><div class="metric-hint" id="metric-bind">0.0.0.0:8765</div></div>
+        <div class="metric"><div class="metric-label">认证</div><div class="metric-value">登录页已启用</div><div class="metric-hint">上次轮换 2026-11-25 13:50</div></div>
+        <div class="metric"><div class="metric-label">活跃负载</div><div class="metric-value">0 任务</div><div class="metric-hint">0 构建 · 0 任务排队</div></div>
+      </div>
+      <div id="design-panel" role="tabpanel" tabindex="0"></div>
+    </main>
+
+    <div class="demo-message" id="demo-message" role="status" hidden></div>
+
+    <script>
+      const panel = document.querySelector('#design-panel');
+      const scenario = document.querySelector('#scenario');
+      const message = document.querySelector('#demo-message');
+      const tabs = [...document.querySelectorAll('[role="tab"]')];
+      let draft = ['a', 'b', 'c'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'a';
+      const icon = (paths) => `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
+      const keyIcon = icon('<circle cx="15.5" cy="8.5" r="4.5"/><path d="M12.2 11.8 3 21v-3.5l2-2h2v-2h2v-2h2"/>');
+      const copyIcon = icon('<rect x="8" y="8" width="11" height="12" rx="1.5"/><path d="M16 8V5a1.5 1.5 0 0 0-1.5-1.5h-9A1.5 1.5 0 0 0 4 5v10a1.5 1.5 0 0 0 1.5 1.5H8"/>');
+      const shieldIcon = icon('<path d="M12 3 5 6v5c0 4.8 2.9 7.6 7 10 4.1-2.4 7-5.2 7-10V6l-7-3Z"/><path d="m9 12 2 2 4-4"/>');
+      const logoutIcon = icon('<path d="M10 17v2H5V5h5v2M13 8l4 4-4 4M8 12h9"/>');
+
+      function state() {
+        const name = scenario.value;
+        return {
+          enabled: name === 'on' || name === 'readonly',
+          readonly: name === 'readonly',
+          loopback: name === 'loopback',
+          label: name === 'on' || name === 'readonly' ? '局域网开放' : name === 'loopback' ? '仅本机' : '局域网关闭',
+          reason: name === 'loopback' ? '当前仅监听回环地址，需重启。' : name === 'readonly' ? '只读预览不能修改访问设置。' : '',
+        };
+      }
+
+      function announce(text) {
+        message.textContent = text;
+        message.hidden = false;
+      }
+
+      function control(s, showTitle = true) {
+        return `<div class="control-top"><div>${showTitle ? '<h3>允许局域网访问</h3>' : ''}<p class="description">同一可信局域网内的设备可使用访问密钥连接。</p></div>
+          <button type="button" class="switch" role="switch" aria-label="允许局域网访问" aria-checked="${s.enabled}" ${s.reason ? 'disabled aria-describedby="switch-reason"' : ''} ${s.reason ? `title="${s.reason}"` : ''} data-switch></button></div>
+          ${s.reason ? `<p class="help" id="switch-reason">${s.reason}</p>` : ''}
+          ${s.loopback ? `<div class="notice warning" style="margin-top:16px"><span aria-hidden="true">!</span><div><strong>当前仅监听回环地址</strong><br>需重启并追加参数：<br><code>--host 0.0.0.0 --port 8765</code> <button class="copy-button" type="button" data-copy="--host 0.0.0.0 --port 8765">${copyIcon} 复制</button><br>重启后页面即可开关局域网。</div></div>` : ''}`;
+      }
+
+      function hosts() {
+        return `<details class="host-details"><summary>允许的 Host（8）</summary><div class="hosts"><code>localhost</code><code>127.0.0.1</code><code>::1</code><code>192.168.1.100</code><code>172.17.32.1</code><code>crawler-host</code><code>crawler-host.local</code><code>example.local</code></div></details>`;
+      }
+
+      function addresses(s, includeTitle = true) {
+        const local = `<div class="url-row"><code class="url">http://127.0.0.1:8765/next/</code><span class="current">当前</span><button class="copy-button" type="button" data-copy="http://127.0.0.1:8765/next/">${copyIcon} 复制</button></div>`;
+        const lan = `<div class="url-row"><code class="url">http://192.168.1.100:8765/next/</code>${s.enabled ? '<span class="current">当前</span>' : ''}<button class="copy-button" type="button" data-copy="http://192.168.1.100:8765/next/">${copyIcon} 复制</button></div>
+          <div class="url-row"><code class="url">http://172.17.32.1:8765/next/</code><button class="copy-button" type="button" data-copy="http://172.17.32.1:8765/next/">${copyIcon} 复制</button></div>`;
+        const rows = s.loopback ? local : s.enabled ? lan : local + lan;
+        return `${includeTitle ? '<h3>访问地址</h3>' : ''}<div class="urls">${rows}</div>${!s.enabled ? `<p class="help">${s.loopback ? '当前地址仅可在本机使用。' : '局域网访问已关闭，其他设备暂时无法访问。'}</p>` : ''}${hosts()}`;
+      }
+
+      function risk() {
+        return `<div class="notice">${shieldIcon}<span>局域网访问使用 HTTP 明文，仅适合可信网络；不要做公网端口映射或反向代理暴露。</span></div>`;
+      }
+
+      function logout() {
+        return `<div class="logout"><p>退出只清除当前浏览器；其他设备需要重新登录时轮换密钥。</p><button class="small-button ghost" type="button" data-demo-action>${logoutIcon} 退出登录</button></div>`;
+      }
+
+      function keyForm(s) {
+        return `<form class="key-form" data-key-form><label for="custom-key">自定义访问密钥</label><div class="input-row"><input id="custom-key" type="password" autocomplete="off" placeholder="1–256 个字符" ${s.readonly ? 'disabled' : ''}><button class="small-button" type="submit" ${s.readonly ? 'disabled' : ''}>保存密钥</button></div><p class="help">1–256 个字符，首尾空白会去掉；不强制大小写、数字或符号。</p></form>`;
+      }
+
+      function keyPanel(s) {
+        return `<div class="key-top"><div><h3>访问密钥</h3><p class="description">登录页认证已启用；上次轮换 2026-11-25 13:50。</p></div><button class="small-button" type="button" data-demo-action ${s.readonly ? 'disabled title="只读预览不能修改访问密钥"' : ''}>${keyIcon} 生成随机密钥</button></div>
+          <p class="help">随机密钥只显示一次；生成后所有设备都需要用新密钥重新登录。</p>
+          ${keyForm(s)}<p class="help">密钥只保存哈希；如果丢失，可用启动参数覆盖，或在本机重新设置。</p>
+          <div class="key-notice">${risk()}</div>${logout()}`;
+      }
+
+      function head(s) {
+        return `<header class="sheet-head"><div class="title-row"><h2>访问与认证</h2><span class="badge ${s.enabled ? '' : 'off'}">${s.label}</span><span class="badge info">登录页认证</span></div><p class="sheet-desc">局域网开关立即生效；访问密钥只保存哈希，页面不会再次显示旧密钥。</p></header>`;
+      }
+
+      function guide(s) {
+        const first = s.loopback ? '先按提示重启服务，再开启局域网访问。' : s.enabled ? '开关已开启；仅在可信局域网内使用。' : '先开启开关；仅在可信局域网内使用。';
+        return `<div class="guide"><h4>其他设备如何访问</h4><ol><li><span class="number">1</span><strong>开启局域网访问</strong><p>${first}</p></li><li><span class="number">2</span><strong>打开访问地址</strong><p>开启后复制局域网地址，在其他设备的浏览器中打开。</p></li><li><span class="number">3</span><strong>输入访问密钥</strong><p>使用当前访问密钥登录，进入工作台。</p></li></ol></div>`;
+      }
+
+      function layoutA(s) {
+        return `<section class="sheet">${head(s)}<div class="columns"><div class="column">${control(s)}<div class="subsection">${addresses(s)}${s.enabled ? '<p class="help">在其他设备的浏览器中打开地址，再输入访问密钥。</p>' : ''}</div></div><div class="column">${keyPanel(s)}</div></div></section>`;
+      }
+
+      function layoutB(s) {
+        return `<section class="sheet">${head(s)}
+          <div class="flat-row"><div><h3>允许局域网访问</h3><p class="help">控制其他设备能否访问。</p></div><div class="flat-body">${control(s, false)}</div></div>
+          <div class="flat-row"><div><h3>访问地址</h3><p class="help">${s.enabled ? '在其他设备上打开，再输入访问密钥。' : '开启局域网访问后供其他设备使用。'}</p></div><div class="flat-body">${addresses(s, false)}</div></div>
+          <div class="flat-row"><div><h3>访问密钥</h3><p class="help">登录页认证已启用；上次轮换 2026-11-25 13:50。</p><p class="help">密钥只保存哈希，不回显旧密钥。</p></div><div class="flat-body"><div class="key-top"><p class="description">随机密钥只显示一次；更换后所有设备需重新登录。</p><button class="small-button" type="button" data-demo-action ${s.readonly ? 'disabled title="只读预览不能修改访问密钥"' : ''}>${keyIcon} 生成随机密钥</button></div>${keyForm(s)}<p class="help">如果丢失密钥，可用启动参数覆盖，或在本机重新设置。</p></div></div>
+          <div class="flat-key-bottom">${risk()}${logout()}</div></section>`;
+      }
+
+      function layoutC(s) {
+        return `<section class="sheet">${head(s)}<div class="columns"><div class="column">${control(s)}${guide(s)}</div><div class="column">${keyPanel(s)}</div></div><div class="full-address">${addresses(s)}</div></section>`;
+      }
+
+      function render() {
+        const s = state();
+        document.querySelector('#metric-access').textContent = s.label;
+        document.querySelector('#metric-bind').textContent = `${s.loopback ? '127.0.0.1' : '0.0.0.0'}:8765`;
+        document.querySelector('#service-state').textContent = s.readonly ? '只读预览' : '正常';
+        tabs.forEach((tab) => {
+          const active = tab.dataset.draft === draft;
+          tab.setAttribute('aria-selected', String(active));
+          tab.tabIndex = active ? 0 : -1;
+        });
+        panel.setAttribute('aria-labelledby', `tab-${draft}`);
+        panel.innerHTML = draft === 'a' ? layoutA(s) : draft === 'b' ? layoutB(s) : layoutC(s);
+      }
+
+      function chooseDraft(next) {
+        draft = next;
+        history.replaceState(null, '', `#${draft}`);
+        message.hidden = true;
+        render();
+      }
+
+      tabs.forEach((tab, index) => {
+        tab.addEventListener('click', () => chooseDraft(tab.dataset.draft));
+        tab.addEventListener('keydown', (event) => {
+          if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+          event.preventDefault();
+          const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+          chooseDraft(tabs[next].dataset.draft);
+          tabs[next].focus();
+        });
+      });
+      scenario.addEventListener('change', () => { message.hidden = true; render(); });
+      window.addEventListener('hashchange', () => {
+        const requested = location.hash.slice(1);
+        if (['a', 'b', 'c'].includes(requested) && requested !== draft) {
+          draft = requested;
+          message.hidden = true;
+          render();
+        }
+      });
+      panel.addEventListener('click', async (event) => {
+        const switchButton = event.target.closest('[data-switch]');
+        const copyButton = event.target.closest('[data-copy]');
+        const demoButton = event.target.closest('[data-demo-action]');
+        if (switchButton) {
+          scenario.value = state().enabled ? 'off' : 'on';
+          render();
+          panel.querySelector('[data-switch]')?.focus();
+          announce('仅切换示例状态；正式页面关闭局域网时仍需确认。');
+        } else if (copyButton) {
+          try {
+            await navigator.clipboard.writeText(copyButton.dataset.copy);
+            announce('已复制示例内容；具体值以正式页面为准。');
+          } catch {
+            announce('无法自动复制。可手动选择示例地址复制。');
+          }
+        } else if (demoButton) {
+          announce('这是设计草稿，该操作不会执行或修改真实设置。');
+        }
+      });
+      panel.addEventListener('submit', (event) => {
+        if (event.target.matches('[data-key-form]')) {
+          event.preventDefault();
+          announce('这是设计草稿，不会保存或发送输入的内容。');
+        }
+      });
+      document.querySelector('.refresh').addEventListener('click', () => announce('这是设计草稿，不会读取真实服务。'));
+      render();
+    </script>
+  </body>
+</html>

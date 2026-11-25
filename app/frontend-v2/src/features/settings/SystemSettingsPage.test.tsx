@@ -139,6 +139,29 @@ describe("system settings", () => {
     );
   });
 
+  it("groups access addresses and allowed hosts with the LAN switch", async () => {
+    const address = "http://192.168.1.20:8765/next/";
+    const copy = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText: copy } });
+    stubFetch(systemInfo());
+    renderPage("/settings", "/settings", <SystemSettingsPage />);
+
+    const group = await screen.findByRole("group", { name: "局域网访问" });
+    expect(within(group).getByRole("switch", { name: "允许局域网访问" })).toBeVisible();
+    expect(within(group).getByRole("heading", { name: "访问地址" })).toBeVisible();
+    expect(within(group).getByText(address)).toBeVisible();
+    expect(
+      within(group).getByText("在可信局域网内的其他设备上打开地址，再输入访问密钥。"),
+    ).toBeVisible();
+    fireEvent.click(within(group).getByRole("button", { name: "复制访问地址" }));
+    await waitFor(() => expect(copy).toHaveBeenCalledWith(address));
+
+    const hosts = within(group).getByText("允许的 Host（1）");
+    fireEvent.click(hosts);
+    expect(within(group).getByText("192.168.1.20")).toBeVisible();
+    expect(screen.getAllByRole("heading", { name: "访问地址" })).toHaveLength(1);
+  });
+
   it("disables LAN access after confirmation", async () => {
     const fetchMock = stubFetch(systemInfo());
     renderPage("/settings", "/settings", <SystemSettingsPage />);
@@ -158,6 +181,9 @@ describe("system settings", () => {
     );
     expect(JSON.parse(String(put?.[1]?.body))).toEqual({ lan_enabled: false });
     expect(await screen.findByText("局域网访问已关闭。")).toBeVisible();
+    expect(
+      screen.getByText("局域网访问已关闭，开启后其他设备才能使用地址访问。"),
+    ).toBeVisible();
   });
 
   it("rotates the token and shows it once", async () => {
@@ -224,6 +250,12 @@ describe("system settings", () => {
 
     expect(await screen.findByText("当前仅监听回环地址")).toBeVisible();
     expect(screen.getByText("--host 0.0.0.0 --port 8765")).toBeVisible();
+    const group = screen.getByRole("group", { name: "局域网访问" });
+    expect(within(group).getByText("http://127.0.0.1:8765/next/")).toBeVisible();
+    expect(
+      within(group).getByText("当前仅监听回环地址；需重启后才能供其他设备访问。"),
+    ).toBeVisible();
+    expect(within(group).getByText("允许的 Host（0）")).toBeVisible();
     expect(screen.getByRole("switch", { name: "允许局域网访问" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "生成密钥" })).toBeEnabled();
   });

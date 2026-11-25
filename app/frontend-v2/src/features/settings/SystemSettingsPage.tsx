@@ -620,7 +620,11 @@ export function SystemSettingsPage() {
         </header>
 
         <div className="grid divide-y divide-line lg:grid-cols-2 lg:divide-x lg:divide-y-0">
-          <div className="space-y-4 px-4 py-5 sm:px-6">
+          <div
+            role="group"
+            aria-label="局域网访问"
+            className="min-w-0 space-y-4 px-4 py-5 sm:px-6"
+          >
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-ink">允许局域网访问</p>
@@ -658,7 +662,7 @@ export function SystemSettingsPage() {
                   <CopyButton value={restartFlags} label="重启参数" />
                 </div>
                 <p className="mt-2 text-xs">
-                  访问密钥保存在本地账本；若尚未配置，请先在右侧设置。重启后页面即可开关局域网。
+                  访问密钥保存在本地账本；若尚未配置，请先在访问密钥区域设置。重启后页面即可开关局域网。
                 </p>
               </InlineNotice>
             ) : null}
@@ -674,9 +678,55 @@ export function SystemSettingsPage() {
                 正在保存访问设置…
               </p>
             ) : null}
+            <div className="border-t border-line pt-4">
+              <h3 className="text-sm font-semibold text-ink">访问地址</h3>
+              <ul className="mt-2 space-y-2">
+                {access.urls.map((url) => (
+                  <li key={url} className="flex flex-wrap items-center gap-2">
+                    <code className="break-all rounded-control bg-surface-muted px-2 py-1 font-mono text-xs text-ink-2">
+                      {url}
+                    </code>
+                    {url.startsWith(currentOrigin()) ? (
+                      <Badge tone="info" dot={false}>
+                        当前
+                      </Badge>
+                    ) : null}
+                    <CopyButton value={url} label="访问地址" />
+                  </li>
+                ))}
+              </ul>
+              <details className="mt-3 rounded-control border border-line px-3 py-2">
+                <summary className="cursor-pointer text-xs font-medium text-ink-2">
+                  允许的 Host（{formatNumber(access.allowed_hosts.length)}）
+                </summary>
+                {access.allowed_hosts.length ? (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {access.allowed_hosts.map((host) => (
+                      <code
+                        key={host}
+                        className="rounded-control bg-surface-muted px-2 py-1 font-mono text-[11px] text-ink-3"
+                      >
+                        {host}
+                      </code>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-2 text-xs text-ink-3">
+                    没有额外的 Host；局域网能力需以非回环地址重启后建立。
+                  </p>
+                )}
+              </details>
+              <p className="mt-3 text-xs leading-5 text-ink-3">
+                {!access.lan_capable
+                  ? "当前仅监听回环地址；需重启后才能供其他设备访问。"
+                  : access.lan_enabled
+                    ? "在可信局域网内的其他设备上打开地址，再输入访问密钥。"
+                    : "局域网访问已关闭，开启后其他设备才能使用地址访问。"}
+              </p>
+            </div>
           </div>
 
-          <div className="space-y-4 px-4 py-5 sm:px-6">
+          <div className="min-w-0 space-y-4 px-4 py-5 sm:px-6">
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-ink">访问密钥</p>
@@ -780,46 +830,6 @@ export function SystemSettingsPage() {
               </div>
             ) : null}
           </div>
-        </div>
-
-        <div className="border-t border-line px-4 py-4 sm:px-6">
-          <h3 className="text-sm font-semibold text-ink">访问地址</h3>
-          <ul className="mt-2 space-y-2">
-            {access.urls.map((url) => (
-              <li key={url} className="flex flex-wrap items-center gap-2">
-                <code className="break-all rounded-control bg-surface-muted px-2 py-1 font-mono text-xs text-ink-2">
-                  {url}
-                </code>
-                {url.startsWith(currentOrigin()) ? (
-                  <Badge tone="info" dot={false}>
-                    当前
-                  </Badge>
-                ) : null}
-                <CopyButton value={url} label="访问地址" />
-              </li>
-            ))}
-          </ul>
-          <details className="mt-3 rounded-control border border-line px-3 py-2">
-            <summary className="cursor-pointer text-xs font-medium text-ink-2">
-              允许的 Host（{formatNumber(access.allowed_hosts.length)}）
-            </summary>
-            {access.allowed_hosts.length ? (
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {access.allowed_hosts.map((host) => (
-                  <code
-                    key={host}
-                    className="rounded-control bg-surface-muted px-2 py-1 font-mono text-[11px] text-ink-3"
-                  >
-                    {host}
-                  </code>
-                ))}
-              </div>
-            ) : (
-              <p className="mt-2 text-xs text-ink-3">
-                没有额外的 Host；局域网能力需以非回环地址重启后建立。
-              </p>
-            )}
-          </details>
         </div>
       </section>
 
