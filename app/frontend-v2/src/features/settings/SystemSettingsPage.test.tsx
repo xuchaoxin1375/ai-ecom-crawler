@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { SystemAccess, SystemInfo } from "../../lib/api";
+import type { SystemAccess, SystemInfo, SystemTokenResponse } from "../../lib/api";
 import { renderPage } from "../../test/renderPage";
 import { SystemSettingsPage } from "./SystemSettingsPage";
 
@@ -21,6 +21,7 @@ function systemInfo(
       auth_required: true,
       token_configured: true,
       token_updated_at: "2026-11-25T00:00:00Z",
+      session_ttl_seconds: 30 * 24 * 60 * 60,
       allowed_hosts: ["192.168.1.20"],
       urls: ["http://192.168.1.20:8765/next/"],
       ...access,
@@ -67,7 +68,7 @@ function stubFetch(
   initial: SystemInfo,
   handlers: {
     onAccess?: (body: { lan_enabled: boolean }) => SystemAccess;
-    onToken?: () => { token: string; access: SystemAccess };
+    onToken?: (body: { token?: string } | undefined) => SystemTokenResponse;
   } = {},
 ) {
   let current = initial;
@@ -85,17 +86,33 @@ function stubFetch(
       return Response.json({ access });
     }
     if (path === "/api/system/access/token" && init?.method === "POST") {
-      const result = handlers.onToken?.() ?? {
-        token: "new-token-0123456789",
-        access: {
-          ...current.server,
-          token_configured: true,
-          auth_required: true,
-          token_updated_at: "2026-11-25T01:00:00Z",
-        },
+      const body = init.body
+        ? (JSON.parse(String(init.body)) as { token?: string })
+        : undefined;
+      const defaultAccess = {
+        ...current.server,
+        token_configured: true,
+        auth_required: true,
+        token_updated_at: "2026-11-25T01:00:00Z",
       };
+      const result = handlers.onToken
+        ? handlers.onToken(body)
+        : body?.token
+          ? {
+              token: null,
+              generated: false,
+              access: defaultAccess,
+            }
+          : {
+              token: "new-token-0123456789",
+              generated: true,
+              access: defaultAccess,
+            };
       current = { ...current, server: result.access };
       return Response.json(result);
+    }
+    if (path === "/api/auth/logout" && init?.method === "POST") {
+      return Response.json({ ok: true });
     }
     throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url}`);
   });
@@ -112,7 +129,7 @@ describe("system settings", () => {
 
     expect(await screen.findByRole("heading", { name: "系统设置" })).toBeVisible();
     expect(screen.getAllByText("局域网开放").length).toBeGreaterThan(0);
-    expect(screen.getByText("Basic 已启用")).toBeVisible();
+    expect(screen.getByText("登录页已启用")).toBeVisible();
     expect(screen.getByText("12.0 MB")).toBeVisible();
     expect(screen.getByText("300 GB")).toBeVisible();
     expect(screen.getByText("~/data/tasks.db")).toBeVisible();
@@ -147,17 +164,45 @@ describe("system settings", () => {
     stubFetch(systemInfo());
     renderPage("/settings", "/settings", <SystemSettingsPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "轮换令牌" }));
+    fireEvent.click(await screen.findByRole("button", { name: "生成随机密钥" }));
     const confirm = await screen.findByRole("dialog", {
-      name: "轮换访问令牌？",
+      name: "生成随机访问密钥？",
     });
-    fireEvent.click(within(confirm).getByRole("button", { name: "生成新令牌" }));
+    fireEvent.click(within(confirm).getByRole("button", { name: "生成新密钥" }));
     const tokenDialog = await screen.findByRole("dialog", {
-      name: "新的访问令牌",
+      name: "新的访问密钥",
     });
     expect(within(tokenDialog).getByText("new-token-0123456789")).toBeVisible();
     fireEvent.click(within(tokenDialog).getByRole("button", { name: "稍后重新加载" }));
-    expect(await screen.findByText("访问令牌已更换")).toBeVisible();
+    expect(await screen.findByText("访问密钥已更换")).toBeVisible();
+  });
+
+  it("saves a custom access key and logs out", async () => {
+    const fetchMock = stubFetch(systemInfo());
+    renderPage("/settings", "/settings", <SystemSettingsPage />);
+
+    fireEvent.change(await screen.findByLabelText("自定义访问密钥"), {
+      target: { value: "1234" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存密钥" }));
+    const confirm = await screen.findByRole("dialog", {
+      name: "保存自定义访问密钥？",
+    });
+    fireEvent.click(within(confirm).getByRole("button", { name: "保存新密钥" }));
+    expect(await screen.findByText("访问密钥已更新")).toBeVisible();
+    expect(screen.getByText("请重新加载页面，并在登录页输入新密钥。")).toBeVisible();
+    const post = fetchMock.mock.calls.find(
+      ([url, init]) => url === "/api/system/access/token" && init?.method === "POST",
+    );
+    expect(JSON.parse(String(post?.[1]?.body))).toEqual({ token: "1234" });
+
+    fireEvent.click(screen.getByRole("button", { name: "退出登录" }));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/auth/logout",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
   });
 
   it("explains how to enable LAN from a loopback-only service", async () => {
@@ -180,7 +225,7 @@ describe("system settings", () => {
     expect(await screen.findByText("当前仅监听回环地址")).toBeVisible();
     expect(screen.getByText("--host 0.0.0.0 --port 8765")).toBeVisible();
     expect(screen.getByRole("switch", { name: "允许局域网访问" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "生成令牌" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "生成密钥" })).toBeEnabled();
   });
 
   it("disables access mutations in read-only mode", async () => {
@@ -198,7 +243,7 @@ describe("system settings", () => {
     expect(
       await screen.findByRole("switch", { name: "允许局域网访问" }),
     ).toBeDisabled();
-    expect(screen.getByRole("button", { name: "轮换令牌" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "生成随机密钥" })).toBeDisabled();
     expect(screen.getAllByText("只读预览").length).toBeGreaterThan(0);
   });
 });

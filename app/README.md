@@ -114,8 +114,6 @@ python -m uv run --project app ecom-crawler serve --db "$data\tasks.db" --out-ro
 
 ### 局域网访问
 
-> 下列登录页、会话 Cookie 和自定义密钥是 [ADR 0019](../docs/adr/0019-访问密钥登录页与会话认证.md) 的目标交互，尚未实现；当前代码仍使用 HTTP Basic 和令牌轮换。实现并通过 `V-01`～`V-05` 后删除本提示。
-
 默认只绑定回环地址。需要从同一可信局域网的另一台电脑操作批次、任务或构建时，显式绑定 `0.0.0.0` 并提供访问密钥：
 
 ```powershell
@@ -124,7 +122,7 @@ $data = "C:\path\to\evidence\workbench"
 python -m uv run --project app ecom-crawler serve --db "$data\tasks.db" --out-root "$data\out" --rules-dir "$data\rules" --host 0.0.0.0 --port 8765
 ```
 
-在另一台电脑打开启动输出里的 `http://<本机局域网 IP>:8765/next/#/batches`。浏览器会打开只填访问密钥的登录页，不需要用户名；登录成功后使用 30 天会话 Cookie。命令行脚本仍可用 HTTP Basic：`curl -u "任意用户名:<访问密钥>"`。
+在另一台电脑打开启动输出里的 `http://<本机局域网 IP>:8765/next/#/batches`。浏览器会打开登录页：用户名固定为只读的 `ecom`，输入访问密钥即可；浏览器密码管理器可以保存和填充这一组凭据。登录成功后使用 30 天会话 Cookie。命令行脚本仍可用 HTTP Basic：`curl -u "任意用户名:<访问密钥>"`。
 
 - 访问密钥 1–256 个字符，首尾空白会被去掉；可在启动参数／环境变量提供，也可在 `/settings` 自定义或随机生成。非回环 `--host` 没有可用密钥时拒绝启动；设置密钥后，回环访问同样需要登录。
 - Host 只接受回环、本机检测到的地址／主机名，以及 `--allow-host <名称>` 追加的名称；用 mDNS 名称（如 `my-pc.local`）访问时把它加进 `--allow-host`，可重复传入。

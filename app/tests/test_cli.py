@@ -147,9 +147,21 @@ class ServeAccessTests(unittest.TestCase):
         ):
             _resolve_serve_access("0.0.0.0", None, [])
 
-    def test_short_token_is_rejected(self) -> None:
-        with self.assertRaisesRegex(ContractError, "at least 16 characters"):
-            _resolve_serve_access("0.0.0.0", "too-short", [])
+    def test_simple_key_is_accepted(self) -> None:
+        _host, token, _allowed = _resolve_serve_access("0.0.0.0", "a", [])
+        self.assertEqual(token, "a")
+
+    def test_empty_token_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ContractError, "must not be empty"):
+            _resolve_serve_access("0.0.0.0", "   ", [])
+
+    def test_control_characters_are_rejected(self) -> None:
+        with self.assertRaisesRegex(ContractError, "control characters"):
+            _resolve_serve_access("0.0.0.0", "abc\ndef", [])
+
+    def test_overlong_token_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ContractError, "at most 256 characters"):
+            _resolve_serve_access("0.0.0.0", "x" * 257, [])
 
     def test_allow_host_requires_non_loopback_bind(self) -> None:
         with self.assertRaisesRegex(ContractError, "requires a non-loopback"):

@@ -697,7 +697,7 @@ class WebApiTests(unittest.TestCase):
 
         missing = client.get("/api/health")
         self.assertEqual(missing.status_code, 401)
-        self.assertIn("Basic", missing.headers["www-authenticate"])
+        self.assertNotIn("www-authenticate", missing.headers)
 
         wrong = client.get(
             "/api/health",
@@ -763,7 +763,132 @@ class WebApiTests(unittest.TestCase):
                     allowed_hosts={"192.168.1.20"},
                 )
 
-    def test_lan_read_only_authenticates_before_rejecting_writes(self) -> None:
+    def test_login_session_custom_key_and_logout(self) -> None:
+        token = "0123456789abcdef"
+        lan_headers = {
+            "Host": "192.168.1.20:8765",
+            "Origin": "http://192.168.1.20:8765",
+            "X-Requested-With": "XMLHttpRequest",
+        }
+        app = create_app(
+            self.db_path,
+            self.out_root,
+            self.rules_dir,
+            access_token=token,
+            allowed_hosts={"192.168.1.20"},
+            serve_host="0.0.0.0",
+        )
+        client = TestClient(app, headers=lan_headers)
+        missing = client.get("/api/health")
+        self.assertEqual(missing.status_code, 401)
+        self.assertNotIn("www-authenticate", missing.headers)
+
+        wrong = client.post("/api/auth/login", json={"key": "wrong"})
+        self.assertEqual(wrong.status_code, 401)
+        self.assertEqual(wrong.json()["error"]["code"], "INVALID_KEY")
+
+        logged = client.post("/api/auth/login", json={"key": token})
+        self.assertEqual(logged.status_code, 200, logged.text)
+        cookie = logged.headers["set-cookie"]
+        self.assertIn("ecom_session=", cookie)
+        self.assertIn("HttpOnly", cookie)
+        self.assertIn("SameSite=lax", cookie)
+        self.assertEqual(client.get("/api/health").status_code, 200)
+
+        custom = client.post("/api/system/access/token", json={"token": "a"})
+        self.assertEqual(custom.status_code, 200, custom.text)
+        self.assertFalse(custom.json()["generated"])
+        self.assertIsNone(custom.json()["token"])
+        self.assertEqual(client.get("/api/health").status_code, 401)
+
+        relogged = client.post("/api/auth/login", json={"key": "a"})
+        self.assertEqual(relogged.status_code, 200, relogged.text)
+        self.assertEqual(client.get("/api/health").status_code, 200)
+
+        logged_out = client.post("/api/auth/logout")
+        self.assertEqual(logged_out.status_code, 200)
+        self.assertEqual(client.get("/api/health").status_code, 401)
+
+    def test_login_rate_limit_locks_after_failures(self) -> None:
+        token = "0123456789abcdef"
+        headers = {
+            "Host": "192.168.1.20:8765",
+            "Origin": "http://192.168.1.20:8765",
+            "X-Requested-With": "XMLHttpRequest",
+        }
+        app = create_app(
+            self.db_path,
+            self.out_root,
+            self.rules_dir,
+            access_token=token,
+            allowed_hosts={"192.168.1.20"},
+            serve_host="0.0.0.0",
+        )
+        client = TestClient(app, headers=headers)
+        for _ in range(5):
+            response = client.post("/api/auth/login", json={"key": "wrong"})
+            self.assertEqual(response.status_code, 401)
+        blocked = client.post("/api/auth/login", json={"key": token})
+        self.assertEqual(blocked.status_code, 429)
+        self.assertEqual(blocked.json()["error"]["code"], "TOO_MANY_ATTEMPTS")
+        self.assertIn("retry-after", blocked.headers)
+
+    def test_read_only_allows_login_but_blocks_key_changes(self) -> None:
+        token = "0123456789abcdef"
+        headers = {
+            "Host": "192.168.1.20:8765",
+            "Origin": "http://192.168.1.20:8765",
+            "X-Requested-With": "XMLHttpRequest",
+        }
+        app = create_app(
+            self.db_path,
+            self.out_root,
+            self.rules_dir,
+            read_only=True,
+            access_token=token,
+            allowed_hosts={"192.168.1.20"},
+            serve_host="0.0.0.0",
+        )
+        client = TestClient(app, headers=headers)
+        logged = client.post("/api/auth/login", json={"key": token})
+        self.assertEqual(logged.status_code, 200, logged.text)
+        self.assertEqual(client.get("/api/health").status_code, 200)
+        changed = client.post("/api/system/access/token", json={"token": "a"})
+        self.assertEqual(changed.status_code, 403)
+        self.assertEqual(changed.json()["error"]["code"], "READ_ONLY")
+
+    def test_spa_shell_is_public_but_api_requires_session(self) -> None:
+        token = "0123456789abcdef"
+        app = create_app(
+            self.db_path,
+            self.out_root,
+            self.rules_dir,
+            access_token=token,
+        )
+        client = TestClient(app, headers={"Host": "127.0.0.1:8765"})
+        root = client.get("/", follow_redirects=False)
+        self.assertNotEqual(root.status_code, 401)
+        self.assertEqual(client.get("/api/health").status_code, 401)
+
+    def test_custom_token_validation(self) -> None:
+        token = "0123456789abcdef"
+        app = create_app(
+            self.db_path,
+            self.out_root,
+            self.rules_dir,
+            access_token=token,
+        )
+        client = TestClient(app, headers={**CLIENT_HEADERS, **basic_auth(token)})
+        for value in ("", "   ", "abc\ndef", "x" * 257):
+            response = client.post("/api/system/access/token", json={"token": value})
+            self.assertEqual(response.status_code, 400, value)
+            self.assertEqual(response.json()["error"]["code"], "INVALID_ACCESS_KEY")
+        accepted = client.post("/api/system/access/token", json={"token": "a"})
+        self.assertEqual(accepted.status_code, 200, accepted.text)
+        self.assertFalse(accepted.json()["generated"])
+        self.assertIsNone(accepted.json()["token"])
+
+
         token = "0123456789abcdef"
         headers = {
             "Host": "192.168.1.20:8765",
@@ -817,6 +942,7 @@ class WebApiTests(unittest.TestCase):
         self.assertTrue(body["server"]["lan_capable"])
         self.assertTrue(body["server"]["lan_enabled"])
         self.assertTrue(body["server"]["auth_required"])
+        self.assertEqual(body["server"]["session_ttl_seconds"], 30 * 24 * 60 * 60)
         self.assertEqual(
             body["server"]["urls"],
             ["http://192.168.1.20:8765/next/"],
@@ -905,6 +1031,7 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(rotated.headers["cache-control"], "no-store")
         new_token = rotated.json()["token"]
         self.assertNotEqual(new_token, token)
+        self.assertTrue(rotated.json()["generated"])
         self.assertTrue(rotated.json()["access"]["token_configured"])
         self.assertTrue(rotated.json()["access"]["token_updated_at"])
         self.assertEqual(client.get("/api/health").status_code, 401)

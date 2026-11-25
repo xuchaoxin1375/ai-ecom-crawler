@@ -26,7 +26,7 @@ from .runtime.rule import RuleError
 from .runtime.store import TaskNotFoundError, TaskStore, TaskTransitionError
 from .runtime.worker import Worker
 from .validate import validate_run, validate_task_result_file
-from .web.access import MIN_ACCESS_TOKEN_LENGTH, stored_token_available
+from .web.access import MAX_ACCESS_TOKEN_LENGTH, stored_token_available, validate_access_token
 
 
 def _add_archive_arguments(parser: argparse.ArgumentParser) -> None:
@@ -271,15 +271,15 @@ def build_parser() -> argparse.ArgumentParser:
         default="127.0.0.1",
         help=(
             "bind address (default: 127.0.0.1); a non-loopback address requires "
-            "an access token or a stored token from the system settings page"
+            "an access key or a stored key from the system settings page"
         ),
     )
     serve.add_argument(
         "--access-token",
         default=None,
         help=(
-            "HTTP Basic password for LAN access; defaults to ECOM_SERVE_TOKEN. "
-            "Required for a non-loopback --host"
+            f"access key for LAN access (1-{MAX_ACCESS_TOKEN_LENGTH} characters); "
+            "defaults to ECOM_SERVE_TOKEN. Required for a non-loopback --host"
         ),
     )
     serve.add_argument(
@@ -484,10 +484,11 @@ def _resolve_serve_access(
             ) from exc
         loopback = address.is_loopback
     token = _access_token_from(access_token)
-    if token is not None and len(token) < MIN_ACCESS_TOKEN_LENGTH:
-        raise ContractError(
-            f"access token must be at least {MIN_ACCESS_TOKEN_LENGTH} characters"
-        )
+    if token is not None:
+        try:
+            token = validate_access_token(token)
+        except ValueError as exc:
+            raise ContractError(str(exc)) from exc
     extras = frozenset(_normalize_allow_host(item) for item in allow_hosts)
     if loopback:
         if extras:

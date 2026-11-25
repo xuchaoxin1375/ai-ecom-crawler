@@ -21,6 +21,7 @@ export interface SystemAccess {
   auth_required: boolean;
   token_configured: boolean;
   token_updated_at: string | null;
+  session_ttl_seconds: number;
   allowed_hosts: string[];
   urls: string[];
 }
@@ -80,8 +81,18 @@ export interface SystemAccessResponse {
 }
 
 export interface SystemTokenResponse {
-  token: string;
+  token: string | null;
+  generated: boolean;
   access: SystemAccess;
+}
+
+export interface LoginResponse {
+  ok: boolean;
+  expires_in: number;
+}
+
+export interface LogoutResponse {
+  ok: boolean;
 }
 
 export interface BatchCounts {
@@ -810,12 +821,23 @@ async function errorMessage(response: Response): Promise<string> {
   return `请求失败 (${response.status})`;
 }
 
+function redirectToLogin(): void {
+  if (typeof window === "undefined") return;
+  const current = window.location.hash || "#/batches";
+  if (current.startsWith("#/login")) return;
+  window.location.hash = `#/login?next=${encodeURIComponent(current)}`;
+}
+
 async function getJson<T>(url: string, signal?: AbortSignal): Promise<T> {
   const response = await fetch(url, {
+    credentials: "same-origin",
     headers: { Accept: "application/json" },
     signal,
   });
   if (!response.ok) {
+    if (response.status === 401 && !url.startsWith("/api/auth/")) {
+      redirectToLogin();
+    }
     throw new ApiError(await errorMessage(response), response.status);
   }
   return (await response.json()) as T;
@@ -837,6 +859,20 @@ export function setSystemAccess(lanEnabled: boolean): Promise<SystemAccessRespon
 
 export function rotateSystemToken(): Promise<SystemTokenResponse> {
   return sendJson<SystemTokenResponse>("/api/system/access/token", "POST");
+}
+
+export function setSystemToken(token: string): Promise<SystemTokenResponse> {
+  return sendJson<SystemTokenResponse>("/api/system/access/token", "POST", {
+    token,
+  });
+}
+
+export function loginWithKey(key: string): Promise<LoginResponse> {
+  return sendJson<LoginResponse>("/api/auth/login", "POST", { key });
+}
+
+export function logout(): Promise<LogoutResponse> {
+  return sendJson<LogoutResponse>("/api/auth/logout", "POST");
 }
 
 export function getBatches(
@@ -867,6 +903,7 @@ async function sendJson<T>(
 ): Promise<T> {
   const response = await fetch(url, {
     method,
+    credentials: "same-origin",
     headers: {
       Accept: "application/json",
       "Content-Type": "application/json",
@@ -875,6 +912,9 @@ async function sendJson<T>(
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (!response.ok) {
+    if (response.status === 401 && !url.startsWith("/api/auth/")) {
+      redirectToLogin();
+    }
     throw new ApiError(await errorMessage(response), response.status);
   }
   return (await response.json()) as T;

@@ -77,9 +77,12 @@ from ..runtime.store import (
 from ..runtime.worker import Worker
 from .access import (
     LOOPBACK_HOSTS,
-    MIN_ACCESS_TOKEN_LENGTH,
+    SESSION_COOKIE_NAME,
+    SESSION_TTL_SECONDS,
     SETTING_LAN_ENABLED,
     SETTING_TOKEN,
+    LoginRateLimiter,
+    create_session,
     hash_token,
     is_loopback_bind,
     is_loopback_host,
@@ -87,6 +90,8 @@ from .access import (
     normalize_host_name,
     parse_token_setting,
     token_setting,
+    validate_access_token,
+    verify_session,
     verify_token,
 )
 
@@ -389,6 +394,14 @@ class BuildDependencyRequest(BaseModel):
 
 class SystemAccessRequest(BaseModel):
     lan_enabled: bool
+
+
+class SystemTokenRequest(BaseModel):
+    token: str | None = None
+
+
+class LoginRequest(BaseModel):
+    key: str
 
 
 def _mask_proxy(value: str | None) -> str | None:
@@ -710,20 +723,69 @@ def _basic_password(header: str | None) -> str | None:
     return password if separator else None
 
 
-def _unauthorized() -> JSONResponse:
+def _unauthorized(message: str = "authentication required") -> JSONResponse:
     response = JSONResponse(
         status_code=401,
         content={
             "error": {
                 "code": "UNAUTHORIZED",
-                "message": "authentication required",
+                "message": message,
                 "details": {},
             }
         },
     )
-    response.headers["WWW-Authenticate"] = 'Basic realm="ecom-crawler", charset="UTF-8"'
     response.headers["Cache-Control"] = "no-store"
     return response
+
+
+def _invalid_key(message: str = "访问密钥不正确") -> JSONResponse:
+    response = JSONResponse(
+        status_code=401,
+        content={
+            "error": {
+                "code": "INVALID_KEY",
+                "message": message,
+                "details": {},
+            }
+        },
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+def _too_many_requests(retry_after: int) -> JSONResponse:
+    response = JSONResponse(
+        status_code=429,
+        content={
+            "error": {
+                "code": "TOO_MANY_ATTEMPTS",
+                "message": f"尝试次数过多，请 {retry_after} 秒后重试",
+                "details": {"retry_after": retry_after},
+            }
+        },
+    )
+    response.headers["Retry-After"] = str(retry_after)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+def _client_key(request: Request) -> str:
+    return request.client.host if request.client is not None else "unknown"
+
+
+def _is_public_static(path: str, method: str) -> bool:
+    if method not in {"GET", "HEAD"}:
+        return False
+    return (
+        path == "/"
+        or path == "/favicon.ico"
+        or path == "/next"
+        or path.startswith("/next/")
+    )
+
+
+def _is_auth_path(path: str) -> bool:
+    return path in {"/api/auth/login", "/api/auth/logout"}
 
 
 def _sse(event: str, data: Any) -> str:
@@ -835,12 +897,10 @@ def create_app(
         raise ValueError("read_only mode cannot accept a build manager")
     token = access_token if access_token is None else str(access_token)
     if token is not None:
-        if not token.strip():
-            raise ValueError("access_token must not be empty")
-        if len(token) < MIN_ACCESS_TOKEN_LENGTH:
-            raise ValueError(
-                f"access_token must be at least {MIN_ACCESS_TOKEN_LENGTH} characters"
-            )
+        try:
+            token = validate_access_token(token)
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
     raw_hosts = (
         [allowed_hosts] if isinstance(allowed_hosts, str) else list(allowed_hosts or ())
     )
@@ -888,6 +948,7 @@ def create_app(
         "token_hash": token_hash,
         "token_updated_at": token_updated_at,
     }
+    login_limiter = LoginRateLimiter()
     urls = [str(url) for url in (access_urls or ()) if str(url).strip()]
     if not urls:
         display = f"[{serve_host}]" if ":" in serve_host else serve_host
@@ -964,6 +1025,7 @@ def create_app(
     app.state.serve_port = serve_port
     app.state.access_urls = tuple(urls)
     app.state.allowed_hosts = tuple(sorted(allowed))
+    app.state.session_ttl_seconds = SESSION_TTL_SECONDS
 
     def rule_error(exc: Exception) -> HTTPException:
         if isinstance(exc, RuleActivationConflictError):
@@ -1303,7 +1365,11 @@ def create_app(
 
     @app.middleware("http")
     async def read_only_guard(request: Request, call_next: Any) -> Any:
-        if read_only and request.method.upper() in WRITE_METHODS:
+        if (
+            read_only
+            and request.method.upper() in WRITE_METHODS
+            and not _is_auth_path(request.url.path)
+        ):
             return JSONResponse(
                 status_code=403,
                 content={
@@ -1321,17 +1387,32 @@ def create_app(
         host = request.headers.get("host", "")
         if not _is_allowed_host(host, allowed):
             return _forbidden("request host is not allowed")
+        path = request.url.path
+        method = request.method.upper()
+        auth_path = _is_auth_path(path)
+        public_static = _is_public_static(path, method)
         with access_lock:
             lan_enabled_now = bool(access_state["lan_enabled"])
             token_salt_now = access_state["token_salt"]
             token_hash_now = access_state["token_hash"]
         if lan_capable and not lan_enabled_now and not is_loopback_host(host):
             return _forbidden("LAN access is disabled")
-        if token_hash_now is not None:
-            password = _basic_password(request.headers.get("authorization"))
-            if not verify_token(password, token_salt_now, token_hash_now):
-                return _unauthorized()
-        if request.method.upper() in WRITE_METHODS:
+        if token_hash_now is not None and not auth_path and not public_static:
+            session_value = request.cookies.get(SESSION_COOKIE_NAME)
+            if not verify_session(session_value, token_hash_now):
+                password = _basic_password(request.headers.get("authorization"))
+                if password is None:
+                    return _unauthorized()
+                client = _client_key(request)
+                retry_after = login_limiter.retry_after(client)
+                if retry_after is not None:
+                    return _too_many_requests(retry_after)
+                if verify_token(password, token_salt_now, token_hash_now):
+                    login_limiter.success(client)
+                else:
+                    login_limiter.failure(client)
+                    return _unauthorized()
+        if method in WRITE_METHODS:
             origin = request.headers.get("origin", "")
             if not _origin_matches_host(origin, host, allowed):
                 return _forbidden("write requests require a same-origin Origin")
@@ -1904,6 +1985,7 @@ def create_app(
             "auth_required": token_configured,
             "token_configured": token_configured,
             "token_updated_at": state["token_updated_at"],
+            "session_ttl_seconds": SESSION_TTL_SECONDS,
             "allowed_hosts": sorted(allowed),
             "urls": list(urls),
         }
@@ -1983,6 +2065,43 @@ def create_app(
             },
         }
 
+    @app.post("/api/auth/login")
+    def login(payload: LoginRequest, request: Request, response: Response) -> Any:
+        with access_lock:
+            salt = access_state["token_salt"]
+            digest = access_state["token_hash"]
+        if digest is None:
+            raise _error("TOKEN_NOT_CONFIGURED", "尚未配置访问密钥", 409)
+        client = _client_key(request)
+        retry_after = login_limiter.retry_after(client)
+        if retry_after is not None:
+            return _too_many_requests(retry_after)
+        try:
+            key = validate_access_token(payload.key)
+        except ValueError as exc:
+            login_limiter.failure(client)
+            raise _error("INVALID_ACCESS_KEY", str(exc), 400) from exc
+        if not verify_token(key, salt, digest):
+            login_limiter.failure(client)
+            return _invalid_key()
+        login_limiter.success(client)
+        response.set_cookie(
+            key=SESSION_COOKIE_NAME,
+            value=create_session(digest),
+            max_age=SESSION_TTL_SECONDS,
+            httponly=True,
+            samesite="lax",
+            path="/",
+        )
+        response.headers["Cache-Control"] = "no-store"
+        return {"ok": True, "expires_in": SESSION_TTL_SECONDS}
+
+    @app.post("/api/auth/logout")
+    def logout(response: Response) -> dict[str, Any]:
+        response.delete_cookie(SESSION_COOKIE_NAME, path="/")
+        response.headers["Cache-Control"] = "no-store"
+        return {"ok": True}
+
     @app.get("/api/system")
     def system_status() -> dict[str, Any]:
         return _system_payload()
@@ -2014,9 +2133,21 @@ def create_app(
         return {"access": _access_payload()}
 
     @app.post("/api/system/access/token")
-    def rotate_system_token(response: Response) -> dict[str, Any]:
+    def rotate_system_token(
+        response: Response,
+        payload: SystemTokenRequest | None = None,
+    ) -> dict[str, Any]:
         response.headers["Cache-Control"] = "no-store"
-        token_value, salt, digest = new_token()
+        generated = payload is None or payload.token is None
+        if generated:
+            token_value, salt, digest = new_token()
+        else:
+            try:
+                token_value = validate_access_token(payload.token)
+            except ValueError as exc:
+                raise _error("INVALID_ACCESS_KEY", str(exc), 400) from exc
+            salt = secrets.token_hex(16)
+            digest = hash_token(token_value, salt)
         updated_at = utc_now()
         if not read_only:
             store.set_setting(
@@ -2029,7 +2160,11 @@ def create_app(
             access_state["token_updated_at"] = updated_at
         app.state.auth_required = True
         app.state.token_configured = True
-        return {"token": token_value, "access": _access_payload()}
+        return {
+            "token": token_value if generated else None,
+            "generated": generated,
+            "access": _access_payload(),
+        }
 
     @app.get("/api/health")
     def health() -> dict[str, Any]:

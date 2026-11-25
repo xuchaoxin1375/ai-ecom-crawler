@@ -40,6 +40,15 @@ function RouteError() {
 
 export const router = createHashRouter([
   {
+    path: "/login",
+    element: lazyPage(() =>
+      import("../features/auth/LoginPage").then(({ LoginPage }) => ({
+        default: LoginPage,
+      })),
+    ),
+    ErrorBoundary: RouteError,
+  },
+  {
     path: "/",
     element: <AppShell />,
     ErrorBoundary: RouteError,

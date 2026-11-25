@@ -1,11 +1,13 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type ReactNode } from "react";
-import { Check, Copy, KeyRound, RefreshCw, ShieldCheck, X } from "lucide-react";
+import { Check, Copy, KeyRound, LogOut, RefreshCw, ShieldCheck, X } from "lucide-react";
 import {
   getSystemInfo,
+  logout as logoutSession,
   rotateSystemToken,
   setSystemAccess,
+  setSystemToken,
   type SystemAccess,
   type SystemInfo,
 } from "../../lib/api";
@@ -13,6 +15,7 @@ import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
 import { ErrorNotice } from "../../components/ui/ErrorNotice";
 import { InlineNotice } from "../../components/ui/InlineNotice";
+import { Input } from "../../components/ui/Input";
 import { MetricStrip } from "../../components/ui/MetricStrip";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { cn } from "../../lib/cn";
@@ -291,7 +294,7 @@ function TokenDialog({
           <header className="flex items-start justify-between gap-4 border-b border-line px-4 py-4 sm:px-6">
             <div>
               <Dialog.Title className="text-lg leading-7 font-semibold text-ink">
-                新的访问令牌
+                新的访问密钥
               </Dialog.Title>
               <Dialog.Description className="mt-1 text-sm leading-6 text-ink-2">
                 只显示这一次。关闭或刷新后无法再次查看；请先复制保存。
@@ -301,7 +304,7 @@ function TokenDialog({
               <button
                 type="button"
                 className="flex h-8 w-8 shrink-0 items-center justify-center rounded-control text-ink-3 hover:bg-surface-muted hover:text-ink"
-                aria-label="关闭令牌对话框"
+                aria-label="关闭密钥对话框"
               >
                 <X size={17} aria-hidden="true" />
               </button>
@@ -312,11 +315,11 @@ function TokenDialog({
               {token || "正在生成…"}
             </code>
             <InlineNotice tone="warning" title="接下来会发生什么">
-              所有设备都需要重新输入新令牌。你正在使用的浏览器会在重新加载后弹出认证框。
+              所有设备都需要用新密钥重新登录。你正在使用的浏览器会在重新加载后进入登录页。
             </InlineNotice>
           </div>
           <div className="flex flex-wrap justify-end gap-2 border-t border-line px-4 py-4 sm:px-6">
-            {token ? <CopyButton value={token} label="新访问令牌" /> : null}
+            {token ? <CopyButton value={token} label="新访问密钥" /> : null}
             <Button onClick={() => onOpenChange(false)}>稍后重新加载</Button>
             <Button variant="primary" onClick={onReload} disabled={!token}>
               我已保存，重新加载
@@ -340,6 +343,11 @@ export function SystemSettingsPage() {
   const [tokenDialogOpen, setTokenDialogOpen] = useState(false);
   const [autoRefreshPaused, setAutoRefreshPaused] = useState(false);
   const [disabledFromLan, setDisabledFromLan] = useState(false);
+  const [customKey, setCustomKey] = useState("");
+  const [savingKey, setSavingKey] = useState(false);
+  const [confirmCustomKey, setConfirmCustomKey] = useState(false);
+  const [customKeyChanged, setCustomKeyChanged] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   const query = useQuery({
     queryKey: ["system"],
@@ -392,7 +400,7 @@ export function SystemSettingsPage() {
     switchDisabledReason = "局域网访问已关闭；请回到本机继续操作。";
   else if (autoRefreshPaused) switchDisabledReason = "请先重新加载页面。";
   else if (!access.lan_capable) switchDisabledReason = "当前仅监听回环地址，需重启。";
-  else if (!access.token_configured) switchDisabledReason = "需要先生成访问令牌。";
+  else if (!access.token_configured) switchDisabledReason = "需要先设置访问密钥。";
   else if (savingAccess) switchDisabledReason = "正在保存访问设置。";
 
   function applyAccess(next: boolean) {
@@ -412,7 +420,7 @@ export function SystemSettingsPage() {
             "局域网访问已关闭。当前页面来自局域网，刷新后将无法继续访问；请回到本机继续操作。",
           );
         } else if (next) {
-          setNotice("局域网访问已开启；同一局域网设备可使用访问令牌连接。");
+          setNotice("局域网访问已开启；同一局域网设备可使用访问密钥连接。");
         } else {
           setNotice("局域网访问已关闭。");
         }
@@ -435,6 +443,7 @@ export function SystemSettingsPage() {
         setNewToken(response.token);
         setTokenDialogOpen(true);
         setAutoRefreshPaused(true);
+        setCustomKeyChanged(false);
         setConfirmRotate(false);
       })
       .catch((exc) => {
@@ -442,6 +451,44 @@ export function SystemSettingsPage() {
         setAutoRefreshPaused(false);
       })
       .finally(() => setRotating(false));
+  }
+
+  function saveCustomKey() {
+    if (savingKey) return;
+    if (!customKey.trim()) {
+      setError("请输入访问密钥。");
+      setConfirmCustomKey(false);
+      return;
+    }
+    setSavingKey(true);
+    setError("");
+    setNotice("");
+    void setSystemToken(customKey)
+      .then((response) => {
+        queryClient.setQueryData<SystemInfo>(["system"], (current) =>
+          current ? { ...current, server: response.access } : current,
+        );
+        setCustomKey("");
+        setNewToken(null);
+        setTokenDialogOpen(false);
+        setConfirmCustomKey(false);
+        setCustomKeyChanged(true);
+        setAutoRefreshPaused(true);
+      })
+      .catch((exc) => setError(errorText(exc)))
+      .finally(() => setSavingKey(false));
+  }
+
+  function handleLogout() {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    setError("");
+    void logoutSession()
+      .then(() => {
+        window.location.hash = "#/login";
+      })
+      .catch((exc) => setError(errorText(exc)))
+      .finally(() => setLoggingOut(false));
   }
 
   function reloadPage() {
@@ -459,7 +506,7 @@ export function SystemSettingsPage() {
       <PageHeader
         eyebrow="系统"
         title="系统设置"
-        description="查看访问、认证、资源和运行状态；局域网开关与令牌修改会立即生效并写入本地账本，绑定地址和端口由启动参数决定。"
+        description="查看访问、认证、资源和运行状态；局域网开关与访问密钥修改会立即生效并写入本地账本，绑定地址和端口由启动参数决定。"
         actions={
           <div className="flex flex-col items-stretch gap-1 sm:items-end">
             <Button
@@ -499,12 +546,22 @@ export function SystemSettingsPage() {
         </InlineNotice>
       ) : null}
       {newToken && !tokenDialogOpen ? (
-        <InlineNotice tone="warning" title="访问令牌已更换">
-          <p>新令牌只在刚才的对话框中显示；重新加载后需要输入新令牌。</p>
+        <InlineNotice tone="warning" title="访问密钥已更换">
+          <p>新密钥只在刚才的对话框中显示；重新加载后需要在登录页输入新密钥。</p>
           <div className="mt-2 flex flex-wrap gap-2">
             <Button size="sm" onClick={() => setTokenDialogOpen(true)}>
-              查看新令牌
+              查看新密钥
             </Button>
+            <Button size="sm" variant="primary" onClick={reloadPage}>
+              重新加载
+            </Button>
+          </div>
+        </InlineNotice>
+      ) : null}
+      {customKeyChanged && !newToken ? (
+        <InlineNotice tone="warning" title="访问密钥已更新">
+          <p>请重新加载页面，并在登录页输入新密钥。</p>
+          <div className="mt-2">
             <Button size="sm" variant="primary" onClick={reloadPage}>
               重新加载
             </Button>
@@ -527,10 +584,10 @@ export function SystemSettingsPage() {
           },
           {
             label: "认证",
-            value: access.auth_required ? "Basic 已启用" : "未启用",
+            value: access.auth_required ? "登录页已启用" : "未启用",
             hint: access.token_configured
               ? `上次轮换 ${formatTime(access.token_updated_at)}`
-              : "局域网需要令牌",
+              : "局域网需要访问密钥",
           },
           {
             label: "活跃负载",
@@ -549,7 +606,7 @@ export function SystemSettingsPage() {
             {modeBadge}
             {access.auth_required ? (
               <Badge tone="info" dot={false}>
-                HTTP Basic
+                登录页认证
               </Badge>
             ) : (
               <Badge tone="warning" dot={false}>
@@ -558,7 +615,7 @@ export function SystemSettingsPage() {
             )}
           </div>
           <p className="mt-1 max-w-3xl text-sm leading-6 text-ink-2">
-            局域网开关立即生效；令牌只保存哈希，页面不会再次显示旧令牌。
+            局域网开关立即生效；访问密钥只保存哈希，页面不会再次显示旧密钥。
           </p>
         </header>
 
@@ -568,7 +625,7 @@ export function SystemSettingsPage() {
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-ink">允许局域网访问</p>
                 <p className="mt-1 text-sm leading-6 text-ink-2">
-                  同一可信局域网内的设备可使用访问令牌连接。
+                  同一可信局域网内的设备可使用访问密钥连接。
                 </p>
               </div>
               <Switch
@@ -601,14 +658,14 @@ export function SystemSettingsPage() {
                   <CopyButton value={restartFlags} label="重启参数" />
                 </div>
                 <p className="mt-2 text-xs">
-                  令牌保存在本地账本；若尚未配置，请先在右侧生成。重启后页面即可开关局域网。
+                  访问密钥保存在本地账本；若尚未配置，请先在右侧设置。重启后页面即可开关局域网。
                 </p>
               </InlineNotice>
             ) : null}
 
             {!access.token_configured ? (
-              <InlineNotice tone="warning" title="尚未配置访问令牌">
-                开启局域网前需要先生成访问令牌；生成后请立即保存。
+              <InlineNotice tone="warning" title="尚未配置访问密钥">
+                开启局域网前需要先设置访问密钥；设置后请保存。
               </InlineNotice>
             ) : null}
 
@@ -622,21 +679,23 @@ export function SystemSettingsPage() {
           <div className="space-y-4 px-4 py-5 sm:px-6">
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
-                <p className="text-sm font-semibold text-ink">访问令牌</p>
+                <p className="text-sm font-semibold text-ink">访问密钥</p>
                 <p className="mt-1 text-sm leading-6 text-ink-2">
                   {access.token_configured
-                    ? `Basic 认证已启用；上次轮换 ${formatTime(
+                    ? `登录页认证已启用；上次轮换 ${formatTime(
                         access.token_updated_at,
                       )}。`
-                    : "未配置令牌时仅回环地址可访问；局域网访问需要令牌。"}
+                    : "未配置密钥时仅回环地址可访问；局域网访问需要密钥。"}
                 </p>
               </div>
               <Button
                 size="sm"
-                disabled={readOnly || rotating || savingAccess || autoRefreshPaused}
+                disabled={
+                  readOnly || rotating || savingAccess || savingKey || autoRefreshPaused
+                }
                 title={
                   readOnly
-                    ? "只读预览不能修改访问令牌"
+                    ? "只读预览不能修改访问密钥"
                     : autoRefreshPaused
                       ? "请先重新加载页面"
                       : undefined
@@ -644,11 +703,54 @@ export function SystemSettingsPage() {
                 onClick={() => setConfirmRotate(true)}
               >
                 <KeyRound size={14} aria-hidden="true" />
-                {access.token_configured ? "轮换令牌" : "生成令牌"}
+                {access.token_configured ? "生成随机密钥" : "生成密钥"}
               </Button>
             </div>
             <p className="text-xs leading-5 text-ink-3">
-              轮换后所有设备都需要重新输入新令牌。令牌只保存哈希；如果丢失，可用启动参数覆盖，或在本机重新生成。
+              随机密钥只显示一次；生成后所有设备都需要用新密钥重新登录。
+            </p>
+            <form
+              className="space-y-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (!customKey.trim()) {
+                  setError("请输入访问密钥。");
+                  return;
+                }
+                setConfirmCustomKey(true);
+              }}
+            >
+              <label
+                htmlFor="custom-access-key"
+                className="block text-sm font-medium text-ink"
+              >
+                自定义访问密钥
+              </label>
+              <div className="flex flex-wrap gap-2">
+                <Input
+                  id="custom-access-key"
+                  type="password"
+                  autoComplete="new-password"
+                  className="min-w-0 flex-1"
+                  placeholder="1–256 个字符"
+                  value={customKey}
+                  disabled={readOnly || autoRefreshPaused || savingKey}
+                  onChange={(event) => setCustomKey(event.target.value)}
+                />
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={readOnly || autoRefreshPaused || savingKey || savingAccess}
+                >
+                  保存密钥
+                </Button>
+              </div>
+              <p className="text-xs leading-5 text-ink-3">
+                1–256 个字符，首尾空白会去掉；不强制大小写、数字或符号。
+              </p>
+            </form>
+            <p className="text-xs leading-5 text-ink-3">
+              密钥只保存哈希；如果丢失，可用启动参数覆盖，或在本机重新设置。
             </p>
             <div className="flex items-start gap-2 rounded-control border border-line bg-surface-muted px-3 py-2">
               <ShieldCheck
@@ -661,6 +763,22 @@ export function SystemSettingsPage() {
                 明文，仅适合可信网络；不要做公网端口映射或反向代理暴露。
               </p>
             </div>
+            {access.token_configured ? (
+              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3">
+                <p className="text-xs leading-5 text-ink-3">
+                  退出只清除当前浏览器；其他设备需要重新登录时轮换密钥。
+                </p>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={loggingOut}
+                  onClick={handleLogout}
+                >
+                  <LogOut size={14} aria-hidden="true" />
+                  {loggingOut ? "正在退出…" : "退出登录"}
+                </Button>
+              </div>
+            ) : null}
           </div>
         </div>
 
@@ -865,11 +983,11 @@ export function SystemSettingsPage() {
 
       <section className="space-y-2 text-xs leading-5 text-ink-3">
         <p>
-          访问开关和令牌写入本地 SQLite 账本；绑定地址、端口和允许的 Host
+          访问开关和访问密钥写入本地 SQLite 账本；绑定地址、端口和允许的 Host
           由启动参数或启动时检测决定，修改后需要重启。
         </p>
         <p>
-          令牌只保存哈希，不保存明文，也不会在日志或页面中回显。局域网访问是 HTTP
+          访问密钥只保存哈希，不保存明文，也不会在日志或页面中回显。局域网访问是 HTTP
           明文；需要公网、HTTPS 或多用户权限时另做安全设计。
         </p>
       </section>
@@ -879,8 +997,8 @@ export function SystemSettingsPage() {
         title="关闭局域网访问？"
         description={
           lanClient
-            ? "你正在通过局域网访问；关闭后本页会在下次请求时失去连接。其他设备也将无法访问。本机回环仍可使用，但需要令牌。"
-            : "关闭后，同一局域网的其他设备将无法访问。本机回环仍可使用，但需要令牌。"
+            ? "你正在通过局域网访问；关闭后本页会在下次请求时失去连接。其他设备也将无法访问。本机回环仍可使用，但需要访问密钥。"
+            : "关闭后，同一局域网的其他设备将无法访问。本机回环仍可使用，但需要访问密钥。"
         }
         confirmLabel="关闭局域网"
         busy={savingAccess}
@@ -894,12 +1012,22 @@ export function SystemSettingsPage() {
 
       <ConfirmDialog
         open={confirmRotate}
-        title={access.token_configured ? "轮换访问令牌？" : "生成访问令牌？"}
-        description="所有设备都需要重新输入新令牌；新令牌只显示一次。生成后请立即复制保存。"
-        confirmLabel={access.token_configured ? "生成新令牌" : "生成令牌"}
+        title={access.token_configured ? "生成随机访问密钥？" : "生成访问密钥？"}
+        description="所有设备都需要用新密钥重新登录；新密钥只显示一次。生成后请立即复制保存。"
+        confirmLabel={access.token_configured ? "生成新密钥" : "生成密钥"}
         busy={rotating}
         onOpenChange={setConfirmRotate}
         onConfirm={rotateToken}
+      />
+
+      <ConfirmDialog
+        open={confirmCustomKey}
+        title="保存自定义访问密钥？"
+        description="保存后旧密钥和所有设备会话立即失效；请用新密钥重新登录。"
+        confirmLabel="保存新密钥"
+        busy={savingKey}
+        onOpenChange={setConfirmCustomKey}
+        onConfirm={saveCustomKey}
       />
 
       <TokenDialog
