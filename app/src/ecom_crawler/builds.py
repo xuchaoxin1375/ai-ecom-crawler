@@ -14,6 +14,7 @@ slice of the user workflow, not a full build-session UI.
 
 from __future__ import annotations
 
+import copy
 import csv
 import hashlib
 import json
@@ -932,6 +933,25 @@ def _live_timeline(
     truncated = len(entries) > limit
     return entries[-limit:], truncated
 
+
+
+def _stable_rule_payload(payload: Any) -> Any:
+    """Return rule content without volatile install timestamps.
+
+    A revalidation of the same build may recompute ``updated_at`` and the host
+    validation timestamp.  Those fields must not make an already installed
+    version look like different content.
+    """
+    if not isinstance(payload, dict):
+        return payload
+    stable = copy.deepcopy(payload)
+    stable.pop("updated_at", None)
+    evidence = stable.get("evidence")
+    if isinstance(evidence, dict):
+        # Host-validation counts and timestamps are build evidence, not rule
+        # behavior; revalidation may legitimately recompute them.
+        evidence.pop("host_validation", None)
+    return stable
 
 
 class BuildManager:
@@ -2983,6 +3003,7 @@ domain-mismatched, or produces no valid product.
                     record.proxy,
                     archive,
                     has_parent=has_parent,
+                    new_rule=rule,
                 )
                 validation["product_samples"] = product_samples
                 validation["candidate_smoke"] = {
@@ -3212,6 +3233,7 @@ domain-mismatched, or produces no valid product.
         archive: dict[str, Any],
         *,
         has_parent: bool = False,
+        new_rule: Any | None = None,
     ) -> dict[str, Any]:
         """Run the source rule over the candidate's fixed product page set."""
         if record.mode != "repair" and not has_parent:
@@ -3235,6 +3257,23 @@ domain-mismatched, or produces no valid product.
                 "regressions": [],
                 "reason": "source rule file is unavailable or its hash changed",
             }
+        if getattr(new_rule, "product_source", None):
+            try:
+                source_rule = load_rule(source_path)
+            except Exception:  # noqa: BLE001 - keep the normal failure path below
+                source_rule = None
+            if source_rule is None or not source_rule.product_source:
+                return {
+                    "executed": False,
+                    "required": False,
+                    "required_checked": 0,
+                    "checked": 0,
+                    "regressions": [],
+                    "reason": (
+                        "source switched to product_source; cross-version "
+                        "name/image comparison is not applicable"
+                    ),
+                }
         seeds = [
             str(item.get("source_url") or "").strip()
             for item in new_samples
@@ -3249,12 +3288,17 @@ domain-mismatched, or produces no valid product.
                 "regressions": [],
                 "reason": "candidate validation produced no product URLs",
             }
+        old_validation_seconds = validation_seconds_for_rule(
+            source_path,
+            default=self.validation_seconds,
+            browser_default=self.browser_validation_seconds,
+        )
         try:
             old_result = self.validator(
                 source_path,
                 work_dir / "regression-old",
                 len(seeds),
-                max(30, int(self.validation_seconds)),
+                max(30, old_validation_seconds),
                 proxy,
                 archive_mode=str(archive.get("mode") or "off"),
                 archive_root=archive.get("root"),
@@ -3660,6 +3704,34 @@ domain-mismatched, or produces no valid product.
             rule_version=rule_version,
             parent_version=parent_version,
         )
+        existing = self.store.get_rule_version(rule_id, rule_version)
+        if existing is not None:
+            if existing.source_build_id == record.build_id:
+                existing_path = self.rules_dir / existing.path
+                if not existing_path.is_file():
+                    raise BuildError(
+                        f"existing rule version file is missing: {existing.path}"
+                    )
+                existing_payload = yaml.safe_load(
+                    existing_path.read_text(encoding="utf-8")
+                )
+                if _stable_rule_payload(existing_payload) != _stable_rule_payload(
+                    payload
+                ):
+                    raise BuildError(
+                        "rule version content changed without bumping rule_version: "
+                        f"{rule_id}@{rule_version}"
+                    )
+                return (
+                    rule_id,
+                    rule_version,
+                    existing.path,
+                    existing.sha256,
+                    change_summary,
+                )
+            raise BuildError(
+                f"rule version already exists: {rule_id}@{rule_version}"
+            )
         self.rules_dir.mkdir(parents=True, exist_ok=True)
         base = f"{_safe_filename(rule_id)}-{_safe_filename(rule_version)}"
         target = self.rules_dir / f"{base}.yaml"

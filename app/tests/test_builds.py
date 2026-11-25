@@ -2948,6 +2948,68 @@ class BuildWorkflowTests(unittest.TestCase):
             self.assertEqual(result["outcome"], "failed")
             self.assertIn("target catalog build requires", result["error"] or "")
 
+    def test_regression_skips_html_to_product_source_switch(self) -> None:
+        adapter = FakeBuildAdapter(self.root)
+        manager = self._manager(adapter)
+        source_path = self.rules / "source-html.yaml"
+        source_path.write_text(
+            yaml.safe_dump(rule_payload(), sort_keys=False, allow_unicode=True),
+            encoding="utf-8",
+        )
+        new_rule = mock.Mock(product_source={"type": "shopify_json"})
+        with mock.patch.object(
+            manager, "_source_rule_path", return_value=source_path
+        ):
+            result = manager._run_regression(
+                mock.Mock(mode="repair"),
+                None,
+                [{"source_url": "https://example.fr/p/1"}],
+                self.root / "regression-switch",
+                None,
+                {},
+                has_parent=True,
+                new_rule=new_rule,
+            )
+        self.assertFalse(result["executed"])
+        self.assertFalse(result["required"])
+        self.assertEqual(result["regressions"], [])
+        self.assertIn("product_source", result["reason"])
+
+    def test_reinstall_same_build_rule_version_is_idempotent(self) -> None:
+        adapter = FakeBuildAdapter(self.root)
+        manager = self._manager(adapter)
+        rule_path = self.root / "idempotent-rule.yaml"
+        rule_path.write_text(
+            yaml.safe_dump(
+                rule_payload(version="2026.11.24-9"),
+                sort_keys=False,
+                allow_unicode=True,
+            ),
+            encoding="utf-8",
+        )
+        record = mock.Mock(
+            build_id="build-idempotent",
+            batch_id="b-1",
+            site_key="example.fr",
+            mode="build",
+            proxy=None,
+            feedback_id=None,
+        )
+        counts = {"valid_products": 2, "failed_products": 0}
+        task_result = {
+            "stop_reason": "NATURAL_END",
+            "outcome": "COMPLETED",
+            "currencies": {"EUR": 2},
+        }
+        first = manager._install_rule(rule_path, record, counts, task_result)
+        second = manager._install_rule(rule_path, record, counts, task_result)
+        self.assertEqual(first[2], second[2])
+        self.assertEqual(first[3], second[3])
+        stored = self.store.get_rule_version("example-fr-build", "2026.11.24-9")
+        self.assertIsNotNone(stored)
+        assert stored is not None
+        self.assertEqual(stored.sha256, first[3])
+
     def test_browser_rule_raises_host_validation_budget(self) -> None:
         payload = rule_payload()
         payload["fetch"]["default_engine"] = "browser"

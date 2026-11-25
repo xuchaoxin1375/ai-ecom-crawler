@@ -122,8 +122,9 @@ flowchart TD
 
 - 本地 fixture 覆盖：完整描述直接提交且不抓商品页；短描述回退 HTML 并保留 JSON 价格；`/products.json` 403 时回退 discovery；`page`／`limit` 翻页；schema 1.2 与币种不一致被拒绝。
 - 真实 `babybubblestore` 探测：`/products.json?limit=2&page=1` 返回 200，价格在 `variants[].price`、无 currency 字段，按 `site.currency=EUR` 映射；10 件任务 `shopify-json-baby-10` 为 `COMPLETED`、10/10、0 失败、0 质量异常、`direct=10`、`fallback=0`，请求只有 robots、JSON 和入口页，没有抓商品页。
-- 后端 runtime 分组 95 项、全量 373 项通过；ruff、文档链接和导出检查作为交付门禁。
-- 仍未验收：完整构建流程、6/6 主机验证、真实短描述回退、blocked 回退、多币种店铺和变体价格口径；这些完成前本 ADR 保持 Provisional。
+- target10 构建：`build-574ff299302e` 的规则 `2026.11.26-1` 主机验证 6/6、EUR 6、0 失败并自动激活；执行 `web-03bd380bf2f4` 10/10、0 失败、0 质量异常，`runtime.shopify_json` 为 `products_seen=250`、`items_added=10`、`direct=10`、`fallback=0`。首次验证因旧 HTML 规则与新 `product_source` 规则的名称／图片差异被判回归，宿主已改为在产品源切换时跳过该比较，并对同 build 的同一版本做幂等重装。
+- 后端 runtime 分组 95 项、全量 375 项通过；ruff、文档链接和导出检查作为交付门禁。
+- 仍未验收：另一家真实 Shopify 店铺、真实短描述回退、blocked 回退、多币种店铺和变体价格口径；这些完成前本 ADR 保持 Provisional。
 
 ## 回滚
 
