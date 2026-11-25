@@ -1,0 +1,103 @@
+import { screen, within } from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
+import type { BatchDetail, BatchSite, TaskSummary } from "../../lib/api";
+import { renderPage } from "../../test/renderPage";
+import { BatchDetailPage } from "./BatchDetailPage";
+
+const date = "2026-11-24T10:00:00Z";
+
+const cancelledTask: TaskSummary = {
+  task_id: "web-1",
+  task_type: "product",
+  plan_id: "fixture-rule",
+  plan_version: "1",
+  site_key: "fixture.test",
+  domain_key: "fixture.test",
+  batch_id: "b-fixture",
+  market: "GB",
+  state: "CANCELLED",
+  outcome: "CANCELLED",
+  stop_reason: "USER_CANCELLED",
+  counts: { valid_products: 3, failed_products: 1, excluded_products: 0 },
+  created_at: date,
+  updated_at: date,
+  started_at: date,
+  finished_at: date,
+};
+
+const site: BatchSite = {
+  site_key: "fixture.test",
+  domain: "fixture.test",
+  input_value: "https://fixture.test/",
+  readiness: "ready",
+  note: null,
+  rule: { rule_id: "fixture-rule", rule_version: "1", path: "fixture.yaml" },
+  task_id: cancelledTask.task_id,
+  task: cancelledTask,
+  build_id: null,
+  build: null,
+  proxy: null,
+  proxy_configured: false,
+  created_at: date,
+  updated_at: date,
+};
+
+const batch: BatchDetail = {
+  batch_id: "b-fixture",
+  name: "批次夹具",
+  country: "GB",
+  market: "GB",
+  language: "en-GB",
+  category: null,
+  note: null,
+  status: "PARTIAL",
+  archived_at: null,
+  created_at: date,
+  updated_at: date,
+  counts: {
+    sites: 1,
+    ready: 1,
+    needs_onboarding: 0,
+    building: 0,
+    invalid: 0,
+    duplicate: 0,
+    startable: 0,
+    tasks: 1,
+    task_runs: 1,
+    draft: 0,
+    queued: 0,
+    running: 0,
+    paused: 0,
+    finished: 0,
+    cancelled: 1,
+    failed: 0,
+    partial_tasks: 0,
+  },
+  valid_products: 3,
+  failed_products: 1,
+  sites: [site],
+};
+
+afterEach(() => vi.unstubAllGlobals());
+
+it("splits the task status and stop reason into separate aligned columns", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      if (url.split("?")[0] === "/api/batches/b-fixture") return Response.json(batch);
+      throw new Error(`Unexpected request: ${url}`);
+    }),
+  );
+  renderPage("/batches/:batchId", "/batches/b-fixture", <BatchDetailPage />);
+
+  const table = await screen.findByRole("table", { name: "批次站点清单" });
+  expect(within(table).getByRole("columnheader", { name: /结束原因/ })).toBeVisible();
+
+  const taskLink = within(table).getByRole("link", {
+    name: "查看任务 web-1 详情",
+  });
+  expect(taskLink).toHaveTextContent("已取消");
+  expect(taskLink).not.toHaveTextContent("用户取消");
+  expect(within(table).getByText("用户取消")).toBeVisible();
+  expect(within(table).queryByText("任务详情")).not.toBeInTheDocument();
+});

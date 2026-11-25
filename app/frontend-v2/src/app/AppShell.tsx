@@ -27,6 +27,16 @@ import { cn } from "../lib/cn";
 const SIDEBAR_KEY = "ecom.sidebar.pinned";
 const SIDEBAR_EXPANDED = 248;
 const SIDEBAR_RAIL = 64;
+// 容器展开用强 S 曲线（CF 实况 250ms）；内层元素用柔和曲线，避免文字先于空间到位。
+const SIDEBAR_DURATION = "duration-[var(--sidebar-duration)]";
+const SIDEBAR_EASE = "ease-[var(--sidebar-ease)]";
+const SIDEBAR_EASE_SOFT = "ease-[var(--sidebar-ease-soft)]";
+
+// 原型开关：?stableGroups=1 时，分组标题槽在折叠态也占固定高度，展开不产生纵向位移。
+function readStableGroups(): boolean {
+  if (typeof window === "undefined") return false;
+  return new URLSearchParams(window.location.search).get("stableGroups") === "1";
+}
 
 function readPinned(): boolean {
   try {
@@ -82,8 +92,10 @@ function SidebarLink({
       </span>
       <span
         className={cn(
-          "truncate whitespace-nowrap transition-opacity duration-150",
-          expanded ? "opacity-100" : "opacity-0",
+          "overflow-hidden whitespace-nowrap transition-transform",
+          SIDEBAR_DURATION,
+          SIDEBAR_EASE_SOFT,
+          expanded ? "translate-x-0" : "-translate-x-1",
         )}
         aria-hidden={!expanded || undefined}
       >
@@ -97,22 +109,87 @@ function SidebarGroup({
   label,
   expanded,
   first = false,
+  stable = false,
   children,
 }: {
   label: string;
   expanded: boolean;
   first?: boolean;
+  stable?: boolean;
   children: ReactNode;
 }) {
+  if (stable) {
+    return (
+      <div className="relative grid gap-0.5" role="group" aria-label={label}>
+        <div className="relative h-7" aria-hidden={!expanded || undefined}>
+          {!first ? (
+            <span
+              aria-hidden="true"
+              className={cn(
+                "pointer-events-none absolute left-2 right-2 top-1/2 h-px bg-line transition-opacity",
+                SIDEBAR_DURATION,
+                SIDEBAR_EASE_SOFT,
+                expanded ? "opacity-0" : "opacity-100",
+              )}
+            />
+          ) : null}
+          <p
+            className={cn(
+              "pointer-events-none absolute inset-x-0 top-0 px-2.5 pb-1 pt-2 text-[10px] font-semibold tracking-[0.08em] text-ink-3 uppercase transition-opacity",
+              SIDEBAR_DURATION,
+              SIDEBAR_EASE_SOFT,
+              expanded ? "opacity-100" : "opacity-0",
+            )}
+          >
+            {label}
+          </p>
+        </div>
+        {children}
+      </div>
+    );
+  }
+
   return (
-    <div className="grid gap-0.5" role="group" aria-label={label}>
-      {expanded ? (
-        <p className="px-2.5 pb-1 pt-3 text-[10px] font-semibold tracking-[0.08em] text-ink-3 uppercase">
-          {label}
-        </p>
-      ) : first ? null : (
-        <div className="mx-2 my-2 h-px bg-line" aria-hidden="true" />
+    <div
+      className={cn(
+        "relative grid gap-0.5",
+        !first &&
+          cn(
+            "transition-[margin-top]",
+            SIDEBAR_DURATION,
+            SIDEBAR_EASE_SOFT,
+            !expanded && "mt-2",
+          ),
       )}
+      role="group"
+      aria-label={label}
+    >
+      {!first ? (
+        <span
+          aria-hidden="true"
+          className={cn(
+            "pointer-events-none absolute -top-1 left-2 right-2 h-px bg-line transition-opacity",
+            SIDEBAR_DURATION,
+            SIDEBAR_EASE_SOFT,
+            expanded ? "opacity-0" : "opacity-100",
+          )}
+        />
+      ) : null}
+      <div
+        className={cn(
+          "grid overflow-hidden transition-[grid-template-rows]",
+          SIDEBAR_DURATION,
+          SIDEBAR_EASE,
+          expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
+        )}
+        aria-hidden={!expanded || undefined}
+      >
+        <div className="min-h-0">
+          <p className="px-2.5 pb-1 pt-2 text-[10px] font-semibold tracking-[0.08em] text-ink-3 uppercase">
+            {label}
+          </p>
+        </div>
+      </div>
       {children}
     </div>
   );
@@ -172,6 +249,7 @@ export function AppShell() {
   const mobileReturnFocusRef = useRef<HTMLElement | null>(null);
   const keyboardFocusRef = useRef(false);
   const [pinned, setPinned] = useState(readPinned);
+  const [stableGroups] = useState(readStableGroups);
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   const [suppressed, setSuppressed] = useState(false);
@@ -224,8 +302,8 @@ export function AppShell() {
     isBatchDetail,
     isBuildDetail,
     isModelSettings,
-    isSystemSettings,
     isSiteDetail,
+    isSystemSettings,
     isTaskDetail,
     location.pathname,
   ]);
@@ -355,25 +433,42 @@ export function AppShell() {
 
       <header className="fixed inset-x-0 top-0 z-50 flex h-14 items-center border-b border-line bg-surface pr-3 sm:pr-6 lg:pr-8">
         <div
-          className="hidden h-full shrink-0 items-center border-r border-line transition-[width] duration-300 ease-out lg:flex"
+          className={cn(
+            "hidden h-full shrink-0 items-center overflow-hidden border-r border-line transition-[width] lg:flex",
+            SIDEBAR_DURATION,
+            SIDEBAR_EASE,
+          )}
           style={{ width: slotWidth }}
         >
           <a
             className={cn(
-              "flex h-9 w-full items-center gap-2.5 rounded-control text-ink transition-colors hover:bg-surface-muted",
+              "flex h-9 w-full items-center overflow-hidden rounded-control text-ink transition-colors hover:bg-surface-muted",
               pinned ? "px-[18px]" : "justify-center",
             )}
             href="#/batches"
             aria-label="电商采集首页"
           >
-            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] bg-accent text-white">
+            <span
+              className={cn(
+                "flex h-7 w-7 shrink-0 origin-left items-center justify-center rounded-[7px] bg-accent text-white transition-transform",
+                SIDEBAR_DURATION,
+                SIDEBAR_EASE_SOFT,
+                pinned ? "scale-100" : "scale-[0.84]",
+              )}
+            >
               <Layers size={16} strokeWidth={1.75} aria-hidden="true" />
             </span>
-            {pinned ? (
-              <span className="truncate text-[15px] font-semibold tracking-[0.01em]">
-                电商采集
-              </span>
-            ) : null}
+            <span
+              className={cn(
+                "overflow-hidden whitespace-nowrap text-[15px] font-semibold tracking-[0.01em] transition-[max-width,padding]",
+                SIDEBAR_DURATION,
+                SIDEBAR_EASE_SOFT,
+                pinned ? "max-w-[160px] pl-2.5" : "max-w-0 pl-0",
+              )}
+              aria-hidden={!pinned || undefined}
+            >
+              电商采集
+            </span>
           </a>
         </div>
 
@@ -469,7 +564,9 @@ export function AppShell() {
         ref={panelRef}
         aria-label="侧边栏"
         className={cn(
-          "fixed bottom-0 left-0 top-14 z-40 hidden overflow-hidden border-r border-line bg-surface transition-[width] duration-300 ease-out lg:block",
+          "fixed bottom-0 left-0 top-14 z-40 hidden overflow-hidden border-r border-line bg-surface transition-[width] lg:block",
+          SIDEBAR_DURATION,
+          SIDEBAR_EASE,
           peeking && "shadow-overlay",
         )}
         style={{ width: visualWidth }}
@@ -482,7 +579,12 @@ export function AppShell() {
         <div className="flex h-full flex-col">
           <nav className="flex-1 overflow-y-auto px-3 py-4" aria-label="主导航">
             <div className="space-y-1">
-              <SidebarGroup label="采集工作台" expanded={visualOpen} first>
+              <SidebarGroup
+                label="采集工作台"
+                expanded={visualOpen}
+                first
+                stable={stableGroups}
+              >
                 <SidebarLink
                   to="/batches"
                   icon={<LayoutList size={17} />}
@@ -502,7 +604,11 @@ export function AppShell() {
                   }}
                 />
               </SidebarGroup>
-              <SidebarGroup label="规则与设置" expanded={visualOpen}>
+              <SidebarGroup
+                label="规则与设置"
+                expanded={visualOpen}
+                stable={stableGroups}
+              >
                 <SidebarLink
                   to="/builds"
                   icon={<Wrench size={17} />}
@@ -553,8 +659,10 @@ export function AppShell() {
               </span>
               <span
                 className={cn(
-                  "truncate whitespace-nowrap transition-opacity duration-150",
-                  visualOpen ? "opacity-100" : "opacity-0",
+                  "overflow-hidden whitespace-nowrap transition-transform",
+                  SIDEBAR_DURATION,
+                  SIDEBAR_EASE_SOFT,
+                  visualOpen ? "translate-x-0" : "-translate-x-1",
                 )}
                 aria-hidden={!visualOpen || undefined}
               >
@@ -663,7 +771,11 @@ export function AppShell() {
       <main
         id="main"
         ref={mainRef}
-        className="min-h-screen pt-14 transition-[margin-left] duration-300 ease-out lg:ml-[var(--sidebar-slot)]"
+        className={cn(
+          "min-h-screen pt-14 transition-[margin-left] lg:ml-[var(--sidebar-slot)]",
+          SIDEBAR_DURATION,
+          SIDEBAR_EASE,
+        )}
         tabIndex={-1}
       >
         <div className="mx-auto w-full max-w-[1560px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">

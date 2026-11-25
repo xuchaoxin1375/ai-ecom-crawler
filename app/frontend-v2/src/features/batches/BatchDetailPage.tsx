@@ -18,6 +18,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Archive,
   ArrowLeft,
+  ArrowUpRight,
   Ban,
   Download,
   Eye,
@@ -51,13 +52,13 @@ import {
 import {
   formatNumber,
   formatTime,
-  outcomeLabel,
   READINESS_LABELS,
   readinessTone,
   siteStatusText,
   stopReasonLabel,
   taskStateLabel,
-  taskStateTone,
+  taskStatusLabel,
+  taskStatusTone,
 } from "../../lib/format";
 import { cn } from "../../lib/cn";
 import { Badge } from "../../components/ui/Badge";
@@ -951,61 +952,57 @@ export function BatchDetailPage() {
       label: "任务",
       hideable: true,
       sortable: true,
-      sortValue: (site) => site.task?.state ?? "",
-      width: 190,
-      minWidth: 140,
-      maxWidth: 320,
-      cell: (site, { compact }) => {
+      sortValue: (site) => site.task?.outcome || site.task?.state || "",
+      width: 132,
+      minWidth: 108,
+      maxWidth: 200,
+      cell: (site) => {
         if (!site.task) {
           return <span className="text-xs text-ink-3">—</span>;
         }
-        const taskHref = `/tasks/${encodeURIComponent(site.task.task_id)}`;
-        const stateBadge = (
-          <Badge tone={taskStateTone(site.task.state)} dot={false}>
-            {taskStateLabel(site.task.state)}
-          </Badge>
+        return (
+          <Link
+            className="group inline-flex max-w-full items-center gap-1 rounded-full"
+            to={`/tasks/${encodeURIComponent(site.task.task_id)}`}
+            title={`查看任务 ${site.task.task_id} 详情`}
+            aria-label={`查看任务 ${site.task.task_id} 详情`}
+          >
+            <Badge
+              tone={taskStatusTone(site.task.state, site.task.outcome)}
+              dot={false}
+            >
+              {taskStatusLabel(site.task.state, site.task.outcome)}
+            </Badge>
+            <ArrowUpRight
+              className="shrink-0 text-ink-3 transition-colors group-hover:text-accent group-focus-visible:text-accent"
+              size={12}
+              aria-hidden="true"
+            />
+          </Link>
         );
-        if (compact) {
-          return (
-            <div className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
-              <Link
-                className="shrink-0 hover:opacity-80"
-                to={taskHref}
-                aria-label={`查看任务 ${site.task.task_id} 详情`}
-              >
-                {stateBadge}
-              </Link>
-              {site.task.outcome ? (
-                <span className="truncate text-[11px] text-ink-3">
-                  {outcomeLabel(site.task.outcome)}
-                </span>
-              ) : null}
-            </div>
-          );
+      },
+    },
+    {
+      key: "stop_reason",
+      header: "结束原因",
+      label: "结束原因",
+      hideable: true,
+      sortable: true,
+      sortValue: (site) => site.task?.stop_reason ?? "",
+      width: 132,
+      minWidth: 96,
+      maxWidth: 220,
+      cell: (site) => {
+        if (!site.task?.stop_reason) {
+          return <span className="text-xs text-ink-3">—</span>;
         }
         return (
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-1.5">
-              {stateBadge}
-              {site.task.outcome ? (
-                <span className="text-[11px] text-ink-3">
-                  {outcomeLabel(site.task.outcome)}
-                </span>
-              ) : null}
-            </div>
-            <p
-              className="mt-1 truncate text-[11px] text-ink-3"
-              title={site.task.stop_reason ?? undefined}
-            >
-              {stopReasonLabel(site.task.stop_reason)}
-            </p>
-            <Link
-              className="mt-0.5 inline-block text-[11px] text-accent hover:underline"
-              to={taskHref}
-            >
-              任务详情
-            </Link>
-          </div>
+          <span
+            className="block truncate text-xs text-ink-2"
+            title={stopReasonLabel(site.task.stop_reason)}
+          >
+            {stopReasonLabel(site.task.stop_reason)}
+          </span>
         );
       },
     },
@@ -1520,7 +1517,7 @@ function BatchSiteListSection({
           rows={table.sortRows(visibleSites)}
           rowKey={(site) => site.site_key}
           rowClassName={(site) => (selection.isSelected(site) ? "bg-accent-soft" : "")}
-          resizeKey="batch-sites"
+          resizeKey="batch-sites-v2"
           density={table.density}
           sort={table.sort}
           onSort={table.toggleSort}
