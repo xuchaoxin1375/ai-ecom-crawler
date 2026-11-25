@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import string
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -14,7 +15,7 @@ from ecom_crawler.executor.manifest import validate_plan
 
 from .models import TASK_TYPES, utc_now
 
-SCHEMA_VERSIONS = {"1.0", "1.1", "1.2"}
+SCHEMA_VERSIONS = {"1.0", "1.1", "1.2", "1.3"}
 RULE_STATUSES = {"candidate", "verified", "deprecated"}
 SUPPORTED_KINDS = {"declarative", "hybrid"}
 SUPPORTED_DISCOVERY = {"entry_links"}
@@ -104,6 +105,7 @@ OPTIONAL_TOP_LEVEL = {
     "evidence",
     "notes",
     "runtime",
+    "product_source",
 }
 
 
@@ -160,6 +162,11 @@ class RulePackage:
     @property
     def task_defaults(self) -> dict[str, Any]:
         return self.raw.get("task_defaults", {})
+
+    @property
+    def product_source(self) -> dict[str, Any]:
+        value = self.raw.get("product_source", {})
+        return value if isinstance(value, dict) else {}
 
     @property
     def entry_url(self) -> str:
@@ -458,6 +465,9 @@ def _validate_common(data: dict[str, Any]) -> None:
         for key in ("extract", "normalize", "validate"):
             if key not in data:
                 raise RuleError(f"product capability needs {key}")
+
+    if "product_source" in data:
+        _validate_product_source(data, fetch)
 
 
 def _validate_browser_config(value: Any) -> None:
@@ -885,6 +895,166 @@ def _validate_public_json_source(source: dict[str, Any], path: str) -> None:
             raise RuleError(f"{path}.pagination.{key} must be a positive integer")
     if pagination_type == "cursor" and not pagination.get("next_cursor_path"):
         raise RuleError(f"{path}.pagination.next_cursor_path is required for cursor")
+
+
+def _validate_product_source(data: dict[str, Any], fetch: dict[str, Any]) -> None:
+    raw = _require_mapping(data.get("product_source"), "product_source")
+    if data["schema_version"] != "1.3":
+        raise RuleError("product_source requires schema_version 1.3")
+    if not data["capabilities"].get("product"):
+        raise RuleError("product_source requires capabilities.product=true")
+    unknown = set(raw) - {
+        "type",
+        "url",
+        "product_url_template",
+        "page_size",
+        "max_pages",
+        "currency",
+        "description",
+        "variants",
+    }
+    if unknown:
+        raise RuleError(
+            f"unknown product_source keys: {', '.join(sorted(unknown))}"
+        )
+    source_type = _require_string(raw.get("type"), "product_source.type")
+    if source_type != "shopify_json":
+        raise RuleError(
+            f"unsupported product_source.type {source_type!r}; supported: ['shopify_json']"
+        )
+
+    origins = {
+        f"{urlparse(str(origin)).scheme.lower()}://"
+        f"{urlparse(str(origin)).netloc.lower()}".rstrip("/")
+        for origin in data["site"].get("allowed_origins", [])
+    }
+    if "url" in raw:
+        _validate_product_source_url(
+            _require_string(raw.get("url"), "product_source.url"),
+            "product_source.url",
+            origins,
+        )
+    if "product_url_template" in raw:
+        template = _require_string(
+            raw.get("product_url_template"), "product_source.product_url_template"
+        )
+        placeholders = _template_placeholders(template)
+        if not placeholders & {"handle", "id", "product_id"}:
+            raise RuleError(
+                "product_source.product_url_template needs {handle}, {id} or "
+                "{product_id}"
+            )
+        if not placeholders <= {"handle", "id", "product_id"}:
+            raise RuleError(
+                "product_source.product_url_template has unsupported placeholders: "
+                f"{sorted(placeholders - {'handle', 'id', 'product_id'})}"
+            )
+        if "://" in template:
+            _validate_product_source_url(
+                template.format(handle="handle", id=1, product_id=1),
+                "product_source.product_url_template",
+                origins,
+            )
+
+    if "page_size" in raw:
+        _validate_positive_int(raw["page_size"], "product_source.page_size")
+        if int(raw["page_size"]) > 250:
+            raise RuleError("product_source.page_size must be <= 250 (Shopify limit)")
+    if "max_pages" in raw:
+        _validate_positive_int(raw["max_pages"], "product_source.max_pages")
+
+    site_currency = str(data["site"].get("currency") or "")
+    if "currency" in raw:
+        currency = _require_string(raw.get("currency"), "product_source.currency")
+        if not re.fullmatch(r"[A-Z]{3}", currency):
+            raise RuleError("product_source.currency must be a 3-letter uppercase code")
+        if site_currency and currency != site_currency:
+            raise RuleError(
+                "product_source.currency must match site.currency "
+                f"({currency!r} != {site_currency!r})"
+            )
+
+    description = _require_mapping(
+        raw.get("description", {}), "product_source.description"
+    )
+    unknown = set(description) - {"min_chars", "fallback_engine", "fallback_concurrency"}
+    if unknown:
+        raise RuleError(
+            "unknown product_source.description keys: "
+            f"{', '.join(sorted(unknown))}"
+        )
+    if "min_chars" in description:
+        _validate_positive_int(
+            description["min_chars"], "product_source.description.min_chars"
+        )
+    if "fallback_concurrency" in description:
+        value = description["fallback_concurrency"]
+        if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 2:
+            raise RuleError(
+                "product_source.description.fallback_concurrency must be 1 or 2"
+            )
+    if "fallback_engine" in description:
+        engine = _require_string(
+            description["fallback_engine"],
+            "product_source.description.fallback_engine",
+        ).lower()
+        if engine not in {"static", "browser"}:
+            raise RuleError(
+                "product_source.description.fallback_engine must be static or browser"
+            )
+        effective = _product_engine(fetch)
+        if effective != engine:
+            raise RuleError(
+                "product_source.description.fallback_engine must match the product "
+                f"page engine ({engine!r} != {effective!r}); set "
+                "fetch.per_url_type.product.engine instead"
+            )
+
+    variants = _require_mapping(
+        raw.get("variants", {}), "product_source.variants"
+    )
+    unknown = set(variants) - {"price"}
+    if unknown:
+        raise RuleError(
+            f"unknown product_source.variants keys: {', '.join(sorted(unknown))}"
+        )
+    if "price" in variants:
+        mode = _require_string(variants["price"], "product_source.variants.price")
+        if mode not in {"min_positive", "first", "product_price"}:
+            raise RuleError(
+                "product_source.variants.price must be min_positive, first or "
+                "product_price"
+            )
+
+
+def _product_engine(fetch: dict[str, Any]) -> str:
+    per_type = fetch.get("per_url_type")
+    if isinstance(per_type, dict):
+        product = per_type.get("product")
+        if isinstance(product, dict) and product.get("engine"):
+            engine = str(product["engine"]).lower()
+            return "static" if engine == "http_json" else engine
+    engine = str(fetch.get("default_engine", "static")).lower()
+    return "static" if engine == "http_json" else engine
+
+
+def _template_placeholders(template: str) -> set[str]:
+    placeholders: set[str] = set()
+    for _, field_name, _, _ in string.Formatter().parse(template):
+        if field_name:
+            placeholders.add(field_name.split(".", 1)[0].split("[", 1)[0])
+    return placeholders
+
+
+def _validate_product_source_url(url: str, path: str, origins: set[str]) -> None:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise RuleError(f"{path} must be an absolute http(s) URL")
+    if parsed.username or parsed.password:
+        raise RuleError(f"{path} must not contain credentials")
+    origin = f"{parsed.scheme.lower()}://{parsed.netloc.lower()}".rstrip("/")
+    if origins and origin not in origins:
+        raise RuleError(f"{path} origin {origin!r} is not in site.allowed_origins")
 
 
 def _validate_task_defaults(value: Any) -> None:

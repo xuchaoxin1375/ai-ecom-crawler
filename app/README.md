@@ -22,6 +22,7 @@
 - 计数不变量、`outcome` 推导、`quality_exceptions` 异常索引。
 - `export`、`validate`、`run`、`submit`、`worker`、`pause`、`resume`、`cancel`、`status`、`list` 和 `serve` CLI 子命令。
 - 声明式规则包读取与校验；`entry_links`、`sitemap`、`listing`、`html_index`、`public_json` 发现来源。
+- Shopify JSON 产品源：`schema_version: "1.3"` 的 `product_source: shopify_json` 从 `/products.json` 映射商品字段，描述不足或 JSON 被挡时回退 HTML／discovery；见 [ADR 0020](../docs/adr/0020-shopify-json产品源.md)。
 - 静态发现、获取、提取、基础重试和 SQLite 任务账本。
 - 浏览器 fetcher：`fetch.default_engine: browser`、`fetch.per_url_type` 按 `navigation`／`product` 路由、Patchright CDP 启动、任务级 profile、`wait_selector`／`wait_until`／`wait_ms`／`network_idle`、渲染后的有效状态读取和任务级进程／目录登记回收。
 - 浏览器列表推进：`schema_version: "1.2"` 的 `listing` 支持 `load_more`（按钮点击）和 `infinite_scroll`（window／容器滚动），记录 `steps`／`items`／`stop`；只支持追加型列表。

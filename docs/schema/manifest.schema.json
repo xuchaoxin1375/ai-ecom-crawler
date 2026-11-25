@@ -706,7 +706,7 @@
       ],
       "properties": {
         "schema_version": {
-          "enum": ["1.0", "1.1", "1.2"]
+          "enum": ["1.0", "1.1", "1.2", "1.3"]
         },
         "rule_id": {
           "type": "string",
@@ -857,6 +857,64 @@
           },
           "additionalProperties": false
         },
+        "product_source": {
+          "type": "object",
+          "required": ["type"],
+          "properties": {
+            "type": {
+              "const": "shopify_json"
+            },
+            "url": {
+              "type": "string",
+              "format": "uri"
+            },
+            "product_url_template": {
+              "type": "string",
+              "minLength": 1
+            },
+            "page_size": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 250
+            },
+            "max_pages": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "currency": {
+              "type": "string",
+              "pattern": "^[A-Z]{3}$"
+            },
+            "description": {
+              "type": "object",
+              "properties": {
+                "min_chars": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "fallback_engine": {
+                  "enum": ["static", "browser"]
+                },
+                "fallback_concurrency": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2
+                }
+              },
+              "additionalProperties": false
+            },
+            "variants": {
+              "type": "object",
+              "properties": {
+                "price": {
+                  "enum": ["min_positive", "first", "product_price"]
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
         "task_defaults": {
           "type": "object",
           "properties": {
@@ -973,6 +1031,26 @@
           },
           "then": {
             "required": ["extract", "normalize", "validate"]
+          }
+        },
+        {
+          "if": {
+            "required": ["product_source"]
+          },
+          "then": {
+            "properties": {
+              "schema_version": {
+                "const": "1.3"
+              },
+              "capabilities": {
+                "required": ["product"],
+                "properties": {
+                  "product": {
+                    "const": true
+                  }
+                }
+              }
+            }
           }
         }
       ]

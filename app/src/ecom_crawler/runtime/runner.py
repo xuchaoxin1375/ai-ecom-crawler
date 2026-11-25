@@ -39,6 +39,11 @@ from .fetcher import UnsupportedAdvanceError
 from .models import Lease, Task, WorkItem, utc_now
 from .resources import register_path, register_process
 from .rule import RulePackage
+from .shopify import (
+    ShopifyProductSource,
+    ShopifySourceError,
+    parse_products_payload,
+)
 from .store import LeaseLostError, TaskStore
 
 RUNTIME_VERSION = "r06-runtime/0.3"
@@ -131,6 +136,21 @@ class TaskRunner:
             min(sitemap_limits)
             if sitemap_limits
             else int(discovery_limits.get("max_sitemaps", 50)),
+        )
+        self._shopify = ShopifyProductSource.from_rule(rule)
+        self._shopify_stats: dict[str, Any] = (
+            {
+                "pages": 0,
+                "products_seen": 0,
+                "items_added": 0,
+                "direct": 0,
+                "fallback": 0,
+                "invalid": 0,
+                "blocked": 0,
+                "currency": self._shopify.currency,
+            }
+            if self._shopify
+            else {}
         )
 
     def run(self) -> str:
@@ -363,6 +383,15 @@ class TaskRunner:
             futures.pop(future, None)
 
     def _process_item(self, item: WorkItem) -> tuple[str, dict[str, Any]]:
+        prefetch = item.result.get("shopify_prefetch")
+        if not isinstance(prefetch, dict):
+            prefetch = None
+        if (
+            prefetch is not None
+            and item.item_type == "product"
+            and item.result.get("shopify_direct")
+        ):
+            return self._finish_shopify_prefetch(item, prefetch)
         advance = (
             self._listing_advance(item)
             if item.discovered_from == "listing"
@@ -387,6 +416,21 @@ class TaskRunner:
             )
         except ArchiveMissError as exc:
             raise StopTask("ARCHIVE_MISS", str(exc)) from exc
+        if prefetch is not None and item.item_type == "product":
+            if result.meta.get("challenge_suspected"):
+                return self._finish_shopify_prefetch(
+                    item, prefetch, fallback_reason="challenge"
+                )
+            if result.status == 0:
+                return self._finish_shopify_prefetch(
+                    item, prefetch, fallback_reason=result.error or "transport_error"
+                )
+            if result.status in {401, 403, 429} or 500 <= result.status < 600:
+                return self._finish_shopify_prefetch(
+                    item, prefetch, fallback_reason=f"http_{result.status}"
+                )
+        if item.item_type == "navigation" and item.discovered_from == "shopify_json":
+            return self._process_shopify_json(item, result)
         if result.meta.get("challenge_suspected"):
             raise StopTask("ACCESS_DENIED", f"challenge page for {item.url}")
         if result.status == 0:
@@ -422,6 +466,18 @@ class TaskRunner:
             return "DONE", {"links": len(urls), "added": added}
 
         plan = self.rule.product_plan()
+        if prefetch is not None:
+            try:
+                html_product = extract_product(page, plan)
+            except Exception as exc:  # noqa: BLE001 - JSON product remains usable
+                return self._finish_shopify_prefetch(
+                    item,
+                    prefetch,
+                    fallback_reason=f"html_extract_error:{type(exc).__name__}",
+                )
+            return self._finish_shopify_prefetch(
+                item, prefetch, html_product=html_product
+            )
         product = extract_product(page, plan)
         reasons = validate_product(product, plan)
         if reasons:
@@ -555,6 +611,234 @@ class TaskRunner:
                 "page": int(item.result.get("page", 1)) + 1,
             }
         return None, {}
+
+    def _shopify_json_unavailable(
+        self, item: WorkItem, reason: str
+    ) -> tuple[str, dict[str, Any]]:
+        self._shopify_stats["blocked"] = (
+            int(self._shopify_stats.get("blocked", 0)) + 1
+        )
+        self._event(
+            "shopify_json_unavailable",
+            url=item.url,
+            reason=reason,
+        )
+        return self._failure(
+            item,
+            "blocked",
+            "shopify_json_unavailable",
+            reason_detail=reason,
+        )
+
+    def _process_shopify_json(
+        self, item: WorkItem, result: Any
+    ) -> tuple[str, dict[str, Any]]:
+        if self._shopify is None:
+            return self._failure(item, "permanent", "shopify_source_not_configured")
+        if result.meta.get("challenge_suspected"):
+            return self._shopify_json_unavailable(item, "challenge")
+        if result.status == 0:
+            return self._shopify_json_unavailable(
+                item, result.error or "transport_error"
+            )
+        if result.status in {401, 403, 429} or 500 <= result.status < 600:
+            return self._shopify_json_unavailable(item, f"http_{result.status}")
+        if not result.ok:
+            return self._shopify_json_unavailable(item, f"http_{result.status}")
+        try:
+            payload = parse_products_payload(result.body)
+            products = self._shopify.products(payload)
+        except ShopifySourceError as exc:
+            self._shopify_stats["blocked"] = (
+                int(self._shopify_stats.get("blocked", 0)) + 1
+            )
+            self._event(
+                "shopify_json_unavailable",
+                url=item.url,
+                reason=exc.reason,
+                detail=exc.detail,
+            )
+            return self._failure(
+                item,
+                "blocked",
+                "shopify_json_unavailable",
+                reason_detail=exc.reason,
+                detail=exc.detail,
+            )
+
+        page = int(item.result.get("page", 1))
+        remaining = self._remaining_product_limit()
+        added = 0
+        direct = 0
+        fallback = 0
+        skipped = 0
+        for entry in products:
+            if remaining <= 0:
+                break
+            try:
+                product = self._shopify.to_extracted(entry, base_url=item.url)
+            except ShopifySourceError as exc:
+                skipped += 1
+                self._shopify_stats["invalid"] = (
+                    int(self._shopify_stats.get("invalid", 0)) + 1
+                )
+                self._event(
+                    "shopify_json_product_skipped",
+                    url=item.url,
+                    reason=exc.reason,
+                    detail=exc.detail,
+                )
+                continue
+            source_url = str(product.values.get("source_url") or "")
+            if not source_url or not self._is_allowed_url(source_url):
+                skipped += 1
+                self._shopify_stats["invalid"] = (
+                    int(self._shopify_stats.get("invalid", 0)) + 1
+                )
+                self._event(
+                    "shopify_json_product_skipped",
+                    url=item.url,
+                    reason="source_url_not_allowed",
+                    detail=source_url,
+                )
+                continue
+            is_direct = product.description_status == "complete"
+            if is_direct:
+                reasons = validate_product(product, self.rule.product_plan())
+                if reasons:
+                    skipped += 1
+                    self._shopify_stats["invalid"] = (
+                        int(self._shopify_stats.get("invalid", 0)) + 1
+                    )
+                    self._event(
+                        "shopify_json_product_skipped",
+                        url=item.url,
+                        reason="validation_error",
+                        detail=", ".join(reasons),
+                    )
+                    continue
+            if self._add_product_item(
+                source_url,
+                parent=item.url,
+                source="shopify_json",
+                result={
+                    "shopify_prefetch": self._shopify.prefetch(product),
+                    "shopify_direct": is_direct,
+                },
+            ):
+                added += 1
+                remaining -= 1
+                if is_direct:
+                    direct += 1
+                else:
+                    fallback += 1
+            else:
+                skipped += 1
+
+        next_url = None
+        if (
+            remaining > 0
+            and page < self._shopify.max_pages
+            and products
+        ):
+            next_url = self._shopify.next_page_url(item.url, page + 1)
+            self._add_navigation(
+                next_url,
+                source="shopify_json",
+                parent=item.url,
+                result={"page": page + 1, "limit": self._shopify.page_size},
+            )
+
+        self._shopify_stats["pages"] = int(self._shopify_stats.get("pages", 0)) + 1
+        self._shopify_stats["products_seen"] = (
+            int(self._shopify_stats.get("products_seen", 0)) + len(products)
+        )
+        self._shopify_stats["items_added"] = (
+            int(self._shopify_stats.get("items_added", 0)) + added
+        )
+        self._shopify_stats["direct"] = (
+            int(self._shopify_stats.get("direct", 0)) + direct
+        )
+        self._shopify_stats["fallback"] = (
+            int(self._shopify_stats.get("fallback", 0)) + fallback
+        )
+        self._event(
+            "shopify_json_page",
+            url=item.url,
+            page=page,
+            products=len(products),
+            added=added,
+            direct=direct,
+            fallback=fallback,
+            skipped=skipped,
+            next=next_url,
+        )
+        return "DONE", {
+            "page": page,
+            "products": len(products),
+            "added": added,
+            "direct": direct,
+            "fallback": fallback,
+            "skipped": skipped,
+            "next": next_url,
+        }
+
+    def _finish_shopify_prefetch(
+        self,
+        item: WorkItem,
+        prefetch: dict[str, Any],
+        *,
+        html_product: Any = None,
+        fallback_reason: str | None = None,
+    ) -> tuple[str, dict[str, Any]]:
+        if self._shopify is None:
+            return self._failure(item, "permanent", "shopify_source_not_configured")
+        try:
+            product = self._shopify.from_prefetch(prefetch)
+        except ShopifySourceError as exc:
+            return self._failure(
+                item, "permanent", "shopify_prefetch_invalid", detail=exc.detail
+            )
+        if html_product is not None:
+            product = self._shopify.merge(product, html_product)
+        if fallback_reason is not None:
+            product = self._shopify.mark_fallback_failed(product, fallback_reason)
+            self._event(
+                "shopify_description_fallback_failed",
+                url=item.url,
+                reason=fallback_reason,
+            )
+        plan = self.rule.product_plan()
+        reasons = validate_product(product, plan)
+        if reasons:
+            return self._failure(
+                item,
+                "permanent",
+                "validation_error",
+                reasons=reasons,
+            )
+        canonical = str(product.values.get("source_url") or item.url)
+        if not self._is_allowed_url(canonical):
+            return self._failure(
+                item,
+                "permanent",
+                "source_url_not_allowed",
+                url=canonical,
+            )
+        if canonical in self._seen_canonical:
+            return "EXCLUDED", {"reasons": ["duplicate_canonical"]}
+        self._seen_canonical.add(canonical)
+        product.values["source_url"] = canonical
+        record = build_record(product)
+        payload = _record_payload(record)
+        return "DONE", {
+            "status": "valid",
+            "name": record.name,
+            "price_amount": record.price_amount,
+            "price_currency": record.price_currency,
+            "description_fallback": fallback_reason,
+            "product": payload,
+        }
 
     def _process_html_index(
         self, item: WorkItem, result: Any
@@ -864,6 +1148,12 @@ class TaskRunner:
                 self._add_product_item(url, parent="seed", source="seed")
         if self.task.input.get("discover", True) is False:
             return
+        if self._shopify is not None and self.task.task_type == "product":
+            self._add_navigation(
+                self._shopify.first_page_url(),
+                source="shopify_json",
+                result={"page": 1, "limit": self._shopify.page_size},
+            )
         for source in self.rule.sources:
             source_type = str(source.get("type", "entry_links"))
             if source_type == "entry_links":
@@ -1313,7 +1603,12 @@ class TaskRunner:
         )
 
     def _add_product_item(
-        self, url: str, *, parent: str, source: str = "entry_links"
+        self,
+        url: str,
+        *,
+        parent: str,
+        source: str = "entry_links",
+        result: dict[str, Any] | None = None,
     ) -> bool:
         if self._remaining_product_limit() <= 0:
             return False
@@ -1321,7 +1616,11 @@ class TaskRunner:
         item_id = hashlib.sha1(normalized.encode()).hexdigest()[:16]
         discovery = self.task.task_type == "discovery"
         state = "DONE" if discovery else "PENDING"
-        result = {"status": "discovered", "source": parent} if discovery else {}
+        item_result = (
+            {"status": "discovered", "source": parent}
+            if discovery
+            else dict(result or {})
+        )
         item = WorkItem(
             task_id=self.task.task_id,
             item_id=item_id,
@@ -1332,7 +1631,7 @@ class TaskRunner:
             state=state,
             parent_url=parent,
             discovered_from=source,
-            result=result,
+            result=item_result,
         )
         added = self.store.add_item(item, lease=self.lease)
         if added and discovery:
@@ -1344,7 +1643,7 @@ class TaskRunner:
                     "item_type": "product",
                     "url": url,
                     "state": state,
-                    "result": result,
+                    "result": item_result,
                 },
             )
             self._event("url_discovered", url=url, source=parent)
@@ -1488,7 +1787,10 @@ class TaskRunner:
         key = "navigation" if self.task.task_type == "discovery" else "product"
         fallback = defaults.get(key, self.rule.fetch.get("concurrency", 1))
         value = self.task.limits.get("concurrency", {}).get(key, fallback)
-        return max(1, min(int(value), 8))
+        limit = max(1, min(int(value), 8))
+        if self._shopify is not None:
+            limit = min(limit, self._shopify.fallback_concurrency)
+        return limit
 
     def _budget_exceeded(self) -> bool:
         max_seconds = self.task.limits.get("max_seconds")
@@ -1704,10 +2006,31 @@ class TaskRunner:
                     "profile": engine_info.get("browser_profile"),
                 },
                 **({"adapter": self._adapter_stats} if self._adapter_stats else {}),
+                **(
+                    {"shopify_json": dict(self._shopify_stats)}
+                    if self._shopify is not None
+                    else {}
+                ),
             },
             "access": {
                 "entry_url": self.rule.entry_url,
-                "sources": [str(source.get("type")) for source in self.rule.sources],
+                "sources": [
+                    *[str(source.get("type")) for source in self.rule.sources],
+                    *(["shopify_json"] if self._shopify is not None else []),
+                ],
+                **(
+                    {
+                        "product_source": {
+                            "type": "shopify_json",
+                            "url": self._shopify.url,
+                            "currency": self._shopify.currency,
+                            "page_size": self._shopify.page_size,
+                            "max_pages": self._shopify.max_pages,
+                        }
+                    }
+                    if self._shopify is not None
+                    else {}
+                ),
                 "robots_url": self._robots_url,
                 "robots_status": self._robots_status,
                 "robots_sitemaps": self._robots_sitemaps,

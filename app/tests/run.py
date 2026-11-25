@@ -39,6 +39,7 @@ GROUPS = {
         "test_hybrid",
         "test_lease",
         "test_resources",
+        "test_shopify",
         "test_worker_quota",
     ),
     "browser": ("test_browser", "test_browser_actions"),
