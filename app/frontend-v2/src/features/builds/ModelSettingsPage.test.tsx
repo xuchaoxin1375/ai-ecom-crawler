@@ -37,6 +37,15 @@ const availableModels: AvailableBuildModel[] = [
     variants: ["none", "low", "medium", "high", "xhigh", "max"],
     probe_supported: true,
     known: true,
+    context_window: 1_050_000,
+    max_output_tokens: 128_000,
+    capabilities: {
+      tools: true,
+      input: ["text", "image"],
+      output: ["text"],
+    },
+    status: "active",
+    enabled: true,
   },
   {
     id: "custom/provider-model",
@@ -502,6 +511,47 @@ describe("model settings", () => {
       "/api/builds/models/check",
       expect.objectContaining({ method: "POST" }),
     );
+  });
+
+  it("shows OpenCode metadata and probes before adding", async () => {
+    const current = config([option(deepseek, "high")]);
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = url.split("?")[0];
+      if (path === "/api/builds/config" && !init?.method) {
+        return Response.json(current);
+      }
+      if (path === "/api/builds/models/available") return availableResponse();
+      if (path === "/api/builds/models/check" && init?.method === "POST") {
+        return Response.json({
+          status: "ok",
+          code: null,
+          checked_at: checkedAt,
+          latency_ms: 123,
+        });
+      }
+      throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage("/models", "/models", <ModelSettingsPage />);
+
+    const available = await screen.findByRole("region", { name: "可用模型" });
+    const terraRow = (await within(available).findByText("YJWD GPT-6.1 Terra")).closest(
+      "li",
+    )!;
+    expect(within(terraRow).getByText("OpenCode 元数据")).toBeVisible();
+    expect(within(terraRow).getByText(/上下文：1,050,000/)).toBeVisible();
+    expect(within(terraRow).getByText(/输出：128,000/)).toBeVisible();
+    expect(within(terraRow).getByText(/工具：支持/)).toBeVisible();
+
+    fireEvent.click(within(terraRow).getByRole("button", { name: "测试可用性" }));
+    expect(await within(terraRow).findByText(/探测通过/)).toBeVisible();
+    expect(within(terraRow).getByRole("button", { name: "加入模型池" })).toBeVisible();
+    const post = fetchMock.mock.calls.find(
+      ([url, init]) => url === "/api/builds/models/check" && init?.method === "POST",
+    )!;
+    expect(JSON.parse(String(post[1]?.body))).toEqual({
+      model_ref: `${terra}#medium`,
+    });
   });
 
   it("resets a page override back to the environment pool", async () => {

@@ -595,6 +595,12 @@ export interface BuildConfig {
   model_catalog?: BuildModelCatalogEntry[];
 }
 
+export interface BuildModelCapabilities {
+  tools: boolean;
+  input: string[];
+  output: string[];
+}
+
 export interface AvailableBuildModel {
   id: string;
   provider: string;
@@ -603,6 +609,12 @@ export interface AvailableBuildModel {
   variants: string[];
   probe_supported: boolean;
   known: boolean;
+  context_window?: number | null;
+  max_output_tokens?: number | null;
+  capabilities?: BuildModelCapabilities | null;
+  status?: string | null;
+  enabled?: boolean | null;
+  max_tokens_field?: string;
 }
 
 export interface AvailableBuildModelsResponse {
@@ -623,7 +635,11 @@ export interface BuildModelOption {
   variant: string;
   variants: string[];
   probe_supported: boolean;
+  known?: boolean;
   health: Record<string, BuildModelHealth | undefined>;
+  context_window?: number | null;
+  max_output_tokens?: number | null;
+  capabilities?: BuildModelCapabilities | null;
 }
 
 export interface BuildMessage {

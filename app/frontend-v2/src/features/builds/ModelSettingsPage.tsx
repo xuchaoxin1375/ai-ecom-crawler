@@ -99,6 +99,38 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function probeResultText(result: BuildModelHealth | undefined): string {
+  if (!result) return "";
+  const verdict = result.status === "ok" ? "探测通过" : "探测失败";
+  const detail = result.code
+    ? ` · ${probeErrorLabels[result.code] ?? result.code}`
+    : "";
+  return `${verdict} · ${formatTime(result.checked_at)} · ${result.latency_ms} ms${detail}`;
+}
+
+function modelLimitText(entry: AvailableBuildModel): string {
+  const bits = [`供应商：${entry.provider}`];
+  bits.push(
+    `档位：${entry.variants.length ? entry.variants.join(" / ") : "供应商默认"}`,
+  );
+  if (entry.context_window) {
+    bits.push(`上下文：${formatNumber(entry.context_window)}`);
+  }
+  if (entry.max_output_tokens) {
+    bits.push(`输出：${formatNumber(entry.max_output_tokens)}`);
+  }
+  return bits.join(" · ");
+}
+
+function modelCapabilityText(entry: AvailableBuildModel): string {
+  if (!entry.capabilities) return "";
+  const bits = [entry.capabilities.tools ? "工具：支持" : "工具：不支持"];
+  if (entry.capabilities.input.length) {
+    bits.push(`输入：${entry.capabilities.input.join(" / ")}`);
+  }
+  return bits.join(" · ");
+}
+
 interface ModelSettingsFormProps {
   config: BuildConfig;
   refreshing: boolean;
@@ -114,13 +146,13 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
   });
   const catalog = useMemo(() => config.model_catalog ?? [], [config.model_catalog]);
   const savedModels = useMemo(() => config.models ?? [], [config.models]);
-  const savedRefs = useMemo(
-    () => new Set(savedModels.map((model) => modelRef(model.id, model.variant))),
-    [savedModels],
-  );
   const savedByKey = useMemo(
     () => new Map(savedModels.map((model) => [model.id, model])),
     [savedModels],
+  );
+  const discoveredByKey = useMemo(
+    () => new Map((modelsQuery.data?.models ?? []).map((model) => [model.id, model])),
+    [modelsQuery.data],
   );
 
   const [draft, setDraft] = useState<DraftModel[]>(() => toDraft(config.models));
@@ -243,7 +275,7 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
     setNotice("");
   }
 
-  function addCandidate(candidate: DraftModel): boolean {
+  function addCandidate(candidate: DraftModel, knownVariants?: string[]): boolean {
     setError("");
     setNotice("");
     const id = candidate.id.trim();
@@ -252,10 +284,12 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
       return false;
     }
     const entry = catalog.find((item) => item.id === id);
-    const variant = entry
-      ? candidate.variant || preferredVariant(entry.variants)
-      : candidate.variant;
-    if (entry && !entry.variants.includes(variant)) {
+    const choices = knownVariants ?? entry?.variants;
+    const variant =
+      choices && choices.length > 0
+        ? candidate.variant || preferredVariant(choices)
+        : candidate.variant;
+    if (choices && choices.length > 0 && !choices.includes(variant)) {
       setError("请选择该模型支持的思考等级。");
       return false;
     }
@@ -289,7 +323,12 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
   }
 
   function addAvailable(entry: AvailableBuildModel) {
-    if (!addCandidate({ id: entry.id, variant: preferredVariant(entry.variants) })) {
+    if (
+      !addCandidate(
+        { id: entry.id, variant: preferredVariant(entry.variants) },
+        entry.variants,
+      )
+    ) {
       return;
     }
     setNotice(`${entry.label} 已加入模型池；保存后生效。`);
@@ -419,9 +458,8 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
     }
   }
 
-  async function probe(item: DraftModel) {
-    const ref = modelRef(item.id, item.variant);
-    if (!editable || !savedRefs.has(ref) || checking) return;
+  async function runProbe(ref: string) {
+    if (!editable || checking) return;
     setChecking(ref);
     setError("");
     try {
@@ -435,16 +473,25 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
     }
   }
 
+  async function probe(item: DraftModel) {
+    await runProbe(modelRef(item.id, item.variant));
+  }
+
+  async function probeAvailable(entry: AvailableBuildModel) {
+    await runProbe(modelRef(entry.id, preferredVariant(entry.variants)));
+  }
+
   function probeText(item: DraftModel, saved: BuildModelOption | undefined): string {
     const ref = modelRef(item.id, item.variant);
-    if (!savedRefs.has(ref)) return "保存后可测试";
-    const result = checks[ref] ?? saved?.health[item.variant];
-    if (!result) return "尚未探测";
-    const verdict = result.status === "ok" ? "探测通过" : "探测失败";
-    const detail = result.code
-      ? ` · ${probeErrorLabels[result.code] ?? result.code}`
-      : "";
-    return `${verdict} · ${formatTime(result.checked_at)} · ${result.latency_ms} ms${detail}`;
+    if (checking === ref) return "测试中…";
+    return probeResultText(checks[ref] ?? saved?.health[item.variant]) || "尚未探测";
+  }
+
+  function availableProbeText(entry: AvailableBuildModel): string {
+    if (!entry.probe_supported) return "不可测试";
+    const ref = modelRef(entry.id, preferredVariant(entry.variants));
+    if (checking === ref) return "测试中…";
+    return probeResultText(checks[ref]) || "尚未测试";
   }
 
   const sourceDescription =
@@ -459,7 +506,7 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
       <PageHeader
         eyebrow="构建设置"
         title="模型配置"
-        description="从 OpenCode 发现可用模型，管理活动模型池、固定或轮询分配、默认思考等级和可用性探测。凭据仍由 OpenCode 解析，本页不保存 API Key。"
+        description="从 OpenCode 读取模型名称、思考档位、上下文和可用性；管理活动模型池、固定或轮询分配，并可在加入前测试。凭据仍由 OpenCode 解析，本页不保存 API Key。"
         actions={
           <Button onClick={onRefresh} disabled={refreshing || busy}>
             <RefreshCw
@@ -587,7 +634,12 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
             >
               {draft.map((item) => {
                 const entry = catalog.find((model) => model.id === item.id);
-                const label = entry?.label ?? savedByKey.get(item.id)?.label ?? item.id;
+                const discovered = discoveredByKey.get(item.id);
+                const label =
+                  entry?.label ??
+                  savedByKey.get(item.id)?.label ??
+                  (discovered?.known ? discovered.label : undefined) ??
+                  item.id;
                 return (
                   <option
                     key={modelRef(item.id, item.variant)}
@@ -612,15 +664,41 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
             {draft.map((item) => {
               const saved = savedByKey.get(item.id);
               const entry = catalog.find((model) => model.id === item.id);
-              const label = entry?.label ?? saved?.label ?? item.id;
-              const variants =
-                entry?.variants ??
-                saved?.variants ??
-                (item.variant ? [item.variant] : [""]);
+              const discovered = discoveredByKey.get(item.id);
+              const label =
+                entry?.label ??
+                saved?.label ??
+                (discovered?.known ? discovered.label : undefined) ??
+                item.id;
+              const hasMetadata = Boolean(entry || saved?.known || discovered?.known);
+              const variants = entry?.variants?.length
+                ? entry.variants
+                : saved?.variants?.length
+                  ? saved.variants
+                  : discovered?.variants?.length
+                    ? discovered.variants
+                    : [item.variant || ""];
+              const variantOptions = variants.includes(item.variant)
+                ? variants
+                : [item.variant, ...variants];
               const supported =
-                entry?.probe_supported ?? saved?.probe_supported ?? false;
+                entry?.probe_supported ??
+                saved?.probe_supported ??
+                discovered?.probe_supported ??
+                false;
+              const contextWindow = saved?.context_window ?? discovered?.context_window;
+              const maxOutput =
+                saved?.max_output_tokens ?? discovered?.max_output_tokens;
+              const capabilities = saved?.capabilities ?? discovered?.capabilities;
+              const limitText = [
+                contextWindow ? `上下文 ${formatNumber(contextWindow)}` : "",
+                maxOutput ? `输出 ${formatNumber(maxOutput)}` : "",
+                capabilities?.tools ? "工具：支持" : "",
+              ]
+                .filter(Boolean)
+                .join(" · ");
               const ref = modelRef(item.id, item.variant);
-              const canProbe = editable && savedRefs.has(ref) && supported;
+              const canProbe = editable && supported;
               return (
                 <li
                   key={item.id}
@@ -638,10 +716,13 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
                         </Badge>
                       ) : null}
                     </div>
+                    {limitText ? (
+                      <p className="mt-1 text-xs leading-5 text-ink-3">{limitText}</p>
+                    ) : null}
                     <div className="mt-2 flex flex-wrap items-center gap-2">
                       <label className="flex items-center gap-2 text-xs text-ink-3">
                         <span>默认思考等级</span>
-                        {entry ? (
+                        {hasMetadata ? (
                           <Select
                             className="h-8 w-36"
                             aria-label={`${label} 默认思考等级`}
@@ -651,7 +732,7 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
                               changeVariant(item.id, event.target.value)
                             }
                           >
-                            {variants.map((variant) => (
+                            {variantOptions.map((variant) => (
                               <option key={variant} value={variant}>
                                 {variant || "供应商默认"}
                               </option>
@@ -695,7 +776,7 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
                         title={
                           canProbe
                             ? "发送一个有界的合成文本请求"
-                            : "保存模型池后才能测试"
+                            : "当前配置只读或模型不可测试"
                         }
                       >
                         {checking === ref ? "测试中…" : "测试可用性"}
@@ -729,7 +810,7 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
             <h2 className="text-[17px] leading-6 font-semibold text-ink">可用模型</h2>
             <p className="mt-1 text-sm leading-6 text-ink-2">
               从 OpenCode
-              读取当前已接入的供应商和模型；刷新不会发送模型请求，也不读取密钥。
+              的模型快照读取名称、思考档位、上下文和模态；刷新不会发送模型请求，也不读取密钥。
             </p>
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -797,10 +878,10 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
               >
                 <option value="all">全部状态（{formatNumber(discoveredCount)}）</option>
                 <option value="known">
-                  已知元数据（{formatNumber(metadataCounts.known)}）
+                  OpenCode 元数据（{formatNumber(metadataCounts.known)}）
                 </option>
                 <option value="unknown">
-                  未验证档位（{formatNumber(metadataCounts.unknown)}）
+                  缺少元数据（{formatNumber(metadataCounts.unknown)}）
                 </option>
                 <option value="probe">
                   可测试（{formatNumber(metadataCounts.probe)}）
@@ -867,6 +948,7 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
                   const added = Boolean(pooled);
                   const pooledRef = pooled ? modelRef(pooled.id, pooled.variant) : "";
                   const isDefault = added && defaultRef === pooledRef;
+                  const probeRef = modelRef(entry.id, preferredVariant(entry.variants));
                   return (
                     <li
                       key={entry.id}
@@ -878,7 +960,7 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
                             {entry.label}
                           </p>
                           <Badge tone={entry.known ? "info" : "neutral"} dot={false}>
-                            {entry.known ? "已知元数据" : "未验证档位"}
+                            {entry.known ? "OpenCode 元数据" : "缺少元数据"}
                           </Badge>
                           {added ? (
                             <Badge tone="success" dot={false}>
@@ -889,15 +971,28 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
                         <code className="mt-0.5 block break-all font-mono text-[11px] text-ink-3">
                           {entry.id}
                         </code>
-                        <p className="mt-1 text-xs leading-5 text-ink-3">
-                          供应商：{providerOf(entry)}
-                          {" · "}
-                          {entry.known
-                            ? `档位：${entry.variants.join(" / ")}`
-                            : "档位未验证，可加入后自由填写"}
-                          {" · "}
-                          {entry.probe_supported ? "可测试" : "未配置小请求探测"}
-                        </p>
+                        {entry.known ? (
+                          <>
+                            <p className="mt-1 text-xs leading-5 text-ink-3">
+                              {modelLimitText(entry)}
+                            </p>
+                            {modelCapabilityText(entry) ? (
+                              <p className="mt-0.5 text-xs leading-5 text-ink-3">
+                                {modelCapabilityText(entry)}
+                              </p>
+                            ) : null}
+                          </>
+                        ) : (
+                          <p className="mt-1 text-xs leading-5 text-ink-3">
+                            OpenCode
+                            未返回该模型的名称、档位或上下文元数据；可加入后手动填写档位。
+                          </p>
+                        )}
+                        {!added ? (
+                          <p className="mt-0.5 text-xs leading-5 text-ink-3">
+                            {availableProbeText(entry)}
+                          </p>
+                        ) : null}
                       </div>
                       {added ? (
                         isDefault ? (
@@ -921,14 +1016,25 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
                           </Button>
                         )
                       ) : (
-                        <Button
-                          size="sm"
-                          className="shrink-0"
-                          onClick={() => addAvailable(entry)}
-                          disabled={!editable || busy}
-                        >
-                          加入模型池
-                        </Button>
+                        <div className="flex shrink-0 flex-wrap items-center gap-2">
+                          {entry.probe_supported ? (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              disabled={!editable || busy}
+                              onClick={() => void probeAvailable(entry)}
+                            >
+                              {checking === probeRef ? "测试中…" : "测试可用性"}
+                            </Button>
+                          ) : null}
+                          <Button
+                            size="sm"
+                            onClick={() => addAvailable(entry)}
+                            disabled={!editable || busy}
+                          >
+                            加入模型池
+                          </Button>
+                        </div>
                       )}
                     </li>
                   );
@@ -1049,7 +1155,7 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
             </>
           )}
           <p className="text-xs leading-5 text-ink-3">
-            OpenCode
+            测试会发送一次有界的合成请求，可能产生少量模型调用费用。 OpenCode
             供应商配置变更由下一次构建读取；这里刷新只更新列表，不需要重启采集服务。
           </p>
         </div>

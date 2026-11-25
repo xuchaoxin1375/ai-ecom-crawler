@@ -262,6 +262,20 @@ class OpenCodeClient:
             raise OpenCodeProtocolError("server info is not an object")
         return payload
 
+    def list_models(self, *, timeout: float | None = None) -> list[dict[str, Any]]:
+        """Return OpenCode's resolved model metadata snapshot.
+
+        The model list settles asynchronously after server startup, so callers
+        should poll until it is non-empty.
+        """
+        payload = self._request("GET", "/api/model", timeout=timeout)
+        data = payload.get("data") if isinstance(payload, dict) else None
+        if data is None:
+            return []
+        if not isinstance(data, list):
+            raise OpenCodeProtocolError("model.list data is not a list")
+        return [item for item in data if isinstance(item, dict)]
+
     def create_session(
         self,
         *,

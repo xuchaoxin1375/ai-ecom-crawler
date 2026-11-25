@@ -428,6 +428,10 @@ class FakeBuildAdapter:
 
 class BuildWorkflowTests(unittest.TestCase):
     def setUp(self) -> None:
+        from ecom_crawler import build_models
+
+        build_models._discovery_cache = None
+        build_models._metadata_cache.clear()
         self._existing_threads = set(threading.enumerate())
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self._clean_workspace)
@@ -1046,20 +1050,96 @@ class BuildWorkflowTests(unittest.TestCase):
             self.assertEqual(response.json()["models"], [])
             self.assertIn("读取失败", response.json()["error"])
 
-    def test_discovery_parses_opencode_models_without_model_request(self) -> None:
+    def test_discovery_maps_opencode_metadata(self) -> None:
+        from ecom_crawler import build_models
+
+        api_models = [
+            {
+                "providerID": "commandcode",
+                "modelID": "deepseek/deepseek-v4.1-flash",
+                "name": "CommandCode DeepSeek V4.1 Flash",
+                "type": "chat",
+                "enabled": True,
+                "variants": [{"id": "low"}, {"id": "high"}, {"id": "max"}],
+                "limit": {"context": 1_000_000, "output": 384_000},
+                "capabilities": {
+                    "tools": True,
+                    "input": ["text", "image"],
+                    "output": ["text"],
+                },
+                "compatibility": {"maxTokensField": "max_tokens"},
+                "status": "active",
+            },
+            {
+                "providerID": "other",
+                "modelID": "plain",
+                "name": "Plain Chat",
+                "type": "chat",
+                "enabled": True,
+                "variants": [],
+                "limit": {"context": 128_000, "output": 4_096},
+                "capabilities": {
+                    "tools": False,
+                    "input": ["text"],
+                    "output": ["text"],
+                },
+                "status": "active",
+            },
+            {
+                "providerID": "other",
+                "modelID": "embedding",
+                "name": "Embedding",
+                "type": "embedding",
+                "enabled": True,
+                "variants": [],
+                "limit": {"context": 8_000, "output": 1_024},
+                "capabilities": {"tools": False, "input": ["text"], "output": []},
+                "status": "active",
+            },
+        ]
+        with mock.patch.object(
+            build_models,
+            "_discover_from_opencode_api",
+            return_value=api_models,
+        ) as discover:
+            models = build_models.discover_models(refresh=True)
+        self.assertEqual(
+            [model["id"] for model in models],
+            ["commandcode/deepseek/deepseek-v4.1-flash", "other/plain"],
+        )
+        first = models[0]
+        self.assertTrue(first["known"])
+        self.assertEqual(first["label"], "CommandCode DeepSeek V4.1 Flash")
+        self.assertEqual(first["variants"], ["low", "high", "max"])
+        self.assertEqual(first["context_window"], 1_000_000)
+        self.assertEqual(first["max_output_tokens"], 384_000)
+        self.assertTrue(first["probe_supported"])
+        self.assertTrue(first["capabilities"]["tools"])
+        self.assertEqual(first["capabilities"]["input"], ["text", "image"])
+        self.assertEqual(first["max_tokens_field"], "max_tokens")
+        self.assertEqual(
+            build_models.model_metadata(first["id"])["label"],
+            "CommandCode DeepSeek V4.1 Flash",
+        )
+        discover.assert_called_once()
+
+    def test_discovery_falls_back_to_cli_ids_when_api_is_unavailable(self) -> None:
         from ecom_crawler import build_models
 
         completed = mock.Mock(
             returncode=0,
             stdout=(
                 "commandcode/deepseek/deepseek-v4.1-flash\n"
-                "opencode-go/deepseek-v4.1-flash\n"
+                "unlisted/model\n"
                 "not-a-model\n"
             ),
         )
-        build_models._discovery_cache = None
-        self.addCleanup(setattr, build_models, "_discovery_cache", None)
         with (
+            mock.patch.object(
+                build_models,
+                "_discover_from_opencode_api",
+                side_effect=ModelPoolError("api unavailable"),
+            ),
             mock.patch.object(
                 build_models, "resolve_opencode_command", return_value=["opencode"]
             ),
@@ -1075,11 +1155,15 @@ class BuildWorkflowTests(unittest.TestCase):
             [model["id"] for model in models],
             [
                 "commandcode/deepseek/deepseek-v4.1-flash",
-                "opencode-go/deepseek-v4.1-flash",
+                "unlisted/model",
             ],
         )
         self.assertTrue(models[0]["known"])
         self.assertEqual(models[0]["variants"], ["low", "high", "max"])
+        self.assertFalse(models[1]["known"])
+        self.assertIsNone(models[1]["context_window"])
+        pool = BuildModelPool("unlisted/model#custom")
+        self.assertEqual(pool.refs(), ["unlisted/model#custom"])
         run.assert_called_once()
 
     def test_commandcode_deepseek_is_a_known_model(self) -> None:
@@ -1092,7 +1176,7 @@ class BuildWorkflowTests(unittest.TestCase):
         )
         self.assertEqual(entry["label"], "CommandCode DeepSeek V4.1 Flash")
         self.assertEqual(entry["variants"], ["low", "high", "max"])
-        self.assertFalse(entry["probe_supported"])
+        self.assertTrue(entry["probe_supported"])
 
     def test_model_pool_probe_only_on_post_and_excludes_failed_default(self) -> None:
         manager = self._manager(FakeBuildAdapter(self.root))
@@ -1120,6 +1204,55 @@ class BuildWorkflowTests(unittest.TestCase):
             response = client.post("/api/batches/b-1/sites/example.fr/build", json={})
             self.assertEqual(response.status_code, 409, response.text)
             self.assertEqual(manager.adapter.started, [])
+
+    def test_model_probe_allows_model_outside_pool(self) -> None:
+        manager = self._manager(FakeBuildAdapter(self.root))
+        manager.model_pool = BuildModelPool("opencode-go/deepseek-v4.1-flash#high")
+        with (
+            mock.patch(
+                "ecom_crawler.build_models.probe_chat", return_value=5
+            ) as probe,
+            self._client(manager) as client,
+        ):
+            response = client.post(
+                "/api/builds/models/check",
+                json={"model_ref": "yjwd-gpt-enterprise/gpt-6.1-terra#medium"},
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()["status"], "ok")
+            self.assertEqual(probe.call_count, 1)
+            self.assertNotIn(
+                "yjwd-gpt-enterprise/gpt-6.1-terra",
+                [model["id"] for model in client.get("/api/builds/config").json()["models"]],
+            )
+
+    def test_model_probe_retries_alternate_max_tokens_field(self) -> None:
+        from ecom_crawler.harness.opencode import OpenCodeHttpError
+
+        manager = self._manager(FakeBuildAdapter(self.root))
+        manager.model_pool = BuildModelPool("")
+        error = OpenCodeHttpError(400, "HTTP_ERROR", "bad parameter", None)
+        with (
+            mock.patch(
+                "ecom_crawler.build_models.probe_chat",
+                side_effect=[error, 9],
+            ) as probe,
+            mock.patch(
+                "ecom_crawler.build_models.model_metadata", return_value=None
+            ),
+            self._client(manager) as client,
+        ):
+            response = client.post(
+                "/api/builds/models/check",
+                json={"model_ref": "commandcode/deepseek/deepseek-v4.1-flash#low"},
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()["status"], "ok")
+            self.assertEqual(probe.call_count, 2)
+            self.assertEqual(
+                [call.kwargs["max_tokens_field"] for call in probe.call_args_list],
+                ["max_tokens", "max_completion_tokens"],
+            )
 
     def test_model_pool_settings_persist_and_hot_apply(self) -> None:
         env_pool = "opencode-go/deepseek-v4.1-flash#high"
