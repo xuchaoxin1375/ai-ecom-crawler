@@ -13,9 +13,15 @@ from ecom_crawler.cli import _resolve_serve_access, _serve_urls, main
 from ecom_crawler.model import ContractError
 from ecom_crawler.runtime.store import TaskStore
 from ecom_crawler.web.access import (
+    SETTING_LAN_ENABLED,
     SETTING_TOKEN,
+    create_session,
+    parse_token_setting,
+    reset_token_setting,
     stored_token_available,
     token_setting,
+    verify_session,
+    verify_token,
 )
 from tests.support import base_task, candidate
 
@@ -215,6 +221,99 @@ class ServeAccessTests(unittest.TestCase):
                 ),
             )
             self.assertTrue(stored_token_available(db_path))
+
+
+class ResetAccessKeyTests(unittest.TestCase):
+    def _ledger(self, root: Path) -> Path:
+        db_path = root / "tasks.db"
+        store = TaskStore(db_path)
+        store.set_setting(SETTING_LAN_ENABLED, "1")
+        return db_path
+
+    def test_reset_writes_hash_and_preserves_lan(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            db_path = self._ledger(Path(temporary))
+            salt, digest, _ = reset_token_setting(
+                db_path,
+                "abc",
+                updated_at="2026-11-25T00:00:00Z",
+            )
+            setting = parse_token_setting(TaskStore(db_path).get_setting(SETTING_TOKEN))
+            self.assertIsNotNone(setting)
+            assert setting is not None
+            self.assertEqual(setting[0], salt)
+            self.assertEqual(setting[1], digest)
+            self.assertTrue(verify_token("abc", setting[0], setting[1]))
+            self.assertTrue(stored_token_available(db_path))
+            self.assertEqual(
+                TaskStore(db_path).get_setting(SETTING_LAN_ENABLED),
+                "1",
+            )
+
+    def test_cli_reset_generates_key(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            db_path = self._ledger(Path(temporary))
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                code = main(["reset-access-key", "--db", str(db_path)])
+            self.assertEqual(code, 0)
+            lines = output.getvalue().splitlines()
+            token = next(
+                line.split("access key: ", 1)[1]
+                for line in lines
+                if line.startswith("access key: ")
+            )
+            setting = parse_token_setting(TaskStore(db_path).get_setting(SETTING_TOKEN))
+            self.assertIsNotNone(setting)
+            assert setting is not None
+            self.assertTrue(verify_token(token, setting[0], setting[1]))
+
+    def test_cli_reset_custom_key_and_rejects_invalid(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            db_path = self._ledger(Path(temporary))
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = main(
+                    ["reset-access-key", "--db", str(db_path), "--key", "home"]
+                )
+            self.assertEqual(code, 0)
+            setting = parse_token_setting(TaskStore(db_path).get_setting(SETTING_TOKEN))
+            self.assertIsNotNone(setting)
+            assert setting is not None
+            self.assertTrue(verify_token("home", setting[0], setting[1]))
+
+            error = io.StringIO()
+            with contextlib.redirect_stderr(error):
+                code = main(
+                    ["reset-access-key", "--db", str(db_path), "--key", "   "]
+                )
+            self.assertEqual(code, 2)
+            self.assertIn("must not be empty", error.getvalue())
+
+    def test_reset_invalidates_old_session(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            db_path = self._ledger(Path(temporary))
+            _, old_digest, _ = reset_token_setting(
+                db_path,
+                "old",
+                updated_at="2026-11-25T00:00:00Z",
+            )
+            old_session = create_session(old_digest)
+            _, new_digest, _ = reset_token_setting(
+                db_path,
+                "new",
+                updated_at="2026-11-25T00:01:00Z",
+            )
+            self.assertFalse(verify_session(old_session, new_digest))
+            self.assertTrue(verify_session(create_session(new_digest), new_digest))
+
+    def test_cli_reset_missing_ledger(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            missing = Path(temporary) / "missing.db"
+            error = io.StringIO()
+            with contextlib.redirect_stderr(error):
+                code = main(["reset-access-key", "--db", str(missing)])
+            self.assertEqual(code, 2)
+            self.assertIn("task ledger not found", error.getvalue())
 
 
 if __name__ == "__main__":

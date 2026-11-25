@@ -139,6 +139,7 @@ python -m uv run --project app ecom-crawler serve --db "$data\tasks.db" --out-ro
 - **局域网开关**：服务必须以非回环 `--host` 启动过，页面才能开关；关闭后非回环 Host 一律 403，绑定地址和端口仍需重启修改。
 - **访问密钥**：可在页面设置自定义密钥，或生成随机密钥；账本只保存随机 salt 和 SHA-256 哈希。自定义密钥不回显，随机密钥只显示一次；轮换后所有设备都要重新登录。
 - **退出登录**：清除当前浏览器的会话 Cookie；其他设备需要退出时轮换密钥。
+- **忘记密钥**：停止 serve 后运行 `python -m uv run --project app ecom-crawler reset-access-key --db <tasks.db>`；默认生成随机密钥并只打印一次，`--key` 可设置自定义密钥。该命令只改密钥哈希，保留局域网开关和其他数据，重启后生效。
 - **持久化**：局域网开关和密钥哈希写入本地 SQLite，重启后继续生效。以回环启动时，页面提供 `--host 0.0.0.0 --port <port>` 重启参数；如果还没有密钥，先生成再重启。
 - **边界**：关闭局域网时仍要求密钥，避免同网段伪造回环 Host；页面不采集系统 CPU／内存，不提供 TLS、多用户或公网暴露。
 - **只读预览**：`--read-only` 下可以查看系统状态和登录，但开关、自定义／随机密钥按钮禁用；退出登录仍可用。
@@ -154,6 +155,7 @@ python -m uv run --project app ecom-crawler worker --db /path/to/tasks.db --out-
 python -m uv run --project app ecom-crawler worker --db /path/to/tasks.db --out-root /path/to/tasks --allow-multi-worker --lease-ttl 30
 python -m uv run --project app ecom-crawler serve --db /path/to/tasks.db --out-root /path/to/tasks --rules-dir /path/to/rules --port 8765 --proxy http://127.0.0.1:17211
 python -m uv run --project app ecom-crawler serve --db /path/to/tasks.db --out-root /path/to/tasks --rules-dir /path/to/rules --host 0.0.0.0 --port 8765
+python -m uv run --project app ecom-crawler reset-access-key --db /path/to/tasks.db
 python -m uv run --project app ecom-crawler pause --db /path/to/tasks.db --task-id sample-002
 python -m uv run --project app ecom-crawler resume --db /path/to/tasks.db --task-id sample-002
 python -m uv run --project app ecom-crawler cancel --db /path/to/tasks.db --task-id sample-002

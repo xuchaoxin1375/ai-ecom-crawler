@@ -235,6 +235,37 @@ def token_setting(salt_hex: str, digest_hex: str, updated_at: str) -> str:
     )
 
 
+def reset_token_setting(
+    db_path: str | Path,
+    token: str,
+    *,
+    updated_at: str,
+) -> tuple[str, str, str]:
+    """Persist a new token hash in an existing ledger; stop the server first."""
+    value = validate_access_token(token)
+    path = Path(db_path)
+    if not path.is_file():
+        raise ValueError(f"task ledger not found: {path}")
+    salt = secrets.token_hex(16)
+    digest = hash_token(value, salt)
+    try:
+        connection = sqlite3.connect(path)
+        try:
+            connection.execute(
+                "INSERT INTO app_settings (key, value, updated_at) "
+                "VALUES (?, ?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET "
+                "value = excluded.value, updated_at = excluded.updated_at",
+                (SETTING_TOKEN, token_setting(salt, digest, updated_at), updated_at),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+    except sqlite3.Error as exc:
+        raise ValueError(f"cannot reset access key: {exc}") from exc
+    return salt, digest, updated_at
+
+
 def parse_token_setting(value: str | None) -> tuple[str, str, str | None] | None:
     if not value:
         return None

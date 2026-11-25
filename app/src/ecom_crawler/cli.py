@@ -21,12 +21,18 @@ from .execution import run_and_export, submit_task
 from .model import ContractError
 from .pipeline import export_run
 from .runtime.lock import WorkerLockError, worker_lock
-from .runtime.models import Task
+from .runtime.models import Task, utc_now
 from .runtime.rule import RuleError
 from .runtime.store import TaskNotFoundError, TaskStore, TaskTransitionError
 from .runtime.worker import Worker
 from .validate import validate_run, validate_task_result_file
-from .web.access import MAX_ACCESS_TOKEN_LENGTH, stored_token_available, validate_access_token
+from .web.access import (
+    MAX_ACCESS_TOKEN_LENGTH,
+    new_token,
+    reset_token_setting,
+    stored_token_available,
+    validate_access_token,
+)
 
 
 def _add_archive_arguments(parser: argparse.ArgumentParser) -> None:
@@ -344,6 +350,21 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="skip the single-instance lock and share the ledger via task leases",
     )
+    reset_access = subparsers.add_parser(
+        "reset-access-key",
+        help="reset the web access key in an existing ledger (stop serve first)",
+    )
+    reset_access.add_argument(
+        "--db",
+        required=True,
+        type=Path,
+        help="SQLite task ledger",
+    )
+    reset_access.add_argument(
+        "--key",
+        default=None,
+        help="custom access key; omit to generate a random key and print it once",
+    )
     return parser
 
 
@@ -580,7 +601,10 @@ def _serve(args: argparse.Namespace) -> int:
     for url in urls[1:]:
         print(f"also serving {url}")
     if app.state.auth_required:
-        print("access: HTTP Basic; username any, password = access token")
+        print(
+            "access: browser login page (username ecom); "
+            "CLI HTTP Basic username any, password = access key"
+        )
     if host in WILDCARD_HOSTS and urls[0] == (
         f"http://{_format_url_host(host)}:{args.port}/next/"
     ):
@@ -665,6 +689,33 @@ def _print_task_list(store: TaskStore, states: list[str] | None, *, as_json: boo
             f"{payload['plan_id']}@{payload['plan_version']}\t"
             f"{payload['updated_at']}"
         )
+    return 0
+
+
+def _reset_access_key(args: argparse.Namespace) -> int:
+    print(
+        "note: stop serve before resetting; a running process keeps the old key "
+        "until it is restarted."
+    )
+    if args.key is None:
+        token, _salt, _digest = new_token()
+        generated = True
+    else:
+        try:
+            token = validate_access_token(args.key)
+        except ValueError as exc:
+            raise ContractError(str(exc)) from exc
+        generated = False
+    try:
+        reset_token_setting(args.db, token, updated_at=utc_now())
+    except ValueError as exc:
+        raise ContractError(str(exc)) from exc
+    if generated:
+        print(f"access key: {token}")
+        print("Store this key now; it is not saved in plaintext.")
+    else:
+        print("access key updated")
+    print("restart serve to load the new key")
     return 0
 
 
@@ -775,6 +826,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     print(f"  error: {item['url']}: {item['error']}")
             print(f"report: {Path(args.out) / 'visual-audit.json'}")
             return 0 if summary["errors"] == 0 else 1
+        if args.command == "reset-access-key":
+            return _reset_access_key(args)
         if args.command == "serve":
             return _serve(args)
         if args.command in {"pause", "resume", "cancel"}:
