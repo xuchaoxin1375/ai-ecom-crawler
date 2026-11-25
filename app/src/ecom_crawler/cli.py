@@ -5,7 +5,9 @@ from __future__ import annotations
 import argparse
 import ipaddress
 import json
+import os
 import signal
+import socket
 import sys
 import threading
 from collections.abc import Sequence
@@ -266,7 +268,28 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument(
         "--host",
         default="127.0.0.1",
-        help="loopback address (default: 127.0.0.1)",
+        help=(
+            "bind address (default: 127.0.0.1); a non-loopback address requires "
+            "an access token"
+        ),
+    )
+    serve.add_argument(
+        "--access-token",
+        default=None,
+        help=(
+            "HTTP Basic password for LAN access; defaults to ECOM_SERVE_TOKEN. "
+            "Required for a non-loopback --host"
+        ),
+    )
+    serve.add_argument(
+        "--allow-host",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help=(
+            "extra Host header name accepted with a non-loopback --host; "
+            "repeat for multiple names"
+        ),
     )
     serve.add_argument("--port", type=int, default=8765, help="HTTP port (default: 8765)")
     serve.add_argument(
@@ -360,15 +383,155 @@ def _run_worker(args: argparse.Namespace) -> int:
     return 0
 
 
-def _serve(args: argparse.Namespace) -> int:
-    host = str(args.host)
-    if host != "localhost":
+MIN_ACCESS_TOKEN_LENGTH = 16
+WILDCARD_HOSTS = frozenset({"0.0.0.0", "::"})
+
+
+def _access_token_from(value: str | None) -> str | None:
+    # Consume the environment copy so build subprocesses cannot inherit the token.
+    env_token = (os.environ.pop("ECOM_SERVE_TOKEN", "") or "").strip()
+    if value is not None:
+        token = value.strip()
+        if not token:
+            raise ContractError("--access-token must not be empty")
+        return token
+    return env_token or None
+
+
+def _normalize_allow_host(value: str) -> str:
+    text = value.strip().lower()
+    if not text:
+        raise ContractError("--allow-host must not be empty")
+    if "://" in text or any(character in text for character in "/?#"):
+        raise ContractError(f"--allow-host must be a host name, not a URL: {value}")
+    if text.startswith("["):
+        if not text.endswith("]"):
+            raise ContractError(f"--allow-host has an invalid IPv6 name: {value}")
+        text = text[1:-1]
+    elif text.count(":") == 1:
+        text = text.rsplit(":", 1)[0]
+    if ":" in text:
         try:
-            address = ipaddress.ip_address(host)
+            ipaddress.IPv6Address(text)
         except ValueError as exc:
-            raise ContractError("--host must be localhost or a loopback address") from exc
-        if not address.is_loopback:
-            raise ContractError("--host must be a loopback address")
+            raise ContractError(
+                f"--allow-host has an invalid IPv6 name: {value}"
+            ) from exc
+    if not text or any(character.isspace() for character in text):
+        raise ContractError(f"--allow-host has an invalid host name: {value}")
+    return text.rstrip(".")
+
+
+def _primary_lan_address() -> str | None:
+    """Return the source address for the default route without sending a packet."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+            probe.connect(("192.0.2.1", 9))
+            address = str(probe.getsockname()[0])
+    except OSError:
+        return None
+    return address if address and address != "0.0.0.0" else None
+
+
+def _local_host_names(bound_host: str) -> set[str]:
+    """Collect local names and addresses that a LAN client may use in Host."""
+    names: set[str] = set()
+    if bound_host not in WILDCARD_HOSTS:
+        names.add(bound_host.lower())
+    try:
+        hostname = socket.gethostname()
+    except OSError:
+        hostname = ""
+    if hostname:
+        names.add(hostname.lower().rstrip("."))
+        try:
+            names.add(socket.getfqdn(hostname).lower().rstrip("."))
+        except OSError:
+            pass
+        try:
+            for info in socket.getaddrinfo(hostname, None):
+                names.add(str(info[4][0]).lower())
+        except OSError:
+            pass
+    primary = _primary_lan_address()
+    if primary is not None:
+        names.add(primary.lower())
+    names.discard("")
+    names.discard("0.0.0.0")
+    names.discard("::")
+    return names
+
+
+def _resolve_serve_access(
+    host: str,
+    access_token: str | None,
+    allow_hosts: Sequence[str],
+) -> tuple[str, str | None, frozenset[str]]:
+    """Validate bind/auth settings and return (host, token, allowed Host names)."""
+    text = str(host).strip()
+    if not text:
+        raise ContractError("--host must not be empty")
+    loopback = text == "localhost"
+    if not loopback:
+        try:
+            address = ipaddress.ip_address(text)
+        except ValueError as exc:
+            raise ContractError(
+                "--host must be localhost or an IP address; use 0.0.0.0 to "
+                "listen on all interfaces"
+            ) from exc
+        loopback = address.is_loopback
+    token = _access_token_from(access_token)
+    if token is not None and len(token) < MIN_ACCESS_TOKEN_LENGTH:
+        raise ContractError(
+            f"access token must be at least {MIN_ACCESS_TOKEN_LENGTH} characters"
+        )
+    extras = frozenset(_normalize_allow_host(item) for item in allow_hosts)
+    if loopback:
+        if extras:
+            raise ContractError("--allow-host requires a non-loopback --host")
+        return text, token, frozenset()
+    if token is None:
+        raise ContractError(
+            "non-loopback --host requires --access-token or ECOM_SERVE_TOKEN"
+        )
+    allowed = frozenset(_local_host_names(text) | set(extras))
+    return text, token, allowed
+
+
+def _format_url_host(host: str) -> str:
+    return f"[{host}]" if ":" in host else host
+
+
+def _serve_urls(host: str, port: int, allowed_hosts: frozenset[str]) -> list[str]:
+    if host not in WILDCARD_HOSTS:
+        names = [host]
+    else:
+        want_ipv6 = host == "::"
+        names = []
+        for name in sorted(allowed_hosts):
+            try:
+                address = ipaddress.ip_address(name)
+            except ValueError:
+                continue
+            if want_ipv6 and address.version != 6:
+                continue
+            if not want_ipv6 and address.version != 4:
+                continue
+            if address.is_loopback or address.is_link_local or address.is_unspecified:
+                continue
+            names.append(name)
+        primary = _primary_lan_address()
+        names.sort(key=lambda name: (name != primary, name))
+    if not names:
+        names = [host]
+    return [f"http://{_format_url_host(name)}:{port}/next/" for name in names]
+
+
+def _serve(args: argparse.Namespace) -> int:
+    host, token, allowed_hosts = _resolve_serve_access(
+        args.host, args.access_token, args.allow_host
+    )
     if args.read_only and not args.db.is_file():
         raise ContractError(
             f"--read-only requires an existing task ledger: {args.db}"
@@ -389,6 +552,8 @@ def _serve(args: argparse.Namespace) -> int:
         heartbeat_interval=args.heartbeat_interval,
         proxy=args.proxy,
         read_only=args.read_only,
+        access_token=token,
+        allowed_hosts=allowed_hosts,
     )
     if args.read_only:
         mode = "read-only"
@@ -398,7 +563,18 @@ def _serve(args: argparse.Namespace) -> int:
         mode = "managed worker"
     if args.allow_multi_worker and not args.read_only:
         mode += ", shared ledger"
-    print(f"serving http://{host}:{args.port} ({mode})")
+    if token is not None:
+        mode += ", token auth"
+    urls = _serve_urls(host, args.port, allowed_hosts)
+    print(f"serving {urls[0]} ({mode})")
+    for url in urls[1:]:
+        print(f"also serving {url}")
+    if token is not None:
+        print("access: HTTP Basic; username any, password = access token")
+    if host in WILDCARD_HOSTS and urls[0] == (
+        f"http://{_format_url_host(host)}:{args.port}/next/"
+    ):
+        print("warning: no LAN address detected; pass --allow-host or use a detected address")
     lock = (
         nullcontext()
         if args.read_only or args.no_worker or args.allow_multi_worker

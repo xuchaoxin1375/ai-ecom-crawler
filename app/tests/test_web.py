@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import io
 import json
 import os
@@ -664,6 +665,123 @@ class WebApiTests(unittest.TestCase):
             json={**body, "request_id": "req-guard-ok"},
         )
         self.assertEqual(valid.status_code, 201)
+
+    def test_lan_access_requires_basic_token_and_allowed_host(self) -> None:
+        token = "0123456789abcdef"
+        auth = {
+            "Authorization": "Basic "
+            + base64.b64encode(f"ecom:{token}".encode()).decode()
+        }
+        lan_headers = {
+            "Host": "192.168.1.20:8765",
+            "Origin": "http://192.168.1.20:8765",
+            "X-Requested-With": "XMLHttpRequest",
+        }
+        app = create_app(
+            self.db_path,
+            self.out_root,
+            self.rules_dir,
+            access_token=token,
+            allowed_hosts={"192.168.1.20"},
+        )
+        self.assertTrue(app.state.auth_required)
+        self.assertFalse(hasattr(app.state, "access_token"))
+        client = TestClient(app, headers=lan_headers)
+
+        missing = client.get("/api/health")
+        self.assertEqual(missing.status_code, 401)
+        self.assertIn("Basic", missing.headers["www-authenticate"])
+
+        wrong = client.get(
+            "/api/health",
+            headers={
+                "Authorization": "Basic "
+                + base64.b64encode(b"ecom:wrong-token").decode()
+            },
+        )
+        self.assertEqual(wrong.status_code, 401)
+
+        self.assertEqual(client.get("/api/health", headers=auth).status_code, 200)
+
+        denied = TestClient(
+            app,
+            headers={
+                **lan_headers,
+                **auth,
+                "Host": "evil.test",
+                "Origin": "http://evil.test",
+            },
+        )
+        self.assertEqual(denied.get("/api/health").status_code, 403)
+
+        rule = self._first_rule()
+        body = {
+            "request_id": "req-lan",
+            "rule_id": rule["rule_id"],
+            "rule_version": rule["rule_version"],
+            "task_type": "product",
+        }
+        created = client.post("/api/tasks", json=body, headers=auth)
+        self.assertEqual(created.status_code, 201, created.text)
+
+        cross = client.post(
+            "/api/tasks",
+            json={**body, "request_id": "req-lan-cross"},
+            headers={**auth, "Origin": "http://evil.test"},
+        )
+        self.assertEqual(cross.status_code, 403)
+
+        events = client.get("/api/tasks/task-1/events", headers=auth)
+        self.assertEqual(events.status_code, 200)
+        self.assertIn("event: end", events.text)
+
+        loopback = TestClient(
+            create_app(
+                self.db_path,
+                self.out_root,
+                self.rules_dir,
+                access_token=token,
+            ),
+            headers={"Host": "127.0.0.1:8765", **auth},
+        )
+        self.assertEqual(loopback.get("/api/health").status_code, 200)
+
+        with self.assertRaises(ValueError):
+            create_app(
+                self.db_path,
+                self.out_root,
+                self.rules_dir,
+                allowed_hosts={"192.168.1.20"},
+            )
+
+    def test_lan_read_only_authenticates_before_rejecting_writes(self) -> None:
+        token = "0123456789abcdef"
+        headers = {
+            "Host": "192.168.1.20:8765",
+            "Origin": "http://192.168.1.20:8765",
+            "X-Requested-With": "XMLHttpRequest",
+        }
+        app = create_app(
+            self.db_path,
+            self.out_root,
+            self.rules_dir,
+            read_only=True,
+            access_token=token,
+            allowed_hosts={"192.168.1.20"},
+        )
+        self.assertEqual(
+            TestClient(app, headers=headers).post("/api/tasks", json={}).status_code,
+            401,
+        )
+        auth = {
+            "Authorization": "Basic "
+            + base64.b64encode(f"ecom:{token}".encode()).decode()
+        }
+        client = TestClient(app, headers={**headers, **auth})
+        self.assertTrue(client.get("/api/health").json()["read_only"])
+        rejected = client.post("/api/tasks", json={})
+        self.assertEqual(rejected.status_code, 403)
+        self.assertEqual(rejected.json()["error"]["code"], "READ_ONLY")
 
     def test_items_limit_is_bounded(self) -> None:
         self.assertEqual(

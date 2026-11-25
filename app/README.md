@@ -85,7 +85,7 @@ python -m patchright install chromium
 
 ## 启动项目
 
-本地入口同时提供 Web UI、API 和托管 worker；`serve` 默认绑定 `127.0.0.1:8765`，端口固定使用 8765，不要为绕开占用换端口。`--db` 和 `--out-root` 必填；`--rules-dir` 用于规则匹配、任务创建和站点构建，不配置时页面只能查看已有任务。
+本地入口同时提供 Web UI、API 和托管 worker；`serve` 默认绑定 `127.0.0.1:8765`，端口固定使用 8765，不要为绕开占用换端口。`--db` 和 `--out-root` 必填；`--rules-dir` 用于规则匹配、任务创建和站点构建，不配置时页面只能查看已有任务。需要从可信局域网的另一台设备访问时，使用下方[局域网访问](#局域网访问)命令，必须同时提供访问令牌。
 
 前置：
 
@@ -112,6 +112,26 @@ python -m uv run --project app ecom-crawler serve --db "$data\tasks.db" --out-ro
 
 打开 `http://127.0.0.1:8765/next/#/batches`；任务入口是 `http://127.0.0.1:8765/next/#/tasks`，构建记录入口是 `http://127.0.0.1:8765/next/#/builds`。根路径 `/` 在 v2 构建产物存在时 307 跳到 `/next/`；旧 Vue 与旧原生控制台默认下线，`/batch`、`/legacy` 都 307 到 `/next/`，只有设置 `ECOM_LEGACY_UI=on` 时才恢复直访回退。停止用 `Ctrl+C`；重启前先停旧实例并继续使用 8765。服务启动后才构建 `frontend-v2/dist` 时，`/next/` 要重启服务才可用。
 
+### 局域网访问
+
+默认只绑定回环地址。需要从同一可信局域网的另一台电脑操作批次、任务或构建时，显式绑定 `0.0.0.0` 并提供访问令牌：
+
+```powershell
+$env:ECOM_SERVE_TOKEN = python -c "import secrets; print(secrets.token_urlsafe(24))"
+$data = "C:\path\to\evidence\workbench"
+python -m uv run --project app ecom-crawler serve --db "$data\tasks.db" --out-root "$data\out" --rules-dir "$data\rules" --host 0.0.0.0 --port 8765
+```
+
+在另一台电脑打开启动输出里的 `http://<本机局域网 IP>:8765/next/#/batches`。浏览器会弹出 HTTP Basic 认证框：用户名任意，密码填访问令牌。令牌也可以通过 `--access-token <令牌>` 传入，但命令行会进入 shell 历史和进程列表，优先用 `ECOM_SERVE_TOKEN`。
+
+- 令牌至少 16 个字符；非回环 `--host` 没有令牌时拒绝启动。设置令牌后，回环访问同样需要认证。
+- Host 只接受回环、本机检测到的地址／主机名，以及 `--allow-host <名称>` 追加的名称；用 mDNS 名称（如 `my-pc.local`）访问时把它加进 `--allow-host`，可重复传入。
+- 写请求仍要求同源 `Origin` 和 `X-Requested-With`；`--read-only` 下开放局域网时，认证通过后写接口仍返回 403 `READ_ONLY`。
+- 局域网入口使用 FastAPI 托管的 `/next/`（需要先构建 `frontend-v2/dist`）；Vite 开发服务仍绑定 `127.0.0.1:5175`，不作为局域网入口。
+- Windows 首次启动时允许专用网络的 8765 入站；只允许专用网络，不要开放公用网络。
+- 这是**可信局域网**的临时访问方式：HTTP 明文传输，Basic 凭据可被同网段嗅探；不提供 TLS、多用户、独立账号或公网暴露。不要做端口映射、反向代理公网或跨不可信网络使用；需要这些能力时另做安全设计。
+- 启动输出只打印可用地址和认证方式，不打印令牌；令牌变更后，浏览器会重新提示认证。
+
 ## CLI
 
 ```powershell
@@ -122,6 +142,7 @@ python -m uv run --project app ecom-crawler submit --rule /path/to/rule.yaml --d
 python -m uv run --project app ecom-crawler worker --db /path/to/tasks.db --out-root /path/to/tasks --proxy http://127.0.0.1:17211
 python -m uv run --project app ecom-crawler worker --db /path/to/tasks.db --out-root /path/to/tasks --allow-multi-worker --lease-ttl 30
 python -m uv run --project app ecom-crawler serve --db /path/to/tasks.db --out-root /path/to/tasks --rules-dir /path/to/rules --port 8765 --proxy http://127.0.0.1:17211
+python -m uv run --project app ecom-crawler serve --db /path/to/tasks.db --out-root /path/to/tasks --rules-dir /path/to/rules --host 0.0.0.0 --port 8765
 python -m uv run --project app ecom-crawler pause --db /path/to/tasks.db --task-id sample-002
 python -m uv run --project app ecom-crawler resume --db /path/to/tasks.db --task-id sample-002
 python -m uv run --project app ecom-crawler cancel --db /path/to/tasks.db --task-id sample-002
@@ -136,7 +157,7 @@ python -m uv run --project app ecom-crawler validate --task-result /path/to/task
 - `audit-content` 用渲染后的商品区文本和截图抽样核对规则提取覆盖：输出 `visual-audit.json`、未覆盖文本块和整页截图；这是人工审计工具，不替代批量提取。
 - `run` 的退出码表示任务是否实际执行；业务结论看 `task-result.json` 的 `outcome`。计划或用法错误返回 2。
 - `run` 是一次性入口，不提供可恢复的控制；需要暂停／恢复／取消时用 `submit` 入队，再在另一个 shell 运行 `worker`，用 `pause`／`resume`／`cancel` 控制。外部暂停 `run` 任务后，`run` 以 2 退出并提示用 `worker` 恢复。
-- `serve` 只绑定回环地址，默认启动托管 worker（持有 worker 单实例锁）；`--no-worker` 只提供 API／页面，执行由独立 `worker` 进程负责，写接口仍然可用；`--read-only` 要求账本已存在，不启动 worker，不创建可写构建管理，所有非 `GET`／`HEAD`／`OPTIONS` 请求返回 403 `READ_ONLY`，SQLite 以 `mode=ro` 和 `PRAGMA query_only=ON` 打开。页面关闭不会停止后台。
+- `serve` 默认只绑定回环地址；`--host` 为非回环地址时必须提供 `--access-token` 或 `ECOM_SERVE_TOKEN`（至少 16 个字符），此时所有请求走 HTTP Basic，Host 只接受回环、本机地址／主机名和 `--allow-host` 追加项。默认启动托管 worker（持有 worker 单实例锁）；`--no-worker` 只提供 API／页面，执行由独立 `worker` 进程负责，写接口仍然可用；`--read-only` 要求账本已存在，不启动 worker，不创建可写构建管理，所有非 `GET`／`HEAD`／`OPTIONS` 请求返回 403 `READ_ONLY`，SQLite 以 `mode=ro` 和 `PRAGMA query_only=ON` 打开。页面关闭不会停止后台。
 - 出口代理按任务或进程传入：`--proxy`、`ECOM_FETCH_PROXY`、`ECOM_BUILD_PROXY`；构建 API 的 `proxy` 会写入构建记录和站点，后续批次任务沿用。代理 URL 不接受凭据，API 展示会遮蔽 userinfo。
 - 构建 trace 默认不保存 reasoning；需要本地复盘时用 `ECOM_BUILD_CAPTURE_REASONING=1` 启动服务，或在构建 API 传 `capture_reasoning=true`。trace 会截断工具输出、消息和 reasoning，不保存原始导出或整页 HTML。
 - 站点详情的“模型输出”读取 `/api/builds/{id}/messages`：构建中显示流式时间线，结束后显示完整可见消息；`timeline` 按时间合并思考、工具调用和文本。reasoning 仅在显式保留时出现；未保留时页面会提示服务端开关和单次勾选条件。
@@ -284,7 +305,7 @@ runtime:
 
 ## Web 服务（serve）
 
-- `serve` 用 FastAPI 托管 `/api/*` 和 `static/`，默认 `127.0.0.1:8765`，拒绝非回环地址；`--rules-dir` 指向受管规则包目录。
+- `serve` 用 FastAPI 托管 `/api/*` 和 `static/`，默认 `127.0.0.1:8765`；非回环 `--host` 必须同时配置访问令牌，启用 HTTP Basic，并按回环、本机地址／主机名和 `--allow-host` 校验 Host。`--rules-dir` 指向受管规则包目录。
 - 默认启动托管 worker（`--max-tasks` 默认 1），持有 `<db>.worker.lock`；`--no-worker` 只跳过托管 worker，写接口仍可用，便于另跑 `worker`。
 - `--read-only` 用于只读预览：要求账本已存在，不启动 worker，不运行构建启动对账／关闭调度，拒绝所有写请求（403 `READ_ONLY`），并以 SQLite `mode=ro` 加 `PRAGMA query_only=ON` 打开账本。`/api/health` 返回 `read_only=true`、`worker=read-only`、`builds_readable=true`、`builds_available=false`；构建历史可读，构建写操作为 403。
 - 只读 API：`GET /api/health`、`GET /api/rules`、`GET /api/tasks`（支持 `state`、`task_type`、`batch_id`、`site_key`、`include_archived`、`sort`、`order`）、`GET /api/tasks/{id}`、`GET /api/tasks/{id}/items?kind=url|product`、`GET /api/tasks/{id}/export`；质量反馈：`GET /api/tasks/{id}/feedback`、`GET /api/feedback`、`GET /api/feedback/{id}`；批次与构建：`GET /api/batches`、`/api/batches/{id}`、`/api/builds`、`/api/builds/config`、`/api/builds/{id}`、`/api/builds/{id}/messages`、`/api/builds/{id}/events`、`/api/builds/{id}/trace`；模型池：`PUT`／`DELETE /api/builds/config/models`、`POST /api/builds/models/check`。

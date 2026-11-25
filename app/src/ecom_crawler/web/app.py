@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import csv
 import hashlib
+import hmac
 import io
 import json
 import logging
@@ -15,6 +18,7 @@ import time
 import uuid
 import zipfile
 from collections import Counter
+from collections.abc import Iterable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -644,20 +648,61 @@ def _hostname_only(host_header: str) -> str:
     return value
 
 
-def _is_loopback_host(host_header: str) -> bool:
-    return _hostname_only(host_header) in LOOPBACK_HOSTS
+def _normalize_host_name(host_header: str) -> str:
+    """Return a bare, lower-case host name without brackets, port, or trailing dot."""
+    return _hostname_only(host_header).rstrip(".")
 
 
-def _origin_matches_host(origin: str, host_header: str) -> bool:
+def _is_allowed_host(host_header: str, allowed_hosts: frozenset[str]) -> bool:
+    name = _normalize_host_name(host_header)
+    return name in LOOPBACK_HOSTS or name in allowed_hosts
+
+
+def _origin_matches_host(
+    origin: str,
+    host_header: str,
+    allowed_hosts: frozenset[str],
+) -> bool:
     try:
         parsed = urlsplit(origin)
     except ValueError:
         return False
     if parsed.scheme != "http" or not parsed.netloc:
         return False
-    if not _is_loopback_host(parsed.netloc):
+    if not _is_allowed_host(parsed.netloc, allowed_hosts):
         return False
     return parsed.netloc.lower() == host_header.strip().lower()
+
+
+def _basic_password(header: str | None) -> str | None:
+    """Extract the password from an HTTP Basic header; the user name is ignored."""
+    if not header:
+        return None
+    parts = header.strip().split(None, 1)
+    if len(parts) != 2 or parts[0].lower() != "basic":
+        return None
+    try:
+        decoded = base64.b64decode(parts[1], validate=True).decode("utf-8")
+    except (binascii.Error, UnicodeDecodeError):
+        return None
+    _user, separator, password = decoded.partition(":")
+    return password if separator else None
+
+
+def _unauthorized() -> JSONResponse:
+    response = JSONResponse(
+        status_code=401,
+        content={
+            "error": {
+                "code": "UNAUTHORIZED",
+                "message": "authentication required",
+                "details": {},
+            }
+        },
+    )
+    response.headers["WWW-Authenticate"] = 'Basic realm="ecom-crawler", charset="UTF-8"'
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 def _sse(event: str, data: Any) -> str:
@@ -757,11 +802,26 @@ def create_app(
     build_dependency_policy: DependencyPolicy | None = None,
     proxy: str | None = None,
     read_only: bool = False,
+    access_token: str | None = None,
+    allowed_hosts: Iterable[str] | None = None,
 ) -> FastAPI:
     if read_only and manage_worker:
         raise ValueError("read_only mode cannot manage a worker")
     if read_only and build_manager is not None:
         raise ValueError("read_only mode cannot accept a build manager")
+    token = access_token if access_token is None else str(access_token)
+    if token is not None and not token.strip():
+        raise ValueError("access_token must not be empty")
+    raw_hosts = (
+        [allowed_hosts] if isinstance(allowed_hosts, str) else list(allowed_hosts or ())
+    )
+    allowed = frozenset(
+        name
+        for name in (_normalize_host_name(item) for item in raw_hosts)
+        if name
+    )
+    if allowed and token is None:
+        raise ValueError("allowed_hosts requires access_token")
     store = TaskStore(db_path, read_only=read_only)
     root = Path(out_root)
     if not read_only:
@@ -831,6 +891,8 @@ def create_app(
     app.state.build_manager = build_manager
     app.state.proxy = proxy
     app.state.read_only = read_only
+    app.state.auth_required = token is not None
+    app.state.allowed_hosts = tuple(sorted(allowed))
 
     def rule_error(exc: Exception) -> HTTPException:
         if isinstance(exc, RuleActivationConflictError):
@@ -1169,19 +1231,6 @@ def create_app(
         return None
 
     @app.middleware("http")
-    async def same_origin_guard(request: Request, call_next: Any) -> Any:
-        host = request.headers.get("host", "")
-        if not _is_loopback_host(host):
-            return _forbidden("request host is not loopback")
-        if request.method.upper() in WRITE_METHODS:
-            origin = request.headers.get("origin", "")
-            if not _origin_matches_host(origin, host):
-                return _forbidden("write requests require a same-origin loopback Origin")
-            if request.headers.get("x-requested-with") != "XMLHttpRequest":
-                return _forbidden("write requests require X-Requested-With: XMLHttpRequest")
-        return await call_next(request)
-
-    @app.middleware("http")
     async def read_only_guard(request: Request, call_next: Any) -> Any:
         if read_only and request.method.upper() in WRITE_METHODS:
             return JSONResponse(
@@ -1194,6 +1243,25 @@ def create_app(
                     }
                 },
             )
+        return await call_next(request)
+
+    @app.middleware("http")
+    async def access_guard(request: Request, call_next: Any) -> Any:
+        host = request.headers.get("host", "")
+        if not _is_allowed_host(host, allowed):
+            return _forbidden("request host is not allowed")
+        if token is not None:
+            password = _basic_password(request.headers.get("authorization"))
+            if password is None or not hmac.compare_digest(
+                password.encode("utf-8"), token.encode("utf-8")
+            ):
+                return _unauthorized()
+        if request.method.upper() in WRITE_METHODS:
+            origin = request.headers.get("origin", "")
+            if not _origin_matches_host(origin, host, allowed):
+                return _forbidden("write requests require a same-origin Origin")
+            if request.headers.get("x-requested-with") != "XMLHttpRequest":
+                return _forbidden("write requests require X-Requested-With: XMLHttpRequest")
         return await call_next(request)
 
     @app.exception_handler(HTTPException)
