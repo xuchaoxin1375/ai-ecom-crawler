@@ -82,6 +82,7 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
   );
 
   const [draft, setDraft] = useState<DraftModel[]>(() => toDraft(config.models));
+  const [defaultRef, setDefaultRef] = useState(config.default_model ?? "");
   const [saving, setSaving] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [checking, setChecking] = useState("");
@@ -97,12 +98,15 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
   const hasOverride = Boolean(config.model_pool_override);
   const source = config.model_pool_source ?? "none";
   const presetEntry = catalog.find((entry) => entry.id === preset);
-  const dirty = draftKey(draft) !== draftKey(toDraft(savedModels));
+  const savedDefault = config.default_model ?? "";
+  const dirty =
+    draftKey(draft) !== draftKey(toDraft(savedModels)) || defaultRef !== savedDefault;
   const busy = saving || resetting || Boolean(checking);
 
   function applyConfig(next: BuildConfig) {
     queryClient.setQueryData(["build-config"], next);
     setDraft(toDraft(next.models));
+    setDefaultRef(next.default_model ?? "");
   }
 
   function updateDraft(next: DraftModel[]) {
@@ -150,10 +154,18 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
   }
 
   function removeModel(id: string) {
+    const removed = draft.find((item) => item.id === id);
+    if (removed && defaultRef === modelRef(removed.id, removed.variant)) {
+      setDefaultRef("");
+    }
     updateDraft(draft.filter((item) => item.id !== id));
   }
 
   function changeVariant(id: string, variant: string) {
+    const current = draft.find((item) => item.id === id);
+    if (current && defaultRef === modelRef(current.id, current.variant)) {
+      setDefaultRef(modelRef(current.id, variant));
+    }
     updateDraft(draft.map((item) => (item.id === id ? { ...item, variant } : item)));
   }
 
@@ -165,10 +177,11 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
     try {
       const next = await updateBuildModels(
         draft.map((item) => modelRef(item.id, item.variant)),
+        defaultRef || null,
       );
       applyConfig(next);
       setNotice(
-        "模型池已保存；新构建会使用新配置，已排队和运行中的构建保持入队时锁定的模型。",
+        "模型池和默认模型已保存；新构建会使用新配置，已排队和运行中的构建保持入队时锁定的模型。",
       );
     } catch (exc) {
       setError(errorText(exc));
@@ -233,7 +246,7 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
       <PageHeader
         eyebrow="构建设置"
         title="模型配置"
-        description="管理构建与规则修复使用的模型池、默认思考等级和可用性探测。凭据仍由 OpenCode 解析，本页不保存 API Key。"
+        description="管理构建与规则修复使用的模型池、固定默认模型、默认思考等级和可用性探测。凭据仍由 OpenCode 解析，本页不保存 API Key。"
         actions={
           <Button onClick={onRefresh} disabled={refreshing || busy}>
             <RefreshCw
@@ -294,10 +307,46 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
           </div>
         </div>
 
+        <div className="flex flex-col gap-3 border-b border-line px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <label className="text-sm font-medium text-ink" htmlFor="default-model">
+              默认模型
+            </label>
+            <p className="mt-0.5 text-xs leading-5 text-ink-3">
+              固定后新构建和修复始终使用该模型；选择轮询才按入队顺序分配。已排队和运行中的构建保持锁定。
+            </p>
+          </div>
+          <Select
+            id="default-model"
+            className="h-9 w-full shrink-0 sm:w-80"
+            value={defaultRef}
+            disabled={!editable || busy || draft.length === 0}
+            onChange={(event) => {
+              setDefaultRef(event.target.value);
+              setNotice("");
+            }}
+          >
+            <option value="">轮询全部模型</option>
+            {draft.map((item) => {
+              const entry = catalog.find((model) => model.id === item.id);
+              const label = entry?.label ?? savedByKey.get(item.id)?.label ?? item.id;
+              return (
+                <option
+                  key={modelRef(item.id, item.variant)}
+                  value={modelRef(item.id, item.variant)}
+                >
+                  {label}
+                  {item.variant ? ` · ${item.variant}` : ""}
+                </option>
+              );
+            })}
+          </Select>
+        </div>
+
         {draft.length === 0 ? (
           <EmptyState
             title="模型池为空"
-            description="不配置模型池时，构建和修复使用单一的默认模型。添加至少两个模型后，新构建会按入队顺序轮转。"
+            description="不配置模型池时，构建和修复使用单一的默认模型。添加模型后可选择固定默认模型，或保留轮询。"
           />
         ) : (
           <ul className="divide-y divide-line">
@@ -324,6 +373,11 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
                       <code className="break-all font-mono text-[11px] text-ink-3">
                         {item.id}
                       </code>
+                      {defaultRef === ref ? (
+                        <Badge tone="info" dot={false}>
+                          默认
+                        </Badge>
+                      ) : null}
                     </div>
                     <div className="mt-2 flex flex-wrap items-center gap-2">
                       <label className="flex items-center gap-2 text-xs text-ink-3">
@@ -505,7 +559,11 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
 
       <section className="space-y-2 text-xs leading-5 text-ink-3">
         <p>
-          模型池按一次入队的构建或修复轮转，不按商品或采集任务轮转。已排队和运行中的构建保留入队时锁定的模型，不会因保存而改派。
+          固定默认模型时，新构建和修复始终使用该模型；选择轮询时按一次入队的构建或修复轮转，不按商品或采集任务轮转。已排队和运行中的构建保留入队时锁定的模型，不会因保存而改派。
+        </p>
+        <p>
+          固定模型即使最近探测失败也不会自动换模型；轮询会跳过标记失败的档位。CommandCode
+          DeepSeek 的 low／max 档位尚未实测。
         </p>
         <p>
           保存会写入本地 SQLite

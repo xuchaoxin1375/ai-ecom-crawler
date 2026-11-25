@@ -266,6 +266,18 @@
       },
       "BuildModelPoolRequest": {
         "properties": {
+          "default_ref": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Ref"
+          },
           "refs": {
             "items": {
               "maxLength": 200,

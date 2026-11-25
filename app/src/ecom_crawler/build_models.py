@@ -15,6 +15,9 @@ from .runtime.models import utc_now
 
 MODEL_REF = re.compile(r"[a-zA-Z0-9_.-]+/[a-zA-Z0-9_./:-]+(?:#[a-zA-Z0-9_.-]+)?")
 CATALOG = {
+    "commandcode/deepseek/deepseek-v4.1-flash": (
+        "CommandCode DeepSeek V4.1 Flash", ("low", "high", "max"),
+    ),
     "opencode-go/deepseek-v4.1-flash": ("DeepSeek V4.1 Flash", ("low", "high", "max")),
     "yjwd-gpt-enterprise/gpt-6.1-terra": (
         "YJWD GPT-6.1 Terra", ("none", "low", "medium", "high", "xhigh", "max"),
@@ -153,6 +156,7 @@ class BuildModelPool:
         self, raw: str = "", *, inherit_env: bool = True,
     ) -> None:
         self.models: dict[str, dict[str, str]] = {}
+        self.default_ref: str | None = None
         self._inherit_env = inherit_env
         self._results: dict[str, dict[str, Any]] = {}
         self._lock = threading.Lock()
@@ -170,6 +174,16 @@ class BuildModelPool:
     def _variants(self, key: str) -> tuple[str, ...]:
         entry = CATALOG.get(key)
         return entry[1] if entry else (self.models[key].get("variant", ""),)
+
+    def set_default(self, ref: str | None) -> None:
+        """Pin new builds to one pool entry; empty means rotate."""
+        if not ref:
+            self.default_ref = None
+            return
+        asked = parse_model_ref(ref)
+        if _full_ref(asked) not in self.refs():
+            raise ModelPoolError("默认模型必须是模型池中的一项，且档位与配置一致")
+        self.default_ref = _full_ref(asked)
 
     def manual(self, ref: str) -> dict[str, str]:
         asked = parse_model_ref(ref)

@@ -897,6 +897,119 @@ class BuildWorkflowTests(unittest.TestCase):
             self.assertEqual(allocations[2]["state"], "QUEUED")
             self.assertEqual(self.store.get_build(allocations[2]["build_id"]).model, allocations[2]["model"])
 
+    def test_model_pool_default_model_pins_new_builds(self) -> None:
+        manager = self._manager(FakeBuildAdapter(self.root, hang=True))
+        terra = "yjwd-gpt-enterprise/gpt-6.1-terra"
+        manager.model_pool = BuildModelPool(
+            "opencode-go/deepseek-v4.1-flash#high,"
+            "yjwd-gpt-enterprise/gpt-6.1-terra#medium"
+        )
+        manager.model_pool.set_default(f"{terra}#medium")
+        self.store.add_batch_sites([
+            BatchSite(
+                batch_id="b-1",
+                site_key="second.test",
+                domain="second.test",
+                input_value="https://second.test/",
+                readiness="needs_onboarding",
+            )
+        ])
+        with self._client(manager) as client:
+            for site in ("example.fr", "second.test"):
+                response = client.post(
+                    f"/api/batches/b-1/sites/{site}/build", json={}
+                )
+                self.assertEqual(response.status_code, 202, response.text)
+                build = response.json()["build"]
+                self.assertEqual(
+                    build["model"],
+                    {
+                        "providerID": "yjwd-gpt-enterprise",
+                        "id": "gpt-6.1-terra",
+                        "variant": "medium",
+                    },
+                )
+                record = self.store.get_build(build["build_id"])
+                self.assertEqual(record.request["model_selection"], "pinned")
+
+    def test_model_pool_default_setting_persists_and_resets(self) -> None:
+        manager = self._manager(FakeBuildAdapter(self.root))
+        deepseek = "opencode-go/deepseek-v4.1-flash"
+        terra = "yjwd-gpt-enterprise/gpt-6.1-terra"
+        with self._client(manager) as client:
+            response = client.put(
+                "/api/builds/config/models",
+                json={
+                    "refs": [f"{deepseek}#high", f"{terra}#medium"],
+                    "default_ref": f"{terra}#medium",
+                },
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()["default_model"], f"{terra}#medium")
+            self.assertEqual(
+                self.store.get_setting("build_model_default"), f"{terra}#medium"
+            )
+
+            started = client.post(
+                "/api/batches/b-1/sites/example.fr/build", json={}
+            )
+            self.assertEqual(started.status_code, 202, started.text)
+            self.assertEqual(
+                started.json()["build"]["model"],
+                {
+                    "providerID": "yjwd-gpt-enterprise",
+                    "id": "gpt-6.1-terra",
+                    "variant": "medium",
+                },
+            )
+
+            restarted = BuildManager(
+                self.store,
+                self.root / "out-restart-default",
+                self.rules,
+                adapter=FakeBuildAdapter(self.root),
+            )
+            self.addCleanup(restarted.shutdown)
+            self.assertEqual(restarted.model_pool.default_ref, f"{terra}#medium")
+
+            reset = client.delete("/api/builds/config/models")
+            self.assertEqual(reset.status_code, 200, reset.text)
+            self.assertIsNone(reset.json()["default_model"])
+            self.assertIsNone(self.store.get_setting("build_model_default"))
+
+    def test_model_pool_rejects_invalid_default_model(self) -> None:
+        manager = self._manager(FakeBuildAdapter(self.root))
+        deepseek = "opencode-go/deepseek-v4.1-flash"
+        terra = "yjwd-gpt-enterprise/gpt-6.1-terra"
+        with self._client(manager) as client:
+            outside = client.put(
+                "/api/builds/config/models",
+                json={"refs": [f"{deepseek}#high"], "default_ref": f"{terra}#medium"},
+            )
+            self.assertEqual(outside.status_code, 400)
+            self.assertEqual(outside.json()["error"]["code"], "MODEL_POOL_INVALID")
+            self.assertIsNone(manager.model_pool.default_ref)
+            self.assertIsNone(self.store.get_setting("build_model_default"))
+
+            mismatch = client.put(
+                "/api/builds/config/models",
+                json={"refs": [f"{deepseek}#high"], "default_ref": f"{deepseek}#max"},
+            )
+            self.assertEqual(mismatch.status_code, 400)
+            self.assertEqual(mismatch.json()["error"]["code"], "MODEL_POOL_INVALID")
+
+    def test_commandcode_deepseek_is_a_known_model(self) -> None:
+        from ecom_crawler.build_models import known_models
+
+        entry = next(
+            item
+            for item in known_models()
+            if item["id"] == "commandcode/deepseek/deepseek-v4.1-flash"
+        )
+        self.assertEqual(entry["label"], "CommandCode DeepSeek V4.1 Flash")
+        self.assertEqual(entry["variants"], ["low", "high", "max"])
+        self.assertFalse(entry["probe_supported"])
+
     def test_model_pool_probe_only_on_post_and_excludes_failed_default(self) -> None:
         manager = self._manager(FakeBuildAdapter(self.root))
         terra = "yjwd-gpt-enterprise/gpt-6.1-terra"
@@ -1018,6 +1131,9 @@ class BuildWorkflowTests(unittest.TestCase):
 
     def test_invalid_stored_model_pool_falls_back_to_env(self) -> None:
         self.store.set_setting("build_model_pool", "not-a-ref")
+        self.store.set_setting(
+            "build_model_default", "yjwd-gpt-enterprise/gpt-6.1-terra#medium"
+        )
         env_pool = "opencode-go/deepseek-v4.1-flash#high"
         with mock.patch.dict(
             os.environ, {"ECOM_BUILD_MODEL_POOL": env_pool}, clear=False
@@ -1026,9 +1142,11 @@ class BuildWorkflowTests(unittest.TestCase):
         self.assertEqual(manager.model_pool_source, "env")
         self.assertTrue(manager.model_pool_override)
         self.assertEqual(manager.model_pool.refs(), [env_pool])
+        self.assertIsNone(manager.model_pool.default_ref)
         manager.reset_model_pool()
         self.assertFalse(manager.model_pool_override)
         self.assertIsNone(self.store.get_setting("build_model_pool"))
+        self.assertIsNone(self.store.get_setting("build_model_default"))
 
     def test_model_pool_settings_write_is_read_only_guarded(self) -> None:
         app = create_app(

@@ -375,6 +375,7 @@ class BuildModelPoolRequest(BaseModel):
     refs: list[Annotated[str, Field(min_length=1, max_length=200)]] = Field(
         default_factory=list, max_length=16
     )
+    default_ref: str | None = Field(default=None, max_length=200)
 
 
 class BuildPermissionRequest(BaseModel):
@@ -3659,6 +3660,7 @@ def create_app(
                 "reasoning_capture_enabled": False,
                 "max_repair_rounds": 0,
                 "models": [],
+                "default_model": None,
                 "model_pool_source": "none",
                 "model_pool_editable": False,
                 "model_pool_override": False,
@@ -3673,6 +3675,7 @@ def create_app(
             "reasoning_capture_enabled": build_manager.reasoning_capture_enabled,
             "max_repair_rounds": build_manager.max_repair_rounds,
             "models": build_manager.model_pool.describe(),
+            "default_model": build_manager.model_pool.default_ref,
             "model_pool_source": build_manager.model_pool_source,
             "model_pool_editable": not builds_disabled and not read_only,
             "model_pool_override": build_manager.model_pool_override,
@@ -3688,7 +3691,7 @@ def create_app(
         if build_manager is None or builds_disabled:
             raise _error("BUILD_UNAVAILABLE", "build service unavailable", 409)
         try:
-            build_manager.update_model_pool(payload.refs)
+            build_manager.update_model_pool(payload.refs, payload.default_ref)
         except ModelPoolError as exc:
             raise _error("MODEL_POOL_INVALID", str(exc), 400) from exc
         except BuildError as exc:

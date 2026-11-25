@@ -588,6 +588,7 @@ export interface BuildConfig {
   reasoning_capture_enabled: boolean;
   max_repair_rounds: number;
   models?: BuildModelOption[];
+  default_model?: string | null;
   model_pool_source?: BuildModelPoolSource;
   model_pool_editable?: boolean;
   model_pool_override?: boolean;
@@ -1324,8 +1325,14 @@ export function checkBuildModel(modelRef: string): Promise<BuildModelHealth> {
   });
 }
 
-export function updateBuildModels(refs: string[]): Promise<BuildConfig> {
-  return sendJson<BuildConfig>("/api/builds/config/models", "PUT", { refs });
+export function updateBuildModels(
+  refs: string[],
+  defaultRef: string | null = null,
+): Promise<BuildConfig> {
+  return sendJson<BuildConfig>("/api/builds/config/models", "PUT", {
+    refs,
+    default_ref: defaultRef,
+  });
 }
 
 export function resetBuildModels(): Promise<BuildConfig> {

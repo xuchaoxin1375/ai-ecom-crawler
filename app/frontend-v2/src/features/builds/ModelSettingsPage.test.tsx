@@ -48,6 +48,7 @@ function config(
     reasoning_capture_enabled: false,
     max_repair_rounds: 1,
     models,
+    default_model: null,
     model_pool_source: "env",
     model_pool_editable: true,
     model_catalog: catalog,
@@ -55,8 +56,14 @@ function config(
   };
 }
 
-function jsonBody(init?: RequestInit): { refs: string[] } {
-  return JSON.parse(String(init?.body)) as { refs: string[] };
+function jsonBody(init?: RequestInit): {
+  refs: string[];
+  default_ref?: string | null;
+} {
+  return JSON.parse(String(init?.body)) as {
+    refs: string[];
+    default_ref?: string | null;
+  };
 }
 
 afterEach(() => vi.unstubAllGlobals());
@@ -114,7 +121,54 @@ describe("model settings", () => {
       ([url, init]) => url === "/api/builds/config/models" && init?.method === "PUT",
     )!;
     expect(jsonBody(put[1]).refs).toEqual([`${deepseek}#high`, `${terra}#medium`]);
-    expect(await screen.findByText(/模型池已保存/)).toBeVisible();
+    expect(await screen.findByText(/模型池和默认模型已保存/)).toBeVisible();
+  });
+
+  it("pins a default model and saves it", async () => {
+    let current = config();
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = url.split("?")[0];
+      if (path === "/api/builds/config" && !init?.method) {
+        return Response.json(current);
+      }
+      if (path === "/api/builds/config/models" && init?.method === "PUT") {
+        const body = jsonBody(init);
+        current = config(
+          body.refs.map((ref) => {
+            const [id, variant] = ref.split("#");
+            return option(id, variant);
+          }),
+          {
+            default_model: body.default_ref ?? null,
+            model_pool_source: "settings",
+          },
+        );
+        return Response.json(current);
+      }
+      throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage("/models", "/models", <ModelSettingsPage />);
+
+    const defaultModel = await screen.findByLabelText("默认模型");
+    fireEvent.change(defaultModel, { target: { value: `${terra}#medium` } });
+    fireEvent.click(screen.getByRole("button", { name: "保存配置" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/builds/config/models",
+        expect.objectContaining({ method: "PUT" }),
+      ),
+    );
+    const put = fetchMock.mock.calls.find(
+      ([url, init]) => url === "/api/builds/config/models" && init?.method === "PUT",
+    )!;
+    expect(jsonBody(put[1]).default_ref).toBe(`${terra}#medium`);
+    expect(await screen.findByText(/模型池和默认模型已保存/)).toBeVisible();
+    const terraRow = (
+      await screen.findByLabelText("YJWD GPT-6.1 Terra 默认思考等级")
+    ).closest("li")!;
+    expect(within(terraRow).getByText("默认")).toBeVisible();
   });
 
   it("probes a saved model and shows the result", async () => {

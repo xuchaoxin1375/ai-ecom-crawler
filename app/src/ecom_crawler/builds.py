@@ -118,6 +118,7 @@ TIMELINE_LIMIT = 200
 ROBOTS_USER_AGENT = "ecom-crawler-build/0.1"
 ROBOTS_TIMEOUT_SECONDS = 10.0
 MODEL_POOL_SETTING = "build_model_pool"
+MODEL_DEFAULT_SETTING = "build_model_default"
 logger = logging.getLogger(__name__)
 
 
@@ -893,6 +894,8 @@ class BuildManager:
         self.model = model if model is not None else default_model()
         self._env_model_pool = os.environ.get("ECOM_BUILD_MODEL_POOL", "").strip()
         stored_pool = self.store.get_setting(MODEL_POOL_SETTING)
+        stored_default = self.store.get_setting(MODEL_DEFAULT_SETTING)
+        using_stored_pool = stored_pool is not None
         self._model_pool_override = stored_pool is not None
         raw_pool = stored_pool if stored_pool is not None else self._env_model_pool
         self._model_pool_source = (
@@ -910,12 +913,20 @@ class BuildManager:
             logger.warning(
                 "stored model pool is invalid; falling back to environment: %s", exc
             )
+            using_stored_pool = False
             self._model_pool_source = (
                 "env" if self._env_model_pool else "none"
             )
             self.model_pool = BuildModelPool(
                 self._env_model_pool, inherit_env=not self.isolate_env,
             )
+        if using_stored_pool and stored_default:
+            try:
+                self.model_pool.set_default(stored_default)
+            except ModelPoolError as exc:
+                logger.warning(
+                    "stored default model is invalid; using rotation: %s", exc
+                )
         self.default_proxy = (
             default_proxy
             or os.environ.get("ECOM_BUILD_PROXY")
@@ -1043,16 +1054,23 @@ class BuildManager:
     def model_pool_override(self) -> bool:
         return self._model_pool_override
 
-    def update_model_pool(self, refs: list[str]) -> None:
+    def update_model_pool(
+        self, refs: list[str], default_ref: str | None = None,
+    ) -> None:
         if self.read_only:
             raise BuildError("build manager is read-only")
         candidate = BuildModelPool(
             ",".join(refs), inherit_env=not self.isolate_env
         )
+        candidate.set_default(default_ref)
         candidate.restore_health(self.model_pool.snapshot_health())
         raw = ",".join(candidate.refs())
         with self._lock:
             self.store.set_setting(MODEL_POOL_SETTING, raw)
+            if candidate.default_ref:
+                self.store.set_setting(MODEL_DEFAULT_SETTING, candidate.default_ref)
+            else:
+                self.store.delete_setting(MODEL_DEFAULT_SETTING)
             self.model_pool = candidate
             self._model_pool_source = "settings"
             self._model_pool_override = True
@@ -1066,6 +1084,7 @@ class BuildManager:
         candidate.restore_health(self.model_pool.snapshot_health())
         with self._lock:
             self.store.delete_setting(MODEL_POOL_SETTING)
+            self.store.delete_setting(MODEL_DEFAULT_SETTING)
             self.model_pool = candidate
             self._model_pool_source = "env" if self._env_model_pool else "none"
             self._model_pool_override = False
@@ -1192,8 +1211,16 @@ class BuildManager:
                     selected_model = self.model_pool.manual(model_ref)
                     selection = "manual"
                 elif self.model_pool.models:
-                    selected_model = self.model_pool.balanced(self.store.last_balanced_build_model())
-                    selection = "balanced"
+                    if self.model_pool.default_ref:
+                        selected_model = self.model_pool.manual(
+                            self.model_pool.default_ref
+                        )
+                        selection = "pinned"
+                    else:
+                        selected_model = self.model_pool.balanced(
+                            self.store.last_balanced_build_model()
+                        )
+                        selection = "balanced"
             except ModelPoolError as exc:
                 raise BuildError(str(exc)) from exc
 
