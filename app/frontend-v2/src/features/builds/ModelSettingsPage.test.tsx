@@ -53,6 +53,10 @@ function availableResponse() {
   return Response.json({ models: availableModels, error: null });
 }
 
+function availableResponseFor(models: AvailableBuildModel[]) {
+  return Response.json({ models, error: null });
+}
+
 function optionFromRef(ref: string): BuildModelOption {
   const [id, variant = ""] = ref.split("#");
   const entry = catalog.find((item) => item.id === id);
@@ -236,11 +240,6 @@ describe("model settings", () => {
     renderPage("/models", "/models", <ModelSettingsPage />);
 
     const available = await screen.findByRole("region", { name: "可用模型" });
-    fireEvent.click(
-      await within(available).findByRole("button", {
-        name: "显示前 50 个",
-      }),
-    );
     const terraRow = (await within(available).findByText("YJWD GPT-6.1 Terra")).closest(
       "li",
     )!;
@@ -277,6 +276,63 @@ describe("model settings", () => {
       "custom/provider-model#high",
     ]);
     expect(body.default_ref).toBe(`${terra}#medium`);
+  });
+
+  it("shows the first page of discovered models and filters by provider", async () => {
+    const manyModels: AvailableBuildModel[] = Array.from(
+      { length: 24 },
+      (_, index) => ({
+        id: `${index % 2 === 0 ? "alpha" : "beta"}/model-${index}`,
+        provider: index % 2 === 0 ? "alpha" : "beta",
+        model: `model-${index}`,
+        label: `Model ${index}`,
+        variants: [],
+        probe_supported: false,
+        known: false,
+      }),
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = url.split("?")[0];
+        if (path === "/api/builds/config") return Response.json(config([]));
+        if (path === "/api/builds/models/available") {
+          return availableResponseFor(manyModels);
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+    renderPage("/models", "/models", <ModelSettingsPage />);
+
+    const available = await screen.findByRole("region", { name: "可用模型" });
+    expect(await within(available).findByText("Model 0")).toBeVisible();
+    expect(within(available).queryByText("Model 20")).not.toBeInTheDocument();
+    expect(within(available).getByText("共 24 个模型")).toBeVisible();
+
+    fireEvent.click(within(available).getByRole("button", { name: "下一页" }));
+    expect(await within(available).findByText("Model 20")).toBeVisible();
+    expect(within(available).queryByText("Model 0")).not.toBeInTheDocument();
+    expect(within(available).getByText("第 2 / 2 页")).toBeVisible();
+
+    fireEvent.change(within(available).getByLabelText("每页显示条数"), {
+      target: { value: "50" },
+    });
+    expect(await within(available).findByText("Model 0")).toBeVisible();
+    expect(within(available).getByText("Model 23")).toBeVisible();
+    expect(within(available).getByText("第 1 / 1 页")).toBeVisible();
+    expect(
+      within(available).queryByRole("navigation", { name: "可用模型分页" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.change(within(available).getByLabelText("按供应商筛选"), {
+      target: { value: "alpha" },
+    });
+    expect(await within(available).findByText("Model 0")).toBeVisible();
+    expect(within(available).queryByText("Model 1")).not.toBeInTheDocument();
+    expect(within(available).getByText("共 24 个模型，筛选后 12 个")).toBeVisible();
+    expect(
+      within(available).queryByRole("navigation", { name: "可用模型分页" }),
+    ).not.toBeInTheDocument();
   });
 
   it("probes a saved model and shows the result", async () => {

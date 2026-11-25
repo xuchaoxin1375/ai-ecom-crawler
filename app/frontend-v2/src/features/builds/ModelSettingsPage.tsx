@@ -1,6 +1,14 @@
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, RefreshCw, Save, Search, Trash2 } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Plus,
+  RefreshCw,
+  Save,
+  Search,
+  Trash2,
+} from "lucide-react";
 import {
   checkBuildModel,
   getAvailableBuildModels,
@@ -19,7 +27,7 @@ import { ErrorNotice } from "../../components/ui/ErrorNotice";
 import { InlineNotice } from "../../components/ui/InlineNotice";
 import { Input, Select } from "../../components/ui/Input";
 import { PageHeader } from "../../components/ui/PageHeader";
-import { formatTime, type Tone } from "../../lib/format";
+import { formatNumber, formatTime, type Tone } from "../../lib/format";
 import { modelRef, probeErrorLabels } from "./modelHealth";
 
 interface DraftModel {
@@ -40,6 +48,30 @@ const SOURCE_TONES: Record<string, Tone> = {
 };
 
 const PREFERRED_VARIANTS = ["medium", "high", "low"];
+const AVAILABLE_PAGE_SIZE = 20;
+const PAGE_SIZE_OPTIONS = [10, 20, 50];
+type PageItem = number | "ellipsis";
+
+function providerOf(model: AvailableBuildModel): string {
+  return model.provider || model.id.split("/")[0] || "unknown";
+}
+
+function paginationItems(current: number, total: number): PageItem[] {
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, index) => index + 1);
+  }
+  const pages = [...new Set([1, current - 1, current, current + 1, total])]
+    .filter((page) => page >= 1 && page <= total)
+    .sort((left, right) => left - right);
+  const items: PageItem[] = [];
+  let previous = 0;
+  for (const page of pages) {
+    if (previous && page - previous > 1) items.push("ellipsis");
+    items.push(page);
+    previous = page;
+  }
+  return items;
+}
 
 function toDraft(models: BuildModelOption[] | undefined): DraftModel[] {
   return (models ?? []).map((model) => ({
@@ -101,7 +133,9 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
   const [customRef, setCustomRef] = useState("");
   const [customVariant, setCustomVariant] = useState("");
   const [modelSearch, setModelSearch] = useState("");
-  const [showAvailable, setShowAvailable] = useState(false);
+  const [providerFilter, setProviderFilter] = useState("all");
+  const [availablePageSize, setAvailablePageSize] = useState(AVAILABLE_PAGE_SIZE);
+  const [availablePageNumber, setAvailablePageNumber] = useState(1);
   const [refreshingAvailable, setRefreshingAvailable] = useState(false);
 
   const editable = Boolean(config.model_pool_editable);
@@ -112,22 +146,45 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
   const dirty =
     draftKey(draft) !== draftKey(toDraft(savedModels)) || defaultRef !== savedDefault;
   const busy = saving || resetting || Boolean(checking);
+  const discoveredModels = useMemo(
+    () => modelsQuery.data?.models ?? [],
+    [modelsQuery.data],
+  );
+  const inPool = useMemo(() => new Set(draft.map((model) => model.id)), [draft]);
+  const providers = useMemo(
+    () =>
+      [...new Set(discoveredModels.map(providerOf))].sort((left, right) =>
+        left.localeCompare(right),
+      ),
+    [discoveredModels],
+  );
+  const providerCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const model of discoveredModels) {
+      const provider = providerOf(model);
+      counts.set(provider, (counts.get(provider) ?? 0) + 1);
+    }
+    return counts;
+  }, [discoveredModels]);
   const availableModels = useMemo(() => {
     const query = modelSearch.trim().toLowerCase();
-    return (modelsQuery.data?.models ?? []).filter((item) => {
-      if (draft.some((model) => model.id === item.id)) return false;
+    return discoveredModels.filter((item) => {
+      if (providerFilter !== "all" && providerOf(item) !== providerFilter) return false;
       if (!query) return true;
       return [item.id, item.label, item.provider].some((value) =>
         value.toLowerCase().includes(query),
       );
     });
-  }, [draft, modelSearch, modelsQuery.data]);
+  }, [discoveredModels, modelSearch, providerFilter]);
   const availableError =
     modelsQuery.data?.error ??
     (modelsQuery.isError ? errorText(modelsQuery.error) : "");
-  const discoveredCount = modelsQuery.data?.models?.length ?? 0;
-  const availableExpanded = showAvailable || Boolean(modelSearch.trim());
-  const availablePage = availableModels.slice(0, 50);
+  const discoveredCount = discoveredModels.length;
+  const hasAvailableFilters = Boolean(modelSearch.trim()) || providerFilter !== "all";
+  const totalPages = Math.max(1, Math.ceil(availableModels.length / availablePageSize));
+  const currentPage = Math.min(Math.max(1, availablePageNumber), totalPages);
+  const pageStart = (currentPage - 1) * availablePageSize;
+  const pageModels = availableModels.slice(pageStart, pageStart + availablePageSize);
 
   function applyConfig(next: BuildConfig) {
     queryClient.setQueryData(["build-config"], next);
@@ -190,6 +247,27 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
       return;
     }
     setNotice(`${entry.label} 已加入模型池；保存后生效。`);
+  }
+
+  function updateSearch(next: string) {
+    setModelSearch(next);
+    setAvailablePageNumber(1);
+  }
+
+  function updateProviderFilter(next: string) {
+    setProviderFilter(next);
+    setAvailablePageNumber(1);
+  }
+
+  function updatePageSize(next: number) {
+    setAvailablePageSize(next);
+    setAvailablePageNumber(1);
+  }
+
+  function clearAvailableFilters() {
+    setModelSearch("");
+    setProviderFilter("all");
+    setAvailablePageNumber(1);
   }
 
   async function refreshAvailable() {
@@ -564,19 +642,34 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
           </Button>
         </div>
         <div className="space-y-3 px-4 py-4">
-          <div className="relative">
-            <Search
-              size={15}
-              aria-hidden="true"
-              className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-ink-3"
-            />
-            <Input
-              aria-label="搜索可用模型"
-              className="pl-9"
-              placeholder="搜索 provider、模型或标签"
-              value={modelSearch}
-              onChange={(event) => setModelSearch(event.target.value)}
-            />
+          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_15rem]">
+            <div className="relative">
+              <Search
+                size={15}
+                aria-hidden="true"
+                className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-ink-3"
+              />
+              <Input
+                aria-label="搜索可用模型"
+                className="pl-9"
+                placeholder="搜索供应商、模型或标签"
+                value={modelSearch}
+                onChange={(event) => updateSearch(event.target.value)}
+              />
+            </div>
+            <Select
+              aria-label="按供应商筛选"
+              value={providerFilter}
+              disabled={modelsQuery.isPending || discoveredCount === 0}
+              onChange={(event) => updateProviderFilter(event.target.value)}
+            >
+              <option value="all">全部供应商（{formatNumber(discoveredCount)}）</option>
+              {providers.map((provider) => (
+                <option key={provider} value={provider}>
+                  {provider}（{formatNumber(providerCounts.get(provider) ?? 0)}）
+                </option>
+              ))}
+            </Select>
           </div>
           {availableError ? (
             <p className="text-xs leading-5 text-danger">
@@ -587,76 +680,163 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
             <p className="text-xs leading-5 text-ink-3" role="status">
               正在读取 OpenCode 模型…
             </p>
-          ) : !availableExpanded ? (
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-xs leading-5 text-ink-3">
-                共 {discoveredCount} 个可用模型；输入关键词搜索，或显示前 50 个。
-              </p>
-              <Button
-                size="sm"
-                className="shrink-0"
-                onClick={() => setShowAvailable(true)}
-                disabled={discoveredCount === 0}
-              >
-                显示前 50 个
-              </Button>
-            </div>
-          ) : availableModels.length === 0 ? (
+          ) : discoveredCount === 0 ? (
             <p className="text-xs leading-5 text-ink-3">
-              {modelSearch
-                ? "没有匹配的可用模型。"
-                : "可用模型都已在模型池中；仍可在下方手动添加引用。"}
+              OpenCode 没有返回可用模型；仍可在下方手动添加引用。
             </p>
-          ) : (
-            <>
-              <ul className="divide-y divide-line rounded-control border border-line">
-                {availablePage.map((entry) => (
-                  <li
-                    key={entry.id}
-                    className="flex flex-col gap-3 px-3 py-3 sm:flex-row sm:items-center sm:justify-between"
-                  >
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="text-sm font-semibold text-ink">{entry.label}</p>
-                        <Badge tone={entry.known ? "info" : "neutral"} dot={false}>
-                          {entry.known ? "已知元数据" : "未验证档位"}
-                        </Badge>
-                      </div>
-                      <code className="mt-0.5 block break-all font-mono text-[11px] text-ink-3">
-                        {entry.id}
-                      </code>
-                      <p className="mt-1 text-xs leading-5 text-ink-3">
-                        {entry.known
-                          ? `档位：${entry.variants.join(" / ")}`
-                          : "档位未验证，可加入后自由填写"}
-                        {" · "}
-                        {entry.probe_supported ? "可测试" : "未配置小请求探测"}
-                      </p>
-                    </div>
-                    <Button
-                      size="sm"
-                      className="shrink-0"
-                      onClick={() => addAvailable(entry)}
-                      disabled={!editable || busy}
-                    >
-                      加入模型池
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-              {availableModels.length > 50 ? (
-                <p className="text-xs leading-5 text-ink-3">
-                  显示前 50 个，共 {availableModels.length} 个匹配；输入关键词缩小范围。
-                </p>
-              ) : null}
+          ) : availableModels.length === 0 ? (
+            <div className="flex flex-col gap-2 rounded-control border border-dashed border-line px-3 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs leading-5 text-ink-3">没有匹配的可用模型。</p>
               <Button
                 size="sm"
                 variant="ghost"
-                onClick={() => setShowAvailable(false)}
-                disabled={Boolean(modelSearch.trim())}
+                className="shrink-0"
+                onClick={clearAvailableFilters}
               >
-                收起列表
+                清除筛选
               </Button>
+            </div>
+          ) : (
+            <>
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-xs leading-5 text-ink-3" role="status">
+                  共 {formatNumber(discoveredCount)} 个模型
+                  {hasAvailableFilters
+                    ? `，筛选后 ${formatNumber(availableModels.length)} 个`
+                    : ""}
+                </p>
+                <p className="text-xs leading-5 text-ink-3">
+                  显示第 {formatNumber(pageStart + 1)}–
+                  {formatNumber(pageStart + pageModels.length)} 个
+                </p>
+              </div>
+              <ul className="divide-y divide-line rounded-control border border-line">
+                {pageModels.map((entry) => {
+                  const added = inPool.has(entry.id);
+                  return (
+                    <li
+                      key={entry.id}
+                      className="flex flex-col gap-3 px-3 py-3 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-sm font-semibold text-ink">
+                            {entry.label}
+                          </p>
+                          <Badge tone={entry.known ? "info" : "neutral"} dot={false}>
+                            {entry.known ? "已知元数据" : "未验证档位"}
+                          </Badge>
+                          {added ? (
+                            <Badge tone="success" dot={false}>
+                              已在模型池
+                            </Badge>
+                          ) : null}
+                        </div>
+                        <code className="mt-0.5 block break-all font-mono text-[11px] text-ink-3">
+                          {entry.id}
+                        </code>
+                        <p className="mt-1 text-xs leading-5 text-ink-3">
+                          供应商：{providerOf(entry)}
+                          {" · "}
+                          {entry.known
+                            ? `档位：${entry.variants.join(" / ")}`
+                            : "档位未验证，可加入后自由填写"}
+                          {" · "}
+                          {entry.probe_supported ? "可测试" : "未配置小请求探测"}
+                        </p>
+                      </div>
+                      <Button
+                        size="sm"
+                        className="shrink-0"
+                        onClick={() => addAvailable(entry)}
+                        disabled={!editable || busy || added}
+                      >
+                        {added ? "已加入" : "加入模型池"}
+                      </Button>
+                    </li>
+                  );
+                })}
+              </ul>
+              <div className="flex flex-col gap-2 border-t border-line pt-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex flex-wrap items-center gap-3 text-xs text-ink-3">
+                  <p>
+                    第 {currentPage} / {totalPages} 页
+                  </p>
+                  <label className="flex items-center gap-1.5 whitespace-nowrap">
+                    每页
+                    <Select
+                      aria-label="每页显示条数"
+                      className="h-9 w-20 lg:h-8"
+                      value={availablePageSize}
+                      onChange={(event) => updatePageSize(Number(event.target.value))}
+                    >
+                      {PAGE_SIZE_OPTIONS.map((size) => (
+                        <option key={size} value={size}>
+                          {size}
+                        </option>
+                      ))}
+                    </Select>
+                    条
+                  </label>
+                </div>
+                {totalPages > 1 ? (
+                  <nav
+                    aria-label="可用模型分页"
+                    className="flex flex-wrap items-center gap-1.5"
+                  >
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      aria-label="上一页"
+                      disabled={currentPage <= 1}
+                      onClick={() => setAvailablePageNumber(currentPage - 1)}
+                    >
+                      <ChevronLeft size={14} aria-hidden="true" />
+                      <span className="hidden sm:inline">上一页</span>
+                    </Button>
+                    {paginationItems(currentPage, totalPages).map((item, index) =>
+                      item === "ellipsis" ? (
+                        <span
+                          key={`gap-${index}`}
+                          className="px-1 text-xs text-ink-3"
+                          aria-hidden="true"
+                        >
+                          …
+                        </span>
+                      ) : item === currentPage ? (
+                        <span
+                          key={item}
+                          aria-current="page"
+                          className="inline-flex h-10 min-w-9 items-center justify-center rounded-control border border-accent bg-accent px-2 text-xs font-medium text-white lg:h-8"
+                        >
+                          {item}
+                        </span>
+                      ) : (
+                        <Button
+                          key={item}
+                          size="sm"
+                          variant="ghost"
+                          className="min-w-9 px-2"
+                          aria-label={`第 ${item} 页`}
+                          onClick={() => setAvailablePageNumber(item)}
+                        >
+                          {item}
+                        </Button>
+                      ),
+                    )}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      aria-label="下一页"
+                      disabled={currentPage >= totalPages}
+                      onClick={() => setAvailablePageNumber(currentPage + 1)}
+                    >
+                      <span className="hidden sm:inline">下一页</span>
+                      <ChevronRight size={14} aria-hidden="true" />
+                    </Button>
+                  </nav>
+                ) : null}
+              </div>
             </>
           )}
           <p className="text-xs leading-5 text-ink-3">
