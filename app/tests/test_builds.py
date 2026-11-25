@@ -192,6 +192,21 @@ def listing_rule_payload(site_key: str = "example.fr") -> dict[str, Any]:
     return payload
 
 
+def shopify_rule_payload(site_key: str = "example.fr") -> dict[str, Any]:
+    payload = rule_payload(site_key)
+    payload["schema_version"] = "1.3"
+    payload["scope"]["max_products"] = 10
+    payload["product_source"] = {
+        "type": "shopify_json",
+        "url": f"https://{site_key}/products.json",
+        "product_url_template": f"https://{site_key}/products/{{handle}}",
+        "currency": "EUR",
+        "description": {"min_chars": 200, "fallback_concurrency": 1},
+        "variants": {"price": "min_positive"},
+    }
+    return payload
+
+
 class FakeBuildAdapter:
     def __init__(
         self,
@@ -494,6 +509,7 @@ class BuildWorkflowTests(unittest.TestCase):
         extra_permissions: list[dict[str, Any]] | None = None,
         dependency_policy: DependencyPolicy | None = None,
         max_seconds: int = 10,
+        browser_validation_seconds: int | None = None,
     ) -> BuildManager:
         if validator is None:
 
@@ -539,6 +555,7 @@ class BuildWorkflowTests(unittest.TestCase):
             validator=validator,
             max_seconds=max_seconds,
             validation_seconds=5,
+            browser_validation_seconds=browser_validation_seconds,
             max_products=2,
             max_repair_rounds=max_repair_rounds,
             repair_seconds=5,
@@ -835,6 +852,7 @@ class BuildWorkflowTests(unittest.TestCase):
             self.assertIn("product_source", brief)
             self.assertIn("schema_version: \"1.3\"", brief)
             self.assertIn("shopify_json", brief)
+            self.assertIn("Host validation budget", brief)
             self.assertIn(
                 "robots.txt",
                 (workspace / "input" / "build-brief.md").read_text(
@@ -2874,6 +2892,105 @@ class BuildWorkflowTests(unittest.TestCase):
             result = self._wait_ready(client, build_id)
             self.assertEqual(result["outcome"], "failed")
             self.assertIn("full catalog build requires", result["error"] or "")
+
+    def test_target_catalog_patches_scope_and_accepts_product_source(self) -> None:
+        adapter = FakeBuildAdapter(
+            self.root, rule_payloads=[shopify_rule_payload()]
+        )
+        manager = self._manager(adapter)
+        with self._client(manager) as client:
+            response = client.post(
+                "/api/batches/b-1/sites/example.fr/build",
+                json={
+                    "catalog_scope": "target",
+                    "catalog_products": 10,
+                    "repair_rounds": 0,
+                },
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(response.status_code, 202, response.text)
+            build_id = response.json()["build"]["build_id"]
+            result = self._wait_ready(client, build_id)
+            self.assertEqual(result["outcome"], "succeeded", result["error"])
+            self.assertEqual(result["catalog"]["catalog_scope"], "target")
+            self.assertEqual(result["catalog"]["catalog_products"], 10)
+            self.assertEqual(
+                result["validation"]["products_budget"],
+                6,
+            )
+            batch = client.get("/api/batches/b-1").json()
+            site = batch["sites"][0]
+            rule_path = self.rules / site["rule"]["path"]
+            payload = yaml.safe_load(rule_path.read_text(encoding="utf-8"))
+            self.assertGreaterEqual(payload["scope"]["max_products"], 10)
+            self.assertEqual(payload["product_source"]["type"], "shopify_json")
+            brief = (
+                Path(result["workspace"]) / "input" / "build-brief.md"
+            ).read_text(encoding="utf-8")
+            self.assertIn("bounded target", brief)
+            self.assertIn("product_source", brief)
+
+    def test_target_catalog_rejects_entry_links_only(self) -> None:
+        adapter = FakeBuildAdapter(self.root)
+        manager = self._manager(adapter)
+        with self._client(manager) as client:
+            response = client.post(
+                "/api/batches/b-1/sites/example.fr/build",
+                json={
+                    "catalog_scope": "target",
+                    "catalog_products": 10,
+                    "repair_rounds": 0,
+                },
+                headers=CLIENT_HEADERS,
+            )
+            build_id = response.json()["build"]["build_id"]
+            result = self._wait_ready(client, build_id)
+            self.assertEqual(result["outcome"], "failed")
+            self.assertIn("target catalog build requires", result["error"] or "")
+
+    def test_browser_rule_raises_host_validation_budget(self) -> None:
+        payload = rule_payload()
+        payload["fetch"]["default_engine"] = "browser"
+        payload["fetch"]["browser"] = {"headless": True}
+        seen: dict[str, int] = {}
+
+        def validator(
+            rule_path: Path,
+            work_dir: Path,
+            max_products: int,
+            max_seconds: int,
+            proxy: str | None = None,
+            **_: Any,
+        ) -> dict[str, Any]:
+            seen["max_products"] = max_products
+            seen["max_seconds"] = max_seconds
+            return {
+                "counts": {"valid_products": 2, "failed_products": 0},
+                "outcome": "COMPLETED",
+                "stop_reason": "NATURAL_END",
+                "currencies": {"EUR": 2},
+            }
+
+        adapter = FakeBuildAdapter(self.root, rule_payloads=[payload])
+        manager = self._manager(
+            adapter,
+            validator=validator,
+            browser_validation_seconds=30,
+        )
+        with self._client(manager) as client:
+            response = client.post(
+                "/api/batches/b-1/sites/example.fr/build",
+                json={"max_products": 6, "max_seconds": 60, "repair_rounds": 0},
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(response.status_code, 202, response.text)
+            build_id = response.json()["build"]["build_id"]
+            result = self._wait_ready(client, build_id)
+            self.assertEqual(result["outcome"], "succeeded", result["error"])
+            self.assertEqual(seen["max_products"], 6)
+            self.assertEqual(seen["max_seconds"], 30)
+            self.assertEqual(result["validation"]["products_budget"], 6)
+            self.assertEqual(result["validation"]["seconds_budget"], 30)
 
     def test_build_timeline_merges_trace_parts(self) -> None:
         trace = {

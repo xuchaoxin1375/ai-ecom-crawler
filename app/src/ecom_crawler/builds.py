@@ -365,6 +365,46 @@ def dependency_policy_from_env() -> DependencyPolicy:
     )
 
 
+def _rule_needs_browser(rule: Any) -> bool:
+    """Return whether any declared URL type needs a browser engine."""
+    if str(getattr(rule, "kind", "")) == "hybrid":
+        return True
+    fetch = getattr(rule, "fetch", {}) or {}
+    if str(fetch.get("default_engine", "")).lower() == "browser":
+        return True
+    per_type = fetch.get("per_url_type")
+    if isinstance(per_type, dict):
+        for settings in per_type.values():
+            if isinstance(settings, dict) and str(
+                settings.get("engine", "")
+            ).lower() == "browser":
+                return True
+    return False
+
+
+def validation_seconds_for_rule(
+    rule_path: Path,
+    *,
+    default: int,
+    browser_default: int,
+) -> int:
+    """Raise the host-validation budget for rules that use a browser.
+
+    Browser product pages are much slower than static HTML; the pilot's
+    120-second budget validated only one of six products.  A rule that loads
+    fails validation before this helper is called, so the fallback is only a
+    defensive default.
+    """
+    base = max(1, int(default))
+    try:
+        rule = load_rule(rule_path)
+    except Exception:  # noqa: BLE001 - validation reports the rule error later
+        return base
+    if _rule_needs_browser(rule):
+        return max(base, max(1, int(browser_default)))
+    return base
+
+
 def default_validator(
     rule_path: Path,
     work_dir: Path,
@@ -908,6 +948,7 @@ class BuildManager:
         validator: Validator | None = None,
         max_seconds: int | None = None,
         validation_seconds: int | None = None,
+        browser_validation_seconds: int | None = None,
         max_total_seconds: int | None = None,
         max_input_tokens: int | None = None,
         max_output_tokens: int | None = None,
@@ -1067,6 +1108,14 @@ class BuildManager:
             validation_seconds
             if validation_seconds is not None
             else os.environ.get("ECOM_BUILD_VALIDATION_SECONDS", "120")
+        )
+        self.browser_validation_seconds = max(
+            self.validation_seconds,
+            int(
+                browser_validation_seconds
+                if browser_validation_seconds is not None
+                else os.environ.get("ECOM_BUILD_BROWSER_VALIDATION_SECONDS", "600")
+            ),
         )
         # Optional whole-build guards.  They include the initial model turn,
         # automatic repair and host validation, unlike ``max_seconds`` which
@@ -1329,9 +1378,9 @@ class BuildManager:
             ).strip().lower()
             if resolved_archive_mode not in {"off", "sample", "full"}:
                 raise BuildError(f"unsupported archive mode: {resolved_archive_mode}")
-            resolved_catalog_scope = (
-                "full" if str(catalog_scope).strip().lower() == "full" else "sample"
-            )
+            resolved_catalog_scope = str(catalog_scope or "sample").strip().lower()
+            if resolved_catalog_scope not in {"sample", "target", "full"}:
+                resolved_catalog_scope = "sample"
             self._archive_configs[build_id] = {
                 "mode": resolved_archive_mode,
                 "root": str(
@@ -1357,7 +1406,14 @@ class BuildManager:
                     int(
                         catalog_products
                         if catalog_products is not None
-                        else os.environ.get("ECOM_BUILD_CATALOG_PRODUCTS", "2000")
+                        else os.environ.get(
+                            "ECOM_BUILD_CATALOG_PRODUCTS",
+                            str(
+                                product_budget
+                                if resolved_catalog_scope == "target"
+                                else 2000
+                            ),
+                        )
                     ),
                 ),
             }
@@ -2132,6 +2188,24 @@ candidate; the host validates and installs it.
                 "template/category and put 3+ representative product URLs in "
                 "`evidence.sample_urls` so the host can archive them.\n"
             )
+        elif catalog_scope == "target":
+            catalog_lines = (
+                f"- Catalog scope: **bounded target** (at least {catalog_products} products)\n"
+                f"- Host validation sample: {task.limits.get('max_products')} products\n"
+                "- The rule's `scope.max_products` and discovery sources must cover at "
+                "least the target; the host validates only a sample.\n"
+            )
+            discovery_instruction = (
+                "This build targets a **bounded catalog** of at least "
+                f"{catalog_products} products, not just the entry-page sample. Use the "
+                "entry page first. If it exposes fewer product links than the target, "
+                "inspect one category or sitemap and use `listing`, `html_index` or "
+                "`sitemap` so discovery can cover the target. On Shopify, "
+                "`product_source: shopify_json` can cover the target from "
+                "`/products.json`. Do not crawl the whole site. Set "
+                "`scope.max_products` to at least the target and put 3+ representative "
+                "product URLs in `evidence.sample_urls`.\n"
+            )
         else:
             catalog_lines = (
                 f"- Product budget: `{task.limits.get('max_products')}`\n"
@@ -2144,6 +2218,11 @@ candidate; the host validates and installs it.
                 "no product links, inspect one category or sitemap and use `listing`, "
                 "`html_index` or `sitemap`.\n"
             )
+        catalog_lines += (
+            f"- Host validation budget: {task.limits.get('max_products')} products, "
+            f"{self.validation_seconds}s; browser rules get at least "
+            f"{self.browser_validation_seconds}s.\n"
+        )
         shopify_instruction = (
             "For Shopify storefronts, prefer public JSON (`/products.json`) for "
             "name, price, currency, variants and description before parsing HTML. "
@@ -2372,13 +2451,23 @@ domain-mismatched, or produces no valid product.
 
     def _prompt(self, site: BatchSite, batch: Batch, task: BuildTask) -> str:
         catalog = str(task.extra.get("catalog_scope") or "sample").lower()
-        scope_note = (
-            " This is a full-catalog build: enumerate the top-level product "
-            "categories and their pagination, and set scope.max_products to the "
-            "catalog target. The host validation uses only a small sample."
-            if catalog == "full"
-            else ""
+        catalog_products = int(
+            task.extra.get("catalog_products") or task.limits.get("max_products") or 1
         )
+        if catalog == "full":
+            scope_note = (
+                " This is a full-catalog build: enumerate the top-level product "
+                "categories and their pagination, and set scope.max_products to the "
+                "catalog target. The host validation uses only a small sample."
+            )
+        elif catalog == "target":
+            scope_note = (
+                " This is a bounded-target build: cover at least "
+                f"{catalog_products} products and set scope.max_products to the "
+                "target. The host validation uses only a small sample."
+            )
+        else:
+            scope_note = ""
         return (
             "Read AGENTS.md, ../input/build-brief.md and "
             "../input/reference-rule.yaml, "
@@ -2706,8 +2795,12 @@ domain-mismatched, or produces no valid product.
                 rule_path = self._find_rule(session)
                 rule = load_rule(rule_path)
                 catalog = self._catalog_configs.get(build_id, {})
-                if str(catalog.get("catalog_scope")) == "full":
-                    target = int(catalog.get("catalog_products") or 2000)
+                catalog_scope = str(catalog.get("catalog_scope"))
+                if catalog_scope in {"full", "target"}:
+                    target = int(
+                        catalog.get("catalog_products")
+                        or (2000 if catalog_scope == "full" else 1)
+                    )
                     payload = yaml.safe_load(rule_path.read_text(encoding="utf-8"))
                     scope = payload.setdefault("scope", {}) if isinstance(payload, dict) else {}
                     if isinstance(scope, dict):
@@ -2715,7 +2808,10 @@ domain-mismatched, or produces no valid product.
                         if int(scope.get("max_products") or 0) < target:
                             scope["max_products"] = target
                             changed = True
-                        if int(scope.get("max_seconds") or 0) < 3600:
+                        if (
+                            catalog_scope == "full"
+                            and int(scope.get("max_seconds") or 0) < 3600
+                        ):
                             scope["max_seconds"] = 3600
                             changed = True
                         if changed:
@@ -2755,11 +2851,19 @@ domain-mismatched, or produces no valid product.
                     for sample in (feedback.samples if feedback else [])
                     if str(sample).strip()
                 ][:5]
+                validation_products = max(
+                    1, int(record.request.get("max_products") or self.max_products)
+                )
+                validation_seconds = validation_seconds_for_rule(
+                    rule_path,
+                    default=self.validation_seconds,
+                    browser_default=self.browser_validation_seconds,
+                )
                 task_result = self.validator(
                     rule_path,
                     work_dir,
-                    self.max_products,
-                    self.validation_seconds,
+                    validation_products,
+                    validation_seconds,
                     record.proxy,
                     archive_mode=str(archive.get("mode") or "off"),
                     archive_root=archive.get("root"),
@@ -2776,6 +2880,8 @@ domain-mismatched, or produces no valid product.
                 validation = {
                     "valid_products": valid,
                     "failed_products": failed,
+                    "products_budget": validation_products,
+                    "seconds_budget": validation_seconds,
                     "stop_reason": task_result.get("stop_reason")
                     if isinstance(task_result, dict)
                     else None,
@@ -3178,19 +3284,36 @@ domain-mismatched, or produces no valid product.
 
     def _assert_catalog_rule(self, build_id: str, rule: Any) -> None:
         catalog = self._catalog_configs.get(build_id, {})
-        if str(catalog.get("catalog_scope")) != "full":
+        catalog_scope = str(catalog.get("catalog_scope"))
+        if catalog_scope not in {"full", "target"}:
             return
+        target = int(
+            catalog.get("catalog_products")
+            or (2000 if catalog_scope == "full" else 1)
+        )
+        scope_products = int(rule.scope.get("max_products") or 0)
+        if scope_products < target:
+            raise BuildError(
+                f"{catalog_scope} catalog build requires scope.max_products >= "
+                f"{target}; got {scope_products}"
+            )
         sources = rule.discovery.get("sources")
         source_types = {
             str(source.get("type"))
             for source in sources or []
             if isinstance(source, dict)
         }
-        if not source_types & {"listing", "sitemap", "html_index", "public_json"}:
+        has_product_source = bool(rule.product_source)
+        if not has_product_source and not source_types & {
+            "listing",
+            "sitemap",
+            "html_index",
+            "public_json",
+        }:
             raise BuildError(
-                "full catalog build requires discovery.sources with a listing, "
-                "sitemap, html_index or public_json source; entry_links alone is "
-                "not a full-catalog discovery path"
+                f"{catalog_scope} catalog build requires discovery.sources with a "
+                "listing, sitemap, html_index or public_json source, or a "
+                "Shopify product_source; entry_links alone does not cover the target"
             )
 
     def _start_repair(

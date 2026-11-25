@@ -375,16 +375,23 @@
             "title": "Capture Reasoning"
           },
           "catalog_products": {
-            "default": 2000,
-            "maximum": 10000.0,
-            "minimum": 1.0,
-            "title": "Catalog Products",
-            "type": "integer"
+            "anyOf": [
+              {
+                "maximum": 10000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Catalog Products"
           },
           "catalog_scope": {
             "default": "sample",
             "enum": [
               "sample",
+              "target",
               "full"
             ],
             "title": "Catalog Scope",

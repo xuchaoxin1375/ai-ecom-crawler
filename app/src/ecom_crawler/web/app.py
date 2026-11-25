@@ -367,8 +367,8 @@ class BuildStartRequest(BaseModel):
     archive_root: str | None = Field(default=None, max_length=1000)
     archive_sample_limit: int = Field(default=20, ge=1, le=1000)
     archive_max_bytes: int | None = Field(default=None, ge=0)
-    catalog_scope: Literal["sample", "full"] = "sample"
-    catalog_products: int = Field(default=2000, ge=1, le=10000)
+    catalog_scope: Literal["sample", "target", "full"] = "sample"
+    catalog_products: int | None = Field(default=None, ge=1, le=10000)
     feedback_id: str | None = Field(default=None, max_length=200)
     request_id: str | None = Field(default=None, max_length=200)
 

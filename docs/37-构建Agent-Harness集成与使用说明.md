@@ -154,6 +154,17 @@ python -m uv run --project app ecom-crawler serve `
 | `ECOM_BUILD_PERSIST_REASONING` | `1` 时允许 reasoning 写入 trace；显式值优先于 `ECOM_BUILD_DEV_TRACE` |
 | `ECOM_BUILD_MAX_REPAIR_ROUNDS` | 自动修复轮次 |
 | `ECOM_BUILD_REPAIR_SECONDS` | 每轮修复额外时间 |
+| `ECOM_BUILD_VALIDATION_SECONDS` | 主机验证基础时长，默认 120 秒 |
+| `ECOM_BUILD_BROWSER_VALIDATION_SECONDS` | 浏览器规则的主机验证时长下限，默认 600 秒；实际取基础时长与它的较大值 |
+| `ECOM_BUILD_MAX_PRODUCTS` | 主机验证商品样本数默认值，默认 6；单次构建请求可覆盖 |
+
+站点构建请求的 `catalog_scope` 支持 `sample`、`target` 和 `full`：
+
+- `sample`：入口页有界样本，默认。
+- `target`：`catalog_products` 指定执行目标（例如 10），要求 `scope.max_products` 和发现来源覆盖该目标；主机验证仍只用 `max_products` 样本。Shopify 可用 `product_source` 覆盖目标。
+- `full`：全站目录，要求 listing／sitemap／html_index／public_json 来源（或 Shopify `product_source`），并自动把 `scope.max_products` 提升到目录目标。
+
+主机验证的 `max_products` 和秒数会写入构建验证记录；规则使用浏览器时，验证秒数自动提升到 `ECOM_BUILD_BROWSER_VALIDATION_SECONDS`，避免 120 秒只验完 1 件。
 
 入口：`http://127.0.0.1:8765/next/#/batches`。站点详情可以启动构建、查看时间线、暂停／恢复／取消、处理权限和依赖请求。同一时间只允许一个构建运行；其他站点提交后进入 `QUEUED` 队列，构建列表／详情显示排队位置并支持取消排队。重启会保留排队项；运行中的会话标为 `FINISHED/interrupted` 并保留，用户可在构建详情继续。
 
