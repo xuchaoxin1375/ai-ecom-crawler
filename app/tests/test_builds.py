@@ -223,6 +223,7 @@ class FakeBuildAdapter:
         self.adopted: list[str] = []
         self.detached: list[str] = []
         self.shutdown_called = False
+        self.usage_payload: dict[str, Any] | None = None
         self._stop = threading.Event()
 
     def start_build(self, task: BuildTask) -> BuildSession:
@@ -399,6 +400,9 @@ class FakeBuildAdapter:
             session.outcome = "closed"
         self.queues[build_id].put(None)
         return session
+
+    def usage(self, build_id: str) -> dict[str, Any] | None:
+        return self.usage_payload
 
     def emit(
         self, event_type: str, source_type: str, *, build_id: str | None = None, **data: Any
@@ -828,6 +832,9 @@ class BuildWorkflowTests(unittest.TestCase):
             self.assertIn("browse` and `htmlmini` MCP tools are available", agents)
             self.assertIn("Read local files from", agents)
             self.assertIn("Read local files from", brief)
+            self.assertIn("product_source", brief)
+            self.assertIn("schema_version: \"1.3\"", brief)
+            self.assertIn("shopify_json", brief)
             self.assertIn(
                 "robots.txt",
                 (workspace / "input" / "build-brief.md").read_text(
@@ -1813,6 +1820,84 @@ class BuildWorkflowTests(unittest.TestCase):
         self.assertEqual(current.state, "RUNNING", current)
         self.assertNotIn(record.build_id, adapter.canceled)
         manager.shutdown()
+
+    def test_total_wall_clock_budget_overrides_initial_turn_budget(self) -> None:
+        adapter = FakeBuildAdapter(self.root, hang=True)
+        manager = self._manager(adapter)
+        site = self.store.get_batch_site("b-1", "example.fr")
+        record = manager.start(self.batch, site, max_seconds=60, max_total_seconds=1)
+        deadline = time.monotonic() + 8
+        current = None
+        while time.monotonic() < deadline:
+            current = self.store.get_build(record.build_id)
+            if current is not None and current.state == "FINISHED":
+                break
+            time.sleep(0.05)
+        self.assertIsNotNone(current)
+        self.assertEqual(current.state, "FINISHED", current)
+        self.assertEqual(current.outcome, "failed", current)
+        self.assertEqual(current.error_class, "budget", current)
+        self.assertIn("total wall-clock budget", current.error or "")
+        self.assertIn(record.build_id, adapter.canceled)
+        manager.shutdown()
+
+    def test_token_budget_stops_hanging_build(self) -> None:
+        adapter = FakeBuildAdapter(self.root, hang=True)
+        adapter.usage_payload = {"input": 600_000, "output": 10, "reasoning": 0}
+        manager = self._manager(adapter)
+        manager.usage_poll_seconds = 0.2
+        site = self.store.get_batch_site("b-1", "example.fr")
+        record = manager.start(
+            self.batch,
+            site,
+            max_seconds=60,
+            max_input_tokens=500_000,
+            max_output_tokens=50_000,
+        )
+        deadline = time.monotonic() + 8
+        current = None
+        while time.monotonic() < deadline:
+            current = self.store.get_build(record.build_id)
+            if current is not None and current.state == "FINISHED":
+                break
+            time.sleep(0.05)
+        self.assertIsNotNone(current)
+        self.assertEqual(current.state, "FINISHED", current)
+        self.assertEqual(current.outcome, "failed", current)
+        self.assertEqual(current.error_class, "budget", current)
+        self.assertIn("token budget", current.error or "")
+        self.assertIn("input 600000/500000", current.error or "")
+        self.assertIn(record.build_id, adapter.canceled)
+        manager.shutdown()
+
+    def test_dev_trace_enables_live_and_persisted_reasoning_by_default(self) -> None:
+        env = {
+            "ECOM_BUILD_DEV_TRACE": "1",
+            "ECOM_BUILD_CAPTURE_REASONING": "",
+            "ECOM_BUILD_PERSIST_REASONING": "",
+        }
+        with mock.patch.dict(os.environ, env, clear=False):
+            adapter = FakeBuildAdapter(self.root, hang=True)
+            manager = self._manager(adapter)
+            self.assertTrue(manager.reasoning_capture_enabled)
+            self.assertTrue(manager.persist_reasoning_enabled)
+            site = self.store.get_batch_site("b-1", "example.fr")
+            record = manager.start(self.batch, site)
+            self.assertTrue(record.request.get("capture_reasoning"))
+            manager.shutdown()
+
+    def test_explicit_reasoning_switches_override_dev_trace(self) -> None:
+        env = {
+            "ECOM_BUILD_DEV_TRACE": "1",
+            "ECOM_BUILD_CAPTURE_REASONING": "0",
+            "ECOM_BUILD_PERSIST_REASONING": "0",
+        }
+        with mock.patch.dict(os.environ, env, clear=False):
+            adapter = FakeBuildAdapter(self.root, hang=True)
+            manager = self._manager(adapter)
+            self.assertFalse(manager.reasoning_capture_enabled)
+            self.assertFalse(manager.persist_reasoning_enabled)
+            manager.shutdown()
 
     def test_failed_build_can_continue_once(self) -> None:
         adapter = FakeBuildAdapter(self.root, write_rule=False, finish=True)
@@ -2892,6 +2977,36 @@ class BuildWorkflowTests(unittest.TestCase):
         self.assertEqual(timeline[0]["text"], "first second")
         self.assertEqual(timeline[1]["status"], "success")
         self.assertEqual(timeline[2]["text"], "done")
+
+    def test_build_timeline_deduplicates_final_reasoning_event(self) -> None:
+        from types import SimpleNamespace
+
+        events = [
+            SimpleNamespace(
+                type="reasoning",
+                data={"delta": "first "},
+                created_at="2026-11-25T04:00:01Z",
+            ),
+            SimpleNamespace(
+                type="reasoning",
+                data={"delta": "second"},
+                created_at="2026-11-25T04:00:02Z",
+            ),
+            SimpleNamespace(
+                type="reasoning",
+                data={"delta": "first second"},
+                created_at="2026-11-25T04:00:02Z",
+            ),
+            SimpleNamespace(
+                type="tool_started",
+                data={"tool": "read"},
+                created_at="2026-11-25T04:00:03Z",
+            ),
+        ]
+        timeline, truncated = _live_timeline(events)
+        self.assertFalse(truncated)
+        self.assertEqual([item["kind"] for item in timeline], ["reasoning", "tool"])
+        self.assertEqual(timeline[0]["text"], "first second")
 
     def test_second_build_waits_in_queue_then_starts(self) -> None:
         gate = threading.Event()

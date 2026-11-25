@@ -220,12 +220,15 @@ class FeedbackRepairRequest(BaseModel):
     reason: str | None = Field(default=None, max_length=2000)
     max_products: int = Field(default=6, ge=1, le=50)
     max_seconds: int = Field(default=600, ge=60, le=3600)
+    max_total_seconds: int | None = Field(default=None, ge=60, le=7200)
+    max_input_tokens: int | None = Field(default=None, ge=1000, le=100_000_000)
+    max_output_tokens: int | None = Field(default=None, ge=1000, le=10_000_000)
     repair_rounds: int | None = Field(default=None, ge=0, le=10)
     archive_mode: Literal["off", "sample", "full"] = "off"
     archive_sample_limit: int = Field(default=20, ge=1, le=1000)
     archive_root: str | None = Field(default=None, max_length=1000)
     archive_max_bytes: int | None = Field(default=None, ge=0)
-    capture_reasoning: bool = False
+    capture_reasoning: bool | None = Field(default=None)
 
 
 class FeedbackRerunRequest(BaseModel):
@@ -354,8 +357,11 @@ class BuildStartRequest(BaseModel):
     reason: str | None = Field(default=None, max_length=2000)
     max_products: int = Field(default=6, ge=1, le=50)
     max_seconds: int = Field(default=600, ge=60, le=3600)
+    max_total_seconds: int | None = Field(default=None, ge=60, le=7200)
+    max_input_tokens: int | None = Field(default=None, ge=1000, le=100_000_000)
+    max_output_tokens: int | None = Field(default=None, ge=1000, le=10_000_000)
     proxy: str | None = Field(default=None, max_length=500)
-    capture_reasoning: bool = False
+    capture_reasoning: bool | None = Field(default=None)
     repair_rounds: int | None = Field(default=None, ge=0, le=10)
     archive_mode: Literal["off", "sample", "full"] = "off"
     archive_root: str | None = Field(default=None, max_length=1000)
@@ -2720,6 +2726,9 @@ def create_app(
                 reason=payload.reason or feedback.expectation,
                 max_products=payload.max_products,
                 max_seconds=payload.max_seconds,
+                max_total_seconds=payload.max_total_seconds,
+                max_input_tokens=payload.max_input_tokens,
+                max_output_tokens=payload.max_output_tokens,
                 capture_reasoning=payload.capture_reasoning,
                 repair_rounds=payload.repair_rounds,
                 archive_mode=payload.archive_mode,
@@ -3612,6 +3621,9 @@ def create_app(
                     reason=request.reason,
                     max_products=request.max_products,
                     max_seconds=request.max_seconds,
+                    max_total_seconds=request.max_total_seconds,
+                    max_input_tokens=request.max_input_tokens,
+                    max_output_tokens=request.max_output_tokens,
                     proxy=request.proxy,
                     capture_reasoning=request.capture_reasoning,
                     repair_rounds=request.repair_rounds,
@@ -3634,6 +3646,9 @@ def create_app(
                     site,
                     max_products=request.max_products,
                     max_seconds=request.max_seconds,
+                    max_total_seconds=request.max_total_seconds,
+                    max_input_tokens=request.max_input_tokens,
+                    max_output_tokens=request.max_output_tokens,
                     proxy=request.proxy,
                     capture_reasoning=request.capture_reasoning,
                     repair_rounds=request.repair_rounds,

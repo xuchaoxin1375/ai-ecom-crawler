@@ -402,6 +402,14 @@ class BuildService:
         with self._lock:
             return self._require(build_id)
 
+    def usage(self, build_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            self._require(build_id)
+        method = getattr(self.adapter, "usage", None)
+        if not callable(method):
+            return None
+        return method(build_id)
+
     def event_log(self, build_id: str, *, since: int = 0) -> list[HarnessEvent]:
         with self._lock:
             self._require(build_id)

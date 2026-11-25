@@ -364,9 +364,15 @@
             "type": "integer"
           },
           "capture_reasoning": {
-            "default": false,
-            "title": "Capture Reasoning",
-            "type": "boolean"
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capture Reasoning"
           },
           "catalog_products": {
             "default": 2000,
@@ -396,6 +402,32 @@
             ],
             "title": "Feedback Id"
           },
+          "max_input_tokens": {
+            "anyOf": [
+              {
+                "maximum": 100000000.0,
+                "minimum": 1000.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Input Tokens"
+          },
+          "max_output_tokens": {
+            "anyOf": [
+              {
+                "maximum": 10000000.0,
+                "minimum": 1000.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Output Tokens"
+          },
           "max_products": {
             "default": 6,
             "maximum": 50.0,
@@ -409,6 +441,19 @@
             "minimum": 60.0,
             "title": "Max Seconds",
             "type": "integer"
+          },
+          "max_total_seconds": {
+            "anyOf": [
+              {
+                "maximum": 7200.0,
+                "minimum": 60.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Total Seconds"
           },
           "mode": {
             "default": "build",
@@ -941,9 +986,41 @@
             "type": "integer"
           },
           "capture_reasoning": {
-            "default": false,
-            "title": "Capture Reasoning",
-            "type": "boolean"
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capture Reasoning"
+          },
+          "max_input_tokens": {
+            "anyOf": [
+              {
+                "maximum": 100000000.0,
+                "minimum": 1000.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Input Tokens"
+          },
+          "max_output_tokens": {
+            "anyOf": [
+              {
+                "maximum": 10000000.0,
+                "minimum": 1000.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Output Tokens"
           },
           "max_products": {
             "default": 6,
@@ -958,6 +1035,19 @@
             "minimum": 60.0,
             "title": "Max Seconds",
             "type": "integer"
+          },
+          "max_total_seconds": {
+            "anyOf": [
+              {
+                "maximum": 7200.0,
+                "minimum": 60.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Total Seconds"
           },
           "model_ref": {
             "anyOf": [

@@ -68,6 +68,22 @@ def _tool_name(data: dict[str, Any]) -> str | None:
 def _summary(raw_type: str, data: dict[str, Any]) -> dict[str, Any]:
     if raw_type == "server.connected":
         return {}
+    if raw_type in {"session.usage.updated", "session.step.ended"}:
+        summary: dict[str, Any] = {}
+        tokens = data.get("tokens")
+        if isinstance(tokens, dict):
+            allowed = {"input", "output", "reasoning", "cache"}
+            summary["tokens"] = {
+                key: value for key, value in tokens.items() if key in allowed
+            }
+        cost = data.get("cost")
+        if type(cost) in {int, float}:
+            summary["cost"] = cost
+        for key in ("finish", "rawFinish"):
+            value = data.get(key)
+            if isinstance(value, str) and value:
+                summary[key] = value
+        return summary
     if raw_type == "session.tool.called":
         summary: dict[str, Any] = {"tool": _tool_name(data)}
         if "id" in data:

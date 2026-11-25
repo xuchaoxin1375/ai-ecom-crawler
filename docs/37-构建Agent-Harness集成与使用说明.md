@@ -116,7 +116,7 @@ OpenCode 的项目技能优先级高于全局技能。使用联接／符号链�
 
 构建会话使用独立状态：`QUEUED`、`CREATED`、`RUNNING`、`PAUSING`、`PAUSED`、`CANCELLING`、`CANCELLED`、`FINISHED`。它不映射为采集任务状态；`QUEUED` 只表示请求已持久化、等待全局单运行槽位，尚未创建 Harness 会话。
 
-事件写入 `out/session.ndjson`；trace 写入 `out/trace.json`／`trace.md`，包含工具调用、命令／路径摘要、截断输出、可见消息、tokens／费用、主机验证和修复轮次。reasoning 默认不保存；需要时用 `ECOM_BUILD_CAPTURE_REASONING=1` 或构建请求的 `capture_reasoning=true` 显式开启，并按截断策略保留。
+事件写入 `out/session.ndjson`；trace 写入 `out/trace.json`／`trace.md`，包含工具调用、命令／路径摘要、截断输出、可见消息、tokens／费用、主机验证和修复轮次。生产默认不保存 reasoning；开发期设置 `ECOM_BUILD_DEV_TRACE=1` 时，默认实时展示思考并写入 trace。需要单独控制时用 `ECOM_BUILD_CAPTURE_REASONING=1` 开启实时思考、`ECOM_BUILD_PERSIST_REASONING=1` 允许 trace 落盘；显式开关优先于 `ECOM_BUILD_DEV_TRACE`，构建请求的 `capture_reasoning` 仍可按单次覆盖。
 
 主机验证在 Agent 结束后执行：
 
@@ -149,7 +149,9 @@ python -m uv run --project app ecom-crawler serve `
 | `ECOM_BUILD_SKILLS_DIR` | 额外或固定的 skills 根 |
 | `ECOM_BUILD_PYTHON` | 专用 build venv 的 Python；未设置时不安装依赖 |
 | `ECOM_BUILD_DEPENDENCY_ALLOWLIST` | 逗号分隔的 `name==version`；仅在 `ECOM_BUILD_PYTHON` 设置后生效 |
-| `ECOM_BUILD_CAPTURE_REASONING` | `1` 时捕获 reasoning |
+| `ECOM_BUILD_DEV_TRACE` | `1` 时开发期默认实时展示思考并写入 trace；生产不设 |
+| `ECOM_BUILD_CAPTURE_REASONING` | `1` 时捕获实时 reasoning；显式值优先于 `ECOM_BUILD_DEV_TRACE` |
+| `ECOM_BUILD_PERSIST_REASONING` | `1` 时允许 reasoning 写入 trace；显式值优先于 `ECOM_BUILD_DEV_TRACE` |
 | `ECOM_BUILD_MAX_REPAIR_ROUNDS` | 自动修复轮次 |
 | `ECOM_BUILD_REPAIR_SECONDS` | 每轮修复额外时间 |
 

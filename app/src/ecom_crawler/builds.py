@@ -26,6 +26,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from collections import Counter
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -475,6 +476,42 @@ def _seconds_since(value: str | None, *, end: str | None = None) -> float | None
     return max(0.0, (finished - parsed).total_seconds())
 
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    return raw.strip() == "1"
+
+
+def _budget_value(explicit: int | None, env_name: str) -> int | None:
+    """Resolve an optional per-build budget from an argument or environment.
+
+    ``None`` keeps the budget unset so existing callers remain unlimited.
+    A non-positive environment value is treated as unset; malformed values
+    fail at startup instead of silently disabling the guard.
+    """
+    if explicit is not None:
+        value = int(explicit)
+        return value if value > 0 else None
+    raw = os.environ.get(env_name, "").strip()
+    if not raw:
+        return None
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise BuildError(f"{env_name} must be an integer") from exc
+    return value if value > 0 else None
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _validate_proxy(value: str) -> None:
     parsed = urlsplit(value)
     if parsed.scheme not in {"http", "https", "socks5"} or not parsed.netloc:
@@ -806,7 +843,18 @@ def _live_timeline(
             flush_text()
             if reasoning_started is None:
                 reasoning_started = getattr(event, "created_at", None)
-            append_bounded(reasoning_buffer, str(data.get("delta") or ""))
+            value = str(data.get("delta") or "")
+            if value:
+                current = "".join(reasoning_buffer)
+                # Some harnesses emit both delta chunks and a final full-text
+                # reasoning event.  Keep the longer text instead of appending
+                # the same thought twice.
+                if value == current or current.startswith(value):
+                    continue
+                if current and value.startswith(current):
+                    reasoning_buffer[:] = [value]
+                else:
+                    append_bounded(reasoning_buffer, value)
         elif event_type == "tool_started":
             flush_text()
             flush_reasoning()
@@ -860,6 +908,9 @@ class BuildManager:
         validator: Validator | None = None,
         max_seconds: int | None = None,
         validation_seconds: int | None = None,
+        max_total_seconds: int | None = None,
+        max_input_tokens: int | None = None,
+        max_output_tokens: int | None = None,
         max_products: int | None = None,
         event_timeout: float | None = None,
         default_proxy: str | None = None,
@@ -933,18 +984,21 @@ class BuildManager:
             or os.environ.get("ECOM_FETCH_PROXY")
             or None
         )
+        dev_trace = _env_flag("ECOM_BUILD_DEV_TRACE")
         self.reasoning_capture_enabled = (
             capture_reasoning
             if capture_reasoning is not None
-            else os.environ.get("ECOM_BUILD_CAPTURE_REASONING") == "1"
+            else _env_flag("ECOM_BUILD_CAPTURE_REASONING", dev_trace)
         )
         # Live reasoning is useful for the build timeline; persisting it into
         # trace.json is a separate, explicit decision because the trace is kept
-        # as local evidence and may contain page or prompt content.
+        # as local evidence and may contain page or prompt content.  The
+        # development switch turns both on by default; an explicit per-switch
+        # environment value still wins.
         self.persist_reasoning_enabled = (
             persist_reasoning
             if persist_reasoning is not None
-            else os.environ.get("ECOM_BUILD_PERSIST_REASONING") == "1"
+            else _env_flag("ECOM_BUILD_PERSIST_REASONING", dev_trace)
         )
         self.robots_probe = robots_probe or _probe_robots
         self._trace_reasoning: dict[str, bool] = {}
@@ -1014,6 +1068,20 @@ class BuildManager:
             if validation_seconds is not None
             else os.environ.get("ECOM_BUILD_VALIDATION_SECONDS", "120")
         )
+        # Optional whole-build guards.  They include the initial model turn,
+        # automatic repair and host validation, unlike ``max_seconds`` which
+        # only bounds the first turn.  Unset means unlimited and preserves the
+        # behavior of older deployments and tests.
+        self.max_total_seconds = _budget_value(
+            max_total_seconds, "ECOM_BUILD_MAX_TOTAL_SECONDS"
+        )
+        self.max_input_tokens = _budget_value(
+            max_input_tokens, "ECOM_BUILD_MAX_INPUT_TOKENS"
+        )
+        self.max_output_tokens = _budget_value(
+            max_output_tokens, "ECOM_BUILD_MAX_OUTPUT_TOKENS"
+        )
+        self.usage_poll_seconds = 2.0
         self.max_products = int(
             max_products
             if max_products is not None
@@ -1140,6 +1208,9 @@ class BuildManager:
         *,
         max_products: int | None = None,
         max_seconds: int | None = None,
+        max_total_seconds: int | None = None,
+        max_input_tokens: int | None = None,
+        max_output_tokens: int | None = None,
         proxy: str | None = None,
         capture_reasoning: bool | None = None,
         repair_rounds: int | None = None,
@@ -1189,6 +1260,21 @@ class BuildManager:
         # enforces its own minimum, while tests and internal callers may need
         # a short budget to verify the deadline behavior.
         second_budget = max(1, int(max_seconds or self.max_seconds))
+        total_budget = (
+            self.max_total_seconds
+            if max_total_seconds is None
+            else max(1, int(max_total_seconds))
+        )
+        input_budget = (
+            self.max_input_tokens
+            if max_input_tokens is None
+            else max(1, int(max_input_tokens))
+        )
+        output_budget = (
+            self.max_output_tokens
+            if max_output_tokens is None
+            else max(1, int(max_output_tokens))
+        )
         resolved_proxy = (proxy or site.proxy or self.default_proxy or "").strip() or None
         if resolved_proxy:
             _validate_proxy(resolved_proxy)
@@ -1225,9 +1311,12 @@ class BuildManager:
                 raise BuildError(str(exc)) from exc
 
             build_id = f"build-{uuid.uuid4().hex[:12]}"
-            self._trace_reasoning[build_id] = bool(
-                capture_reasoning and self.reasoning_capture_enabled
+            trace_reasoning = (
+                self.reasoning_capture_enabled
+                if capture_reasoning is None
+                else bool(capture_reasoning) and self.reasoning_capture_enabled
             )
+            self._trace_reasoning[build_id] = trace_reasoning
             requested_repairs = (
                 self.max_repair_rounds
                 if repair_rounds is None
@@ -1275,8 +1364,11 @@ class BuildManager:
             request = {
                 "max_products": product_budget,
                 "max_seconds": second_budget,
+                "max_total_seconds": total_budget,
+                "max_input_tokens": input_budget,
+                "max_output_tokens": output_budget,
                 "repair_rounds": requested_repairs,
-                "capture_reasoning": bool(capture_reasoning),
+                "capture_reasoning": bool(trace_reasoning),
                 "repair_reason": repair_reason or "",
                 "previous_readiness": site.readiness,
                 "robots_note": robots_note,
@@ -1324,6 +1416,9 @@ class BuildManager:
         reason: str | None = None,
         max_products: int | None = None,
         max_seconds: int | None = None,
+        max_total_seconds: int | None = None,
+        max_input_tokens: int | None = None,
+        max_output_tokens: int | None = None,
         proxy: str | None = None,
         capture_reasoning: bool | None = None,
         repair_rounds: int | None = None,
@@ -1341,6 +1436,9 @@ class BuildManager:
             site,
             max_products=max_products,
             max_seconds=max_seconds,
+            max_total_seconds=max_total_seconds,
+            max_input_tokens=max_input_tokens,
+            max_output_tokens=max_output_tokens,
             proxy=proxy,
             capture_reasoning=capture_reasoning,
             repair_rounds=repair_rounds,
@@ -1441,7 +1539,7 @@ class BuildManager:
                 "allowed_path_prefixes": ["/"],
                 "market": batch.market or "UNKNOWN",
                 "locale": batch.language or "en-US",
-                "currency": "USD",
+                "currency": MARKET_CURRENCY.get((batch.market or "").upper(), ""),
             },
             scope={
                 "max_products": product_budget,
@@ -2046,7 +2144,26 @@ candidate; the host validates and installs it.
                 "no product links, inspect one category or sitemap and use `listing`, "
                 "`html_index` or `sitemap`.\n"
             )
+        shopify_instruction = (
+            "For Shopify storefronts, prefer public JSON (`/products.json`) for "
+            "name, price, currency, variants and description before parsing HTML. "
+            "Declare a `product_source` section and keep `discovery` as the HTML "
+            "fallback. The runtime seeds product work items from `/products.json`, "
+            "commits complete descriptions directly, and fetches HTML/browser only "
+            "for descriptions shorter than `description.min_chars` or when the JSON "
+            "endpoint is blocked. Keep fallback concurrency at 1–2. Availability is "
+            "optional; price and currency must match and the currency must remain "
+            "the batch currency. Per-product `.js`/`.json` extraction is not "
+            "implemented yet; do not claim it in the rule.\n"
+        )
         robots_note = str(task.extra.get("robots_note") or "robots.txt not probed")
+        expected_currency = MARKET_CURRENCY.get((batch.market or "").upper(), "")
+        expected_currency_line = (
+            f"- Expected currency for market `{batch.market}`: `{expected_currency}` "
+            "(verify on a static product page; the host rejects a mismatch)\n"
+            if expected_currency
+            else "- Expected currency: determine it from the site's static product page.\n"
+        )
         robots_sitemaps = [
             str(url) for url in (task.extra.get("robots_sitemaps") or [])
         ][:20]
@@ -2054,6 +2171,7 @@ candidate; the host validates and installs it.
             "\n".join(f"- {url}" for url in robots_sitemaps)
             or "- No Sitemap lines found."
         )
+        product_source_currency = expected_currency or "EUR"
         return f"""# Build brief: {site.site_key}
 
 You are building a **declarative** rule package for one public e-commerce site.
@@ -2068,8 +2186,16 @@ valid product. You cannot mark a rule `verified`; the host stores it as
 - Allowed origin: `{origin}`
 - Batch market: `{batch.market or "unknown"}`
 - Batch language: `{batch.language or "unknown"}`
+{expected_currency_line}- Stock／availability is not a required business field for this build;
+  do not spend budget verifying it or reject a product only because it is out
+  of stock. Price and currency must match; minor price differences between
+  requests are acceptable.
 {catalog_lines}{proxy_line}
-{discovery_instruction}
+Budget checkpoint: write a minimal valid rule by about 50% of the wall-clock
+budget, stop discovery by about 70%, and leave the remainder for host
+validation and repair. Do not wait until the budget is exhausted to write the
+first rule.
+{discovery_instruction}{shopify_instruction}
 ## Required output
 
 Write these files from the workspace (`work/` is your current directory):
@@ -2099,10 +2225,23 @@ groups. robots.txt is not a stop signal. Keep the fixed conservative request
 rate in this brief. Do not use archive.org or caches as a substitute for the
 live target.
 
+If two responses from the same client are a challenge page (for example titles
+such as "Verify your browser" or "Verifying your connection"), stop retrying
+that path. Switch to a browser sample only when the final rule will use the
+browser engine and the host can validate it; otherwise stop and record `ACCESS`
+in `../out/evidence/build-notes.md`. Do not spend the remaining wall-clock
+budget on repeated challenge retries.
+
+Keep one exit for the rest of the build and host validation. If static product
+pages return 429 on that exit, you may test at most two alternate same-market
+exits or switch to the browser engine, record the chosen exit, and stop
+rotating; do not change exit per request. Minor price differences are
+acceptable, but the currency must remain the batch currency.
+
 A generic reference rule is at `../input/reference-rule.yaml`; adapt it, do not
 copy its site or selectors blindly.
 
-## Rule contract (schema_version 1.1)
+## Rule contract (schema_version 1.1, 1.2 or 1.3)
 
 Required top-level keys: `schema_version`, `rule_id`, `rule_version`, `kind`,
 `site`, `scope`, `capabilities`, `discovery`, `fetch`, `extract`, `normalize`,
@@ -2119,19 +2258,76 @@ Required top-level keys: `schema_version`, `rule_id`, `rule_version`, `kind`,
   `max_products`, `max_seconds`, `notes`.
 - `capabilities`: `discovery: true`, `product: true`.
 - `discovery`: prefer `strategies: ["entry_links"]` with `link_selector`,
-  `product_url_patterns` and `url_identity: canonical`. A `listing` source with
-  `product_link_selector` is also supported.
+  `product_url_patterns` and `url_identity: canonical`. `discovery.strategies`
+  only accepts `entry_links`; use `discovery.sources` for other source types.
+  A `listing` source needs `url` and `product_link_selector`. A sitemap source
+  uses `urls` (list), not `strategies`:
+
+  ```yaml
+  discovery:
+    sources:
+      - type: sitemap
+        urls:
+          - https://www.example.com/sitemap.xml
+        max_sitemaps: 3
+    product_url_patterns:
+      - ^/products/
+  ```
+
+- `product_source` (optional, Shopify only, requires `schema_version: "1.3"`):
+  prefer this when the store exposes public `/products.json`. Keep `discovery`
+  as the fallback; `product_source` does not replace it. Example:
+
+  ```yaml
+  product_source:
+    type: shopify_json
+    url: https://www.example.com/products.json
+    product_url_template: https://www.example.com/products/{{handle}}
+    page_size: 250
+    max_pages: 1
+    currency: {product_source_currency}
+    description:
+      min_chars: 200
+      fallback_concurrency: 1
+    variants:
+      price: min_positive
+  ```
+
+  `page_size` is capped at 250. `variants.price` accepts `min_positive`,
+  `first` or `product_price`. `description.fallback_concurrency` is 1 or 2.
+  `currency` must equal `site.currency`. If `/products.json` returns 401/403,
+  429, a challenge or invalid JSON, the runtime records
+  `shopify_json_unavailable` and continues with `discovery`; do not invent a
+  second JSON endpoint. Product `.js`/`.json` per-product extraction is not
+  implemented.
 - `fetch`: `default_engine` is `static` unless the page truly needs JavaScript;
   `concurrency: 1`, `delay_ms` at least `1000`, `retry: {{max_attempts: 2,
   backoff_ms: 1000}}`, `timeout_ms: 45000`, `browser: false` for static pages.
-  If browser is required, set `default_engine: browser` and `browser:
-  {{headless: true, wait_selector: "..."}}`; `schema_version: "1.2"` is only
-  needed for `load_more`/`infinite_scroll`.
+  If a challenge page appears, verify one product page through
+  Patchright/Chromium with the same proxy before changing the rule. When the
+  browser sample passes, set `default_engine: browser` and a browser block:
+
+  ```yaml
+  browser:
+    headless: true
+    wait_selector: "h1"
+    challenge_wait_ms: 15000
+  ```
+
+  The host validation uses the same browser engine. If the browser sample also
+  hits a challenge, stop and record `ACCESS` instead of declaring a browser
+  rule. Use `schema_version: "1.1"` by default, `"1.2"` only for
+  `load_more`/`infinite_scroll`, and `"1.3"` when `product_source` is present.
 - `extract.fields` must cover `name`, `price.amount`, `price.currency`,
   `primary_image_url`, `source_url`; add `description_html`, `category`,
   `brand`, `options` when available. Every field needs an ordered `fallbacks`
   list with explicit `type` and `label`; put `json_ld` first when the page has
   Product JSON-LD, then CSS/attribute/title fallbacks.
+- Supported fallback `type` values: `json_ld`, `css_text`, `css_html`,
+  `css_attr`, `compose`, `title`, `breadcrumb`, `option_groups`, `price_pair`,
+  `canonical`, `constant`. There is no `url` or `meta` fallback type.
+  `source_url` may use `canonical`; when it is absent, the runtime uses the
+  page URL.
 - Product descriptions are often split across a narrative block and a
   specification list/table. Do not accept a short microdata summary as the
   complete description when the page also shows specs. Use a `compose` fallback
@@ -2141,6 +2337,11 @@ Required top-level keys: `schema_version`, `rule_id`, `rule_version`, `kind`,
   Add `extract.fields.description_html.audit.blocks` for every block used
   (narrative, feature list, specification tab); the host fails validation when
   a present block is not represented in the final `description_html`.
+  Declare only blocks you actually extract: if a specification accordion is
+  empty or rendered only by JavaScript, do not declare it; a single narrative
+  block is valid when that is all the static page provides. Optional fields
+  (`category`, `brand`, `options`) may be omitted when the page has no reliable
+  static source; do not invent a fallback type or a value for them.
 - `normalize.price`: `tax_basis: "exclusive_or_inclusive"`, `choose:
   "smaller_public_pair"`, `positive_only: true`.
 - `validate.required_fields`: the five core fields above; assertions for
@@ -2211,13 +2412,19 @@ domain-mismatched, or produces no valid product.
         # The build record carries its own wall-clock budget.  Using the
         # global default here made the per-build limit advisory: a 60-second
         # build would keep the manager's 600-second deadline or vice versa.
+        request = record.request or {}
         budget = max(
             1,
-            int(
-                (record.request or {}).get("max_seconds") or self.max_seconds
-            ),
+            int(request.get("max_seconds") or self.max_seconds),
         )
         deadline = time.monotonic() + budget
+        total_budget = _optional_int(request.get("max_total_seconds"))
+        total_deadline = (
+            time.monotonic() + total_budget if total_budget is not None else None
+        )
+        input_budget = _optional_int(request.get("max_input_tokens"))
+        output_budget = _optional_int(request.get("max_output_tokens"))
+        next_usage_check = 0.0
         try:
             while not self._stopping.is_set():
                 record = self.store.get_build(build_id)
@@ -2227,6 +2434,22 @@ domain-mismatched, or produces no valid product.
                 if session is None:
                     self._finalize(build_id, error="build session is no longer available")
                     return
+                now = time.monotonic()
+                if total_deadline is not None and now >= total_deadline:
+                    self._cancel_for_budget(
+                        build_id,
+                        "build exceeded the total wall-clock budget "
+                        f"({total_budget}s)",
+                    )
+                    return
+                if (input_budget or output_budget) and now >= next_usage_check:
+                    next_usage_check = now + max(0.5, float(self.usage_poll_seconds))
+                    usage_error = self._token_budget_error(
+                        self._usage(build_id), input_budget, output_budget
+                    )
+                    if usage_error is not None:
+                        self._cancel_for_budget(build_id, usage_error)
+                        return
                 if session.state in TERMINAL_BUILD_STATES:
                     if session.state == "FINISHED" and record.state not in TERMINAL_BUILD_STATES:
                         self.store.update_build(build_id, state="VALIDATING")
@@ -2243,11 +2466,13 @@ domain-mismatched, or produces no valid product.
                         self._finalize(
                             build_id,
                             error=f"build timed out and cancel failed: {exc}",
+                            error_class="budget",
                         )
                         return
                     self._finalize(
                         build_id,
                         error=f"build exceeded the wall-clock budget ({budget}s)",
+                        error_class="budget",
                     )
                     return
                 self._auto_approve(build_id, session)
@@ -2263,6 +2488,53 @@ domain-mismatched, or produces no valid product.
                     self._slot_build_id = None
             if not self._stopping.is_set():
                 self._drain_queue()
+
+    def _usage(self, build_id: str) -> dict[str, Any] | None:
+        try:
+            usage = self.service.usage(build_id)
+        except Exception:
+            logger.debug("build usage check failed for %s", build_id, exc_info=True)
+            return None
+        return usage if isinstance(usage, dict) else None
+
+    @staticmethod
+    def _token_budget_error(
+        usage: dict[str, Any] | None,
+        input_budget: int | None,
+        output_budget: int | None,
+    ) -> str | None:
+        if usage is None:
+            return None
+        used_input = int(usage.get("input") or 0)
+        # Providers commonly bill reasoning as output; count it against the
+        # output ceiling so a reasoning-heavy turn cannot exceed the cap.
+        used_output = int(usage.get("output") or 0) + int(
+            usage.get("reasoning") or 0
+        )
+        if input_budget is not None and used_input > input_budget:
+            return (
+                "build exceeded the token budget "
+                f"(input {used_input}/{input_budget}, output {used_output}"
+                + (f"/{output_budget}" if output_budget is not None else "")
+                + ")"
+            )
+        if output_budget is not None and used_output > output_budget:
+            return (
+                "build exceeded the token budget "
+                f"(input {used_input}"
+                + (f"/{input_budget}" if input_budget is not None else "")
+                + f", output {used_output}/{output_budget})"
+            )
+        return None
+
+    def _cancel_for_budget(self, build_id: str, error: str) -> None:
+        try:
+            self.service.cancel(build_id)
+        except Exception as exc:
+            logger.warning(
+                "budget cancel failed for %s: %s", build_id, exc, exc_info=True
+            )
+        self._finalize(build_id, error=error, error_class="budget")
 
     def _session(self, build_id: str) -> BuildSession | None:
         try:
@@ -2372,7 +2644,7 @@ domain-mismatched, or produces no valid product.
 
     # --------------------------------------------------------------- finalize
     def _finalize(
-        self, build_id: str, *, error: str | None = None
+        self, build_id: str, *, error: str | None = None, error_class: str | None = None
     ) -> str | None:
         """Validate and install one finished agent run.
 
@@ -2397,7 +2669,7 @@ domain-mismatched, or produces no valid product.
                     build_id,
                     f"构建失败：{message}",
                 )
-                self._record_failure(build_id, message)
+                self._record_failure(build_id, message, error_class=error_class)
                 return None
             try:
                 # Use the session workspace directly: a session restored after
@@ -2423,7 +2695,7 @@ domain-mismatched, or produces no valid product.
                     build_id,
                     f"构建失败：{error}",
                 )
-                self._record_failure(build_id, error)
+                self._record_failure(build_id, error, error_class=error_class)
                 # Keep the failed session available for a user-triggered
                 # manual continue; manager shutdown closes it.
                 return None
@@ -3078,6 +3350,10 @@ domain-mismatched, or produces no valid product.
             events = [event.to_dict() for event in self.service.event_log(build_id)]
         except KeyError:
             events = []
+        capture_trace_reasoning = (
+            self._trace_reasoning.get(build_id, False)
+            and self.persist_reasoning_enabled
+        )
         trace = build_trace(
             export,
             build_id=build_id,
@@ -3087,11 +3363,78 @@ domain-mismatched, or produces no valid product.
             repairs=list(self._repairs.get(build_id, [])),
             repair_limit=self._repair_limits.get(build_id, 0),
             error=error,
-            capture_reasoning=(
-                self._trace_reasoning.get(build_id, False)
-                and self.persist_reasoning_enabled
-            ),
+            capture_reasoning=capture_trace_reasoning,
         )
+        if not trace.get("messages") and not trace.get("tools"):
+            # Cancelled or interrupted sessions may export no messages even
+            # though session.ndjson has the full event log.  Persist a compact
+            # fallback so failure evidence does not become empty.
+            fallback_events = _workspace_events(session.workspace)
+            fallback_timeline, _ = _live_timeline(fallback_events)
+            if not trace.get("tokens"):
+                for event in reversed(fallback_events):
+                    data = getattr(event, "data", {}) or {}
+                    tokens = data.get("tokens")
+                    if isinstance(tokens, dict) and tokens:
+                        trace["tokens"] = tokens
+                        cost = data.get("cost")
+                        if type(cost) in {int, float}:
+                            trace["cost"] = cost
+                        break
+            fallback_messages = [
+                {
+                    "created_at": item.get("created_at"),
+                    "role": str(item.get("role") or "assistant"),
+                    "text": str(item.get("text") or ""),
+                }
+                for item in fallback_timeline
+                if item.get("kind") == "text" and item.get("text")
+            ]
+            fallback_reasoning = (
+                [
+                    {
+                        "created_at": item.get("created_at"),
+                        "text": str(item.get("text") or ""),
+                    }
+                    for item in fallback_timeline
+                    if item.get("kind") == "reasoning" and item.get("text")
+                ]
+                if capture_trace_reasoning
+                else []
+            )
+            fallback_tools = [
+                {
+                    "created_at": item.get("created_at"),
+                    "name": str(item.get("name") or "unknown"),
+                    "status": str(item.get("status") or ""),
+                    "call_id": item.get("call_id"),
+                }
+                for item in fallback_timeline
+                if item.get("kind") == "tool"
+            ]
+            if fallback_messages:
+                trace["messages"] = fallback_messages
+            if fallback_reasoning:
+                trace["reasoning"] = fallback_reasoning
+            if fallback_tools:
+                trace["tools"] = fallback_tools
+            counts = trace.setdefault("counts", {})
+            counts["messages"] = len(fallback_messages)
+            counts["reasoning_parts"] = len(fallback_reasoning)
+            counts["reasoning_chars"] = sum(
+                len(item["text"]) for item in fallback_reasoning
+            )
+            counts["tools"] = len(fallback_tools)
+            counts["failed_tools"] = sum(
+                1
+                for item in fallback_tools
+                if item.get("status") not in {"completed", "success", ""}
+            )
+            counts["by_tool"] = dict(
+                sorted(Counter(item["name"] for item in fallback_tools).items())
+            )
+            if fallback_reasoning:
+                trace["reasoning_retained"] = True
         out_dir = session.workspace.out_dir
         out_dir.mkdir(parents=True, exist_ok=True)
         (out_dir / "trace.json").write_text(
@@ -3225,7 +3568,9 @@ domain-mismatched, or produces no valid product.
         )
         return rule_id, rule_version, target.name, digest, change_summary
 
-    def _record_failure(self, build_id: str, message: str) -> None:
+    def _record_failure(
+        self, build_id: str, message: str, *, error_class: str | None = None
+    ) -> None:
         record = self.store.get_build(build_id)
         if record is None or record.state in TERMINAL_BUILD_STATES:
             return
@@ -3234,6 +3579,7 @@ domain-mismatched, or produces no valid product.
             state="FINISHED",
             outcome="failed",
             error=message,
+            error_class=error_class,
             finished_at=utc_now(),
         )
         self._release_feedback(build_id, message)
@@ -3518,6 +3864,27 @@ domain-mismatched, or produces no valid product.
                             or len(merged) > TIMELINE_LIMIT
                         )
                         timeline = merged[-TIMELINE_LIMIT:]
+            if not timeline and record.workspace:
+                # A cancelled or interrupted build may have an empty export
+                # even though the workspace event log is complete.  Keep the
+                # timeline observable instead of showing an empty panel.
+                fallback_events = _workspace_events(
+                    BuildWorkspace(root=Path(record.workspace), build_id=build_id)
+                )
+                fallback_timeline, fallback_truncated = _live_timeline(fallback_events)
+                if fallback_timeline:
+                    timeline = fallback_timeline
+                    timeline_truncated = fallback_truncated
+                    if not trace.get("messages"):
+                        trace["messages"] = [
+                            {
+                                "created_at": item.get("created_at"),
+                                "text": str(item.get("text") or ""),
+                                "role": "assistant",
+                            }
+                            for item in fallback_timeline
+                            if item.get("kind") == "text" and item.get("text")
+                        ]
             return {
                 "build_id": build_id,
                 "state": record.state,
@@ -3534,6 +3901,10 @@ domain-mismatched, or produces no valid product.
             events = self.service.event_log(build_id)
         except KeyError:
             events = []
+        if not events and record.workspace:
+            events = _workspace_events(
+                BuildWorkspace(root=Path(record.workspace), build_id=build_id)
+            )
         messages: list[dict[str, Any]] = []
         reasoning: list[dict[str, Any]] = []
         for event in events:

@@ -164,6 +164,10 @@ class HarnessAdapter(ABC):
     def close(self, build_id: str) -> BuildSession:
         raise NotImplementedError
 
+    def usage(self, build_id: str) -> dict[str, Any] | None:
+        """Return cumulative session token/cost usage when the adapter can."""
+        return None
+
 
 class OpenCodeHttpAdapter(HarnessAdapter):
     """v1 adapter: one ``opencode serve`` process per adapter instance."""
@@ -694,3 +698,25 @@ class OpenCodeHttpAdapter(HarnessAdapter):
 
     def status(self, build_id: str) -> BuildSession:
         return self._require(build_id)
+
+    def usage(self, build_id: str) -> dict[str, Any] | None:
+        session = self._require(build_id)
+        if not session.session_id:
+            return None
+        with self._lock:
+            client = self.client
+        if client is None:
+            # Do not start a new server just to read usage after shutdown.
+            return None
+        info = client.get_session(session.session_id)
+        tokens = info.get("tokens")
+        tokens = tokens if isinstance(tokens, dict) else {}
+        values: dict[str, Any] = {}
+        for key in ("input", "output", "reasoning"):
+            value = tokens.get(key)
+            if type(value) in {int, float}:
+                values[key] = int(value)
+        cost = info.get("cost")
+        if type(cost) in {int, float}:
+            values["cost"] = float(cost)
+        return values

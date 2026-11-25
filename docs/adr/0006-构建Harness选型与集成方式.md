@@ -31,7 +31,7 @@ updated: 2026-11-23
 
 - 真实模型已完成两次完整构建：`familidoo.fr`（FR／EUR）和 `sixmoondesigns.com`（US／USD，经 mihomo US 出口），均从批次站点详情启动、主机有界验证、候选规则安装到批次任务 3／3。
 - 站点详情接入最小构建控制面：启动、状态、暂停／恢复／取消、错误、失败回到 `needs_onboarding`；完整构建会话 UI（多轮对话、权限／依赖审批页面）仍未实现。
-- 每次构建写 `out/trace.json`／`out/trace.md`：阶段、工具调用、命令／路径摘要、截断输出、可见消息、tokens／费用、主机验证和错误；默认不保存 reasoning，`ECOM_BUILD_CAPTURE_REASONING=1` 时才保留并截断。模型、provider 和 variant 在状态与 trace 中标出。
+- 每次构建写 `out/trace.json`／`out/trace.md`：阶段、工具调用、命令／路径摘要、截断输出、可见消息、tokens／费用、主机验证和错误；生产默认不保存 reasoning。开发期可用 `ECOM_BUILD_DEV_TRACE=1` 默认开启实时思考与 trace 落盘，也可用 `ECOM_BUILD_CAPTURE_REASONING=1`／`ECOM_BUILD_PERSIST_REASONING=1` 单独控制；保留时按截断策略处理。模型、provider 和 variant 在状态与 trace 中标出。
 - 构建简报和主机验证使用同一出口代理；规则包不写代理 URL。市场／币种不一致时拒绝安装，避免浏览器样本与静态样本混用。
 - 仍保持 Provisional：完整构建会话 UI、自然规则缺陷连续多轮、生产依赖安装器接线、权限请求的真实触发、跨物理设备和更大规模站点未验证。
 

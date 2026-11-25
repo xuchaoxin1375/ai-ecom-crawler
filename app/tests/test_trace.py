@@ -91,6 +91,27 @@ class TraceTests(unittest.TestCase):
         self.assertIn("HTML output suppressed", output)
         self.assertNotIn("<html", output)
 
+    def test_usage_event_keeps_tokens_and_cost(self) -> None:
+        event = normalize_event(
+            {
+                "type": "session.usage.updated",
+                "data": {
+                    "sessionID": "ses_1",
+                    "tokens": {
+                        "input": 10,
+                        "output": 2,
+                        "reasoning": 1,
+                        "cache": {"read": 5, "write": 0},
+                    },
+                    "cost": 0.25,
+                },
+            }
+        )
+        self.assertEqual(event.type, "other")
+        self.assertEqual(event.data["tokens"]["input"], 10)
+        self.assertEqual(event.data["tokens"]["cache"]["read"], 5)
+        self.assertEqual(event.data["cost"], 0.25)
+
     def test_capture_reasoning_keeps_truncated_reasoning(self) -> None:
         trace = build_trace(
             export_payload(),
