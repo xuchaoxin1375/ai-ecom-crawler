@@ -5,6 +5,7 @@ import {
   useState,
   type MouseEvent,
   type ReactNode,
+  type Ref,
 } from "react";
 import {
   Link,
@@ -64,13 +65,22 @@ import { BatchStatusBadge } from "../../components/ui/BatchStatusBadge";
 import { Button } from "../../components/ui/Button";
 import { Checkbox, Input } from "../../components/ui/Input";
 import { DataTable, type DataTableColumn } from "../../components/ui/DataTable";
+import { TableDisplayOptions } from "../../components/ui/TableDisplayOptions";
+import {
+  densityViewOptions,
+  TableViewToggle,
+} from "../../components/ui/TableViewToggle";
+import { useTablePreferences } from "../../components/ui/tablePreferences";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { ErrorNotice } from "../../components/ui/ErrorNotice";
 import { InlineNotice } from "../../components/ui/InlineNotice";
 import { RowActionsMenu, type RowActionItem } from "../../components/ui/DropdownMenu";
 import { BulkActionBar, type BulkAction } from "../../components/ui/BulkActionBar";
 import { Toast, useToast } from "../../components/ui/Toast";
-import { useRowSelection } from "../../components/ui/useRowSelection";
+import {
+  useRowSelection,
+  type RowSelection,
+} from "../../components/ui/useRowSelection";
 import { BatchStatusBand } from "./BatchStatusBand";
 import { ConfirmBatchActionDialog } from "./ConfirmBatchActionDialog";
 import { ImportSitesDialog } from "./ImportSitesDialog";
@@ -846,6 +856,7 @@ export function BatchDetailPage() {
   const columns: DataTableColumn<BatchSite>[] = [
     {
       key: "select",
+      label: "选择",
       header: (
         <Checkbox
           checked={selection.allSelected(visibleSites)}
@@ -855,7 +866,10 @@ export function BatchDetailPage() {
           onChange={() => selection.toggleVisible(visibleSites)}
         />
       ),
-      width: "36px",
+      width: 36,
+      resizable: false,
+      sticky: "left",
+      hideable: false,
       headerClassName: "px-1.5",
       cellClassName: "px-1.5",
       skeleton: false,
@@ -871,39 +885,60 @@ export function BatchDetailPage() {
     {
       key: "site",
       header: "站点",
-      width: "27%",
-      cell: (site) => (
+      label: "站点",
+      sortable: true,
+      sortValue: (site) => site.domain,
+      width: 280,
+      minWidth: 180,
+      maxWidth: 720,
+      cell: (site, { compact }) => (
         <div className="min-w-0">
           <Link
             className="inline-flex max-w-full items-center gap-1 font-semibold text-ink hover:text-accent hover:underline"
             to={siteHref(site)}
             onClick={(event) => openSite(site, event)}
             data-site-key={site.site_key}
-            title={`${site.domain}：查看站点详情`}
+            title={
+              compact
+                ? `${site.domain}${
+                    site.note || site.input_value
+                      ? `：${site.note || site.input_value}`
+                      : ""
+                  }`
+                : `${site.domain}：查看站点详情`
+            }
           >
             <span className="truncate">{site.domain}</span>
           </Link>
-          <p
-            className="mt-0.5 truncate text-[11px] text-ink-3"
-            title={site.note || site.input_value}
-          >
-            {site.note || site.input_value}
-          </p>
+          {compact ? null : (
+            <p
+              className="mt-0.5 truncate text-[11px] text-ink-3"
+              title={site.note || site.input_value}
+            >
+              {site.note || site.input_value}
+            </p>
+          )}
         </div>
       ),
     },
     {
       key: "readiness",
       header: "接入",
-      width: "11%",
-      cell: (site) => {
+      label: "接入",
+      hideable: true,
+      sortable: true,
+      sortValue: (site) => site.readiness,
+      width: 110,
+      minWidth: 80,
+      maxWidth: 180,
+      cell: (site, { compact }) => {
         const statusText = siteStatusText(site.readiness, site.task?.state);
         return (
           <div>
             <Badge tone={readinessTone(site.readiness)} dot={false}>
               {READINESS_LABELS[site.readiness]}
             </Badge>
-            {statusText && !site.task ? (
+            {!compact && statusText && !site.task ? (
               <p className="mt-1 text-[11px] text-ink-3">{statusText}</p>
             ) : null}
           </div>
@@ -913,17 +948,45 @@ export function BatchDetailPage() {
     {
       key: "task",
       header: "任务",
-      width: "19%",
-      cell: (site) => {
+      label: "任务",
+      hideable: true,
+      sortable: true,
+      sortValue: (site) => site.task?.state ?? "",
+      width: 190,
+      minWidth: 140,
+      maxWidth: 320,
+      cell: (site, { compact }) => {
         if (!site.task) {
           return <span className="text-xs text-ink-3">—</span>;
+        }
+        const taskHref = `/tasks/${encodeURIComponent(site.task.task_id)}`;
+        const stateBadge = (
+          <Badge tone={taskStateTone(site.task.state)} dot={false}>
+            {taskStateLabel(site.task.state)}
+          </Badge>
+        );
+        if (compact) {
+          return (
+            <div className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
+              <Link
+                className="shrink-0 hover:opacity-80"
+                to={taskHref}
+                aria-label={`查看任务 ${site.task.task_id} 详情`}
+              >
+                {stateBadge}
+              </Link>
+              {site.task.outcome ? (
+                <span className="truncate text-[11px] text-ink-3">
+                  {outcomeLabel(site.task.outcome)}
+                </span>
+              ) : null}
+            </div>
+          );
         }
         return (
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-1.5">
-              <Badge tone={taskStateTone(site.task.state)} dot={false}>
-                {taskStateLabel(site.task.state)}
-              </Badge>
+              {stateBadge}
               {site.task.outcome ? (
                 <span className="text-[11px] text-ink-3">
                   {outcomeLabel(site.task.outcome)}
@@ -938,7 +1001,7 @@ export function BatchDetailPage() {
             </p>
             <Link
               className="mt-0.5 inline-block text-[11px] text-accent hover:underline"
-              to={`/tasks/${encodeURIComponent(site.task.task_id)}`}
+              to={taskHref}
             >
               任务详情
             </Link>
@@ -949,7 +1012,13 @@ export function BatchDetailPage() {
     {
       key: "result",
       header: <span title="有效商品／失败商品">结果</span>,
-      width: "12%",
+      label: "结果",
+      hideable: true,
+      sortable: true,
+      sortValue: (site) => site.task?.counts.valid_products ?? 0,
+      width: 110,
+      minWidth: 80,
+      maxWidth: 180,
       align: "right",
       cell: (site) => {
         if (!site.task) return <span className="text-xs text-ink-3">—</span>;
@@ -964,7 +1033,13 @@ export function BatchDetailPage() {
     {
       key: "updated",
       header: "更新",
-      width: "13%",
+      label: "更新",
+      hideable: true,
+      sortable: true,
+      sortValue: (site) => site.task?.updated_at || site.updated_at,
+      width: 100,
+      minWidth: 80,
+      maxWidth: 150,
       align: "right",
       headerClassName: "px-2",
       cellClassName: "px-2",
@@ -979,12 +1054,15 @@ export function BatchDetailPage() {
     },
     {
       key: "actions",
+      label: "操作",
       header: <span className="sr-only">操作</span>,
-      width: "40px",
+      width: 40,
+      resizable: false,
+      sticky: "right",
+      hideable: false,
       align: "right",
-      headerClassName: "px-1 max-lg:right-0 max-lg:z-20",
-      cellClassName:
-        "px-1 max-lg:sticky max-lg:right-0 max-lg:z-10 max-lg:border-l max-lg:border-line max-lg:bg-surface",
+      headerClassName: "px-1",
+      cellClassName: "px-1",
       skeleton: false,
       cell: (site) => (
         <RowActionsMenu
@@ -1052,7 +1130,7 @@ export function BatchDetailPage() {
   ];
 
   return (
-    <div className={cn("space-y-6", selection.selectedCount > 0 && "pb-20")}>
+    <div className={cn("space-y-6", selection.selectedCount > 0 && "pb-48")}>
       <header>
         <div className="flex items-center justify-between gap-4">
           <Link
@@ -1115,120 +1193,24 @@ export function BatchDetailPage() {
 
       <BatchStatusBand batch={batch} />
 
-      <section
-        ref={siteListRef}
-        tabIndex={-1}
-        aria-label="站点清单"
-        className="min-w-0 scroll-mt-16 rounded-panel border border-line bg-surface"
-      >
-        <div className="border-b border-line px-5 py-4">
-          <div className="flex flex-col items-start gap-3 sm:flex-row sm:justify-between">
-            <div>
-              <h2 className="text-[17px] leading-6 font-semibold text-ink">站点清单</h2>
-              <p className="mt-0.5 text-xs leading-5 text-ink-3" role="status">
-                {query.isFetching
-                  ? "更新中…"
-                  : `显示 ${formatNumber(
-                      visibleSites.length,
-                    )} / ${formatNumber(sites.length)} 个站点`}
-              </p>
-            </div>
-            <Button
-              size="sm"
-              onClick={() => void query.refetch()}
-              disabled={query.isFetching}
-            >
-              <RefreshCw
-                className={query.isFetching ? "animate-spin" : undefined}
-                size={14}
-                aria-hidden="true"
-              />
-              刷新清单
-            </Button>
-          </div>
-
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <div className="relative min-w-0 basis-48 grow">
-              <Search
-                className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-3"
-                size={14}
-                aria-hidden="true"
-              />
-              <Input
-                className="pl-8 text-sm"
-                value={queryParam}
-                placeholder="域名、备注或任务 ID"
-                aria-label="搜索站点"
-                onChange={(event) => updateParam("q", event.target.value)}
-              />
-            </div>
-            <select
-              aria-label="筛选站点状态"
-              className="h-9 max-w-full rounded-control border border-line-strong bg-surface px-3 text-sm text-ink"
-              value={filter}
-              onChange={(event) => setFilter(parseFilter(event.target.value))}
-            >
-              {filterOptions.map(({ key, label, count }) => (
-                <option key={key} value={key}>
-                  {label}（{formatNumber(count)}）
-                </option>
-              ))}
-            </select>
-          </div>
-          {visibleSites.length > 0 && (
-            <p className="mt-2 text-xs text-ink-3 lg:hidden">横向滚动可查看其他列</p>
-          )}
-        </div>
-
-        {query.isError ? (
-          <div className="px-4 pt-4">
-            <ErrorNotice
-              title="刷新批次失败"
-              message={
-                query.error instanceof Error
-                  ? query.error.message
-                  : "暂时无法更新批次。"
-              }
-              compact
-              onRetry={() => void query.refetch()}
-            />
-          </div>
-        ) : null}
-
-        {bulkNotice ? (
-          <div className="px-4 pt-4">
-            <InlineNotice
-              tone={bulkNotice.tone}
-              title={bulkNotice.title}
-              onDismiss={() => setBulkNotice(null)}
-            >
-              <p>{bulkNotice.text}</p>
-              {bulkNotice.details?.length ? (
-                <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs">
-                  {bulkNotice.details.map((detail, index) => (
-                    <li key={`${index}-${detail}`}>{detail}</li>
-                  ))}
-                </ul>
-              ) : null}
-            </InlineNotice>
-          </div>
-        ) : null}
-
-        {visibleSites.length ? (
-          <DataTable
-            caption="批次站点清单"
-            columns={columns}
-            rows={visibleSites}
-            rowKey={(site) => site.site_key}
-            rowClassName={(site) =>
-              selection.isSelected(site) ? "bg-accent-soft/40" : ""
-            }
-            density="compact"
-          />
-        ) : (
-          emptyState
-        )}
-      </section>
+      <BatchSiteListSection
+        sectionRef={siteListRef}
+        sites={sites}
+        visibleSites={visibleSites}
+        columns={columns}
+        selection={selection}
+        emptyState={emptyState}
+        filter={filter}
+        onFilterChange={setFilter}
+        filterOptions={filterOptions}
+        queryParam={queryParam}
+        onQueryChange={(value) => updateParam("q", value)}
+        isFetching={query.isFetching}
+        error={query.error}
+        onRefresh={() => void query.refetch()}
+        bulkNotice={bulkNotice}
+        onDismissBulkNotice={() => setBulkNotice(null)}
+      />
 
       <details className="rounded-panel border border-line bg-surface">
         <summary className="cursor-pointer rounded-control px-4 py-3 text-sm font-semibold text-ink">
@@ -1380,5 +1362,178 @@ export function BatchDetailPage() {
 
       <Toast toast={toast} onDismiss={dismissToast} />
     </div>
+  );
+}
+
+interface BatchSiteListSectionProps {
+  sectionRef: Ref<HTMLElement>;
+  sites: BatchSite[];
+  visibleSites: BatchSite[];
+  columns: DataTableColumn<BatchSite>[];
+  selection: RowSelection<BatchSite>;
+  emptyState: ReactNode;
+  filter: SiteFilter;
+  onFilterChange: (filter: SiteFilter) => void;
+  filterOptions: { key: string; label: string; count: number }[];
+  queryParam: string;
+  onQueryChange: (value: string) => void;
+  isFetching: boolean;
+  error: unknown;
+  onRefresh: () => void;
+  bulkNotice: BulkNotice | null;
+  onDismissBulkNotice: () => void;
+}
+
+function BatchSiteListSection({
+  sectionRef,
+  sites,
+  visibleSites,
+  columns,
+  selection,
+  emptyState,
+  filter,
+  onFilterChange,
+  filterOptions,
+  queryParam,
+  onQueryChange,
+  isFetching,
+  error,
+  onRefresh,
+  bulkNotice,
+  onDismissBulkNotice,
+}: BatchSiteListSectionProps) {
+  const resetWidthsRef = useRef<(() => void) | null>(null);
+  const [widthsCustomized, setWidthsCustomized] = useState(false);
+  const table = useTablePreferences({
+    tableKey: "batch-sites",
+    columns,
+    defaultDensity: "default",
+  });
+
+  return (
+    <section
+      ref={sectionRef}
+      tabIndex={-1}
+      aria-label="站点清单"
+      className="min-w-0 scroll-mt-16 rounded-panel border border-line bg-surface"
+    >
+      <div className="border-b border-line px-5 py-4">
+        <div className="flex flex-col items-start gap-3 sm:flex-row sm:justify-between">
+          <div>
+            <h2 className="text-[17px] leading-6 font-semibold text-ink">站点清单</h2>
+            <p className="mt-0.5 text-xs leading-5 text-ink-3" role="status">
+              {isFetching
+                ? "更新中…"
+                : `显示 ${formatNumber(
+                    visibleSites.length,
+                  )} / ${formatNumber(sites.length)} 个站点`}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <TableViewToggle
+              value={table.density}
+              options={densityViewOptions}
+              onChange={table.setDensity}
+            />
+            <TableDisplayOptions
+              columns={columns}
+              visible={table.visible}
+              onToggleColumn={table.toggleColumn}
+              onResetWidths={() => resetWidthsRef.current?.()}
+              widthsDefault={!widthsCustomized}
+            />
+            <Button size="sm" onClick={onRefresh} disabled={isFetching}>
+              <RefreshCw
+                className={isFetching ? "animate-spin" : undefined}
+                size={14}
+                aria-hidden="true"
+              />
+              刷新清单
+            </Button>
+          </div>
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <div className="relative min-w-0 basis-48 grow">
+            <Search
+              className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-3"
+              size={14}
+              aria-hidden="true"
+            />
+            <Input
+              className="pl-8 text-sm"
+              value={queryParam}
+              placeholder="域名、备注或任务 ID"
+              aria-label="搜索站点"
+              onChange={(event) => onQueryChange(event.target.value)}
+            />
+          </div>
+          <select
+            aria-label="筛选站点状态"
+            className="h-9 max-w-full rounded-control border border-line-strong bg-surface px-3 text-sm text-ink"
+            value={filter}
+            onChange={(event) => onFilterChange(parseFilter(event.target.value))}
+          >
+            {filterOptions.map(({ key, label, count }) => (
+              <option key={key} value={key}>
+                {label}（{formatNumber(count)}）
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {error ? (
+        <div className="px-4 pt-4">
+          <ErrorNotice
+            title="刷新批次失败"
+            message={error instanceof Error ? error.message : "暂时无法更新批次。"}
+            compact
+            onRetry={onRefresh}
+          />
+        </div>
+      ) : null}
+
+      {bulkNotice ? (
+        <div className="px-4 pt-4">
+          <InlineNotice
+            tone={bulkNotice.tone}
+            title={bulkNotice.title}
+            onDismiss={onDismissBulkNotice}
+          >
+            <p>{bulkNotice.text}</p>
+            {bulkNotice.details?.length ? (
+              <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs">
+                {bulkNotice.details.map((detail, index) => (
+                  <li key={`${index}-${detail}`}>{detail}</li>
+                ))}
+              </ul>
+            ) : null}
+          </InlineNotice>
+        </div>
+      ) : null}
+
+      {visibleSites.length ? (
+        <DataTable
+          caption="批次站点清单"
+          columns={table.visibleColumns}
+          rows={table.sortRows(visibleSites)}
+          rowKey={(site) => site.site_key}
+          rowClassName={(site) => (selection.isSelected(site) ? "bg-accent-soft" : "")}
+          resizeKey="batch-sites"
+          density={table.density}
+          sort={table.sort}
+          onSort={table.toggleSort}
+          onSortChange={table.setSort}
+          mobileCards
+          onResetWidthsReady={(reset) => {
+            resetWidthsRef.current = reset;
+          }}
+          onWidthsCustomizedChange={setWidthsCustomized}
+        />
+      ) : (
+        emptyState
+      )}
+    </section>
   );
 }

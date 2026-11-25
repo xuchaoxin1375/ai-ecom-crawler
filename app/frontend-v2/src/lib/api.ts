@@ -136,6 +136,8 @@ export interface TaskListParams {
   includeArchived?: boolean;
   limit?: number;
   offset?: number;
+  sort?: string;
+  order?: "asc" | "desc";
 }
 
 export type FeedbackCategory =
@@ -890,6 +892,8 @@ export function getTasks(
       include_archived: params.includeArchived,
       limit: params.limit ?? 50,
       offset: params.offset,
+      sort: params.sort,
+      order: params.order,
     })}`,
     signal,
   );

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { RefreshCw, Search } from "lucide-react";
@@ -14,6 +14,12 @@ import { buildModeLabel } from "../sites/build";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
 import { DataTable, type DataTableColumn } from "../../components/ui/DataTable";
+import { TableDisplayOptions } from "../../components/ui/TableDisplayOptions";
+import {
+  densityViewOptions,
+  TableViewToggle,
+} from "../../components/ui/TableViewToggle";
+import { useTablePreferences } from "../../components/ui/tablePreferences";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { ErrorNotice } from "../../components/ui/ErrorNotice";
 import { Input, Select } from "../../components/ui/Input";
@@ -50,6 +56,8 @@ export function BuildsPage() {
   const mode = searchParams.get("mode") ?? "";
   const queryParam = searchParams.get("q") ?? "";
   const [queryDraft, setQueryDraft] = useState(queryParam);
+  const resetWidthsRef = useRef<(() => void) | null>(null);
+  const [widthsCustomized, setWidthsCustomized] = useState(false);
 
   const query = useQuery({
     queryKey: ["builds", LIMIT],
@@ -100,42 +108,81 @@ export function BuildsPage() {
     {
       key: "build",
       header: "构建",
-      width: "28%",
-      cell: (build) => (
+      label: "构建",
+      sortable: true,
+      sortValue: (build) => build.site_key || build.build_id,
+      width: 270,
+      minWidth: 190,
+      maxWidth: 720,
+      cell: (build, { compact }) => (
         <div className="min-w-0">
           <Link
             className="block truncate font-semibold text-ink hover:text-accent hover:underline"
             to={`/builds/${encodeURIComponent(build.build_id)}`}
+            title={
+              compact
+                ? `${build.site_key || "未关联站点"} · ${build.build_id}`
+                : undefined
+            }
           >
             {build.site_key || "未关联站点"}
           </Link>
-          <span className="mt-0.5 block truncate font-mono text-[11px] text-ink-3">
-            {build.build_id}
-          </span>
-          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-ink-3">
-            <Badge tone={build.mode === "repair" ? "warning" : "neutral"} dot={false}>
-              {buildModeLabel(build.mode)}
-            </Badge>
-            {build.batch_id ? (
-              <Link
-                className="hover:text-accent hover:underline"
-                to={`/batches/${encodeURIComponent(build.batch_id)}`}
-              >
-                {build.batch_id}
-              </Link>
-            ) : (
-              <span>未关联批次</span>
-            )}
-          </div>
+          {compact ? null : (
+            <>
+              <span className="mt-0.5 block truncate font-mono text-[11px] text-ink-3">
+                {build.build_id}
+              </span>
+              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-ink-3">
+                <Badge
+                  tone={build.mode === "repair" ? "warning" : "neutral"}
+                  dot={false}
+                >
+                  {buildModeLabel(build.mode)}
+                </Badge>
+                {build.batch_id ? (
+                  <Link
+                    className="hover:text-accent hover:underline"
+                    to={`/batches/${encodeURIComponent(build.batch_id)}`}
+                  >
+                    {build.batch_id}
+                  </Link>
+                ) : (
+                  <span>未关联批次</span>
+                )}
+              </div>
+            </>
+          )}
         </div>
       ),
     },
     {
       key: "site",
       header: "站点／规则",
-      width: "22%",
-      cell: (build) => {
+      compactHeader: "规则",
+      label: "站点／规则",
+      hideable: true,
+      sortable: true,
+      sortValue: (build) => build.site_key || "",
+      width: 230,
+      minWidth: 160,
+      maxWidth: 400,
+      cell: (build, { compact }) => {
         const href = siteHref(build);
+        const ruleText = build.rule
+          ? `${build.rule.rule_id}@${build.rule.rule_version}`
+          : build.mode === "repair" && build.source_rule?.rule_version
+            ? `源规则 @${build.source_rule.rule_version}`
+            : "尚未安装规则";
+        if (compact) {
+          return (
+            <span
+              className="block truncate font-mono text-xs text-ink-2"
+              title={`${build.site_key || "未关联站点"}：${ruleText}`}
+            >
+              {ruleText}
+            </span>
+          );
+        }
         return (
           <div className="min-w-0">
             {href ? (
@@ -151,11 +198,7 @@ export function BuildsPage() {
               </span>
             )}
             <span className="mt-0.5 block truncate font-mono text-[11px] text-ink-3">
-              {build.rule
-                ? `${build.rule.rule_id}@${build.rule.rule_version}`
-                : build.mode === "repair" && build.source_rule?.rule_version
-                  ? `源规则 @${build.source_rule.rule_version}`
-                  : "尚未安装规则"}
+              {ruleText}
             </span>
           </div>
         );
@@ -164,9 +207,15 @@ export function BuildsPage() {
     {
       key: "state",
       header: "状态／结果",
-      width: "18%",
-      cell: (build) => (
-        <div className="space-y-1">
+      label: "状态／结果",
+      hideable: true,
+      sortable: true,
+      sortValue: (build) => build.state,
+      width: 170,
+      minWidth: 130,
+      maxWidth: 300,
+      cell: (build, { compact }) => (
+        <div className={compact ? "flex flex-wrap items-center gap-1" : "space-y-1"}>
           <div className="flex flex-wrap items-center gap-1">
             <Badge tone={buildTone(build.state, build.outcome)} dot={false}>
               {buildStateLabel(build.state)}
@@ -177,47 +226,75 @@ export function BuildsPage() {
               </Badge>
             ) : null}
           </div>
-          <p className="text-xs text-ink-3">
-            {build.state === "QUEUED" && build.queue_position
-              ? `队列第 ${build.queue_position} 位`
-              : build.repair_round
-                ? `自动修复 ${build.repair_round}/${build.repair_limit}`
-                : "未触发自动修复"}
-            {build.state === "QUEUED"
-              ? ""
-              : build.validation?.status === "PASSED"
-                ? " · 验证通过"
-                : build.validation?.status === "FAILED"
-                  ? " · 验证未通过"
-                  : ""}
-            {build.outcome === "interrupted" ? " · 可在详情继续" : ""}
-          </p>
+          {compact ? null : (
+            <p className="text-xs text-ink-3">
+              {build.state === "QUEUED" && build.queue_position
+                ? `队列第 ${build.queue_position} 位`
+                : build.repair_round
+                  ? `自动修复 ${build.repair_round}/${build.repair_limit}`
+                  : "未触发自动修复"}
+              {build.state === "QUEUED"
+                ? ""
+                : build.validation?.status === "PASSED"
+                  ? " · 验证通过"
+                  : build.validation?.status === "FAILED"
+                    ? " · 验证未通过"
+                    : ""}
+              {build.outcome === "interrupted" ? " · 可在详情继续" : ""}
+            </p>
+          )}
         </div>
       ),
     },
     {
       key: "time",
       header: "时间",
-      width: "16%",
-      cell: (build) => (
-        <div className="text-xs text-ink-3">
-          <p>更新 {formatTime(build.updated_at)}</p>
-          <p className="mt-0.5">
-            {build.elapsed_seconds !== null
-              ? `耗时 ${Math.round(build.elapsed_seconds)} 秒`
-              : build.finished_at
-                ? "未启动"
-                : build.state === "QUEUED"
-                  ? "等待开始"
-                  : "尚未结束"}
-          </p>
-        </div>
-      ),
+      label: "时间",
+      hideable: true,
+      sortable: true,
+      sortValue: (build) => build.updated_at,
+      width: 145,
+      minWidth: 110,
+      maxWidth: 260,
+      cell: (build, { compact }) => {
+        const updated = formatTime(build.updated_at);
+        const duration =
+          build.elapsed_seconds !== null
+            ? `${Math.round(build.elapsed_seconds)} 秒`
+            : build.finished_at
+              ? "未启动"
+              : build.state === "QUEUED"
+                ? "等待开始"
+                : "尚未结束";
+        if (compact) {
+          const short = updated === "-" ? "-" : updated.slice(5);
+          return (
+            <span
+              className="text-xs whitespace-nowrap text-ink-3"
+              title={`更新 ${updated} · 耗时 ${duration}`}
+            >
+              {short} · {duration}
+            </span>
+          );
+        }
+        return (
+          <div className="text-xs text-ink-3">
+            <p>更新 {updated}</p>
+            <p className="mt-0.5">耗时 {duration}</p>
+          </div>
+        );
+      },
     },
     {
       key: "actions",
       header: "操作",
-      width: "16%",
+      label: "操作",
+      width: 116,
+      minWidth: 100,
+      maxWidth: 180,
+      resizable: false,
+      sticky: "right",
+      hideable: false,
       align: "right",
       skeleton: false,
       cell: (build) => (
@@ -229,6 +306,12 @@ export function BuildsPage() {
       ),
     },
   ];
+
+  const table = useTablePreferences({
+    tableKey: "builds",
+    columns,
+    defaultDensity: "default",
+  });
 
   return (
     <div className="space-y-6">
@@ -341,14 +424,37 @@ export function BuildsPage() {
                   query.isFetching ? " · 更新中…" : ""
                 }`}
           </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <TableViewToggle
+              value={table.density}
+              options={densityViewOptions}
+              onChange={table.setDensity}
+            />
+            <TableDisplayOptions
+              columns={columns}
+              visible={table.visible}
+              onToggleColumn={table.toggleColumn}
+              onResetWidths={() => resetWidthsRef.current?.()}
+              widthsDefault={!widthsCustomized}
+            />
+          </div>
         </div>
 
         <DataTable
           caption="构建记录"
-          columns={columns}
-          rows={visible}
+          columns={table.visibleColumns}
+          rows={table.sortRows(visible)}
           rowKey={(build) => build.build_id}
-          density="compact"
+          density={table.density}
+          resizeKey="builds"
+          sort={table.sort}
+          onSort={table.toggleSort}
+          onSortChange={table.setSort}
+          mobileCards
+          onResetWidthsReady={(reset) => {
+            resetWidthsRef.current = reset;
+          }}
+          onWidthsCustomizedChange={setWidthsCustomized}
           loading={query.isPending}
           empty={
             <EmptyState

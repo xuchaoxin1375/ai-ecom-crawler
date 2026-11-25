@@ -36,6 +36,13 @@
   --shadow-overlay: 0 12px 32px rgb(16 24 20 / 18%);
 }
 
+:root {
+  /* 外壳展开：容器宽度用强 S 曲线，标签/内边距等内层元素用柔和曲线。 */
+  --sidebar-duration: 250ms;
+  --sidebar-ease: cubic-bezier(0.77, 0, 0.175, 1);
+  --sidebar-ease-soft: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
 @keyframes menu-in {
   from {
     opacity: 0;
@@ -174,6 +181,16 @@
 
   .tabular {
     font-variant-numeric: tabular-nums;
+  }
+}
+
+.ecom-data-table tbody tr:last-child > td {
+  border-bottom: 0;
+}
+
+@media (pointer: coarse) {
+  .col-resizer {
+    display: none;
   }
 }
 

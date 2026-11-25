@@ -554,6 +554,27 @@ def _summary(store: TaskStore, task: Task, out_root: Path) -> dict[str, Any]:
     }
 
 
+def _task_sort_value(item: dict[str, Any], key: str) -> Any:
+    if key == "task":
+        return str(item.get("site_key") or item.get("plan_id") or "").lower()
+    if key == "state":
+        return str(item.get("state") or "")
+    if key == "results":
+        counts = item.get("counts") or {}
+        return (
+            int(counts.get("valid_products") or 0),
+            int(counts.get("discovered_urls") or 0),
+        )
+    if key == "coverage":
+        coverage = item.get("coverage") or {}
+        return str(coverage.get("status") or "")
+    if key == "quality":
+        return len(item.get("quality_exceptions") or [])
+    if key == "updated":
+        return str(item.get("updated_at") or "")
+    return ""
+
+
 def _item_payload(item: WorkItem) -> dict[str, Any]:
     return {
         "item_id": item.item_id,
@@ -1769,6 +1790,8 @@ def create_app(
         include_archived: Annotated[bool, Query()] = False,
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         offset: Annotated[int, Query(ge=0)] = 0,
+        sort: Annotated[str | None, Query(max_length=40)] = None,
+        order: Annotated[str, Query(pattern="^(asc|desc)$")] = "asc",
     ) -> dict[str, Any]:
         tasks = store.list_tasks(set(state) if state else None)
         tasks = [
@@ -1787,6 +1810,16 @@ def create_app(
                 if (task.site_key or task.plan_id) == site_key
             ]
         total = len(tasks)
+        sort_keys = {"task", "state", "results", "coverage", "quality", "updated"}
+        if sort in sort_keys:
+            # Sorting by a computed field needs the summary for every task in
+            # the filtered set; the task list is a local, bounded workspace.
+            items = [_summary(store, task, root) for task in tasks]
+            items.sort(
+                key=lambda item: _task_sort_value(item, sort),
+                reverse=order == "desc",
+            )
+            return {"total": total, "items": items[offset : offset + limit]}
         return {
             "total": total,
             "items": [_summary(store, task, root) for task in tasks[offset : offset + limit]],

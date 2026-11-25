@@ -48,6 +48,9 @@ import { BatchStatusBadge } from "../../components/ui/BatchStatusBadge";
 import { Button } from "../../components/ui/Button";
 import { Checkbox, Input, Select } from "../../components/ui/Input";
 import { DataTable, type DataTableColumn } from "../../components/ui/DataTable";
+import { TableDisplayOptions } from "../../components/ui/TableDisplayOptions";
+import { TableViewToggle } from "../../components/ui/TableViewToggle";
+import { useTablePreferences } from "../../components/ui/tablePreferences";
 import { ReadinessBar } from "../../components/ui/ReadinessBar";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { ErrorNotice } from "../../components/ui/ErrorNotice";
@@ -69,6 +72,21 @@ const STATUS_OPTIONS = [
 
 type ConfirmArchiveState = string[] | null;
 type BulkBusy = "" | "pause" | "restore";
+type BatchView = "standard" | "fields";
+
+const BATCH_VIEW_KEY = "ecom.table.batches.view.v1";
+const BATCH_VIEW_OPTIONS = [
+  { value: "standard", label: "标准", title: "标准视图：多行合并详情" },
+  { value: "fields", label: "字段", title: "详细字段视图：单行、按字段拆列" },
+] as const;
+
+function readBatchView(): BatchView {
+  try {
+    return localStorage.getItem(BATCH_VIEW_KEY) === "fields" ? "fields" : "standard";
+  } catch {
+    return "standard";
+  }
+}
 
 function batchHref(batchId: string): string {
   return `/batches/${encodeURIComponent(batchId)}`;
@@ -110,6 +128,9 @@ export function BatchesPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const listRef = useRef<HTMLElement>(null);
+  const resetWidthsRef = useRef<(() => void) | null>(null);
+  const [widthsCustomized, setWidthsCustomized] = useState(false);
+  const [view, setView] = useState<BatchView>(readBatchView);
   const from = `${location.pathname}${location.search}`;
   const status = searchParams.get("status") ?? "";
   const country = searchParams.get("country") ?? "";
@@ -505,68 +526,109 @@ export function BatchesPage() {
     return groups;
   }
 
-  const columns: DataTableColumn<BatchSummary>[] = [
-    {
-      key: "select",
-      header: (
-        <Checkbox
-          checked={selection.allSelected(visibleItems)}
-          indeterminate={selection.someSelected(visibleItems)}
-          disabled={loading || visibleItems.length === 0}
-          aria-label="选择当前筛选的全部批次"
-          onChange={() => selection.toggleVisible(visibleItems)}
-        />
-      ),
-      width: "44px",
-      headerClassName: "px-3",
-      cellClassName: "px-3",
-      skeleton: false,
-      cell: (row) => (
-        <Checkbox
-          checked={selection.isSelected(row)}
-          aria-label={`选择批次 ${row.name}`}
-          onChange={() => selection.toggle(row.batch_id)}
-        />
-      ),
-    },
+  const selectColumn: DataTableColumn<BatchSummary> = {
+    key: "select",
+    label: "选择",
+    header: (
+      <Checkbox
+        checked={selection.allSelected(visibleItems)}
+        indeterminate={selection.someSelected(visibleItems)}
+        disabled={loading || visibleItems.length === 0}
+        aria-label="选择当前筛选的全部批次"
+        onChange={() => selection.toggleVisible(visibleItems)}
+      />
+    ),
+    width: 44,
+    resizable: false,
+    sticky: "left",
+    hideable: false,
+    headerClassName: "px-3",
+    cellClassName: "px-3",
+    skeleton: false,
+    cell: (row) => (
+      <Checkbox
+        checked={selection.isSelected(row)}
+        aria-label={`选择批次 ${row.name}`}
+        onChange={() => selection.toggle(row.batch_id)}
+      />
+    ),
+  };
+
+  const standardDataColumns: DataTableColumn<BatchSummary>[] = [
     {
       key: "batch",
       header: "批次",
-      width: "24%",
-      cell: (row) => (
+      label: "批次",
+      sortable: true,
+      sortValue: (row) => row.name,
+      width: 230,
+      minWidth: 160,
+      maxWidth: 720,
+      cell: (row, { compact }) => (
         <div className="min-w-0">
           <Link
             className="block truncate font-semibold text-ink hover:text-accent hover:underline"
             to={batchHref(row.batch_id)}
             state={{ from }}
-            title={row.name}
+            title={compact ? `${row.name}（${row.batch_id}）` : row.name}
           >
             {row.name}
           </Link>
-          <span className="mt-0.5 block truncate font-mono text-[11px] text-ink-3">
-            {row.batch_id}
-          </span>
+          {compact ? null : (
+            <span className="mt-0.5 block truncate font-mono text-[11px] text-ink-3">
+              {row.batch_id}
+            </span>
+          )}
         </div>
       ),
     },
     {
       key: "market",
       header: "市场",
-      width: "9%",
-      cell: (row) => (
-        <div>
-          <p className="text-sm">{row.country || row.market || "-"}</p>
-          <p className="mt-0.5 text-xs text-ink-3">{row.language || "未设置语言"}</p>
-        </div>
-      ),
+      label: "市场",
+      hideable: true,
+      sortable: true,
+      sortValue: (row) =>
+        `${row.country || row.market || ""} ${row.language || ""}`.trim(),
+      width: 92,
+      minWidth: 72,
+      maxWidth: 160,
+      cell: (row, { compact }) => {
+        const market = row.country || row.market || "-";
+        const language = row.language || "未设置语言";
+        return (
+          <div>
+            <p className="text-sm" title={compact ? language : undefined}>
+              {market}
+            </p>
+            {compact ? null : <p className="mt-0.5 text-xs text-ink-3">{language}</p>}
+          </div>
+        );
+      },
     },
     {
       key: "sites",
       header: "站点",
-      width: "16%",
-      cell: (row) => {
+      label: "站点",
+      hideable: true,
+      sortable: true,
+      sortValue: (row) => row.counts.sites,
+      width: 160,
+      minWidth: 120,
+      maxWidth: 280,
+      cell: (row, { compact }) => {
         const { ready, needs_onboarding, building, invalid, duplicate, sites } =
           row.counts;
+        if (compact) {
+          return (
+            <span
+              className="text-sm font-medium tabular whitespace-nowrap"
+              title={`可采 ${ready} · 待接入 ${needs_onboarding + building} · 无效／重复 ${invalid + duplicate}`}
+            >
+              {sites}
+            </span>
+          );
+        }
         return (
           <div>
             <div className="flex items-baseline justify-between gap-2">
@@ -592,10 +654,26 @@ export function BatchesPage() {
     {
       key: "tasks",
       header: "任务",
-      width: "16%",
-      cell: (row) => {
+      label: "任务",
+      hideable: true,
+      sortable: true,
+      sortValue: (row) => row.counts.tasks,
+      width: 150,
+      minWidth: 110,
+      maxWidth: 280,
+      cell: (row, { compact }) => {
         const { tasks, running, finished, queued, failed, partial_tasks } = row.counts;
         if (!tasks) return <span className="text-xs text-ink-3">未开始</span>;
+        if (compact) {
+          return (
+            <span
+              className="text-sm whitespace-nowrap"
+              title={`运行 ${running} · 完成 ${finished} · 排队 ${queued} · 失败／部分 ${failed + partial_tasks}`}
+            >
+              完成 <span className="font-medium tabular">{finished}</span>
+            </span>
+          );
+        }
         return (
           <div>
             <p className="text-sm">
@@ -612,11 +690,17 @@ export function BatchesPage() {
     {
       key: "status",
       header: "状态",
-      width: "11%",
-      cell: (row) => (
+      label: "状态",
+      hideable: true,
+      sortable: true,
+      sortValue: (row) => row.status,
+      width: 104,
+      minWidth: 80,
+      maxWidth: 180,
+      cell: (row, { compact }) => (
         <div>
           <BatchStatusBadge status={row.status} />
-          {row.counts.startable > 0 ? (
+          {!compact && row.counts.startable > 0 ? (
             <p className="mt-1 text-xs text-ink-3">可启动 {row.counts.startable}</p>
           ) : null}
         </div>
@@ -625,7 +709,13 @@ export function BatchesPage() {
     {
       key: "updated",
       header: "更新",
-      width: "11%",
+      label: "更新",
+      hideable: true,
+      sortable: true,
+      sortValue: (row) => row.updated_at,
+      width: 88,
+      minWidth: 70,
+      maxWidth: 140,
       align: "right",
       cell: (row) => {
         const stamp = formatTime(row.updated_at);
@@ -636,23 +726,283 @@ export function BatchesPage() {
         );
       },
     },
+  ];
+
+  const actionsColumn: DataTableColumn<BatchSummary> = {
+    key: "actions",
+    label: "操作",
+    header: <span className="sr-only">操作</span>,
+    width: 52,
+    resizable: false,
+    sticky: "right",
+    hideable: false,
+    align: "right",
+    headerClassName: "px-2",
+    cellClassName: "px-2",
+    skeleton: false,
+    cell: (row) => (
+      <RowActionsMenu
+        label={`打开批次「${row.name}」的操作菜单`}
+        groups={batchActions(row)}
+        busy={rowBusy === row.batch_id}
+      />
+    ),
+  };
+
+  const columns: DataTableColumn<BatchSummary>[] = [
+    selectColumn,
+    ...standardDataColumns,
+    actionsColumn,
+  ];
+
+  const numberCell = (value: number) => (
+    <span className="text-sm tabular">{formatNumber(value)}</span>
+  );
+
+  const fieldDataColumns: DataTableColumn<BatchSummary>[] = [
     {
-      key: "actions",
-      header: <span className="sr-only">操作</span>,
-      width: "52px",
-      align: "right",
-      headerClassName: "px-2",
-      cellClassName: "px-2",
-      skeleton: false,
+      key: "batch",
+      header: "批次",
+      label: "批次",
+      sortable: true,
+      sortValue: (row) => row.name,
+      width: 260,
+      minWidth: 160,
+      maxWidth: 720,
       cell: (row) => (
-        <RowActionsMenu
-          label={`打开批次「${row.name}」的操作菜单`}
-          groups={batchActions(row)}
-          busy={rowBusy === row.batch_id}
-        />
+        <Link
+          className="block truncate font-semibold text-ink hover:text-accent hover:underline"
+          to={batchHref(row.batch_id)}
+          state={{ from }}
+          title={row.name}
+        >
+          {row.name}
+        </Link>
       ),
     },
+    {
+      key: "batch_id",
+      header: "批次 ID",
+      label: "批次 ID",
+      hideable: true,
+      sortable: true,
+      sortValue: (row) => row.batch_id,
+      width: 180,
+      minWidth: 140,
+      maxWidth: 320,
+      cell: (row) => (
+        <span className="block truncate font-mono text-xs text-ink-3">
+          {row.batch_id}
+        </span>
+      ),
+    },
+    {
+      key: "market",
+      header: "市场",
+      label: "市场",
+      hideable: true,
+      sortable: true,
+      sortValue: (row) => row.country || row.market || "",
+      width: 90,
+      minWidth: 70,
+      maxWidth: 160,
+      cell: (row) => (
+        <span className="text-sm">{row.country || row.market || "-"}</span>
+      ),
+    },
+    {
+      key: "language",
+      header: "语言",
+      label: "语言",
+      hideable: true,
+      sortable: true,
+      sortValue: (row) => row.language || "",
+      width: 80,
+      minWidth: 64,
+      maxWidth: 160,
+      cell: (row) => (
+        <span className="text-sm text-ink-3">{row.language || "未设置语言"}</span>
+      ),
+    },
+    {
+      key: "sites",
+      header: "站点",
+      label: "站点总数",
+      hideable: true,
+      sortable: true,
+      sortValue: (row) => row.counts.sites,
+      width: 76,
+      minWidth: 60,
+      maxWidth: 160,
+      align: "right",
+      cell: (row) => numberCell(row.counts.sites),
+    },
+    {
+      key: "ready",
+      header: "可采",
+      label: "可采",
+      hideable: true,
+      sortable: true,
+      sortValue: (row) => row.counts.ready,
+      width: 72,
+      minWidth: 56,
+      maxWidth: 160,
+      align: "right",
+      cell: (row) => numberCell(row.counts.ready),
+    },
+    {
+      key: "needs_onboarding",
+      header: "待接入",
+      label: "待接入",
+      hideable: true,
+      sortable: true,
+      sortValue: (row) => row.counts.needs_onboarding + row.counts.building,
+      width: 88,
+      minWidth: 64,
+      maxWidth: 160,
+      align: "right",
+      cell: (row) => numberCell(row.counts.needs_onboarding + row.counts.building),
+    },
+    {
+      key: "invalid",
+      header: "无效／重复",
+      label: "无效／重复",
+      hideable: true,
+      sortable: true,
+      sortValue: (row) => row.counts.invalid + row.counts.duplicate,
+      width: 120,
+      minWidth: 72,
+      maxWidth: 180,
+      align: "right",
+      cell: (row) => numberCell(row.counts.invalid + row.counts.duplicate),
+    },
+    {
+      key: "running",
+      header: "运行",
+      label: "运行",
+      hideable: true,
+      sortable: true,
+      sortValue: (row) => row.counts.running,
+      width: 72,
+      minWidth: 56,
+      maxWidth: 160,
+      align: "right",
+      cell: (row) => numberCell(row.counts.running),
+    },
+    {
+      key: "finished",
+      header: "完成",
+      label: "完成",
+      hideable: true,
+      sortable: true,
+      sortValue: (row) => row.counts.finished,
+      width: 72,
+      minWidth: 56,
+      maxWidth: 160,
+      align: "right",
+      cell: (row) => numberCell(row.counts.finished),
+    },
+    {
+      key: "queued",
+      header: "排队",
+      label: "排队",
+      hideable: true,
+      sortable: true,
+      sortValue: (row) => row.counts.queued,
+      width: 72,
+      minWidth: 56,
+      maxWidth: 160,
+      align: "right",
+      cell: (row) => numberCell(row.counts.queued),
+    },
+    {
+      key: "failed",
+      header: "失败／部分",
+      label: "失败／部分",
+      hideable: true,
+      sortable: true,
+      sortValue: (row) => row.counts.failed + row.counts.partial_tasks,
+      width: 120,
+      minWidth: 72,
+      maxWidth: 180,
+      align: "right",
+      cell: (row) => numberCell(row.counts.failed + row.counts.partial_tasks),
+    },
+    {
+      key: "status",
+      header: "状态",
+      label: "状态",
+      hideable: true,
+      sortable: true,
+      sortValue: (row) => row.status,
+      width: 104,
+      minWidth: 80,
+      maxWidth: 180,
+      cell: (row) => <BatchStatusBadge status={row.status} />,
+    },
+    {
+      key: "startable",
+      header: "可启动",
+      label: "可启动",
+      hideable: true,
+      sortable: true,
+      sortValue: (row) => row.counts.startable,
+      width: 88,
+      minWidth: 60,
+      maxWidth: 160,
+      align: "right",
+      cell: (row) => numberCell(row.counts.startable),
+    },
+    {
+      key: "updated",
+      header: "更新",
+      label: "更新",
+      hideable: true,
+      sortable: true,
+      sortValue: (row) => row.updated_at,
+      width: 88,
+      minWidth: 70,
+      maxWidth: 140,
+      align: "right",
+      cell: (row) => {
+        const stamp = formatTime(row.updated_at);
+        return (
+          <span className="text-xs whitespace-nowrap text-ink-3" title={stamp}>
+            {stamp === "-" ? "-" : stamp.slice(5)}
+          </span>
+        );
+      },
+    },
   ];
+
+  const fieldColumns: DataTableColumn<BatchSummary>[] = [
+    selectColumn,
+    ...fieldDataColumns,
+    actionsColumn,
+  ];
+
+  const standardTable = useTablePreferences({
+    tableKey: "batches",
+    columns,
+    defaultDensity: "default",
+  });
+  const fieldTable = useTablePreferences({
+    tableKey: "batches-fields",
+    columns: fieldColumns,
+    defaultDensity: "compact",
+  });
+  const table = view === "fields" ? fieldTable : standardTable;
+
+  function changeView(next: BatchView) {
+    setView(next);
+    try {
+      localStorage.setItem(BATCH_VIEW_KEY, next);
+    } catch {
+      // The in-memory view still works when storage is unavailable.
+    }
+    standardTable.setSort(null);
+    fieldTable.setSort(null);
+  }
 
   const archiveNames = (confirmArchive ?? []).map(batchName);
   const archiveDescription =
@@ -720,7 +1070,7 @@ export function BatchesPage() {
   );
 
   return (
-    <div className={cn("space-y-6", selection.selectedCount > 0 && "pb-20")}>
+    <div className={cn("space-y-6", selection.selectedCount > 0 && "pb-48")}>
       <PageHeader
         title="采集批次"
         description="按项目组织站点：先导入并匹配规则包，再启动可采站点。未接入站点保留在批次中，不计为失败。"
@@ -908,21 +1258,39 @@ export function BatchesPage() {
                   ? "正在读取批次…"
                   : `共 ${formatNumber(total)} 个批次，显示 ${formatNumber(
                       visibleItems.length,
-                    )} 个${query.isFetching ? " · 更新中…" : ""}`}
+                    )} 个${view === "fields" ? " · 左右滚动查看更多字段" : ""}${
+                      query.isFetching ? " · 更新中…" : ""
+                    }`}
               </p>
             </div>
-            <Button
-              size="sm"
-              onClick={() => void query.refetch()}
-              disabled={query.isFetching}
-            >
-              <RefreshCw
-                size={14}
-                className={query.isFetching ? "animate-spin" : undefined}
-                aria-hidden="true"
+            <div className="flex flex-wrap items-center gap-2">
+              <TableViewToggle
+                value={view}
+                options={BATCH_VIEW_OPTIONS}
+                onChange={changeView}
               />
-              刷新
-            </Button>
+              <TableDisplayOptions
+                columns={table.allColumns}
+                visible={table.visible}
+                onToggleColumn={table.toggleColumn}
+                onResetWidths={() => {
+                  resetWidthsRef.current?.();
+                }}
+                widthsDefault={!widthsCustomized}
+              />
+              <Button
+                size="sm"
+                onClick={() => void query.refetch()}
+                disabled={query.isFetching}
+              >
+                <RefreshCw
+                  size={14}
+                  className={query.isFetching ? "animate-spin" : undefined}
+                  aria-hidden="true"
+                />
+                刷新
+              </Button>
+            </div>
           </div>
 
           {bulkNotice ? (
@@ -945,13 +1313,23 @@ export function BatchesPage() {
           ) : null}
 
           <DataTable
+            key={view}
             caption="采集批次列表"
-            columns={columns}
-            rows={visibleItems}
+            columns={table.visibleColumns}
+            rows={table.sortRows(visibleItems)}
             rowKey={(row) => row.batch_id}
-            rowClassName={(row) =>
-              selection.isSelected(row) ? "bg-accent-soft/40" : ""
-            }
+            rowClassName={(row) => (selection.isSelected(row) ? "bg-accent-soft" : "")}
+            resizeKey={view === "fields" ? "batches-fields" : "batches"}
+            fillWidth={view !== "fields"}
+            density={view === "fields" ? "compact" : "default"}
+            sort={table.sort}
+            onSort={table.toggleSort}
+            onSortChange={table.setSort}
+            mobileCards
+            onResetWidthsReady={(reset) => {
+              resetWidthsRef.current = reset;
+            }}
+            onWidthsCustomizedChange={setWidthsCustomized}
             loading={loading}
             empty={emptyState}
           />

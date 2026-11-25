@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -38,6 +38,15 @@ import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
 import { Checkbox, Input, Select } from "../../components/ui/Input";
 import { DataTable, type DataTableColumn } from "../../components/ui/DataTable";
+import { TableDisplayOptions } from "../../components/ui/TableDisplayOptions";
+import {
+  densityViewOptions,
+  TableViewToggle,
+} from "../../components/ui/TableViewToggle";
+import {
+  useTablePreferences,
+  type TableSort,
+} from "../../components/ui/tablePreferences";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { ErrorNotice } from "../../components/ui/ErrorNotice";
 import { MetricStrip } from "../../components/ui/MetricStrip";
@@ -95,8 +104,14 @@ export function TasksPage() {
   const includeArchived = searchParams.get("archived") === "1";
   const queryParam = searchParams.get("q") ?? "";
   const offset = Math.max(0, Number(searchParams.get("offset") ?? 0) || 0);
+  const sortKey = searchParams.get("sort") ?? "";
+  const sortOrder: "asc" | "desc" =
+    searchParams.get("order") === "asc" ? "asc" : "desc";
+  const tableSort: TableSort = sortKey ? { key: sortKey, direction: sortOrder } : null;
 
   const [queryDraft, setQueryDraft] = useState(queryParam);
+  const resetWidthsRef = useRef<(() => void) | null>(null);
+  const [widthsCustomized, setWidthsCustomized] = useState(false);
   const [batchDraft, setBatchDraft] = useState(batchId);
   const [siteDraft, setSiteDraft] = useState(siteKey);
   const [busy, setBusy] = useState("");
@@ -137,7 +152,17 @@ export function TasksPage() {
   }
 
   const query = useQuery({
-    queryKey: ["tasks", state, taskType, batchId, siteKey, includeArchived, offset],
+    queryKey: [
+      "tasks",
+      state,
+      taskType,
+      batchId,
+      siteKey,
+      includeArchived,
+      offset,
+      sortKey,
+      sortOrder,
+    ],
     queryFn: ({ signal }) =>
       getTasks(
         {
@@ -148,6 +173,8 @@ export function TasksPage() {
           includeArchived,
           limit: PAGE_SIZE,
           offset,
+          sort: sortKey || undefined,
+          order: sortKey ? sortOrder : undefined,
         },
         signal,
       ),
@@ -309,41 +336,59 @@ export function TasksPage() {
     {
       key: "task",
       header: "任务",
-      width: "26%",
-      cell: (task) => (
+      label: "任务",
+      sortable: true,
+      sortValue: (task) => task.site_key || task.plan_id,
+      width: 260,
+      minWidth: 180,
+      maxWidth: 720,
+      cell: (task, { compact }) => (
         <div className="min-w-0">
           <Link
             className="block truncate font-semibold text-ink hover:text-accent hover:underline"
             to={`/tasks/${encodeURIComponent(task.task_id)}`}
+            title={
+              compact ? `${task.site_key || task.plan_id} · ${task.task_id}` : undefined
+            }
           >
             {task.site_key || task.plan_id}
           </Link>
-          <span className="mt-0.5 block truncate font-mono text-[11px] text-ink-3">
-            {task.task_id}
-          </span>
-          <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] text-ink-3">
-            {batchHref(task) ? (
-              <Link
-                className="hover:text-accent hover:underline"
-                to={batchHref(task) ?? ""}
-              >
-                {task.batch_id}
-              </Link>
-            ) : (
-              <span>未关联批次</span>
-            )}
-            <span>·</span>
-            <span>{taskTypeLabel(task.task_type)}</span>
-          </div>
+          {compact ? null : (
+            <>
+              <span className="mt-0.5 block truncate font-mono text-[11px] text-ink-3">
+                {task.task_id}
+              </span>
+              <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] text-ink-3">
+                {batchHref(task) ? (
+                  <Link
+                    className="hover:text-accent hover:underline"
+                    to={batchHref(task) ?? ""}
+                  >
+                    {task.batch_id}
+                  </Link>
+                ) : (
+                  <span>未关联批次</span>
+                )}
+                <span>·</span>
+                <span>{taskTypeLabel(task.task_type)}</span>
+              </div>
+            </>
+          )}
         </div>
       ),
     },
     {
       key: "state",
       header: "状态／结果",
-      width: "14%",
-      cell: (task) => (
-        <div className="space-y-1">
+      label: "状态／结果",
+      hideable: true,
+      sortable: true,
+      sortValue: (task) => task.state,
+      width: 140,
+      minWidth: 100,
+      maxWidth: 240,
+      cell: (task, { compact }) => (
+        <div className={compact ? "flex flex-wrap items-center gap-1" : "space-y-1"}>
           <div className="flex flex-wrap items-center gap-1">
             <Badge tone={taskStateTone(task.state)} dot={false}>
               {taskStateLabel(task.state)}
@@ -354,32 +399,60 @@ export function TasksPage() {
               </Badge>
             ) : null}
           </div>
-          <p className="text-xs text-ink-3">
-            {task.outcome ? outcomeLabel(task.outcome) : "未结束"}
-            {taskNeedsAttention(task) ? " · 需关注" : ""}
-          </p>
+          {compact ? (
+            <span className="text-xs text-ink-3">
+              {task.outcome ? outcomeLabel(task.outcome) : "未结束"}
+              {taskNeedsAttention(task) ? " · 需关注" : ""}
+            </span>
+          ) : (
+            <p className="text-xs text-ink-3">
+              {task.outcome ? outcomeLabel(task.outcome) : "未结束"}
+              {taskNeedsAttention(task) ? " · 需关注" : ""}
+            </p>
+          )}
         </div>
       ),
     },
     {
       key: "results",
       header: "结果",
-      width: "15%",
-      cell: (task) => {
+      label: "结果",
+      hideable: true,
+      sortable: true,
+      sortValue: (task) =>
+        task.task_type === "discovery"
+          ? (task.counts.discovered_urls ?? 0)
+          : (task.counts.valid_products ?? 0),
+      width: 150,
+      minWidth: 110,
+      maxWidth: 260,
+      cell: (task, { compact }) => {
         const discovery = task.task_type === "discovery";
+        const label = discovery ? "发现 / 失败 / 排除" : "有效 / 失败 / 排除";
+        const primary = discovery
+          ? (task.counts.discovered_urls ?? 0)
+          : (task.counts.valid_products ?? 0);
+        if (compact) {
+          return (
+            <span
+              className="text-sm tabular whitespace-nowrap"
+              title={label}
+              aria-label={`${label}：${formatNumber(primary)} / ${formatNumber(task.counts.failed_products ?? 0)} / ${formatNumber(task.counts.excluded_products ?? 0)}`}
+            >
+              <span className="font-medium text-ink">{formatNumber(primary)}</span>
+              <span className="text-ink-3">
+                {" "}
+                / {formatNumber(task.counts.failed_products ?? 0)} /{" "}
+                {formatNumber(task.counts.excluded_products ?? 0)}
+              </span>
+            </span>
+          );
+        }
         return (
           <div>
-            <p className="text-[11px] text-ink-3">
-              {discovery ? "发现 / 失败 / 排除" : "有效 / 失败 / 排除"}
-            </p>
+            <p className="text-[11px] text-ink-3">{label}</p>
             <p className="text-sm tabular">
-              <span className="font-medium text-ink">
-                {formatNumber(
-                  discovery
-                    ? (task.counts.discovered_urls ?? 0)
-                    : (task.counts.valid_products ?? 0),
-                )}
-              </span>
+              <span className="font-medium text-ink">{formatNumber(primary)}</span>
               <span className="text-ink-3">
                 {" "}
                 / {formatNumber(task.counts.failed_products ?? 0)} /{" "}
@@ -393,22 +466,49 @@ export function TasksPage() {
     {
       key: "coverage",
       header: "覆盖",
-      width: "12%",
-      cell: (task) => (
-        <div>
-          <p className="text-sm">{coverageLabel(task.coverage?.status)}</p>
-          {task.coverage?.status !== "UNKNOWN" && task.coverage ? (
-            <p className="mt-0.5 text-xs text-ink-3 tabular">
-              {task.coverage.covered ?? "—"} / {task.coverage.denominator ?? "—"}
-            </p>
-          ) : null}
-        </div>
-      ),
+      label: "覆盖",
+      hideable: true,
+      sortable: true,
+      sortValue: (task) => task.coverage?.status ?? "",
+      width: 120,
+      minWidth: 90,
+      maxWidth: 220,
+      cell: (task, { compact }) => {
+        const coverage = coverageLabel(task.coverage?.status);
+        const detail =
+          task.coverage?.status !== "UNKNOWN" && task.coverage
+            ? `${task.coverage.covered ?? "—"} / ${task.coverage.denominator ?? "—"}`
+            : null;
+        if (compact) {
+          return (
+            <span className="text-sm whitespace-nowrap">
+              {coverage}
+              {detail ? (
+                <span className="text-xs text-ink-3 tabular"> {detail}</span>
+              ) : null}
+            </span>
+          );
+        }
+        return (
+          <div>
+            <p className="text-sm">{coverage}</p>
+            {detail ? (
+              <p className="mt-0.5 text-xs text-ink-3 tabular">{detail}</p>
+            ) : null}
+          </div>
+        );
+      },
     },
     {
       key: "quality",
       header: "质量异常",
-      width: "10%",
+      label: "质量异常",
+      hideable: true,
+      sortable: true,
+      sortValue: (task) => task.quality_exceptions?.length ?? 0,
+      width: 100,
+      minWidth: 70,
+      maxWidth: 160,
       align: "right",
       cell: (task) => (
         <span
@@ -424,7 +524,13 @@ export function TasksPage() {
     {
       key: "updated",
       header: "更新",
-      width: "11%",
+      label: "更新",
+      hideable: true,
+      sortable: true,
+      sortValue: (task) => task.updated_at,
+      width: 100,
+      minWidth: 80,
+      maxWidth: 150,
       align: "right",
       cell: (task) => {
         const stamp = formatTime(task.updated_at);
@@ -437,8 +543,12 @@ export function TasksPage() {
     },
     {
       key: "actions",
+      label: "操作",
       header: <span className="sr-only">操作</span>,
-      width: "52px",
+      width: 52,
+      resizable: false,
+      sticky: "right",
+      hideable: false,
       align: "right",
       headerClassName: "px-2",
       cellClassName: "px-2",
@@ -452,6 +562,15 @@ export function TasksPage() {
       ),
     },
   ];
+
+  const table = useTablePreferences({
+    tableKey: "tasks",
+    columns,
+    defaultDensity: "default",
+    sort: tableSort,
+    onSortChange: (next) =>
+      updateParams({ sort: next?.key ?? "", order: next?.direction ?? "" }),
+  });
 
   return (
     <div className="space-y-6">
@@ -632,7 +751,7 @@ export function TasksPage() {
         aria-label="任务列表"
         className="overflow-hidden rounded-panel border border-line bg-surface"
       >
-        <div className="flex items-center justify-between gap-4 border-b border-line px-6 py-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-6 py-4">
           <div>
             <h2 className="text-[17px] leading-6 font-semibold text-ink">任务列表</h2>
             <p className="mt-0.5 text-xs text-ink-3" role="status">
@@ -643,14 +762,37 @@ export function TasksPage() {
                   )} 个${query.isFetching ? " · 更新中…" : ""}`}
             </p>
           </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <TableViewToggle
+              value={table.density}
+              options={densityViewOptions}
+              onChange={table.setDensity}
+            />
+            <TableDisplayOptions
+              columns={columns}
+              visible={table.visible}
+              onToggleColumn={table.toggleColumn}
+              onResetWidths={() => resetWidthsRef.current?.()}
+              widthsDefault={!widthsCustomized}
+            />
+          </div>
         </div>
 
         <DataTable
           caption="全部任务"
-          columns={columns}
+          columns={table.visibleColumns}
           rows={visibleItems}
           rowKey={(task) => task.task_id}
-          density="compact"
+          density={table.density}
+          resizeKey="tasks"
+          sort={table.sort}
+          onSort={table.toggleSort}
+          onSortChange={table.setSort}
+          mobileCards
+          onResetWidthsReady={(reset) => {
+            resetWidthsRef.current = reset;
+          }}
+          onWidthsCustomizedChange={setWidthsCustomized}
           loading={query.isPending}
           empty={
             <EmptyState

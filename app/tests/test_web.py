@@ -425,6 +425,34 @@ class WebApiTests(unittest.TestCase):
             self.client.get("/api/tasks?batch_id=missing").json()["total"], 0
         )
 
+    def test_list_sorts_by_requested_field(self) -> None:
+        self.store.create_task(
+            make_task("task-sort-b", site_key="beta.test", state="RUNNING")
+        )
+        self.store.create_task(
+            make_task("task-sort-a", site_key="alpha.test", state="FINISHED")
+        )
+
+        by_task = self.client.get("/api/tasks?sort=task&order=asc").json()
+        self.assertEqual(
+            [item["site_key"] for item in by_task["items"]],
+            ["alpha.test", "beta.test", "fixture-web"],
+        )
+
+        page = self.client.get(
+            "/api/tasks?sort=task&order=asc&limit=1&offset=1"
+        ).json()
+        self.assertEqual(page["total"], 3)
+        self.assertEqual([item["site_key"] for item in page["items"]], ["beta.test"])
+
+        # task-1 is the only task with a result file and one valid product.
+        by_results = self.client.get("/api/tasks?sort=results&order=desc").json()
+        self.assertEqual(by_results["items"][0]["task_id"], "task-1")
+        self.assertEqual(
+            self.client.get("/api/tasks?sort=task&order=up").status_code,
+            422,
+        )
+
     def test_items_pagination(self) -> None:
         payload = self.client.get("/api/tasks/task-1/items?kind=product&limit=2").json()
         self.assertEqual(payload["total"], 3)
