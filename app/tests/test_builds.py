@@ -1254,6 +1254,28 @@ class BuildWorkflowTests(unittest.TestCase):
                 ["max_tokens", "max_completion_tokens"],
             )
 
+    def test_probe_accepts_reasoning_or_text_activity(self) -> None:
+        from ecom_crawler.harness.opencode import OpenCodeClient
+
+        client = OpenCodeClient("http://127.0.0.1:9", "secret")
+        cases = [
+            (
+                {"data": {"text": "", "tokens": {"input": 10, "output": 0, "reasoning": 64}}},
+                64,
+            ),
+            (
+                {"data": {"text": "OK", "tokens": {"input": 10, "output": 0, "reasoning": 0}}},
+                1,
+            ),
+            (
+                {"data": {"text": "", "tokens": {"input": 10, "output": 0, "reasoning": 0}}},
+                0,
+            ),
+        ]
+        for payload, expected in cases:
+            with mock.patch.object(client, "_request", return_value=payload):
+                self.assertEqual(client.generate_probe("session-1"), expected)
+
     def test_model_pool_settings_persist_and_hot_apply(self) -> None:
         env_pool = "opencode-go/deepseek-v4.1-flash#high"
         with mock.patch.dict(os.environ, {"ECOM_BUILD_MODEL_POOL": env_pool}, clear=False):

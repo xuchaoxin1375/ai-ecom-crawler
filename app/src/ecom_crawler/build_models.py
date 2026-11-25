@@ -36,6 +36,7 @@ PROBE_FIELDS = {
     "yjwd-gpt-enterprise/gpt-6.1-terra": ("max_completion_tokens",),
 }
 DEFAULT_PROBE_FIELDS = ("max_tokens", "max_completion_tokens")
+PROBE_MAX_TOKENS = 256
 PROBE_PLUGIN = """\
 import { Plugin } from "@opencode/plugin"
 import { writeFileSync } from "node:fs"
@@ -357,7 +358,7 @@ def probe_chat(
     max_tokens_field: str = "max_tokens",
 ) -> int:
     """Use OpenCode's credentials without sending build context or registering tools."""
-    limit = {max_tokens_field: 64}
+    limit = {max_tokens_field: PROBE_MAX_TOKENS}
     overrides: dict[str, Any] = {"body": limit}
     if variant := model.get("variant"):
         overrides["variants"] = [{"id": variant, "body": limit}]

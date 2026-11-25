@@ -313,9 +313,21 @@ class OpenCodeClient:
             "POST", f"/api/session/{_quote(session_id)}/generate", {"prompt": "Reply OK."}, timeout=10
         )
         data = result.get("data") if isinstance(result, dict) else None
-        tokens = data.get("tokens") if isinstance(data, dict) else None
-        output = tokens.get("output") if isinstance(tokens, dict) else None
-        return output if type(output) is int else 0
+        if not isinstance(data, dict):
+            return 0
+        text = data.get("text")
+        if isinstance(text, str) and text.strip():
+            return 1
+        tokens = data.get("tokens")
+        tokens = tokens if isinstance(tokens, dict) else {}
+        output = tokens.get("output")
+        reasoning = tokens.get("reasoning")
+        output = output if type(output) in {int, float} else 0
+        reasoning = reasoning if type(reasoning) in {int, float} else 0
+        # Reasoning-only replies (for example a small reasoning model consuming
+        # the whole probe budget before visible text) still prove the provider
+        # returned a response; only zero activity is NO_OUTPUT.
+        return int(output + reasoning)
 
     def initialize_probe_plugins(self, directory: str) -> None:
         location = urllib.parse.urlencode({"location[directory]": directory})
