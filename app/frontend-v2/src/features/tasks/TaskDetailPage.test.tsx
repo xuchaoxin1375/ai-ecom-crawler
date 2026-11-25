@@ -1,7 +1,7 @@
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TaskSummary } from "../../lib/api";
-import { renderPage } from "../../test/renderPage";
+import { renderPage, type RenderEntry } from "../../test/renderPage";
 import { TaskDetailPage } from "./TaskDetailPage";
 
 const task: TaskSummary = {
@@ -24,7 +24,10 @@ const task: TaskSummary = {
   finished_at: null,
 };
 
-function openTaskPage(initial: TaskSummary = task, entry = "/tasks/web-1") {
+function openTaskPage(
+  initial: TaskSummary = task,
+  entry: RenderEntry = "/tasks/web-1",
+) {
   const getTask = vi.fn(() => initial);
   const cancelTask = vi.fn(() =>
     Response.json({ error: { message: "服务暂不可用，请重试" } }, { status: 503 }),
@@ -206,6 +209,48 @@ describe("task detail recovery", () => {
       expect(await screen.findByText("本次没有有效商品")).toBeVisible();
       expect(screen.getByRole("button", { name: "查看质量与验收" })).toBeVisible();
       expect(screen.getByRole("button", { name: "查看数据明细" })).toBeVisible();
+    } finally {
+      unmount();
+    }
+  });
+
+  it("keeps task list filters on the back link", async () => {
+    const { unmount } = openTaskPage(finishedTask, {
+      pathname: "/tasks/web-1",
+      state: {
+        listReturn: {
+          href: "/tasks?state=FINISHED&site=fixture.test",
+          label: "全部任务",
+          scrollTop: 480,
+          focusKey: "web-1",
+        },
+      },
+    });
+    try {
+      const back = await screen.findByRole("link", { name: /返回全部任务/ });
+      expect(back).toHaveAttribute("href", "/tasks?state=FINISHED&site=fixture.test");
+    } finally {
+      unmount();
+    }
+  });
+
+  it("returns to the site page when opened from a site", async () => {
+    const { unmount } = openTaskPage(finishedTask, {
+      pathname: "/tasks/web-1",
+      state: {
+        listReturn: {
+          href: "/batches/b-1/sites/fixture.test?view=history",
+          label: "站点详情",
+          scrollTop: 120,
+        },
+      },
+    });
+    try {
+      const back = await screen.findByRole("link", { name: /返回站点详情/ });
+      expect(back).toHaveAttribute(
+        "href",
+        "/batches/b-1/sites/fixture.test?view=history",
+      );
     } finally {
       unmount();
     }

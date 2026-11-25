@@ -94,8 +94,9 @@ it("splits the task status and stop reason into separate aligned columns", async
   expect(within(table).getByRole("columnheader", { name: /结束原因/ })).toBeVisible();
 
   const taskLink = within(table).getByRole("link", {
-    name: "查看任务 web-1 详情",
+    name: /查看任务 web-1 详情/,
   });
+  expect(taskLink).toHaveAccessibleName("已取消：查看任务 web-1 详情");
   expect(taskLink).toHaveTextContent("已取消");
   expect(taskLink).not.toHaveTextContent("用户取消");
   expect(within(table).getByText("用户取消")).toBeVisible();

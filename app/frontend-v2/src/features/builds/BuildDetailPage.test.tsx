@@ -1,7 +1,7 @@
 import { fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { BuildMessages, BuildStatus } from "../../lib/api";
-import { renderPage } from "../../test/renderPage";
+import { renderPage, type RenderEntry } from "../../test/renderPage";
 import { BuildDetailPage } from "./BuildDetailPage";
 
 const date = "2026-11-24T10:00:00Z";
@@ -58,7 +58,11 @@ function messagesFixture(build: BuildStatus): BuildMessages {
   };
 }
 
-async function renderBuild(build: BuildStatus, config: Response | object) {
+async function renderBuild(
+  build: BuildStatus,
+  config: Response | object,
+  entry: RenderEntry = "/builds/build-1",
+) {
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     const path = url.split("?")[0];
     if (path === "/api/builds/build-1") return Response.json({ build });
@@ -71,7 +75,7 @@ async function renderBuild(build: BuildStatus, config: Response | object) {
     throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url}`);
   });
   vi.stubGlobal("fetch", fetchMock);
-  renderPage("/builds/:buildId", "/builds/build-1", <BuildDetailPage />);
+  renderPage("/builds/:buildId", entry, <BuildDetailPage />);
   return fetchMock;
 }
 
@@ -192,6 +196,31 @@ it("switches between build status, evidence, repairs and logs", async () => {
       name: "下载构建过程",
     }),
   ).toBeVisible();
+});
+
+it("keeps build list filters on the back link", async () => {
+  await renderBuild(
+    buildFixture({ state: "FINISHED", outcome: "succeeded" }),
+    {
+      available: true,
+      reasoning_capture_enabled: false,
+      max_repair_rounds: 0,
+    },
+    {
+      pathname: "/builds/build-1",
+      state: {
+        listReturn: {
+          href: "/builds?state=active&mode=repair",
+          label: "构建记录",
+          scrollTop: 300,
+          focusKey: "build-1",
+        },
+      },
+    },
+  );
+
+  const back = await screen.findByRole("link", { name: "返回构建记录" });
+  expect(back).toHaveAttribute("href", "/builds?state=active&mode=repair");
 });
 
 it("separates continuing the session from rebuilding", async () => {

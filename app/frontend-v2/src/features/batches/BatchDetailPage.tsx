@@ -61,6 +61,11 @@ import {
   taskStatusTone,
 } from "../../lib/format";
 import { cn } from "../../lib/cn";
+import {
+  readListReturn,
+  rememberListReturn,
+  useListReturnRestore,
+} from "../../lib/listReturn";
 import { Badge } from "../../components/ui/Badge";
 import { BatchStatusBadge } from "../../components/ui/BatchStatusBadge";
 import { Button } from "../../components/ui/Button";
@@ -245,7 +250,9 @@ export function BatchDetailPage() {
   const batchActionsRef = useRef<HTMLDivElement>(null);
   const batchPath = `/batches/${encodeURIComponent(batchId)}`;
   const returnPosition = readSiteListReturn(location.state, batchPath);
-  const backHref = returnPosition?.from ?? backHrefFromState(location.state);
+  const listReturn = readListReturn(location.state);
+  const backHref =
+    returnPosition?.from ?? listReturn?.href ?? backHrefFromState(location.state);
   const restoredKey = useRef<string | null>(null);
 
   const filter = parseFilter(searchParams.get("site"));
@@ -310,6 +317,12 @@ export function BatchDetailPage() {
     });
     return () => window.cancelAnimationFrame(frame);
   }, [batchPath, locationKey, navigationState, siteListReady]);
+  useListReturnRestore({
+    ready: siteListReady,
+    locationKey,
+    navigationState,
+    containerRef: siteListRef,
+  });
   const selection = useRowSelection(sites, (site) => site.site_key);
   const visibleSiteIds = useMemo(
     () => new Set(visibleSites.map((site) => site.site_key)),
@@ -385,6 +398,29 @@ export function BatchDetailPage() {
         siteKey: site.site_key,
         scrollTop: window.scrollY,
         from: backHref,
+      }),
+    });
+  }
+
+  function openTask(taskId: string, event?: MouseEvent<HTMLAnchorElement>) {
+    if (event) {
+      if (
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      )
+        return;
+      event.preventDefault();
+    }
+    navigate(`/tasks/${encodeURIComponent(taskId)}`, {
+      state: rememberListReturn(locationKey, {
+        href: batchPath + location.search,
+        label: "批次详情",
+        scrollTop: window.scrollY,
+        focusKey: `task:${taskId}`,
       }),
     });
   }
@@ -764,6 +800,7 @@ export function BatchDetailPage() {
         <Link
           className="inline-flex items-center gap-1.5 text-sm font-medium text-ink-2 hover:text-ink"
           to={backHref}
+          state={listReturn ? { listReturn } : undefined}
         >
           <ArrowLeft size={15} aria-hidden="true" />
           返回批次列表
@@ -957,21 +994,22 @@ export function BatchDetailPage() {
       minWidth: 108,
       maxWidth: 200,
       cell: (site) => {
-        if (!site.task) {
+        const task = site.task;
+        if (!task) {
           return <span className="text-xs text-ink-3">—</span>;
         }
+        const statusLabel = taskStatusLabel(task.state, task.outcome);
         return (
           <Link
             className="group inline-flex max-w-full items-center gap-1 rounded-full"
-            to={`/tasks/${encodeURIComponent(site.task.task_id)}`}
-            title={`查看任务 ${site.task.task_id} 详情`}
-            aria-label={`查看任务 ${site.task.task_id} 详情`}
+            to={`/tasks/${encodeURIComponent(task.task_id)}`}
+            onClick={(event) => openTask(task.task_id, event)}
+            data-return-focus={`task:${task.task_id}`}
+            title={`查看任务 ${task.task_id} 详情`}
+            aria-label={`${statusLabel}：查看任务 ${task.task_id} 详情`}
           >
-            <Badge
-              tone={taskStatusTone(site.task.state, site.task.outcome)}
-              dot={false}
-            >
-              {taskStatusLabel(site.task.state, site.task.outcome)}
+            <Badge tone={taskStatusTone(task.state, task.outcome)} dot={false}>
+              {statusLabel}
             </Badge>
             <ArrowUpRight
               className="shrink-0 text-ink-3 transition-colors group-hover:text-accent group-focus-visible:text-accent"
@@ -1133,6 +1171,7 @@ export function BatchDetailPage() {
           <Link
             className="inline-flex items-center gap-1.5 text-sm font-medium text-ink-2 hover:text-ink"
             to={backHref}
+            state={listReturn ? { listReturn } : undefined}
           >
             <ArrowLeft size={15} aria-hidden="true" />
             返回批次列表

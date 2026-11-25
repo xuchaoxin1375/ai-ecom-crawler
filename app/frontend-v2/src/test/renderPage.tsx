@@ -3,7 +3,20 @@ import { render } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
-export function renderPage(path: string, initialEntry: string, element: ReactNode) {
+export type RenderEntry =
+  | string
+  | {
+      pathname: string;
+      search?: string;
+      hash?: string;
+      state?: unknown;
+    };
+
+export function renderPage(
+  path: string,
+  initialEntry: RenderEntry,
+  element: ReactNode,
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: Infinity } },
   });

@@ -1,5 +1,5 @@
-import { useMemo, useRef, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useMemo, useRef, useState, type MouseEvent } from "react";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { RefreshCw, Search } from "lucide-react";
 import { getBuilds, type BuildStatus } from "../../lib/api";
@@ -11,6 +11,7 @@ import {
 } from "../../lib/format";
 import { buildIsActive } from "../sites/site";
 import { buildModeLabel } from "../sites/build";
+import { rememberListReturn, useListReturnRestore } from "../../lib/listReturn";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
 import { DataTable, type DataTableColumn } from "../../components/ui/DataTable";
@@ -52,6 +53,9 @@ function matchesQuery(build: BuildStatus, query: string): boolean {
 
 export function BuildsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const listRef = useRef<HTMLDivElement>(null);
   const state = searchParams.get("state") ?? "";
   const mode = searchParams.get("mode") ?? "";
   const queryParam = searchParams.get("q") ?? "";
@@ -77,6 +81,13 @@ export function BuildsPage() {
       }),
     [builds, mode, queryParam, state],
   );
+  useListReturnRestore({
+    ready: Boolean(query.data),
+    locationKey: location.key,
+    navigationState: location.state,
+    containerRef: listRef,
+  });
+
   const activeCount = builds.filter(buildIsActive).length;
   const queuedCount = builds.filter((build) => build.state === "QUEUED").length;
   const succeeded = builds.filter((build) => build.outcome === "succeeded").length;
@@ -104,6 +115,29 @@ export function BuildsPage() {
     setSearchParams(new URLSearchParams(), { replace: true });
   }
 
+  function openBuild(build: BuildStatus, event?: MouseEvent<HTMLAnchorElement>) {
+    if (event) {
+      if (
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      )
+        return;
+      event.preventDefault();
+    }
+    navigate(`/builds/${encodeURIComponent(build.build_id)}`, {
+      state: rememberListReturn(location.key, {
+        href: `${location.pathname}${location.search}`,
+        label: "构建记录",
+        scrollTop: window.scrollY,
+        focusKey: build.build_id,
+      }),
+    });
+  }
+
   const columns: DataTableColumn<BuildStatus>[] = [
     {
       key: "build",
@@ -119,6 +153,8 @@ export function BuildsPage() {
           <Link
             className="block truncate font-semibold text-ink hover:text-accent hover:underline"
             to={`/builds/${encodeURIComponent(build.build_id)}`}
+            onClick={(event) => openBuild(build, event)}
+            data-return-focus={build.build_id}
             title={
               compact
                 ? `${build.site_key || "未关联站点"} · ${build.build_id}`
@@ -300,7 +336,12 @@ export function BuildsPage() {
       cell: (build) => (
         <div className="flex justify-end">
           <Button asChild size="sm">
-            <Link to={`/builds/${encodeURIComponent(build.build_id)}`}>查看详情</Link>
+            <Link
+              to={`/builds/${encodeURIComponent(build.build_id)}`}
+              onClick={(event) => openBuild(build, event)}
+            >
+              查看详情
+            </Link>
           </Button>
         </div>
       ),
@@ -314,7 +355,7 @@ export function BuildsPage() {
   });
 
   return (
-    <div className="space-y-6">
+    <div ref={listRef} tabIndex={-1} className="space-y-6">
       <PageHeader
         eyebrow="规则生产"
         title="构建记录"

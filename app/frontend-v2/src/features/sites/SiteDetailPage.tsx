@@ -1,5 +1,18 @@
-import { useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
-import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
+import {
+  Link,
+  useLocation,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
 import { readSiteListReturn } from "../batches/siteListReturn";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -53,6 +66,7 @@ import {
   taskStateTone,
 } from "../../lib/format";
 import { cn } from "../../lib/cn";
+import { rememberListReturn, useListReturnRestore } from "../../lib/listReturn";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
 import { EmptyState } from "../../components/ui/EmptyState";
@@ -179,6 +193,7 @@ function newRuleRequest(prefix: string): string {
 
 export function SiteDetailPage() {
   const location = useLocation();
+  const navigate = useNavigate();
   const { batchId = "", siteKey = "" } = useParams<{
     batchId: string;
     siteKey: string;
@@ -187,6 +202,7 @@ export function SiteDetailPage() {
   const activeView = parseSiteView(searchParams.get("view"));
   const batchPath = `/batches/${encodeURIComponent(batchId)}`;
   const returnPosition = readSiteListReturn(location.state, batchPath);
+  const listRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
 
   const [dialog, setDialog] = useState<DialogKind>("");
@@ -236,6 +252,13 @@ export function SiteDetailPage() {
   });
 
   const build: BuildStatus | null = buildQuery.data?.build ?? null;
+
+  useListReturnRestore({
+    ready: Boolean(batch && site),
+    locationKey: location.key,
+    navigationState: location.state,
+    containerRef: listRef,
+  });
 
   useEffect(() => {
     if (!build || buildIsActive(build)) return;
@@ -623,6 +646,29 @@ export function SiteDetailPage() {
     }
   }
 
+  function openTask(taskId: string, event?: MouseEvent<HTMLAnchorElement>) {
+    if (event) {
+      if (
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      )
+        return;
+      event.preventDefault();
+    }
+    navigate(`/tasks/${encodeURIComponent(taskId)}`, {
+      state: rememberListReturn(location.key, {
+        href: `${location.pathname}${location.search}`,
+        label: "站点详情",
+        scrollTop: window.scrollY,
+        focusKey: taskId,
+      }),
+    });
+  }
+
   const stepBusy =
     (step?.action === "pause-task" && taskBusy === "pause") ||
     (step?.action === "resume-task" && taskBusy === "resume") ||
@@ -877,7 +923,13 @@ export function SiteDetailPage() {
           </p>
         </div>
         <Button asChild size="sm">
-          <Link to={`/tasks/${encodeURIComponent(task.task_id)}`}>打开任务详情</Link>
+          <Link
+            to={`/tasks/${encodeURIComponent(task.task_id)}`}
+            onClick={(event) => openTask(task.task_id, event)}
+            data-return-focus={task.task_id}
+          >
+            打开任务详情
+          </Link>
         </Button>
       </div>
       <dl className="grid grid-cols-2 gap-px bg-line max-sm:hidden sm:grid-cols-4">
@@ -923,7 +975,13 @@ export function SiteDetailPage() {
           </p>
         </div>
         <Button asChild size="sm">
-          <Link to={`/tasks/${encodeURIComponent(task.task_id)}`}>查看 CSV 与明细</Link>
+          <Link
+            to={`/tasks/${encodeURIComponent(task.task_id)}`}
+            onClick={(event) => openTask(task.task_id, event)}
+            data-return-focus={task.task_id}
+          >
+            查看 CSV 与明细
+          </Link>
         </Button>
       </div>
     </section>
@@ -1117,6 +1175,8 @@ export function SiteDetailPage() {
               <Link
                 className="block px-4 py-2.5 transition-colors hover:bg-surface-muted"
                 to={`/tasks/${encodeURIComponent(item.task_id)}`}
+                onClick={(event) => openTask(item.task_id, event)}
+                data-return-focus={item.task_id}
               >
                 <div className="flex items-center justify-between gap-2">
                   <code className="truncate font-mono text-[11px] text-ink-2">
@@ -1246,7 +1306,7 @@ export function SiteDetailPage() {
   };
 
   return (
-    <div className="space-y-6">
+    <div ref={listRef} tabIndex={-1} className="space-y-6">
       <header className="rounded-panel border border-line bg-surface px-4 py-5 sm:px-6">
         <div className="flex items-center justify-between gap-4">
           <Link

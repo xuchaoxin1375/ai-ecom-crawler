@@ -41,6 +41,7 @@ import {
   formatTime,
 } from "../../lib/format";
 import { cn } from "../../lib/cn";
+import { readListReturn } from "../../lib/listReturn";
 import { buildIsActive, buildServiceBlockReason } from "../sites/site";
 import {
   buildEventText,
@@ -194,6 +195,19 @@ export function BuildDetailPage() {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeView = parseBuildView(searchParams.get("view"));
+  const returnTo = readListReturn(location.state);
+  const backHref = returnTo?.href ?? "/builds";
+  const backLabel = returnTo?.label ?? "构建记录";
+  const backLink = (
+    <Link
+      className="inline-flex items-center gap-1.5 text-sm font-medium text-ink-2 hover:text-ink"
+      to={backHref}
+      state={returnTo ? { listReturn: returnTo } : undefined}
+    >
+      <ArrowLeft size={15} aria-hidden="true" />
+      返回{backLabel}
+    </Link>
+  );
   const queryClient = useQueryClient();
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -407,13 +421,7 @@ export function BuildDetailPage() {
   if (buildQuery.isError) {
     return (
       <div className="space-y-4">
-        <Link
-          className="inline-flex items-center gap-1.5 text-sm font-medium text-ink-2 hover:text-ink"
-          to="/builds"
-        >
-          <ArrowLeft size={15} aria-hidden="true" />
-          返回构建记录
-        </Link>
+        {backLink}
         <ErrorNotice
           title="读取构建失败"
           message={
@@ -429,13 +437,7 @@ export function BuildDetailPage() {
   if (!build) {
     return (
       <div className="space-y-4" role="status">
-        <Link
-          className="inline-flex items-center gap-1.5 text-sm font-medium text-ink-2 hover:text-ink"
-          to="/builds"
-        >
-          <ArrowLeft size={15} aria-hidden="true" />
-          返回构建记录
-        </Link>
+        {backLink}
         <p className="text-sm text-ink-3">正在读取构建 {buildId}…</p>
       </div>
     );
@@ -944,13 +946,7 @@ export function BuildDetailPage() {
     <div className="space-y-6">
       <header className="rounded-panel border border-line bg-surface px-4 py-5 sm:px-6">
         <div className="flex items-center justify-between gap-4">
-          <Link
-            className="inline-flex items-center gap-1.5 text-sm font-medium text-ink-2 hover:text-ink"
-            to="/builds"
-          >
-            <ArrowLeft size={15} aria-hidden="true" />
-            返回构建记录
-          </Link>
+          {backLink}
           <span className="min-w-0 truncate font-mono text-[11px] text-ink-3">
             {build.build_id}
           </span>

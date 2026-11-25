@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -28,6 +35,7 @@ import {
 } from "../../lib/api";
 import { formatNumber, formatTime } from "../../lib/format";
 import { cn } from "../../lib/cn";
+import { rememberListReturn, useListReturnRestore } from "../../lib/listReturn";
 import { summarizeBatches } from "./summary";
 import { NewBatchDialog } from "./NewBatchDialog";
 import { StartBatchDialog } from "./StartBatchDialog";
@@ -212,6 +220,13 @@ export function BatchesPage() {
   const total = query.data?.total ?? 0;
   const summary = summarizeBatches(items, total);
   const loading = query.isPending;
+
+  useListReturnRestore({
+    ready: Boolean(query.data),
+    locationKey: location.key,
+    navigationState: location.state,
+    containerRef: listRef,
+  });
   const selection = useRowSelection(items, (row) => row.batch_id);
 
   const visibleItems = useMemo(() => {
@@ -451,6 +466,32 @@ export function BatchesPage() {
     focusList();
   }
 
+  function openBatch(batch: BatchSummary, event?: MouseEvent<HTMLAnchorElement>) {
+    if (event) {
+      if (
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      )
+        return;
+      event.preventDefault();
+    }
+    navigate(batchHref(batch.batch_id), {
+      state: {
+        from,
+        ...rememberListReturn(location.key, {
+          href: from,
+          label: "采集批次",
+          scrollTop: window.scrollY,
+          focusKey: batch.batch_id,
+        }),
+      },
+    });
+  }
+
   function batchActions(batch: BatchSummary): RowActionItem[][] {
     const groups: RowActionItem[][] = [
       [
@@ -458,7 +499,7 @@ export function BatchesPage() {
           key: "open",
           label: "查看批次",
           icon: <Eye size={14} />,
-          onSelect: () => navigate(batchHref(batch.batch_id), { state: { from } }),
+          onSelect: () => openBatch(batch),
         },
         {
           key: "copy-id",
@@ -569,7 +610,8 @@ export function BatchesPage() {
           <Link
             className="block truncate font-semibold text-ink hover:text-accent hover:underline"
             to={batchHref(row.batch_id)}
-            state={{ from }}
+            onClick={(event) => openBatch(row, event)}
+            data-return-focus={row.batch_id}
             title={compact ? `${row.name}（${row.batch_id}）` : row.name}
           >
             {row.name}
@@ -773,7 +815,8 @@ export function BatchesPage() {
         <Link
           className="block truncate font-semibold text-ink hover:text-accent hover:underline"
           to={batchHref(row.batch_id)}
-          state={{ from }}
+          onClick={(event) => openBatch(row, event)}
+          data-return-focus={row.batch_id}
           title={row.name}
         >
           {row.name}

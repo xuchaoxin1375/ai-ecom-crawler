@@ -42,6 +42,7 @@ import {
   taskStateTone,
 } from "../../lib/format";
 import { cn } from "../../lib/cn";
+import { readListReturn } from "../../lib/listReturn";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
 import { EmptyState } from "../../components/ui/EmptyState";
@@ -126,6 +127,9 @@ export function TaskDetailPage() {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeView = parseTaskView(searchParams.get("view"));
+  const returnTo = readListReturn(location.state);
+  const backHref = returnTo?.href ?? "/tasks";
+  const backLabel = returnTo?.label ?? "全部任务";
   const queryClient = useQueryClient();
 
   const [busy, setBusy] = useState("");
@@ -311,10 +315,11 @@ export function TaskDetailPage() {
       <div className="space-y-6">
         <Link
           className="inline-flex items-center gap-1.5 text-sm font-medium text-ink-2 hover:text-ink"
-          to="/tasks"
+          to={backHref}
+          state={returnTo ? { listReturn: returnTo } : undefined}
         >
           <ArrowLeft size={15} aria-hidden="true" />
-          返回全部任务
+          返回{backLabel}
         </Link>
         <ErrorNotice
           title="读取任务失败"
@@ -689,10 +694,11 @@ export function TaskDetailPage() {
         <div className="flex items-center justify-between gap-4">
           <Link
             className="inline-flex items-center gap-1.5 text-sm font-medium text-ink-2 hover:text-ink"
-            to="/tasks"
+            to={backHref}
+            state={returnTo ? { listReturn: returnTo } : undefined}
           >
             <ArrowLeft size={15} aria-hidden="true" />
-            返回全部任务
+            返回{backLabel}
           </Link>
           <span className="min-w-0 truncate font-mono text-[11px] text-ink-3">
             {task.task_id}

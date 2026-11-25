@@ -1,5 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Archive,
@@ -34,6 +41,7 @@ import {
   taskStateTone,
 } from "../../lib/format";
 import { cn } from "../../lib/cn";
+import { rememberListReturn, useListReturnRestore } from "../../lib/listReturn";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
 import { Checkbox, Input, Select } from "../../components/ui/Input";
@@ -94,8 +102,10 @@ async function copyText(value: string): Promise<void> {
 
 export function TasksPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const listRef = useRef<HTMLDivElement>(null);
 
   const state = searchParams.get("state") ?? "";
   const taskType = searchParams.get("type") ?? "";
@@ -192,6 +202,13 @@ export function TasksPage() {
     [items, queryDraft],
   );
 
+  useListReturnRestore({
+    ready: Boolean(query.data),
+    locationKey: location.key,
+    navigationState: location.state,
+    containerRef: listRef,
+  });
+
   const hasFilters = Boolean(
     state || taskType || batchId || siteKey || queryParam || includeArchived,
   );
@@ -262,6 +279,29 @@ export function TasksPage() {
     link.remove();
   }
 
+  function openTask(task: TaskSummary, event?: MouseEvent<HTMLAnchorElement>) {
+    if (event) {
+      if (
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      )
+        return;
+      event.preventDefault();
+    }
+    navigate(`/tasks/${encodeURIComponent(task.task_id)}`, {
+      state: rememberListReturn(location.key, {
+        href: `${location.pathname}${location.search}`,
+        label: "全部任务",
+        scrollTop: window.scrollY,
+        focusKey: task.task_id,
+      }),
+    });
+  }
+
   function taskActions(task: TaskSummary): RowActionItem[][] {
     const active = taskIsActive(task);
     const groups: RowActionItem[][] = [
@@ -270,7 +310,7 @@ export function TasksPage() {
           key: "view",
           label: "查看任务详情",
           icon: <Eye size={14} />,
-          onSelect: () => navigate(`/tasks/${encodeURIComponent(task.task_id)}`),
+          onSelect: () => openTask(task),
         },
         {
           key: "copy",
@@ -347,6 +387,8 @@ export function TasksPage() {
           <Link
             className="block truncate font-semibold text-ink hover:text-accent hover:underline"
             to={`/tasks/${encodeURIComponent(task.task_id)}`}
+            onClick={(event) => openTask(task, event)}
+            data-return-focus={task.task_id}
             title={
               compact ? `${task.site_key || task.plan_id} · ${task.task_id}` : undefined
             }
@@ -573,7 +615,7 @@ export function TasksPage() {
   });
 
   return (
-    <div className="space-y-6">
+    <div ref={listRef} tabIndex={-1} className="space-y-6">
       <PageHeader
         eyebrow="任务控制台"
         title="全部任务"
