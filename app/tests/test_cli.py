@@ -11,6 +11,12 @@ from unittest import mock
 
 from ecom_crawler.cli import _resolve_serve_access, _serve_urls, main
 from ecom_crawler.model import ContractError
+from ecom_crawler.runtime.store import TaskStore
+from ecom_crawler.web.access import (
+    SETTING_TOKEN,
+    stored_token_available,
+    token_setting,
+)
 from tests.support import base_task, candidate
 
 
@@ -168,6 +174,35 @@ class ServeAccessTests(unittest.TestCase):
                 frozenset({"172.17.0.1", "192.168.1.20"}),
             )
         self.assertEqual(urls[0], "http://192.168.1.20:8765/next/")
+
+    def test_stored_token_allows_non_loopback_without_token(self) -> None:
+        with mock.patch(
+            "ecom_crawler.cli._local_host_names",
+            return_value={"192.168.1.20"},
+        ):
+            _host, token, allowed = _resolve_serve_access(
+                "0.0.0.0",
+                None,
+                [],
+                stored_token=True,
+            )
+        self.assertIsNone(token)
+        self.assertIn("192.168.1.20", allowed)
+
+    def test_stored_token_setting_is_detected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            db_path = Path(temporary) / "tasks.db"
+            self.assertFalse(stored_token_available(db_path))
+            store = TaskStore(db_path)
+            store.set_setting(
+                SETTING_TOKEN,
+                token_setting(
+                    "00" * 16,
+                    "11" * 32,
+                    "2026-11-25T00:00:00Z",
+                ),
+            )
+            self.assertTrue(stored_token_available(db_path))
 
 
 if __name__ == "__main__":

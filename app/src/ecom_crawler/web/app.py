@@ -7,12 +7,14 @@ import base64
 import binascii
 import csv
 import hashlib
-import hmac
 import io
 import json
 import logging
 import os
+import platform
 import re
+import secrets
+import shutil
 import threading
 import time
 import uuid
@@ -73,6 +75,20 @@ from ..runtime.store import (
     TaskTransitionError,
 )
 from ..runtime.worker import Worker
+from .access import (
+    LOOPBACK_HOSTS,
+    MIN_ACCESS_TOKEN_LENGTH,
+    SETTING_LAN_ENABLED,
+    SETTING_TOKEN,
+    hash_token,
+    is_loopback_bind,
+    is_loopback_host,
+    new_token,
+    normalize_host_name,
+    parse_token_setting,
+    token_setting,
+    verify_token,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -371,6 +387,10 @@ class BuildDependencyRequest(BaseModel):
     message: str | None = Field(default=None, max_length=2000)
 
 
+class SystemAccessRequest(BaseModel):
+    lan_enabled: bool
+
+
 def _mask_proxy(value: str | None) -> str | None:
     if not value:
         return None
@@ -598,7 +618,6 @@ def _safe_filename(task: Task) -> str:
 
 
 WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
-LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
 def _error(
@@ -638,23 +657,25 @@ def _forbidden(message: str) -> JSONResponse:
     )
 
 
-def _hostname_only(host_header: str) -> str:
-    value = host_header.strip().lower()
-    if value.startswith("["):
-        closing = value.find("]")
-        return value[1:closing] if closing >= 0 else value
-    if value.count(":") == 1:
-        return value.rsplit(":", 1)[0]
-    return value
+def _display_path(path: Path | None) -> str | None:
+    if path is None:
+        return None
+    try:
+        relative = path.resolve().relative_to(Path.home().resolve())
+    except (OSError, ValueError):
+        return str(path)
+    return "~/" + relative.as_posix() if relative.parts else "~"
 
 
-def _normalize_host_name(host_header: str) -> str:
-    """Return a bare, lower-case host name without brackets, port, or trailing dot."""
-    return _hostname_only(host_header).rstrip(".")
+def _disk_target(path: Path) -> Path:
+    candidate = path
+    while not candidate.exists() and candidate.parent != candidate:
+        candidate = candidate.parent
+    return candidate if candidate.exists() else Path.cwd()
 
 
 def _is_allowed_host(host_header: str, allowed_hosts: frozenset[str]) -> bool:
-    name = _normalize_host_name(host_header)
+    name = normalize_host_name(host_header)
     return name in LOOPBACK_HOSTS or name in allowed_hosts
 
 
@@ -804,24 +825,28 @@ def create_app(
     read_only: bool = False,
     access_token: str | None = None,
     allowed_hosts: Iterable[str] | None = None,
+    serve_host: str = "127.0.0.1",
+    serve_port: int = 8765,
+    access_urls: Iterable[str] | None = None,
 ) -> FastAPI:
     if read_only and manage_worker:
         raise ValueError("read_only mode cannot manage a worker")
     if read_only and build_manager is not None:
         raise ValueError("read_only mode cannot accept a build manager")
     token = access_token if access_token is None else str(access_token)
-    if token is not None and not token.strip():
-        raise ValueError("access_token must not be empty")
+    if token is not None:
+        if not token.strip():
+            raise ValueError("access_token must not be empty")
+        if len(token) < MIN_ACCESS_TOKEN_LENGTH:
+            raise ValueError(
+                f"access_token must be at least {MIN_ACCESS_TOKEN_LENGTH} characters"
+            )
     raw_hosts = (
         [allowed_hosts] if isinstance(allowed_hosts, str) else list(allowed_hosts or ())
     )
     allowed = frozenset(
-        name
-        for name in (_normalize_host_name(item) for item in raw_hosts)
-        if name
+        name for name in (normalize_host_name(item) for item in raw_hosts) if name
     )
-    if allowed and token is None:
-        raise ValueError("allowed_hosts requires access_token")
     store = TaskStore(db_path, read_only=read_only)
     root = Path(out_root)
     if not read_only:
@@ -829,6 +854,46 @@ def create_app(
     rules = Path(rules_dir).resolve() if rules_dir is not None else None
     builds_disabled = os.environ.get("ECOM_BUILD_DISABLED") == "1"
     legacy_ui_enabled = _legacy_ui_enabled()
+
+    stored_token = parse_token_setting(store.get_setting(SETTING_TOKEN))
+    token_salt: str | None
+    token_hash: str | None
+    token_updated_at: str | None
+    if token is not None:
+        token_salt = secrets.token_hex(16)
+        token_hash = hash_token(token, token_salt)
+        token_updated_at = utc_now()
+        if not read_only:
+            store.set_setting(
+                SETTING_TOKEN,
+                token_setting(token_salt, token_hash, token_updated_at),
+            )
+    elif stored_token is not None:
+        token_salt, token_hash, token_updated_at = stored_token
+    else:
+        token_salt = token_hash = token_updated_at = None
+    if allowed and token_hash is None:
+        raise ValueError("allowed_hosts requires access_token")
+    lan_capable = not is_loopback_bind(serve_host)
+    if lan_capable and token_hash is None:
+        raise ValueError(
+            "non-loopback serve_host requires an access token or a stored token"
+        )
+    stored_lan = store.get_setting(SETTING_LAN_ENABLED)
+    lan_enabled = lan_capable and (stored_lan != "0" if stored_lan is not None else True)
+    access_lock = threading.Lock()
+    access_state: dict[str, Any] = {
+        "lan_enabled": lan_enabled,
+        "token_salt": token_salt,
+        "token_hash": token_hash,
+        "token_updated_at": token_updated_at,
+    }
+    urls = [str(url) for url in (access_urls or ()) if str(url).strip()]
+    if not urls:
+        display = f"[{serve_host}]" if ":" in serve_host else serve_host
+        urls = [f"http://{display}:{serve_port}/next/"]
+    started_at = utc_now()
+    started_monotonic = time.monotonic()
     if build_manager is None and rules is not None:
         build_manager = BuildManager(
             store,
@@ -891,7 +956,13 @@ def create_app(
     app.state.build_manager = build_manager
     app.state.proxy = proxy
     app.state.read_only = read_only
-    app.state.auth_required = token is not None
+    app.state.auth_required = token_hash is not None
+    app.state.token_configured = token_hash is not None
+    app.state.lan_capable = lan_capable
+    app.state.lan_enabled = lan_enabled
+    app.state.serve_host = serve_host
+    app.state.serve_port = serve_port
+    app.state.access_urls = tuple(urls)
     app.state.allowed_hosts = tuple(sorted(allowed))
 
     def rule_error(exc: Exception) -> HTTPException:
@@ -1250,11 +1321,15 @@ def create_app(
         host = request.headers.get("host", "")
         if not _is_allowed_host(host, allowed):
             return _forbidden("request host is not allowed")
-        if token is not None:
+        with access_lock:
+            lan_enabled_now = bool(access_state["lan_enabled"])
+            token_salt_now = access_state["token_salt"]
+            token_hash_now = access_state["token_hash"]
+        if lan_capable and not lan_enabled_now and not is_loopback_host(host):
+            return _forbidden("LAN access is disabled")
+        if token_hash_now is not None:
             password = _basic_password(request.headers.get("authorization"))
-            if password is None or not hmac.compare_digest(
-                password.encode("utf-8"), token.encode("utf-8")
-            ):
+            if not verify_token(password, token_salt_now, token_hash_now):
                 return _unauthorized()
         if request.method.upper() in WRITE_METHODS:
             origin = request.headers.get("origin", "")
@@ -1816,6 +1891,145 @@ def create_app(
             if (V2_DIST_DIR / "index.html").is_file():
                 return RedirectResponse(url="/next/", status_code=307)
             raise _error("NOT_FOUND", "legacy UI is disabled", 404)
+
+    def _access_payload() -> dict[str, Any]:
+        with access_lock:
+            state = dict(access_state)
+        token_configured = state["token_hash"] is not None
+        return {
+            "host": serve_host,
+            "port": serve_port,
+            "lan_capable": lan_capable,
+            "lan_enabled": bool(state["lan_enabled"]),
+            "auth_required": token_configured,
+            "token_configured": token_configured,
+            "token_updated_at": state["token_updated_at"],
+            "allowed_hosts": sorted(allowed),
+            "urls": list(urls),
+        }
+
+    def _system_payload() -> dict[str, Any]:
+        tasks = store.list_tasks()
+        task_counts = Counter(task.state for task in tasks)
+        active_builds = store.list_builds(
+            states=ACTIVE_BUILD_STATES,
+            limit=1000,
+        )
+        build_counts = Counter(record.state for record in active_builds)
+        db_path = Path(store.path)
+        db_bytes = sum(
+            path.stat().st_size
+            for path in (
+                db_path,
+                Path(f"{db_path}-wal"),
+                Path(f"{db_path}-shm"),
+            )
+            if path.is_file()
+        )
+        disk_target = _disk_target(root)
+        disk = shutil.disk_usage(disk_target)
+        worker = (
+            "read-only"
+            if read_only
+            else ("managed" if manage_worker else "external")
+        )
+        builds_available = (
+            build_manager is not None and not builds_disabled and not read_only
+        )
+        return {
+            "status": "ok",
+            "version": __version__,
+            "started_at": started_at,
+            "uptime_seconds": max(0, int(time.monotonic() - started_monotonic)),
+            "server": _access_payload(),
+            "runtime": {
+                "worker": worker,
+                "max_tasks": max_tasks if manage_worker else None,
+                "max_browser_tasks": max_browser_tasks if manage_worker else None,
+                "read_only": read_only,
+                "builds_available": builds_available,
+                "builds_disabled": builds_disabled,
+                "legacy_ui": "enabled" if legacy_ui_enabled else "disabled",
+                "rules_configured": rules is not None and rules.is_dir(),
+                "python": platform.python_version(),
+                "platform": platform.platform(),
+                "threads": threading.active_count(),
+            },
+            "work": {
+                "tasks_total": len(tasks),
+                "tasks_active": sum(
+                    task_counts.get(state, 0)
+                    for state in ("RUNNING", "PAUSING", "CANCELLING")
+                ),
+                "tasks_queued": task_counts.get("QUEUED", 0),
+                "tasks_paused": task_counts.get("PAUSED", 0),
+                "tasks_by_state": dict(sorted(task_counts.items())),
+                "builds_active": sum(
+                    count for state, count in build_counts.items() if state != "QUEUED"
+                ),
+                "builds_queued": build_counts.get("QUEUED", 0),
+            },
+            "storage": {
+                "db_bytes": db_bytes,
+                "disk_total_bytes": disk.total,
+                "disk_used_bytes": disk.used,
+                "disk_free_bytes": disk.free,
+                "disk_path": _display_path(disk_target),
+            },
+            "paths": {
+                "db": _display_path(db_path),
+                "out_root": _display_path(root),
+                "rules_dir": _display_path(rules),
+            },
+        }
+
+    @app.get("/api/system")
+    def system_status() -> dict[str, Any]:
+        return _system_payload()
+
+    @app.put("/api/system/access")
+    def update_system_access(payload: SystemAccessRequest) -> dict[str, Any]:
+        if not lan_capable:
+            raise _error(
+                "LAN_NOT_CAPABLE",
+                "服务以回环地址启动；修改 --host 后重启才能开放局域网",
+                409,
+            )
+        with access_lock:
+            token_configured = access_state["token_hash"] is not None
+        if payload.lan_enabled and not token_configured:
+            raise _error(
+                "TOKEN_REQUIRED",
+                "开启局域网前需要配置访问令牌",
+                409,
+            )
+        if not read_only:
+            store.set_setting(
+                SETTING_LAN_ENABLED,
+                "1" if payload.lan_enabled else "0",
+            )
+        with access_lock:
+            access_state["lan_enabled"] = payload.lan_enabled
+        app.state.lan_enabled = payload.lan_enabled
+        return {"access": _access_payload()}
+
+    @app.post("/api/system/access/token")
+    def rotate_system_token(response: Response) -> dict[str, Any]:
+        response.headers["Cache-Control"] = "no-store"
+        token_value, salt, digest = new_token()
+        updated_at = utc_now()
+        if not read_only:
+            store.set_setting(
+                SETTING_TOKEN,
+                token_setting(salt, digest, updated_at),
+            )
+        with access_lock:
+            access_state["token_salt"] = salt
+            access_state["token_hash"] = digest
+            access_state["token_updated_at"] = updated_at
+        app.state.auth_required = True
+        app.state.token_configured = True
+        return {"token": token_value, "access": _access_payload()}
 
     @app.get("/api/health")
     def health() -> dict[str, Any]:

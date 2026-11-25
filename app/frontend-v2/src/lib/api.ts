@@ -13,6 +13,77 @@ export interface Health {
   rules_configured: boolean;
 }
 
+export interface SystemAccess {
+  host: string;
+  port: number;
+  lan_capable: boolean;
+  lan_enabled: boolean;
+  auth_required: boolean;
+  token_configured: boolean;
+  token_updated_at: string | null;
+  allowed_hosts: string[];
+  urls: string[];
+}
+
+export interface SystemRuntime {
+  worker: string;
+  max_tasks: number | null;
+  max_browser_tasks: number | null;
+  read_only: boolean;
+  builds_available: boolean;
+  builds_disabled: boolean;
+  legacy_ui: string;
+  rules_configured: boolean;
+  python: string;
+  platform: string;
+  threads: number;
+}
+
+export interface SystemWork {
+  tasks_total: number;
+  tasks_active: number;
+  tasks_queued: number;
+  tasks_paused: number;
+  tasks_by_state: Record<string, number>;
+  builds_active: number;
+  builds_queued: number;
+}
+
+export interface SystemStorage {
+  db_bytes: number;
+  disk_total_bytes: number;
+  disk_used_bytes: number;
+  disk_free_bytes: number;
+  disk_path: string | null;
+}
+
+export interface SystemPaths {
+  db: string | null;
+  out_root: string | null;
+  rules_dir: string | null;
+}
+
+export interface SystemInfo {
+  status: string;
+  version: string;
+  started_at: string;
+  uptime_seconds: number;
+  server: SystemAccess;
+  runtime: SystemRuntime;
+  work: SystemWork;
+  storage: SystemStorage;
+  paths: SystemPaths;
+}
+
+export interface SystemAccessResponse {
+  access: SystemAccess;
+}
+
+export interface SystemTokenResponse {
+  token: string;
+  access: SystemAccess;
+}
+
 export interface BatchCounts {
   sites: number;
   ready: number;
@@ -752,6 +823,20 @@ async function getJson<T>(url: string, signal?: AbortSignal): Promise<T> {
 
 export function getHealth(signal?: AbortSignal): Promise<Health> {
   return getJson<Health>("/api/health", signal);
+}
+
+export function getSystemInfo(signal?: AbortSignal): Promise<SystemInfo> {
+  return getJson<SystemInfo>("/api/system", signal);
+}
+
+export function setSystemAccess(lanEnabled: boolean): Promise<SystemAccessResponse> {
+  return sendJson<SystemAccessResponse>("/api/system/access", "PUT", {
+    lan_enabled: lanEnabled,
+  });
+}
+
+export function rotateSystemToken(): Promise<SystemTokenResponse> {
+  return sendJson<SystemTokenResponse>("/api/system/access/token", "POST");
 }
 
 export function getBatches(

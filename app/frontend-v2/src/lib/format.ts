@@ -90,6 +90,28 @@ export function taskStateTone(state: string | null | undefined): Tone {
   return "neutral";
 }
 
+/**
+ * 列表中的单枚任务状态：有结束结果时优先显示结果，避免同一原因重复成
+ * “已结束／完成／自然结束”三行；仍在进行或排队时显示原始状态。
+ */
+export function taskStatusLabel(
+  state: string | null | undefined,
+  outcome: string | null | undefined,
+): string {
+  return outcome ? outcomeLabel(outcome) : taskStateLabel(state);
+}
+
+export function taskStatusTone(
+  state: string | null | undefined,
+  outcome: string | null | undefined,
+): Tone {
+  if (outcome === "COMPLETED") return "success";
+  if (outcome === "PARTIAL") return "warning";
+  if (outcome === "FAILED") return "danger";
+  if (outcome === "CANCELLED") return "neutral";
+  return taskStateTone(state);
+}
+
 export function siteStatusText(
   readiness: Readiness,
   taskState: string | null | undefined,
@@ -111,6 +133,30 @@ export function formatTime(value: string | null | undefined): string {
 
 export function formatNumber(value: number): string {
   return new Intl.NumberFormat("zh-CN").format(value);
+}
+
+export function formatBytes(value: number | null | undefined): string {
+  const bytes = Number(value || 0);
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let size = bytes / 1024;
+  let index = 0;
+  while (size >= 1024 && index < units.length - 1) {
+    size /= 1024;
+    index += 1;
+  }
+  return `${size.toFixed(size >= 100 ? 0 : 1)} ${units[index]}`;
+}
+
+export function formatDuration(seconds: number | null | undefined): string {
+  const total = Math.max(0, Math.floor(Number(seconds || 0)));
+  if (total < 60) return `${total} 秒`;
+  const days = Math.floor(total / 86400);
+  const hours = Math.floor((total % 86400) / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  if (days > 0) return `${days} 天 ${hours} 小时`;
+  if (hours > 0) return `${hours} 小时 ${minutes} 分`;
+  return `${minutes} 分`;
 }
 
 const BUILD_STATE_LABELS: Record<string, string> = {

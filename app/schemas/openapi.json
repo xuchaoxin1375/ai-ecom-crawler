@@ -1803,6 +1803,19 @@
         "title": "SiteRuleResponse",
         "type": "object"
       },
+      "SystemAccessRequest": {
+        "properties": {
+          "lan_enabled": {
+            "title": "Lan Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "lan_enabled"
+        ],
+        "title": "SystemAccessRequest",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -3843,6 +3856,86 @@
           }
         },
         "summary": "Rollback Site Rule"
+      }
+    },
+    "/api/system": {
+      "get": {
+        "operationId": "system_status_api_system_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response System Status Api System Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "System Status"
+      }
+    },
+    "/api/system/access": {
+      "put": {
+        "operationId": "update_system_access_api_system_access_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SystemAccessRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Update System Access Api System Access Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update System Access"
+      }
+    },
+    "/api/system/access/token": {
+      "post": {
+        "operationId": "rotate_system_token_api_system_access_token_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Rotate System Token Api System Access Token Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Rotate System Token"
       }
     },
     "/api/tasks": {

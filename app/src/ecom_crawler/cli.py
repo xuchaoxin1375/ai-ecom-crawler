@@ -26,6 +26,7 @@ from .runtime.rule import RuleError
 from .runtime.store import TaskNotFoundError, TaskStore, TaskTransitionError
 from .runtime.worker import Worker
 from .validate import validate_run, validate_task_result_file
+from .web.access import MIN_ACCESS_TOKEN_LENGTH, stored_token_available
 
 
 def _add_archive_arguments(parser: argparse.ArgumentParser) -> None:
@@ -270,7 +271,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="127.0.0.1",
         help=(
             "bind address (default: 127.0.0.1); a non-loopback address requires "
-            "an access token"
+            "an access token or a stored token from the system settings page"
         ),
     )
     serve.add_argument(
@@ -383,7 +384,6 @@ def _run_worker(args: argparse.Namespace) -> int:
     return 0
 
 
-MIN_ACCESS_TOKEN_LENGTH = 16
 WILDCARD_HOSTS = frozenset({"0.0.0.0", "::"})
 
 
@@ -466,6 +466,8 @@ def _resolve_serve_access(
     host: str,
     access_token: str | None,
     allow_hosts: Sequence[str],
+    *,
+    stored_token: bool = False,
 ) -> tuple[str, str | None, frozenset[str]]:
     """Validate bind/auth settings and return (host, token, allowed Host names)."""
     text = str(host).strip()
@@ -491,9 +493,10 @@ def _resolve_serve_access(
         if extras:
             raise ContractError("--allow-host requires a non-loopback --host")
         return text, token, frozenset()
-    if token is None:
+    if token is None and not stored_token:
         raise ContractError(
-            "non-loopback --host requires --access-token or ECOM_SERVE_TOKEN"
+            "non-loopback --host requires --access-token, ECOM_SERVE_TOKEN, "
+            "or a token generated from the system settings page"
         )
     allowed = frozenset(_local_host_names(text) | set(extras))
     return text, token, allowed
@@ -530,7 +533,10 @@ def _serve_urls(host: str, port: int, allowed_hosts: frozenset[str]) -> list[str
 
 def _serve(args: argparse.Namespace) -> int:
     host, token, allowed_hosts = _resolve_serve_access(
-        args.host, args.access_token, args.allow_host
+        args.host,
+        args.access_token,
+        args.allow_host,
+        stored_token=stored_token_available(args.db),
     )
     if args.read_only and not args.db.is_file():
         raise ContractError(
@@ -540,6 +546,7 @@ def _serve(args: argparse.Namespace) -> int:
 
     from .web.app import create_app
 
+    urls = _serve_urls(host, args.port, allowed_hosts)
     app = create_app(
         args.db,
         args.out_root,
@@ -554,6 +561,9 @@ def _serve(args: argparse.Namespace) -> int:
         read_only=args.read_only,
         access_token=token,
         allowed_hosts=allowed_hosts,
+        serve_host=host,
+        serve_port=args.port,
+        access_urls=urls,
     )
     if args.read_only:
         mode = "read-only"
@@ -563,13 +573,12 @@ def _serve(args: argparse.Namespace) -> int:
         mode = "managed worker"
     if args.allow_multi_worker and not args.read_only:
         mode += ", shared ledger"
-    if token is not None:
+    if app.state.auth_required:
         mode += ", token auth"
-    urls = _serve_urls(host, args.port, allowed_hosts)
     print(f"serving {urls[0]} ({mode})")
     for url in urls[1:]:
         print(f"also serving {url}")
-    if token is not None:
+    if app.state.auth_required:
         print("access: HTTP Basic; username any, password = access token")
     if host in WILDCARD_HOSTS and urls[0] == (
         f"http://{_format_url_host(host)}:{args.port}/next/"

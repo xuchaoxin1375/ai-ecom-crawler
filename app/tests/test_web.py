@@ -31,6 +31,13 @@ CLIENT_HEADERS = {
 }
 
 
+def basic_auth(token: str) -> dict[str, str]:
+    return {
+        "Authorization": "Basic "
+        + base64.b64encode(f"ecom:{token}".encode()).decode()
+    }
+
+
 def make_task(
     task_id: str,
     state: str = "FINISHED",
@@ -746,13 +753,15 @@ class WebApiTests(unittest.TestCase):
         )
         self.assertEqual(loopback.get("/api/health").status_code, 200)
 
-        with self.assertRaises(ValueError):
-            create_app(
-                self.db_path,
-                self.out_root,
-                self.rules_dir,
-                allowed_hosts={"192.168.1.20"},
-            )
+        with tempfile.TemporaryDirectory() as temporary:
+            empty = Path(temporary)
+            with self.assertRaises(ValueError):
+                create_app(
+                    empty / "tasks.db",
+                    empty / "out",
+                    self.rules_dir,
+                    allowed_hosts={"192.168.1.20"},
+                )
 
     def test_lan_read_only_authenticates_before_rejecting_writes(self) -> None:
         token = "0123456789abcdef"
@@ -782,6 +791,201 @@ class WebApiTests(unittest.TestCase):
         rejected = client.post("/api/tasks", json={})
         self.assertEqual(rejected.status_code, 403)
         self.assertEqual(rejected.json()["error"]["code"], "READ_ONLY")
+
+    def test_system_status_reports_access_and_resources(self) -> None:
+        token = "0123456789abcdef"
+        headers = {
+            "Host": "192.168.1.20:8765",
+            "Origin": "http://192.168.1.20:8765",
+            "X-Requested-With": "XMLHttpRequest",
+            **basic_auth(token),
+        }
+        app = create_app(
+            self.db_path,
+            self.out_root,
+            self.rules_dir,
+            access_token=token,
+            allowed_hosts={"192.168.1.20"},
+            serve_host="0.0.0.0",
+            serve_port=8765,
+            access_urls=["http://192.168.1.20:8765/next/"],
+        )
+        client = TestClient(app, headers=headers)
+        body = client.get("/api/system").json()
+        self.assertEqual(body["server"]["host"], "0.0.0.0")
+        self.assertEqual(body["server"]["port"], 8765)
+        self.assertTrue(body["server"]["lan_capable"])
+        self.assertTrue(body["server"]["lan_enabled"])
+        self.assertTrue(body["server"]["auth_required"])
+        self.assertEqual(
+            body["server"]["urls"],
+            ["http://192.168.1.20:8765/next/"],
+        )
+        self.assertEqual(body["runtime"]["worker"], "external")
+        self.assertGreaterEqual(body["work"]["tasks_total"], 1)
+        self.assertGreater(body["storage"]["disk_total_bytes"], 0)
+        self.assertIsInstance(body["runtime"]["threads"], int)
+
+    def test_system_lan_toggle_persists_and_blocks_lan(self) -> None:
+        token = "0123456789abcdef"
+        lan_headers = {
+            "Host": "192.168.1.20:8765",
+            "Origin": "http://192.168.1.20:8765",
+            "X-Requested-With": "XMLHttpRequest",
+        }
+        loop_headers = {
+            **CLIENT_HEADERS,
+            **basic_auth(token),
+        }
+        app = create_app(
+            self.db_path,
+            self.out_root,
+            self.rules_dir,
+            access_token=token,
+            allowed_hosts={"192.168.1.20"},
+            serve_host="0.0.0.0",
+        )
+        lan_client = TestClient(
+            app,
+            headers={**lan_headers, **basic_auth(token)},
+        )
+        disabled = lan_client.put(
+            "/api/system/access",
+            json={"lan_enabled": False},
+        )
+        self.assertEqual(disabled.status_code, 200, disabled.text)
+        self.assertFalse(disabled.json()["access"]["lan_enabled"])
+        self.assertEqual(lan_client.get("/api/health").status_code, 403)
+
+        loopback = TestClient(app, headers=loop_headers)
+        self.assertEqual(loopback.get("/api/health").status_code, 200)
+
+        restored = create_app(
+            self.db_path,
+            self.out_root,
+            self.rules_dir,
+            allowed_hosts={"192.168.1.20"},
+            serve_host="0.0.0.0",
+        )
+        restored_lan = TestClient(
+            restored,
+            headers={**lan_headers, **basic_auth(token)},
+        )
+        self.assertEqual(restored_lan.get("/api/health").status_code, 403)
+        restored_loop = TestClient(restored, headers=loop_headers)
+        self.assertEqual(restored_loop.get("/api/health").status_code, 200)
+        enabled = restored_loop.put(
+            "/api/system/access",
+            json={"lan_enabled": True},
+        )
+        self.assertEqual(enabled.status_code, 200, enabled.text)
+        self.assertEqual(restored_lan.get("/api/health").status_code, 200)
+
+    def test_system_token_rotation_invalidates_old_token(self) -> None:
+        token = "0123456789abcdef"
+        lan_headers = {
+            "Host": "192.168.1.20:8765",
+            "Origin": "http://192.168.1.20:8765",
+            "X-Requested-With": "XMLHttpRequest",
+        }
+        app = create_app(
+            self.db_path,
+            self.out_root,
+            self.rules_dir,
+            access_token=token,
+            allowed_hosts={"192.168.1.20"},
+            serve_host="0.0.0.0",
+        )
+        client = TestClient(
+            app,
+            headers={**lan_headers, **basic_auth(token)},
+        )
+        rotated = client.post("/api/system/access/token")
+        self.assertEqual(rotated.status_code, 200, rotated.text)
+        self.assertEqual(rotated.headers["cache-control"], "no-store")
+        new_token = rotated.json()["token"]
+        self.assertNotEqual(new_token, token)
+        self.assertTrue(rotated.json()["access"]["token_configured"])
+        self.assertTrue(rotated.json()["access"]["token_updated_at"])
+        self.assertEqual(client.get("/api/health").status_code, 401)
+        self.assertEqual(
+            client.get("/api/health", headers=basic_auth(new_token)).status_code,
+            200,
+        )
+
+        restored = create_app(
+            self.db_path,
+            self.out_root,
+            self.rules_dir,
+            allowed_hosts={"192.168.1.20"},
+            serve_host="0.0.0.0",
+        )
+        old_client = TestClient(
+            restored,
+            headers={**lan_headers, **basic_auth(token)},
+        )
+        new_client = TestClient(
+            restored,
+            headers={**lan_headers, **basic_auth(new_token)},
+        )
+        self.assertEqual(old_client.get("/api/health").status_code, 401)
+        self.assertEqual(new_client.get("/api/health").status_code, 200)
+
+    def test_system_access_requires_capability(self) -> None:
+        token = "0123456789abcdef"
+        app = create_app(
+            self.db_path,
+            self.out_root,
+            self.rules_dir,
+            access_token=token,
+        )
+        client = TestClient(
+            app,
+            headers={**CLIENT_HEADERS, **basic_auth(token)},
+        )
+        response = client.put(
+            "/api/system/access",
+            json={"lan_enabled": True},
+        )
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["error"]["code"], "LAN_NOT_CAPABLE")
+        rotated = client.post("/api/system/access/token")
+        self.assertEqual(rotated.status_code, 200)
+        self.assertTrue(rotated.json()["token"])
+
+    def test_system_writes_rejected_in_read_only(self) -> None:
+        token = "0123456789abcdef"
+        app = create_app(
+            self.db_path,
+            self.out_root,
+            self.rules_dir,
+            read_only=True,
+            access_token=token,
+        )
+        client = TestClient(
+            app,
+            headers={**CLIENT_HEADERS, **basic_auth(token)},
+        )
+        access = client.put(
+            "/api/system/access",
+            json={"lan_enabled": True},
+        )
+        self.assertEqual(access.status_code, 403)
+        self.assertEqual(access.json()["error"]["code"], "READ_ONLY")
+        rotated = client.post("/api/system/access/token")
+        self.assertEqual(rotated.status_code, 403)
+        self.assertEqual(rotated.json()["error"]["code"], "READ_ONLY")
+
+    def test_non_loopback_without_token_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with self.assertRaises(ValueError):
+                create_app(
+                    root / "tasks.db",
+                    root / "out",
+                    self.rules_dir,
+                    serve_host="0.0.0.0",
+                )
 
     def test_items_limit_is_bounded(self) -> None:
         self.assertEqual(

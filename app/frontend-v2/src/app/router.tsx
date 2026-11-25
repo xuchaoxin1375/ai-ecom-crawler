@@ -104,6 +104,16 @@ export const router = createHashRouter([
           ),
         ),
       },
+      {
+        path: "settings",
+        element: lazyPage(() =>
+          import("../features/settings/SystemSettingsPage").then(
+            ({ SystemSettingsPage }) => ({
+              default: SystemSettingsPage,
+            }),
+          ),
+        ),
+      },
       { path: "*", element: <NotFoundPage /> },
     ],
   },

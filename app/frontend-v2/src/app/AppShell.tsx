@@ -17,6 +17,7 @@ import {
   Menu,
   PanelLeftClose,
   PanelLeftOpen,
+  Settings2,
   Wrench,
   X,
 } from "lucide-react";
@@ -180,6 +181,7 @@ export function AppShell() {
   const isTaskDetail = /^\/tasks\/[^/]+/.test(location.pathname);
   const isBuildDetail = /^\/builds\/[^/]+/.test(location.pathname);
   const isModelSettings = location.pathname.startsWith("/models");
+  const isSystemSettings = location.pathname.startsWith("/settings");
   const isSiteDetail = Boolean(siteMatch);
   const isBatchDetail = Boolean(batchMatch) && !isSiteDetail;
   const showBreadcrumb = isBatchDetail || isSiteDetail || isTaskDetail || isBuildDetail;
@@ -210,16 +212,19 @@ export function AppShell() {
             ? "批次详情"
             : isModelSettings
               ? "模型配置"
-              : location.pathname.startsWith("/tasks")
-                ? "全部任务"
-                : location.pathname.startsWith("/builds")
-                  ? "构建记录"
-                  : "采集批次";
+              : isSystemSettings
+                ? "系统设置"
+                : location.pathname.startsWith("/tasks")
+                  ? "全部任务"
+                  : location.pathname.startsWith("/builds")
+                    ? "构建记录"
+                    : "采集批次";
     document.title = `${title} · 电商采集`;
   }, [
     isBatchDetail,
     isBuildDetail,
     isModelSettings,
+    isSystemSettings,
     isSiteDetail,
     isTaskDetail,
     location.pathname,
@@ -516,6 +521,15 @@ export function AppShell() {
                     if (!pinned) setFocused(false);
                   }}
                 />
+                <SidebarLink
+                  to="/settings"
+                  icon={<Settings2 size={17} />}
+                  label="系统设置"
+                  expanded={visualOpen}
+                  onPointerNavigate={() => {
+                    if (!pinned) setFocused(false);
+                  }}
+                />
               </SidebarGroup>
             </div>
           </nav>
@@ -624,6 +638,13 @@ export function AppShell() {
                     to="/models"
                     icon={<Cpu size={17} />}
                     label="模型配置"
+                    expanded
+                    onPointerNavigate={closeMobile}
+                  />
+                  <SidebarLink
+                    to="/settings"
+                    icon={<Settings2 size={17} />}
+                    label="系统设置"
                     expanded
                     onPointerNavigate={closeMobile}
                   />
