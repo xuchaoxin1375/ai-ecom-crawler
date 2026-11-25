@@ -32,12 +32,6 @@ const SIDEBAR_DURATION = "duration-[var(--sidebar-duration)]";
 const SIDEBAR_EASE = "ease-[var(--sidebar-ease)]";
 const SIDEBAR_EASE_SOFT = "ease-[var(--sidebar-ease-soft)]";
 
-// 原型开关：?stableGroups=1 时，分组标题槽在折叠态也占固定高度，展开不产生纵向位移。
-function readStableGroups(): boolean {
-  if (typeof window === "undefined") return false;
-  return new URLSearchParams(window.location.search).get("stableGroups") === "1";
-}
-
 function readPinned(): boolean {
   try {
     const stored = localStorage.getItem(SIDEBAR_KEY);
@@ -109,86 +103,37 @@ function SidebarGroup({
   label,
   expanded,
   first = false,
-  stable = false,
   children,
 }: {
   label: string;
   expanded: boolean;
   first?: boolean;
-  stable?: boolean;
   children: ReactNode;
 }) {
-  if (stable) {
-    return (
-      <div className="relative grid gap-0.5" role="group" aria-label={label}>
-        <div className="relative h-7" aria-hidden={!expanded || undefined}>
-          {!first ? (
-            <span
-              aria-hidden="true"
-              className={cn(
-                "pointer-events-none absolute left-2 right-2 top-1/2 h-px bg-line transition-opacity",
-                SIDEBAR_DURATION,
-                SIDEBAR_EASE_SOFT,
-                expanded ? "opacity-0" : "opacity-100",
-              )}
-            />
-          ) : null}
-          <p
+  return (
+    <div className="relative grid gap-0.5" role="group" aria-label={label}>
+      <div className="relative h-7" aria-hidden={!expanded || undefined}>
+        {!first ? (
+          <span
+            aria-hidden="true"
             className={cn(
-              "pointer-events-none absolute inset-x-0 top-0 px-2.5 pb-1 pt-2 text-[10px] font-semibold tracking-[0.08em] text-ink-3 uppercase transition-opacity",
+              "pointer-events-none absolute left-2 right-2 top-1/2 h-px bg-line transition-opacity",
               SIDEBAR_DURATION,
               SIDEBAR_EASE_SOFT,
-              expanded ? "opacity-100" : "opacity-0",
+              expanded ? "opacity-0" : "opacity-100",
             )}
-          >
-            {label}
-          </p>
-        </div>
-        {children}
-      </div>
-    );
-  }
-
-  return (
-    <div
-      className={cn(
-        "relative grid gap-0.5",
-        !first &&
-          cn(
-            "transition-[margin-top]",
-            SIDEBAR_DURATION,
-            SIDEBAR_EASE_SOFT,
-            !expanded && "mt-2",
-          ),
-      )}
-      role="group"
-      aria-label={label}
-    >
-      {!first ? (
-        <span
-          aria-hidden="true"
+          />
+        ) : null}
+        <p
           className={cn(
-            "pointer-events-none absolute -top-1 left-2 right-2 h-px bg-line transition-opacity",
+            "pointer-events-none absolute inset-x-0 top-0 px-2.5 pb-1 pt-2 text-[10px] font-semibold tracking-[0.08em] text-ink-3 uppercase transition-opacity",
             SIDEBAR_DURATION,
             SIDEBAR_EASE_SOFT,
-            expanded ? "opacity-0" : "opacity-100",
+            expanded ? "opacity-100" : "opacity-0",
           )}
-        />
-      ) : null}
-      <div
-        className={cn(
-          "grid overflow-hidden transition-[grid-template-rows]",
-          SIDEBAR_DURATION,
-          SIDEBAR_EASE,
-          expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
-        )}
-        aria-hidden={!expanded || undefined}
-      >
-        <div className="min-h-0">
-          <p className="px-2.5 pb-1 pt-2 text-[10px] font-semibold tracking-[0.08em] text-ink-3 uppercase">
-            {label}
-          </p>
-        </div>
+        >
+          {label}
+        </p>
       </div>
       {children}
     </div>
@@ -249,7 +194,6 @@ export function AppShell() {
   const mobileReturnFocusRef = useRef<HTMLElement | null>(null);
   const keyboardFocusRef = useRef(false);
   const [pinned, setPinned] = useState(readPinned);
-  const [stableGroups] = useState(readStableGroups);
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   const [suppressed, setSuppressed] = useState(false);
@@ -579,12 +523,7 @@ export function AppShell() {
         <div className="flex h-full flex-col">
           <nav className="flex-1 overflow-y-auto px-3 py-4" aria-label="主导航">
             <div className="space-y-1">
-              <SidebarGroup
-                label="采集工作台"
-                expanded={visualOpen}
-                first
-                stable={stableGroups}
-              >
+              <SidebarGroup label="采集工作台" expanded={visualOpen} first>
                 <SidebarLink
                   to="/batches"
                   icon={<LayoutList size={17} />}
@@ -604,11 +543,7 @@ export function AppShell() {
                   }}
                 />
               </SidebarGroup>
-              <SidebarGroup
-                label="规则与设置"
-                expanded={visualOpen}
-                stable={stableGroups}
-              >
+              <SidebarGroup label="规则与设置" expanded={visualOpen}>
                 <SidebarLink
                   to="/builds"
                   icon={<Wrench size={17} />}
