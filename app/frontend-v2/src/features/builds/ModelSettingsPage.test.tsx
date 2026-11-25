@@ -218,6 +218,114 @@ describe("model settings", () => {
     expect(within(terraRow).getByText("默认")).toBeVisible();
   });
 
+  it("sets a default from a model pool row", async () => {
+    let current = config();
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = url.split("?")[0];
+      if (path === "/api/builds/config" && !init?.method) {
+        return Response.json(current);
+      }
+      if (path === "/api/builds/models/available") return availableResponse();
+      if (path === "/api/builds/config/models" && init?.method === "PUT") {
+        const body = jsonBody(init);
+        current = config(
+          body.refs.map((ref) => {
+            const [id, variant] = ref.split("#");
+            return option(id, variant);
+          }),
+          {
+            default_model: body.default_ref ?? null,
+            model_pool_source: "settings",
+          },
+        );
+        return Response.json(current);
+      }
+      throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage("/models", "/models", <ModelSettingsPage />);
+
+    const terraRow = (
+      await screen.findByLabelText("YJWD GPT-6.1 Terra 默认思考等级")
+    ).closest("li")!;
+    fireEvent.click(within(terraRow).getByRole("button", { name: "设为默认" }));
+    expect(
+      await screen.findByText(/已将 YJWD GPT-6.1 Terra 设为默认模型/),
+    ).toBeVisible();
+    expect(screen.getByLabelText("固定默认模型")).toBeChecked();
+
+    fireEvent.click(screen.getByRole("button", { name: "保存配置" }));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/builds/config/models",
+        expect.objectContaining({ method: "PUT" }),
+      ),
+    );
+    const put = fetchMock.mock.calls.find(
+      ([url, init]) => url === "/api/builds/config/models" && init?.method === "PUT",
+    )!;
+    expect(jsonBody(put[1]).default_ref).toBe(`${terra}#medium`);
+  });
+
+  it("filters the catalog to the model pool and sets a default there", async () => {
+    const deepseekAvailable: AvailableBuildModel = {
+      id: deepseek,
+      provider: "opencode-go",
+      model: "deepseek-v4.1-flash",
+      label: "DeepSeek V4.1 Flash",
+      variants: ["low", "high", "max"],
+      probe_supported: true,
+      known: true,
+    };
+    let current = config([option(deepseek, "high")]);
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = url.split("?")[0];
+      if (path === "/api/builds/config" && !init?.method) {
+        return Response.json(current);
+      }
+      if (path === "/api/builds/models/available") {
+        return availableResponseFor([deepseekAvailable, ...availableModels]);
+      }
+      if (path === "/api/builds/config/models" && init?.method === "PUT") {
+        const body = jsonBody(init);
+        current = config(body.refs.map(optionFromRef), {
+          default_model: body.default_ref ?? null,
+          model_pool_source: "settings",
+        });
+        return Response.json(current);
+      }
+      throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage("/models", "/models", <ModelSettingsPage />);
+
+    const available = await screen.findByRole("region", { name: "可用模型" });
+    fireEvent.change(within(available).getByLabelText("按模型池状态筛选"), {
+      target: { value: "inPool" },
+    });
+    expect(await within(available).findByText("DeepSeek V4.1 Flash")).toBeVisible();
+    expect(within(available).queryByText("YJWD GPT-6.1 Terra")).not.toBeInTheDocument();
+    expect(within(available).getByText("共 3 个模型，筛选后 1 个")).toBeVisible();
+
+    fireEvent.click(within(available).getByRole("button", { name: "设为默认" }));
+    expect(
+      await screen.findByText(/已将 DeepSeek V4.1 Flash 设为默认模型/),
+    ).toBeVisible();
+    expect(within(available).getByText("当前默认")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "保存配置" }));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/builds/config/models",
+        expect.objectContaining({ method: "PUT" }),
+      ),
+    );
+    const put = fetchMock.mock.calls.find(
+      ([url, init]) => url === "/api/builds/config/models" && init?.method === "PUT",
+    )!;
+    expect(jsonBody(put[1]).default_ref).toBe(`${deepseek}#high`);
+  });
+
   it("adds discovered models and keeps an unknown variant editable", async () => {
     let current = config([option(deepseek, "high")]);
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
@@ -287,8 +395,8 @@ describe("model settings", () => {
         model: `model-${index}`,
         label: `Model ${index}`,
         variants: [],
-        probe_supported: false,
-        known: false,
+        probe_supported: index % 6 === 0,
+        known: index % 4 === 0,
       }),
     );
     vi.stubGlobal(
@@ -314,6 +422,16 @@ describe("model settings", () => {
     expect(within(available).queryByText("Model 0")).not.toBeInTheDocument();
     expect(within(available).getByText("第 2 / 2 页")).toBeVisible();
 
+    fireEvent.click(within(available).getByRole("button", { name: "上一页" }));
+    expect(await within(available).findByText("Model 0")).toBeVisible();
+
+    fireEvent.change(within(available).getByLabelText("跳至"), {
+      target: { value: "2" },
+    });
+    fireEvent.click(within(available).getByRole("button", { name: "跳转" }));
+    expect(await within(available).findByText("Model 20")).toBeVisible();
+    expect(within(available).getByText("第 2 / 2 页")).toBeVisible();
+
     fireEvent.change(within(available).getByLabelText("每页显示条数"), {
       target: { value: "50" },
     });
@@ -333,6 +451,27 @@ describe("model settings", () => {
     expect(
       within(available).queryByRole("navigation", { name: "可用模型分页" }),
     ).not.toBeInTheDocument();
+
+    fireEvent.change(within(available).getByLabelText("按元数据状态筛选"), {
+      target: { value: "known" },
+    });
+    expect(await within(available).findByText("Model 0")).toBeVisible();
+    expect(within(available).queryByText("Model 2")).not.toBeInTheDocument();
+    expect(within(available).getByText("共 24 个模型，筛选后 6 个")).toBeVisible();
+
+    fireEvent.change(within(available).getByLabelText("按元数据状态筛选"), {
+      target: { value: "unknown" },
+    });
+    expect(await within(available).findByText("Model 2")).toBeVisible();
+    expect(within(available).queryByText("Model 0")).not.toBeInTheDocument();
+    expect(within(available).getByText("共 24 个模型，筛选后 6 个")).toBeVisible();
+
+    fireEvent.change(within(available).getByLabelText("按元数据状态筛选"), {
+      target: { value: "probe" },
+    });
+    expect(await within(available).findByText("Model 0")).toBeVisible();
+    expect(within(available).queryByText("Model 2")).not.toBeInTheDocument();
+    expect(within(available).getByText("共 24 个模型，筛选后 4 个")).toBeVisible();
   });
 
   it("probes a saved model and shows the result", async () => {

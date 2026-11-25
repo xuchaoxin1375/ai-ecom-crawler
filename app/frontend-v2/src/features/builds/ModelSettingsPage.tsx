@@ -7,6 +7,7 @@ import {
   RefreshCw,
   Save,
   Search,
+  Star,
   Trash2,
 } from "lucide-react";
 import {
@@ -51,6 +52,8 @@ const PREFERRED_VARIANTS = ["medium", "high", "low"];
 const AVAILABLE_PAGE_SIZE = 20;
 const PAGE_SIZE_OPTIONS = [10, 20, 50];
 type PageItem = number | "ellipsis";
+type MetadataFilter = "all" | "known" | "unknown" | "probe";
+type PoolFilter = "all" | "available" | "inPool";
 
 function providerOf(model: AvailableBuildModel): string {
   return model.provider || model.id.split("/")[0] || "unknown";
@@ -134,8 +137,11 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
   const [customVariant, setCustomVariant] = useState("");
   const [modelSearch, setModelSearch] = useState("");
   const [providerFilter, setProviderFilter] = useState("all");
+  const [metadataFilter, setMetadataFilter] = useState<MetadataFilter>("all");
+  const [poolFilter, setPoolFilter] = useState<PoolFilter>("all");
   const [availablePageSize, setAvailablePageSize] = useState(AVAILABLE_PAGE_SIZE);
   const [availablePageNumber, setAvailablePageNumber] = useState(1);
+  const [pageJump, setPageJump] = useState("");
   const [refreshingAvailable, setRefreshingAvailable] = useState(false);
 
   const editable = Boolean(config.model_pool_editable);
@@ -151,6 +157,10 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
     [modelsQuery.data],
   );
   const inPool = useMemo(() => new Set(draft.map((model) => model.id)), [draft]);
+  const poolByKey = useMemo(
+    () => new Map(draft.map((model) => [model.id, model])),
+    [draft],
+  );
   const providers = useMemo(
     () =>
       [...new Set(discoveredModels.map(providerOf))].sort((left, right) =>
@@ -166,21 +176,57 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
     }
     return counts;
   }, [discoveredModels]);
+  const metadataCounts = useMemo(() => {
+    let known = 0;
+    let unknown = 0;
+    let probe = 0;
+    for (const model of discoveredModels) {
+      if (model.known) known += 1;
+      else unknown += 1;
+      if (model.probe_supported) probe += 1;
+    }
+    return { known, unknown, probe };
+  }, [discoveredModels]);
+  const inPoolDiscoveredCount = useMemo(
+    () =>
+      discoveredModels.reduce(
+        (count, model) => count + (inPool.has(model.id) ? 1 : 0),
+        0,
+      ),
+    [discoveredModels, inPool],
+  );
   const availableModels = useMemo(() => {
     const query = modelSearch.trim().toLowerCase();
     return discoveredModels.filter((item) => {
       if (providerFilter !== "all" && providerOf(item) !== providerFilter) return false;
+      if (metadataFilter === "known" && !item.known) return false;
+      if (metadataFilter === "unknown" && item.known) return false;
+      if (metadataFilter === "probe" && !item.probe_supported) return false;
+      const added = inPool.has(item.id);
+      if (poolFilter === "available" && added) return false;
+      if (poolFilter === "inPool" && !added) return false;
       if (!query) return true;
       return [item.id, item.label, item.provider].some((value) =>
         value.toLowerCase().includes(query),
       );
     });
-  }, [discoveredModels, modelSearch, providerFilter]);
+  }, [
+    discoveredModels,
+    inPool,
+    metadataFilter,
+    modelSearch,
+    poolFilter,
+    providerFilter,
+  ]);
   const availableError =
     modelsQuery.data?.error ??
     (modelsQuery.isError ? errorText(modelsQuery.error) : "");
   const discoveredCount = discoveredModels.length;
-  const hasAvailableFilters = Boolean(modelSearch.trim()) || providerFilter !== "all";
+  const hasAvailableFilters =
+    Boolean(modelSearch.trim()) ||
+    providerFilter !== "all" ||
+    metadataFilter !== "all" ||
+    poolFilter !== "all";
   const totalPages = Math.max(1, Math.ceil(availableModels.length / availablePageSize));
   const currentPage = Math.min(Math.max(1, availablePageNumber), totalPages);
   const pageStart = (currentPage - 1) * availablePageSize;
@@ -252,22 +298,53 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
   function updateSearch(next: string) {
     setModelSearch(next);
     setAvailablePageNumber(1);
+    setPageJump("");
   }
 
   function updateProviderFilter(next: string) {
     setProviderFilter(next);
     setAvailablePageNumber(1);
+    setPageJump("");
+  }
+
+  function updateMetadataFilter(next: MetadataFilter) {
+    setMetadataFilter(next);
+    setAvailablePageNumber(1);
+    setPageJump("");
+  }
+
+  function updatePoolFilter(next: PoolFilter) {
+    setPoolFilter(next);
+    setAvailablePageNumber(1);
+    setPageJump("");
   }
 
   function updatePageSize(next: number) {
     setAvailablePageSize(next);
     setAvailablePageNumber(1);
+    setPageJump("");
+  }
+
+  function jumpToPage() {
+    const parsed = Number.parseInt(pageJump, 10);
+    if (!Number.isFinite(parsed)) return;
+    setAvailablePageNumber(Math.min(Math.max(1, parsed), totalPages));
+    setPageJump("");
   }
 
   function clearAvailableFilters() {
     setModelSearch("");
     setProviderFilter("all");
+    setMetadataFilter("all");
+    setPoolFilter("all");
     setAvailablePageNumber(1);
+    setPageJump("");
+  }
+
+  function scrollToPool() {
+    const heading = document.getElementById("model-pool-heading");
+    heading?.scrollIntoView({ block: "start" });
+    heading?.focus({ preventScroll: true });
   }
 
   async function refreshAvailable() {
@@ -297,6 +374,12 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
       setDefaultRef(modelRef(current.id, variant));
     }
     updateDraft(draft.map((item) => (item.id === id ? { ...item, variant } : item)));
+  }
+
+  function chooseDefault(ref: string, label: string) {
+    setError("");
+    setDefaultRef(ref);
+    setNotice(`已将 ${label} 设为默认模型；保存后生效。`);
   }
 
   async function save() {
@@ -405,11 +488,21 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
         </InlineNotice>
       ) : null}
 
-      <section className="rounded-panel border border-line bg-surface">
+      <section
+        id="model-pool"
+        aria-label="模型池"
+        className="scroll-mt-4 rounded-panel border border-line bg-surface"
+      >
         <div className="flex flex-col gap-3 border-b border-line px-4 py-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-[17px] leading-6 font-semibold text-ink">模型池</h2>
+              <h2
+                id="model-pool-heading"
+                tabIndex={-1}
+                className="text-[17px] leading-6 font-semibold text-ink"
+              >
+                模型池
+              </h2>
               <Badge tone={SOURCE_TONES[source] ?? "neutral"} dot={false}>
                 {SOURCE_LABELS[source] ?? source}
               </Badge>
@@ -582,7 +675,18 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
                       </span>
                     </div>
                   </div>
-                  <div className="flex shrink-0 items-center gap-2">
+                  <div className="flex shrink-0 flex-wrap items-center gap-2">
+                    {defaultRef !== ref ? (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        disabled={!editable || busy}
+                        onClick={() => chooseDefault(ref, label)}
+                      >
+                        <Star size={14} aria-hidden="true" />
+                        设为默认
+                      </Button>
+                    ) : null}
                     {supported ? (
                       <Button
                         size="sm"
@@ -628,21 +732,31 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
               读取当前已接入的供应商和模型；刷新不会发送模型请求，也不读取密钥。
             </p>
           </div>
-          <Button
-            size="sm"
-            onClick={() => void refreshAvailable()}
-            disabled={refreshingAvailable}
-          >
-            <RefreshCw
-              size={14}
-              aria-hidden="true"
-              className={refreshingAvailable ? "animate-spin" : undefined}
-            />
-            {refreshingAvailable ? "读取中…" : "刷新可用模型"}
-          </Button>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={scrollToPool}
+              disabled={draft.length === 0}
+            >
+              查看模型池（{draft.length}）
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => void refreshAvailable()}
+              disabled={refreshingAvailable}
+            >
+              <RefreshCw
+                size={14}
+                aria-hidden="true"
+                className={refreshingAvailable ? "animate-spin" : undefined}
+              />
+              {refreshingAvailable ? "读取中…" : "刷新可用模型"}
+            </Button>
+          </div>
         </div>
         <div className="space-y-3 px-4 py-4">
-          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_15rem]">
+          <div className="space-y-3">
             <div className="relative">
               <Search
                 size={15}
@@ -657,19 +771,56 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
                 onChange={(event) => updateSearch(event.target.value)}
               />
             </div>
-            <Select
-              aria-label="按供应商筛选"
-              value={providerFilter}
-              disabled={modelsQuery.isPending || discoveredCount === 0}
-              onChange={(event) => updateProviderFilter(event.target.value)}
-            >
-              <option value="all">全部供应商（{formatNumber(discoveredCount)}）</option>
-              {providers.map((provider) => (
-                <option key={provider} value={provider}>
-                  {provider}（{formatNumber(providerCounts.get(provider) ?? 0)}）
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <Select
+                aria-label="按供应商筛选"
+                value={providerFilter}
+                disabled={modelsQuery.isPending || discoveredCount === 0}
+                onChange={(event) => updateProviderFilter(event.target.value)}
+              >
+                <option value="all">
+                  全部供应商（{formatNumber(discoveredCount)}）
                 </option>
-              ))}
-            </Select>
+                {providers.map((provider) => (
+                  <option key={provider} value={provider}>
+                    {provider}（{formatNumber(providerCounts.get(provider) ?? 0)}）
+                  </option>
+                ))}
+              </Select>
+              <Select
+                aria-label="按元数据状态筛选"
+                value={metadataFilter}
+                disabled={modelsQuery.isPending || discoveredCount === 0}
+                onChange={(event) =>
+                  updateMetadataFilter(event.target.value as MetadataFilter)
+                }
+              >
+                <option value="all">全部状态（{formatNumber(discoveredCount)}）</option>
+                <option value="known">
+                  已知元数据（{formatNumber(metadataCounts.known)}）
+                </option>
+                <option value="unknown">
+                  未验证档位（{formatNumber(metadataCounts.unknown)}）
+                </option>
+                <option value="probe">
+                  可测试（{formatNumber(metadataCounts.probe)}）
+                </option>
+              </Select>
+              <Select
+                aria-label="按模型池状态筛选"
+                value={poolFilter}
+                disabled={modelsQuery.isPending || discoveredCount === 0}
+                onChange={(event) => updatePoolFilter(event.target.value as PoolFilter)}
+              >
+                <option value="all">全部模型（{formatNumber(discoveredCount)}）</option>
+                <option value="available">
+                  未加入（{formatNumber(discoveredCount - inPoolDiscoveredCount)}）
+                </option>
+                <option value="inPool">
+                  已在模型池（{formatNumber(inPoolDiscoveredCount)}）
+                </option>
+              </Select>
+            </div>
           </div>
           {availableError ? (
             <p className="text-xs leading-5 text-danger">
@@ -712,7 +863,10 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
               </div>
               <ul className="divide-y divide-line rounded-control border border-line">
                 {pageModels.map((entry) => {
-                  const added = inPool.has(entry.id);
+                  const pooled = poolByKey.get(entry.id);
+                  const added = Boolean(pooled);
+                  const pooledRef = pooled ? modelRef(pooled.id, pooled.variant) : "";
+                  const isDefault = added && defaultRef === pooledRef;
                   return (
                     <li
                       key={entry.id}
@@ -745,14 +899,37 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
                           {entry.probe_supported ? "可测试" : "未配置小请求探测"}
                         </p>
                       </div>
-                      <Button
-                        size="sm"
-                        className="shrink-0"
-                        onClick={() => addAvailable(entry)}
-                        disabled={!editable || busy || added}
-                      >
-                        {added ? "已加入" : "加入模型池"}
-                      </Button>
+                      {added ? (
+                        isDefault ? (
+                          <Badge
+                            tone="info"
+                            dot={false}
+                            className="shrink-0 self-start sm:self-auto"
+                          >
+                            当前默认
+                          </Badge>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            className="shrink-0"
+                            disabled={!editable || busy}
+                            onClick={() => chooseDefault(pooledRef, entry.label)}
+                          >
+                            <Star size={14} aria-hidden="true" />
+                            设为默认
+                          </Button>
+                        )
+                      ) : (
+                        <Button
+                          size="sm"
+                          className="shrink-0"
+                          onClick={() => addAvailable(entry)}
+                          disabled={!editable || busy}
+                        >
+                          加入模型池
+                        </Button>
+                      )}
                     </li>
                   );
                 })}
@@ -778,6 +955,38 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
                     </Select>
                     条
                   </label>
+                  {totalPages > 1 ? (
+                    <div className="flex items-center gap-1.5 whitespace-nowrap">
+                      <label htmlFor="model-page-jump">跳至</label>
+                      <Input
+                        id="model-page-jump"
+                        type="number"
+                        min={1}
+                        max={totalPages}
+                        inputMode="numeric"
+                        className="h-9 w-16 px-2 text-center lg:h-8"
+                        value={pageJump}
+                        onChange={(event) =>
+                          setPageJump(event.target.value.replace(/[^\d]/g, ""))
+                        }
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            jumpToPage();
+                          }
+                        }}
+                      />
+                      <span>页</span>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={jumpToPage}
+                        disabled={!pageJump.trim()}
+                      >
+                        跳转
+                      </Button>
+                    </div>
+                  ) : null}
                 </div>
                 {totalPages > 1 ? (
                   <nav
