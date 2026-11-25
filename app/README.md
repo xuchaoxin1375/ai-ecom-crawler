@@ -114,6 +114,8 @@ python -m uv run --project app ecom-crawler serve --db "$data\tasks.db" --out-ro
 
 ### 局域网访问
 
+> 下列登录页、会话 Cookie 和自定义密钥是 [ADR 0019](../docs/adr/0019-访问密钥登录页与会话认证.md) 的目标交互，尚未实现；当前代码仍使用 HTTP Basic 和令牌轮换。实现并通过 `V-01`～`V-05` 后删除本提示。
+
 默认只绑定回环地址。需要从同一可信局域网的另一台电脑操作批次、任务或构建时，显式绑定 `0.0.0.0` 并提供访问密钥：
 
 ```powershell
