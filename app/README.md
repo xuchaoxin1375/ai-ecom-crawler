@@ -85,7 +85,7 @@ python -m patchright install chromium
 
 ## 启动项目
 
-本地入口同时提供 Web UI、API 和托管 worker；`serve` 默认绑定 `127.0.0.1:8765`，端口固定使用 8765，不要为绕开占用换端口。`--db` 和 `--out-root` 必填；`--rules-dir` 用于规则匹配、任务创建和站点构建，不配置时页面只能查看已有任务。需要从可信局域网的另一台设备访问时，使用下方[局域网访问](#局域网访问)命令，必须同时提供访问令牌。
+本地入口同时提供 Web UI、API 和托管 worker；`serve` 默认绑定 `127.0.0.1:8765`，端口固定使用 8765，不要为绕开占用换端口。`--db` 和 `--out-root` 必填；`--rules-dir` 用于规则匹配、任务创建和站点构建，不配置时页面只能查看已有任务。需要从可信局域网的另一台设备访问时，使用下方[局域网访问](#局域网访问)命令，必须同时提供访问密钥。
 
 前置：
 
@@ -114,7 +114,7 @@ python -m uv run --project app ecom-crawler serve --db "$data\tasks.db" --out-ro
 
 ### 局域网访问
 
-默认只绑定回环地址。需要从同一可信局域网的另一台电脑操作批次、任务或构建时，显式绑定 `0.0.0.0` 并提供访问令牌：
+默认只绑定回环地址。需要从同一可信局域网的另一台电脑操作批次、任务或构建时，显式绑定 `0.0.0.0` 并提供访问密钥：
 
 ```powershell
 $env:ECOM_SERVE_TOKEN = python -c "import secrets; print(secrets.token_urlsafe(24))"
@@ -122,25 +122,26 @@ $data = "C:\path\to\evidence\workbench"
 python -m uv run --project app ecom-crawler serve --db "$data\tasks.db" --out-root "$data\out" --rules-dir "$data\rules" --host 0.0.0.0 --port 8765
 ```
 
-在另一台电脑打开启动输出里的 `http://<本机局域网 IP>:8765/next/#/batches`。浏览器会弹出 HTTP Basic 认证框：用户名任意，密码填访问令牌。令牌也可以通过 `--access-token <令牌>` 传入，但命令行会进入 shell 历史和进程列表，优先用 `ECOM_SERVE_TOKEN`。
+在另一台电脑打开启动输出里的 `http://<本机局域网 IP>:8765/next/#/batches`。浏览器会打开只填访问密钥的登录页，不需要用户名；登录成功后使用 30 天会话 Cookie。命令行脚本仍可用 HTTP Basic：`curl -u "任意用户名:<访问密钥>"`。
 
-- 令牌至少 16 个字符；非回环 `--host` 没有可用令牌时拒绝启动。首次用启动参数或环境变量提供，之后可在 `/settings` 轮换；设置令牌后，回环访问同样需要认证。
+- 访问密钥 1–256 个字符，首尾空白会被去掉；可在启动参数／环境变量提供，也可在 `/settings` 自定义或随机生成。非回环 `--host` 没有可用密钥时拒绝启动；设置密钥后，回环访问同样需要登录。
 - Host 只接受回环、本机检测到的地址／主机名，以及 `--allow-host <名称>` 追加的名称；用 mDNS 名称（如 `my-pc.local`）访问时把它加进 `--allow-host`，可重复传入。
-- 写请求仍要求同源 `Origin` 和 `X-Requested-With`；`--read-only` 下开放局域网时，认证通过后写接口仍返回 403 `READ_ONLY`。
+- 写请求仍要求同源 `Origin` 和 `X-Requested-With`；`--read-only` 下开放局域网时，认证通过后写接口仍返回 403 `READ_ONLY`，但登录和退出仍可用。
 - 局域网入口使用 FastAPI 托管的 `/next/`（需要先构建 `frontend-v2/dist`）；Vite 开发服务仍绑定 `127.0.0.1:5175`，不作为局域网入口。
 - Windows 首次启动时允许专用网络的 8765 入站；只允许专用网络，不要开放公用网络。
-- 这是**可信局域网**的临时访问方式：HTTP 明文传输，Basic 凭据可被同网段嗅探；不提供 TLS、多用户、独立账号或公网暴露。不要做端口映射、反向代理公网或跨不可信网络使用；需要这些能力时另做安全设计。
-- 启动输出只打印可用地址和认证方式，不打印令牌；令牌变更后，浏览器会重新提示认证。
+- 这是**可信局域网**的临时访问方式：HTTP 明文传输，访问密钥和会话 Cookie 可被同网段嗅探；不提供 TLS、多用户、独立账号或公网暴露。不要做端口映射、反向代理公网或跨不可信网络使用；需要这些能力时另做安全设计。
+- 启动输出只打印可用地址和认证方式，不打印密钥；密钥轮换后所有设备需要重新登录。
 
 ### 系统设置
 
 入口是 `http://127.0.0.1:8765/next/#/settings`（侧栏“规则与设置 → 系统设置”）。页面集中展示服务状态、访问范围、认证、worker 槽位、任务／构建队列、数据库大小、磁盘剩余、路径和版本。
 
 - **局域网开关**：服务必须以非回环 `--host` 启动过，页面才能开关；关闭后非回环 Host 一律 403，绑定地址和端口仍需重启修改。
-- **访问令牌**：可在页面生成或轮换，只显示一次明文；账本只保存随机 salt 和 SHA-256 哈希。轮换后所有设备都要重新认证；丢失时可用启动参数／环境变量覆盖。
-- **持久化**：局域网开关和令牌哈希写入本地 SQLite，重启后继续生效。以回环启动时，页面提供 `--host 0.0.0.0 --port <port>` 重启参数；如果还没有令牌，先生成再重启。
-- **边界**：关闭局域网时仍要求令牌，避免同网段伪造回环 Host；页面不采集系统 CPU／内存，不提供 TLS、多用户或公网暴露。
-- **只读预览**：`--read-only` 下可以查看系统状态，但开关和令牌轮换按钮禁用。
+- **访问密钥**：可在页面设置自定义密钥，或生成随机密钥；账本只保存随机 salt 和 SHA-256 哈希。自定义密钥不回显，随机密钥只显示一次；轮换后所有设备都要重新登录。
+- **退出登录**：清除当前浏览器的会话 Cookie；其他设备需要退出时轮换密钥。
+- **持久化**：局域网开关和密钥哈希写入本地 SQLite，重启后继续生效。以回环启动时，页面提供 `--host 0.0.0.0 --port <port>` 重启参数；如果还没有密钥，先生成再重启。
+- **边界**：关闭局域网时仍要求密钥，避免同网段伪造回环 Host；页面不采集系统 CPU／内存，不提供 TLS、多用户或公网暴露。
+- **只读预览**：`--read-only` 下可以查看系统状态和登录，但开关、自定义／随机密钥按钮禁用；退出登录仍可用。
 
 ## CLI
 
@@ -167,7 +168,7 @@ python -m uv run --project app ecom-crawler validate --task-result /path/to/task
 - `audit-content` 用渲染后的商品区文本和截图抽样核对规则提取覆盖：输出 `visual-audit.json`、未覆盖文本块和整页截图；这是人工审计工具，不替代批量提取。
 - `run` 的退出码表示任务是否实际执行；业务结论看 `task-result.json` 的 `outcome`。计划或用法错误返回 2。
 - `run` 是一次性入口，不提供可恢复的控制；需要暂停／恢复／取消时用 `submit` 入队，再在另一个 shell 运行 `worker`，用 `pause`／`resume`／`cancel` 控制。外部暂停 `run` 任务后，`run` 以 2 退出并提示用 `worker` 恢复。
-- `serve` 默认只绑定回环地址；`--host` 为非回环地址时必须提供 `--access-token`／`ECOM_SERVE_TOKEN`（至少 16 个字符），或使用系统设置页已保存的令牌哈希，此时所有请求走 HTTP Basic，Host 只接受回环、本机地址／主机名和 `--allow-host` 追加项。默认启动托管 worker（持有 worker 单实例锁）；`--no-worker` 只提供 API／页面，执行由独立 `worker` 进程负责，写接口仍然可用；`--read-only` 要求账本已存在，不启动 worker，不创建可写构建管理，所有非 `GET`／`HEAD`／`OPTIONS` 请求返回 403 `READ_ONLY`，SQLite 以 `mode=ro` 和 `PRAGMA query_only=ON` 打开。页面关闭不会停止后台。
+- `serve` 默认只绑定回环地址；`--host` 为非回环地址时必须提供 `--access-token`／`ECOM_SERVE_TOKEN`（长度 1–256），或使用系统设置页已保存的密钥哈希；浏览器使用登录页和会话 Cookie，命令行仍可用 HTTP Basic，Host 只接受回环、本机地址／主机名和 `--allow-host` 追加项。默认启动托管 worker（持有 worker 单实例锁）；`--no-worker` 只提供 API／页面，执行由独立 `worker` 进程负责，写接口仍然可用；`--read-only` 要求账本已存在，不启动 worker，不创建可写构建管理，所有非 `GET`／`HEAD`／`OPTIONS` 请求返回 403 `READ_ONLY`，SQLite 以 `mode=ro` 和 `PRAGMA query_only=ON` 打开。页面关闭不会停止后台。
 - 出口代理按任务或进程传入：`--proxy`、`ECOM_FETCH_PROXY`、`ECOM_BUILD_PROXY`；构建 API 的 `proxy` 会写入构建记录和站点，后续批次任务沿用。代理 URL 不接受凭据，API 展示会遮蔽 userinfo。
 - 构建 trace 默认不保存 reasoning；需要本地复盘时用 `ECOM_BUILD_CAPTURE_REASONING=1` 启动服务，或在构建 API 传 `capture_reasoning=true`。trace 会截断工具输出、消息和 reasoning，不保存原始导出或整页 HTML。
 - 站点详情的“模型输出”读取 `/api/builds/{id}/messages`：构建中显示流式时间线，结束后显示完整可见消息；`timeline` 按时间合并思考、工具调用和文本。reasoning 仅在显式保留时出现；未保留时页面会提示服务端开关和单次勾选条件。
@@ -315,7 +316,7 @@ runtime:
 
 ## Web 服务（serve）
 
-- `serve` 用 FastAPI 托管 `/api/*` 和 `static/`，默认 `127.0.0.1:8765`；非回环 `--host` 必须同时配置访问令牌或已有令牌哈希，启用 HTTP Basic，并按回环、本机地址／主机名和 `--allow-host` 校验 Host。`--rules-dir` 指向受管规则包目录。
+- `serve` 用 FastAPI 托管 `/api/*` 和 `static/`，默认 `127.0.0.1:8765`；非回环 `--host` 必须同时配置访问密钥或已有密钥哈希，浏览器使用登录页和会话 Cookie，命令行 Basic 兼容，并按回环、本机地址／主机名和 `--allow-host` 校验 Host。`--rules-dir` 指向受管规则包目录。
 - 默认启动托管 worker（`--max-tasks` 默认 1），持有 `<db>.worker.lock`；`--no-worker` 只跳过托管 worker，写接口仍可用，便于另跑 `worker`。
 - `--read-only` 用于只读预览：要求账本已存在，不启动 worker，不运行构建启动对账／关闭调度，拒绝所有写请求（403 `READ_ONLY`），并以 SQLite `mode=ro` 加 `PRAGMA query_only=ON` 打开账本。`/api/health` 返回 `read_only=true`、`worker=read-only`、`builds_readable=true`、`builds_available=false`；构建历史可读，构建写操作为 403。
 - 只读 API：`GET /api/health`、`GET /api/system`、`GET /api/rules`、`GET /api/tasks`（支持 `state`、`task_type`、`batch_id`、`site_key`、`include_archived`、`sort`、`order`）、`GET /api/tasks/{id}`、`GET /api/tasks/{id}/items?kind=url|product`、`GET /api/tasks/{id}/export`；质量反馈：`GET /api/tasks/{id}/feedback`、`GET /api/feedback`、`GET /api/feedback/{id}`；批次与构建：`GET /api/batches`、`/api/batches/{id}`、`/api/builds`、`/api/builds/config`、`/api/builds/{id}`、`/api/builds/{id}/messages`、`/api/builds/{id}/events`、`/api/builds/{id}/trace`；模型池：`PUT`／`DELETE /api/builds/config/models`、`POST /api/builds/models/check`。
