@@ -2725,6 +2725,48 @@
         "summary": "Update Build Models"
       }
     },
+    "/api/builds/models/available": {
+      "get": {
+        "operationId": "list_available_build_models_api_builds_models_available_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Refresh",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Available Build Models Api Builds Models Available Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Available Build Models"
+      }
+    },
     "/api/builds/models/check": {
       "post": {
         "operationId": "check_build_model_api_builds_models_check_post",

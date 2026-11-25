@@ -595,6 +595,21 @@ export interface BuildConfig {
   model_catalog?: BuildModelCatalogEntry[];
 }
 
+export interface AvailableBuildModel {
+  id: string;
+  provider: string;
+  model: string;
+  label: string;
+  variants: string[];
+  probe_supported: boolean;
+  known: boolean;
+}
+
+export interface AvailableBuildModelsResponse {
+  models: AvailableBuildModel[];
+  error: string | null;
+}
+
 export interface BuildModelHealth {
   status: "ok" | "failed";
   code: string | null;
@@ -1323,6 +1338,14 @@ export function checkBuildModel(modelRef: string): Promise<BuildModelHealth> {
   return sendJson<BuildModelHealth>("/api/builds/models/check", "POST", {
     model_ref: modelRef,
   });
+}
+
+export function getAvailableBuildModels(
+  refresh = false,
+): Promise<AvailableBuildModelsResponse> {
+  return getJson<AvailableBuildModelsResponse>(
+    `/api/builds/models/available${refresh ? "?refresh=1" : ""}`,
+  );
 }
 
 export function updateBuildModels(

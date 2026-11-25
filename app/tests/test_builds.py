@@ -20,7 +20,7 @@ from unittest import mock
 import yaml
 from fastapi.testclient import TestClient
 
-from ecom_crawler.build_models import BuildModelPool
+from ecom_crawler.build_models import BuildModelPool, ModelPoolError
 from ecom_crawler.builds import (
     BuildError,
     BuildManager,
@@ -997,6 +997,90 @@ class BuildWorkflowTests(unittest.TestCase):
             )
             self.assertEqual(mismatch.status_code, 400)
             self.assertEqual(mismatch.json()["error"]["code"], "MODEL_POOL_INVALID")
+
+    def test_available_models_endpoint_uses_discovery(self) -> None:
+        manager = self._manager(FakeBuildAdapter(self.root))
+        models = [
+            {
+                "id": "commandcode/deepseek/deepseek-v4.1-flash",
+                "provider": "commandcode",
+                "model": "deepseek/deepseek-v4.1-flash",
+                "label": "CommandCode DeepSeek V4.1 Flash",
+                "variants": ["low", "high", "max"],
+                "probe_supported": False,
+                "known": True,
+            },
+            {
+                "id": "custom/provider-model",
+                "provider": "custom",
+                "model": "provider-model",
+                "label": "provider-model",
+                "variants": [],
+                "probe_supported": False,
+                "known": False,
+            },
+        ]
+        with (
+            mock.patch(
+                "ecom_crawler.web.app.discover_models", return_value=models
+            ) as discover,
+            self._client(manager) as client,
+        ):
+            response = client.get("/api/builds/models/available?refresh=1")
+            self.assertEqual(response.status_code, 200, response.text)
+            body = response.json()
+            self.assertEqual(body["models"], models)
+            self.assertIsNone(body["error"])
+            discover.assert_called_once()
+            self.assertTrue(discover.call_args.kwargs["refresh"])
+
+        with (
+            mock.patch(
+                "ecom_crawler.web.app.discover_models",
+                side_effect=ModelPoolError("OpenCode 模型列表读取失败"),
+            ),
+            self._client(manager) as client,
+        ):
+            response = client.get("/api/builds/models/available")
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()["models"], [])
+            self.assertIn("读取失败", response.json()["error"])
+
+    def test_discovery_parses_opencode_models_without_model_request(self) -> None:
+        from ecom_crawler import build_models
+
+        completed = mock.Mock(
+            returncode=0,
+            stdout=(
+                "commandcode/deepseek/deepseek-v4.1-flash\n"
+                "opencode-go/deepseek-v4.1-flash\n"
+                "not-a-model\n"
+            ),
+        )
+        build_models._discovery_cache = None
+        self.addCleanup(setattr, build_models, "_discovery_cache", None)
+        with (
+            mock.patch.object(
+                build_models, "resolve_opencode_command", return_value=["opencode"]
+            ),
+            mock.patch.object(
+                build_models, "child_environment", return_value={}
+            ),
+            mock.patch.object(
+                build_models.subprocess, "run", return_value=completed
+            ) as run,
+        ):
+            models = build_models.discover_models(refresh=True)
+        self.assertEqual(
+            [model["id"] for model in models],
+            [
+                "commandcode/deepseek/deepseek-v4.1-flash",
+                "opencode-go/deepseek-v4.1-flash",
+            ],
+        )
+        self.assertTrue(models[0]["known"])
+        self.assertEqual(models[0]["variants"], ["low", "high", "max"])
+        run.assert_called_once()
 
     def test_commandcode_deepseek_is_a_known_model(self) -> None:
         from ecom_crawler.build_models import known_models

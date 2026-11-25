@@ -1,6 +1,7 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
+  AvailableBuildModel,
   BuildConfig,
   BuildModelCatalogEntry,
   BuildModelOption,
@@ -26,6 +27,44 @@ const catalog: BuildModelCatalogEntry[] = [
     probe_supported: true,
   },
 ];
+
+const availableModels: AvailableBuildModel[] = [
+  {
+    id: terra,
+    provider: "yjwd-gpt-enterprise",
+    model: "gpt-6.1-terra",
+    label: "YJWD GPT-6.1 Terra",
+    variants: ["none", "low", "medium", "high", "xhigh", "max"],
+    probe_supported: true,
+    known: true,
+  },
+  {
+    id: "custom/provider-model",
+    provider: "custom",
+    model: "provider-model",
+    label: "provider-model",
+    variants: [],
+    probe_supported: false,
+    known: false,
+  },
+];
+
+function availableResponse() {
+  return Response.json({ models: availableModels, error: null });
+}
+
+function optionFromRef(ref: string): BuildModelOption {
+  const [id, variant = ""] = ref.split("#");
+  const entry = catalog.find((item) => item.id === id);
+  return {
+    id,
+    label: entry?.label ?? id,
+    variant,
+    variants: entry?.variants ?? (variant ? [variant] : []),
+    probe_supported: entry?.probe_supported ?? false,
+    health: {},
+  };
+}
 
 function option(id: string, variant: string): BuildModelOption {
   const entry = catalog.find((item) => item.id === id)!;
@@ -76,6 +115,7 @@ describe("model settings", () => {
       if (path === "/api/builds/config" && !init?.method) {
         return Response.json(current);
       }
+      if (path === "/api/builds/models/available") return availableResponse();
       if (path === "/api/builds/config/models" && init?.method === "PUT") {
         const refs = jsonBody(init).refs;
         current = config(
@@ -131,6 +171,7 @@ describe("model settings", () => {
       if (path === "/api/builds/config" && !init?.method) {
         return Response.json(current);
       }
+      if (path === "/api/builds/models/available") return availableResponse();
       if (path === "/api/builds/config/models" && init?.method === "PUT") {
         const body = jsonBody(init);
         current = config(
@@ -150,6 +191,8 @@ describe("model settings", () => {
     vi.stubGlobal("fetch", fetchMock);
     renderPage("/models", "/models", <ModelSettingsPage />);
 
+    expect(await screen.findByLabelText("轮询全部模型")).toBeChecked();
+    fireEvent.click(screen.getByLabelText("固定默认模型"));
     const defaultModel = await screen.findByLabelText("默认模型");
     fireEvent.change(defaultModel, { target: { value: `${terra}#medium` } });
     fireEvent.click(screen.getByRole("button", { name: "保存配置" }));
@@ -171,12 +214,78 @@ describe("model settings", () => {
     expect(within(terraRow).getByText("默认")).toBeVisible();
   });
 
+  it("adds discovered models and keeps an unknown variant editable", async () => {
+    let current = config([option(deepseek, "high")]);
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = url.split("?")[0];
+      if (path === "/api/builds/config" && !init?.method) {
+        return Response.json(current);
+      }
+      if (path === "/api/builds/models/available") return availableResponse();
+      if (path === "/api/builds/config/models" && init?.method === "PUT") {
+        const body = jsonBody(init);
+        current = config(body.refs.map(optionFromRef), {
+          default_model: body.default_ref ?? null,
+          model_pool_source: "settings",
+        });
+        return Response.json(current);
+      }
+      throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage("/models", "/models", <ModelSettingsPage />);
+
+    const available = await screen.findByRole("region", { name: "可用模型" });
+    fireEvent.click(
+      await within(available).findByRole("button", {
+        name: "显示前 50 个",
+      }),
+    );
+    const terraRow = (await within(available).findByText("YJWD GPT-6.1 Terra")).closest(
+      "li",
+    )!;
+    fireEvent.click(within(terraRow).getByRole("button", { name: "加入模型池" }));
+
+    const customRow = within(screen.getByRole("region", { name: "可用模型" }))
+      .getByText("provider-model")
+      .closest("li")!;
+    fireEvent.click(within(customRow).getByRole("button", { name: "加入模型池" }));
+
+    fireEvent.change(
+      await screen.findByLabelText("custom/provider-model 默认思考等级"),
+      { target: { value: "high" } },
+    );
+    fireEvent.click(screen.getByLabelText("固定默认模型"));
+    fireEvent.change(screen.getByLabelText("默认模型"), {
+      target: { value: `${terra}#medium` },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存配置" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/builds/config/models",
+        expect.objectContaining({ method: "PUT" }),
+      ),
+    );
+    const put = fetchMock.mock.calls.find(
+      ([url, init]) => url === "/api/builds/config/models" && init?.method === "PUT",
+    )!;
+    const body = jsonBody(put[1]);
+    expect(body.refs).toEqual([
+      `${deepseek}#high`,
+      `${terra}#medium`,
+      "custom/provider-model#high",
+    ]);
+    expect(body.default_ref).toBe(`${terra}#medium`);
+  });
+
   it("probes a saved model and shows the result", async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       const path = url.split("?")[0];
       if (path === "/api/builds/config" && !init?.method) {
         return Response.json(config());
       }
+      if (path === "/api/builds/models/available") return availableResponse();
       if (path === "/api/builds/models/check" && init?.method === "POST") {
         return Response.json({
           status: "ok",
@@ -211,6 +320,7 @@ describe("model settings", () => {
       if (path === "/api/builds/config" && !init?.method) {
         return Response.json(overridden);
       }
+      if (path === "/api/builds/models/available") return availableResponse();
       if (path === "/api/builds/config/models" && init?.method === "DELETE") {
         return Response.json(fromEnv);
       }
@@ -231,13 +341,16 @@ describe("model settings", () => {
   it("keeps the page read-only when the service disables writes", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () =>
-        Response.json(
+      vi.fn(async (url: string) => {
+        if (url.split("?")[0] === "/api/builds/models/available") {
+          return availableResponse();
+        }
+        return Response.json(
           config(undefined, {
             model_pool_editable: false,
           }),
-        ),
-      ),
+        );
+      }),
     );
     renderPage("/models", "/models", <ModelSettingsPage />);
 

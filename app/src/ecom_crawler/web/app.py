@@ -39,7 +39,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .. import __version__
-from ..build_models import ModelPoolError, known_models
+from ..build_models import ModelPoolError, discover_models, known_models
 from ..builds import ACTIVE_BUILD_STATES, BuildError, BuildManager
 from ..execution import build_task
 from ..executor.runner import CSV_COLUMNS
@@ -3709,6 +3709,17 @@ def create_app(
         except BuildError as exc:
             raise _error("MODEL_POOL_UNAVAILABLE", str(exc), 409) from exc
         return build_config_payload()
+
+    @app.get("/api/builds/models/available")
+    def list_available_build_models(refresh: bool = False) -> dict[str, Any]:
+        try:
+            models = discover_models(
+                inherit_env=not (build_manager and build_manager.isolate_env),
+                refresh=refresh,
+            )
+        except ModelPoolError as exc:
+            return {"models": [], "error": str(exc)}
+        return {"models": models, "error": None}
 
     @app.post("/api/builds/models/check")
     def check_build_model(payload: BuildModelCheckRequest) -> dict[str, Any]:

@@ -4,13 +4,20 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import threading
 import time
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
-from .harness.opencode import OpenCodeError, OpenCodeHttpError, OpenCodeServer
+from .harness.opencode import (
+    OpenCodeError,
+    OpenCodeHttpError,
+    OpenCodeServer,
+    child_environment,
+    resolve_opencode_command,
+)
 from .runtime.models import utc_now
 
 MODEL_REF = re.compile(r"[a-zA-Z0-9_.-]+/[a-zA-Z0-9_./:-]+(?:#[a-zA-Z0-9_.-]+)?")
@@ -53,8 +60,78 @@ export default Plugin.define({
 """
 
 
+DISCOVERY_TTL_SECONDS = 60.0
+_discovery_lock = threading.Lock()
+_discovery_cache: tuple[float, list[dict[str, Any]]] | None = None
+
+
 class ModelPoolError(ValueError):
     pass
+
+
+def _available_model(ref: str) -> dict[str, Any]:
+    provider, model = ref.split("/", 1)
+    entry = CATALOG.get(ref)
+    return {
+        "id": ref,
+        "provider": provider,
+        "model": model,
+        "label": entry[0] if entry else model,
+        "variants": list(entry[1]) if entry else [],
+        "probe_supported": ref in PROBE_LIMIT_FIELDS,
+        "known": entry is not None,
+    }
+
+
+def discover_models(
+    *,
+    inherit_env: bool = True,
+    refresh: bool = False,
+    timeout: float = 25.0,
+) -> list[dict[str, Any]]:
+    """List models visible to OpenCode without sending a model request.
+
+    OpenCode is the source of truth for provider integration and credentials.
+    The result is cached briefly so opening the settings page does not spawn a
+    private server on every request.
+    """
+    global _discovery_cache
+    now = time.monotonic()
+    with _discovery_lock:
+        if (
+            not refresh
+            and _discovery_cache is not None
+            and now - _discovery_cache[0] < DISCOVERY_TTL_SECONDS
+        ):
+            return [dict(item) for item in _discovery_cache[1]]
+        try:
+            command = [*resolve_opencode_command(), "models", "--standalone"]
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env=child_environment({}, inherit=inherit_env),
+                timeout=timeout,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError, OpenCodeError) as exc:
+            raise ModelPoolError(
+                f"无法读取 OpenCode 模型列表：{type(exc).__name__}"
+            ) from exc
+        if completed.returncode != 0:
+            raise ModelPoolError("OpenCode 模型列表读取失败")
+        refs = sorted({
+            line.strip()
+            for line in completed.stdout.splitlines()
+            if MODEL_REF.fullmatch(line.strip())
+        })
+        if not refs:
+            raise ModelPoolError("OpenCode 没有返回可用模型")
+        models = [_available_model(ref) for ref in refs]
+        _discovery_cache = (now, models)
+        return [dict(item) for item in models]
 
 
 def parse_model_ref(ref: str) -> dict[str, str]:
