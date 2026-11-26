@@ -65,21 +65,22 @@
 
 ## 环境与测试
 
-从仓库根目录运行。需要 Python 3.11+、`uv` 和应用的开发依赖；首次准备环境用 `python -m uv sync --project app --extra dev --frozen`。以下命令用 `--no-sync` 复用已准备好的环境，不在每次运行时同步依赖。
+从仓库根目录运行。先准备 Python 3.11+ 和 `uv`，首次运行或锁文件变化后用 `python -m uv sync --project app --extra dev --frozen` 安装开发依赖。全量测试还需要 Node.js 和 Patchright Chromium，安装 Chromium 的命令见下方。
 
 ```powershell
 python -m uv run --project app --extra dev --frozen --no-sync python app/tests/run.py
 python -m uv run --project app --extra dev --frozen --no-sync python app/tests/run.py build -k price_regression
-python -m uv run --project app --extra dev --frozen --no-sync python app/tests/run.py parallel -q
+python -m uv run --project app --extra dev --frozen --no-sync python app/tests/run.py all -q
+python -m uv run --project app --extra dev --frozen --no-sync python app/tests/run.py all --jobs 2 -q
 python -m uv run --project app --extra dev --frozen --no-sync ruff check app
 ```
 
-不带参数时跑日常快跑组；`parallel` 仅在 Windows 同时跑 `build` 和 `runtime`，需要 Node.js，不替代合并前的串行 `all`。其他分组和失败判定见[后端测试怎么跑](../docs/23-测试策略.md#后端测试怎么跑)。
+不带参数时跑日常快跑组。`all` 串行执行完整后端回归，`all --jobs 2` 在 Windows 上用两个进程执行同一批用例。`parallel` 在 Windows 上对应构建和运行时两组。CI 使用串行 `all`，有失败或跳过时返回非零。其他分组和排错方式见[后端测试怎么跑](../docs/23-测试策略.md#后端测试怎么跑)。
 
 `jsonschema`、`httpx` 和 `ruff` 是开发依赖；`jsonschema`／`httpx` 缺失时测试会失败，不会 skip。应用运行依赖包括 `lxml`、`pyyaml`、`scrapling[fetchers]`、`patchright`、`protego`、`fastapi` 和 `uvicorn`；`scrapling[fetchers]` 会带 `curl_cffi`、`playwright`、`browserforge` 和 `msgspec`。浏览器模式还需要 Chromium：
 
 ```powershell
-python -m patchright install chromium
+python -m uv run --project app --extra dev --frozen --no-sync python -m patchright install chromium
 ```
 
 `real_chrome: true` 时使用系统 Chrome／Edge，不依赖 Patchright 的 Chromium 下载。

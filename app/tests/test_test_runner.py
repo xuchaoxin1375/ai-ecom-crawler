@@ -8,7 +8,14 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from tests.run import PARALLEL_GROUPS, load_suite, parallel_plan
+from tests.run import (
+    GROUPS,
+    PARALLEL_GROUPS,
+    iter_cases,
+    load_suite,
+    parallel_plan,
+    split_full_suite,
+)
 
 
 class TestSelectionTests(unittest.TestCase):
@@ -24,6 +31,22 @@ class TestSelectionTests(unittest.TestCase):
     def test_empty_group_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "empty"):
             parallel_plan({"build": unittest.TestSuite()})
+
+    def test_full_shards_cover_the_suite_and_keep_browser_modules_together(self) -> None:
+        full_suite = unittest.TestSuite([load_suite("browser", []), load_suite("quick", [])])
+        shards = split_full_suite(full_suite)
+        plan = parallel_plan(shards, full_suite=full_suite)
+        self.assertEqual(len(plan), 2)
+        modules = [{type(test).__module__ for test in iter_cases(shard)} for shard in shards.values()]
+        browser = {f"tests.{name}" for name in GROUPS["browser"]}
+        self.assertEqual([names & browser for names in modules if names & browser], [browser])
+
+    def test_full_plan_rejects_an_omitted_shard(self) -> None:
+        full_suite = load_suite("quick", [])
+        shards = split_full_suite(full_suite)
+        shards.pop(next(iter(shards)))
+        with self.assertRaisesRegex(ValueError, "differ from full test discovery"):
+            parallel_plan(shards, full_suite=full_suite)
 
 
 if sys.platform == "win32":

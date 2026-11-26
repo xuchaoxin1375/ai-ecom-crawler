@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import tempfile
-import threading
 import unittest
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -13,6 +12,7 @@ from typing import Any
 from ecom_crawler.execution import run_and_export
 from ecom_crawler.runtime.rule import RuleError, load_rule
 from ecom_crawler.runtime.store import TaskStore
+from tests.support import serve_http_fixture
 
 RULE_TEMPLATE = """\
 schema_version: "1.2"
@@ -283,14 +283,8 @@ def fixture_server() -> Iterator[str]:
             return
 
     server = QuietServer(("127.0.0.1", 0), Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
+    with serve_http_fixture(server):
         yield f"http://127.0.0.1:{server.server_address[1]}"
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
 
 
 def _browser_available() -> bool:

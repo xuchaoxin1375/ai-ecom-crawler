@@ -150,12 +150,14 @@ def wait_for_start_gate(marker: Path) -> bool:
 
 def _start_worker(
     job: _Job, command: list[str], root: Path, name: str, fingerprint: str, quiet: bool,
-    deadline: float,
+    deadline: float, modules: tuple[str, ...] = (),
 ) -> _Worker:
     temp = root / name
     temp.mkdir()
     log = root / f"{name}.log"
     receipt = root / f"{name}.passed"
+    if modules:
+        receipt.with_suffix(".modules").write_text("\n".join(modules), encoding="utf-8")
     env = {
         **os.environ,
         "TMP": str(temp), "TEMP": str(temp), "TMPDIR": str(temp), "PYTHONIOENCODING": "utf-8",
@@ -186,7 +188,10 @@ def _report(message: str) -> None:
     sys.stderr.flush()
 
 
-def run_parallel(command: list[str], plan: dict[str, str], *, quiet: bool, timeout: int) -> int:
+def run_parallel(
+    command: list[str], plan: dict[str, str], *, quiet: bool, timeout: int,
+    modules_by_shard: dict[str, tuple[str, ...]] | None = None,
+) -> int:
     """Run a validated plan; require a completion receipt from every worker."""
     start = time.monotonic()
     deadline = start + timeout
@@ -198,7 +203,10 @@ def run_parallel(command: list[str], plan: dict[str, str], *, quiet: bool, timeo
     try:
         job = _Job()
         for name, fingerprint in plan.items():
-            workers.append(_start_worker(job, command, root, name, fingerprint, quiet, deadline))
+            modules = modules_by_shard[name] if modules_by_shard is not None else ()
+            workers.append(
+                _start_worker(job, command, root, name, fingerprint, quiet, deadline, modules)
+            )
             _report(f"Started {name} (PID {workers[-1].process.pid})")
         pending = workers.copy()
         code = 0
@@ -261,6 +269,6 @@ def run_parallel(command: list[str], plan: dict[str, str], *, quiet: bool, timeo
             _report(f"Could not remove parallel run directory: {exc}")
             code = 1
     if code != 0:
-        _report(f"Parallel test diagnostics: {root}; rerun build or runtime separately")
+        _report(f"Parallel test diagnostics: {root}; rerun with a serial test command")
     _report(f"Parallel wall clock: {time.monotonic() - start:.2f}s")
     return code

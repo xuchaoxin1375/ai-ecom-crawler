@@ -27,6 +27,7 @@ from ecom_crawler.harness.opencode import (
     child_environment,
 )
 from ecom_crawler.harness.workspace import BuildWorkspace
+from tests.support import serve_http_fixture
 
 PASSWORD = "test-password"
 AUTH = "Basic " + base64.b64encode(f"opencode:{PASSWORD}".encode()).decode()
@@ -256,24 +257,14 @@ class FakeHandler(BaseHTTPRequestHandler):
 
 class HarnessTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.temporary = tempfile.TemporaryDirectory()
-        self.root = Path(self.temporary.name)
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         FakeHandler.state = FakeState()
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), FakeHandler)
-        self.thread = threading.Thread(
-            target=self.server.serve_forever, daemon=True
-        )
-        self.thread.start()
+        server = ThreadingHTTPServer(("127.0.0.1", 0), FakeHandler)
+        self.enterContext(serve_http_fixture(server))
         self.client = OpenCodeClient(
-            f"http://127.0.0.1:{self.server.server_port}",
+            f"http://127.0.0.1:{server.server_port}",
             PASSWORD,
         )
-
-    def tearDown(self) -> None:
-        self.server.shutdown()
-        self.server.server_close()
-        self.thread.join(timeout=5)
-        self.temporary.cleanup()
 
     def _task(self, build_id: str = "build-1") -> BuildTask:
         return BuildTask(

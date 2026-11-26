@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import tempfile
-import threading
 import time
 import types
 import unittest
@@ -17,6 +16,7 @@ from ecom_crawler.execution import build_task, run_and_export, run_task
 from ecom_crawler.runtime.runner import UNLIMITED_ITEMS, TaskRunner
 from ecom_crawler.runtime.store import TaskStore
 from ecom_crawler.validate import validate_run
+from tests.support import serve_http_fixture
 
 RULE_TEMPLATE = """\
 schema_version: "1.1"
@@ -246,14 +246,8 @@ def fixture_server(*, products: int = 2, proxy_origin: str | None = None) -> Ite
             return
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
+    with serve_http_fixture(server):
         yield f"http://127.0.0.1:{server.server_address[1]}"
-    finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
 
 
 class ExecutionTests(unittest.TestCase):

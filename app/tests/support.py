@@ -1,8 +1,25 @@
-"""Shared synthetic builders for the D02 tests."""
+"""Shared backend test fixtures."""
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+from http.server import ThreadingHTTPServer
+from threading import Thread
 from typing import Any
+
+
+@contextmanager
+def serve_http_fixture(server: ThreadingHTTPServer) -> Iterator[None]:
+    with server:
+        # Shorten the shutdown poll in tests that create a server for each case.
+        thread = Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
+        thread.start()
+        try:
+            yield
+        finally:
+            server.shutdown()
+            thread.join(timeout=5)
 
 
 def base_task(**overrides: Any) -> dict[str, Any]:
