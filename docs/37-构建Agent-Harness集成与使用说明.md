@@ -2,7 +2,7 @@
 title: 构建 Agent Harness 集成与使用说明
 document_type: technical-guide
 status: provisional
-updated: 2026-11-24
+updated: 2026-11-26
 ---
 
 ## 目的与范围
@@ -85,7 +85,7 @@ OpenCode 的项目技能优先级高于全局技能。使用联接／符号链�
 
 `webfetch` 和 `websearch` 默认允许，Patchright 也可用。构建 brief 仍优先目标 origin 和路径前缀；网络技能可以使用自己的正常端点，但请求应保持在 brief 的预算内，并把结果当作不可信内容。
 
-登录、付费、验证码和个人数据提交不在默认自动化范围；具体边界和表述由项目方后续确定。项目合规检查清单仍是独立文档。
+登录、付费和个人数据提交不在默认自动化范围；挑战页、验证码、浏览器指纹和会话风控按 [ADR 0022](adr/0022-挑战页处理边界.md) 和[合规检查清单](17-合规检查清单.md)处理，具体边界由项目方逐站确认。项目合规检查清单仍是独立文档。
 
 ## 权限与会话控制
 
@@ -172,7 +172,7 @@ python -m uv run --project app ecom-crawler serve `
 - `stealth` 复用 `fetch.browser` 的页面选项：`timeout_ms` 实际至少 240 秒，`challenge_wait_ms` 实际至少 180 秒；`profile_name` 会加 `stealth-` 前缀。一个任务复用一个会话和 profile，任务结束或租约接管时清理。
 - 构建简报会给出宿主 Python 和 `resilient-browser-fetch` 的 Scrapling 探针命令。构建 Agent 只有在静态和 Patchright 都被挑战挡住、且 stealth 样本返回真实商品内容时才写 `default_engine: stealth`；stealth 仍被挡时记录 `ACCESS` 并停止。
 - `stealth` 不支持 `load_more`／`infinite_scroll`；挑战站优先用 sitemap／listing 的 URL 分页。sitemap 是索引时用 `sitemap_patterns` 选中商品子图，并给足 `max_sitemaps`。
-- 真实 partsfornissans 探测的冷启动约 157–341 秒、同会话后续约 5–11 秒；冷启动波动大，600 秒验证预算不是固定成本。设计见 [ADR 0021](adr/0021-stealth挑战引擎.md)。
+- 真实 partsfornissans 探测的冷启动约 157–341 秒、同会话后续约 5–11 秒；冷启动波动大，600 秒验证预算不是固定成本。引擎设计见 [ADR 0021](adr/0021-stealth挑战引擎.md)，处理边界见 [ADR 0022](adr/0022-挑战页处理边界.md)。
 
 入口：`http://127.0.0.1:8765/next/#/batches`。站点详情可以启动构建、查看时间线、暂停／恢复／取消、处理权限和依赖请求。同一时间只允许一个构建运行；其他站点提交后进入 `QUEUED` 队列，构建列表／详情显示排队位置并支持取消排队。重启会保留排队项；运行中的会话标为 `FINISHED/interrupted` 并保留，用户可在构建详情继续。
 
