@@ -754,6 +754,77 @@ def _duplicate_product_sample_error(
     return None
 
 
+_VISUAL_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
+
+
+def _visual_evidence_status(workspace_root: Path) -> dict[str, Any]:
+    """Inspect the build's visual evidence without failing the build.
+
+    Visual evidence is a soft requirement in the current pilot.  The host only
+    reports missing or unreadable files so the operator can see the gap; the
+    agent's ``PASSED`` result is not rewritten into a visual review.
+    """
+
+    root = Path(workspace_root) / "out" / "evidence" / "visual"
+    missing: list[str] = []
+    screenshot = ""
+    product_image = ""
+    review_status = ""
+    baseline = root / "baseline.json"
+    compare = root / "compare.md"
+    if not baseline.is_file():
+        missing.append("baseline.json")
+    if not compare.is_file():
+        missing.append("compare.md")
+    if baseline.is_file():
+        try:
+            payload = json.loads(baseline.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            missing.append("baseline.json (unreadable)")
+            payload = {}
+        if isinstance(payload, dict):
+            capture = payload.get("capture")
+            capture = capture if isinstance(capture, dict) else {}
+            screenshot = str(capture.get("screenshot") or "").strip()
+            product_image = str(capture.get("product_image") or "").strip()
+            review = payload.get("review")
+            review = review if isinstance(review, dict) else {}
+            review_status = str(review.get("status") or "").strip()
+    for label, value in (
+        ("capture.screenshot", screenshot),
+        ("capture.product_image", product_image),
+    ):
+        if not value:
+            missing.append(f"{label} (missing field)")
+            continue
+        candidate = Path(value)
+        if candidate.is_absolute() or ".." in candidate.parts:
+            missing.append(f"{label} (must be relative)")
+            continue
+        path = root / candidate
+        if not path.is_file():
+            missing.append(f"{label} ({value})")
+            continue
+        if path.suffix.casefold() not in _VISUAL_IMAGE_SUFFIXES:
+            missing.append(f"{label} (unsupported image type)")
+    if not screenshot and not product_image:
+        images = [
+            path
+            for path in root.glob("*")
+            if path.is_file() and path.suffix.casefold() in _VISUAL_IMAGE_SUFFIXES
+        ]
+        if not images:
+            missing.append("screenshot/image file")
+    return {
+        "status": "complete" if not missing else "missing",
+        "root": str(root),
+        "missing": missing,
+        "screenshot": screenshot,
+        "product_image": product_image,
+        "review_status": review_status,
+    }
+
+
 def _validation_error_message(
     task_result: dict[str, Any], *, valid: int, failed: int
 ) -> str:
@@ -2953,6 +3024,7 @@ domain-mismatched, or produces no valid product.
 
             validation: dict[str, Any] | None = None
             archive_stats: dict[str, Any] | None = None
+            visual_evidence = _visual_evidence_status(Path(session.workspace.root))
             try:
                 rule_path = self._find_rule(session)
                 rule = load_rule(rule_path)
@@ -3227,6 +3299,7 @@ domain-mismatched, or produces no valid product.
                 }
             )
             validation = normalize_validation(validation, change_summary)
+            validation["visual_evidence"] = visual_evidence
             validation_status = str(validation.get("status") or "FAILED")
             auto_activate = (
                 record.mode == "build" or self.activation_mode == "legacy"
@@ -3248,6 +3321,9 @@ domain-mismatched, or produces no valid product.
                     note += f"；验证{validation_status}"
                     if reasons:
                         note += "：" + "；".join(reasons[:2])
+            if visual_evidence["status"] != "complete":
+                missing = "、".join(visual_evidence["missing"][:4])
+                note += f"；视觉证据缺失：{missing}"
             if auto_activate:
                 current = self.store.get_site_rule(record.site_key)
                 self.store.activate_rule(
