@@ -13,6 +13,8 @@ import {
   siteCanPauseTask,
   siteCanResumeTask,
   siteExportIsPartial,
+  siteExportLabel,
+  siteResultTask,
   siteStartMode,
   taskExportLabel,
 } from "./actions";
@@ -221,5 +223,11 @@ describe("site action availability", () => {
 
     const finished = site({ task_id: "t-1", task: task({ state: "FINISHED" }) });
     expect(siteExportIsPartial(finished)).toBe(false);
+
+    const delivered = task({ task_id: "t-previous", state: "FINISHED" });
+    const rerunning = { ...running, delivery_task: delivered };
+    expect(siteResultTask(rerunning)).toBe(delivered);
+    expect(siteExportIsPartial(rerunning)).toBe(false);
+    expect(siteExportLabel(rerunning)).toBe("导出已采用结果 ZIP");
   });
 });

@@ -69,6 +69,7 @@ from .runtime.batch import (
     normalize_site,
     rule_covers_entry,
     rule_domains,
+    rule_has_catalog_discovery,
     target_entry,
 )
 from .runtime.models import (
@@ -79,7 +80,7 @@ from .runtime.models import (
     SiteRule,
     utc_now,
 )
-from .runtime.rule import load_rule
+from .runtime.rule import RuleError, load_rule
 from .runtime.store import BatchNotFoundError, TaskStore
 
 ACTIVE_TASK_STATES = {"DRAFT", "QUEUED", "RUNNING", "PAUSING", "PAUSED"}
@@ -1353,20 +1354,16 @@ class BuildManager:
         path = self.rules_dir / site.rule_path
         if not path.is_file():
             return None
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()
-        self.store.create_rule_version(
-            RuleVersion(
-                rule_id=site.rule_id,
-                rule_version=site.rule_version,
-                sha256=digest,
-                path=site.rule_path,
-                status="active",
-                created_at=site.updated_at,
-                activated_at=site.updated_at,
-                activated_by="legacy-migration",
-            )
-        )
-        return self.store.upsert_site_rule(
+        try:
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            if (
+                self.store.get_rule_version(site.rule_id, site.rule_version) is None
+                and load_rule(path).raw.get("status") != "verified"
+            ):
+                return None
+        except (OSError, RuleError):
+            return None
+        return self.store.bind_verified_site_rule(
             SiteRule(
                 site_key=site.site_key,
                 rule_id=site.rule_id,
@@ -1411,6 +1408,7 @@ class BuildManager:
         request_id: str | None = None,
         model_ref: str | None = None,
         auto_collect: bool = False,
+        promote_trial: bool = False,
     ) -> BuildRecord:
         if self.read_only:
             raise BuildError("build manager is read-only")
@@ -1518,6 +1516,8 @@ class BuildManager:
             resolved_catalog_scope = str(catalog_scope or "sample").strip().lower()
             if resolved_catalog_scope not in {"sample", "target", "full"}:
                 resolved_catalog_scope = "sample"
+            if batch.collection_mode and not repair and resolved_catalog_scope == "sample":
+                resolved_catalog_scope = "batch"
             self._archive_configs[build_id] = {
                 "mode": resolved_archive_mode,
                 "root": str(
@@ -1586,7 +1586,7 @@ class BuildManager:
                 source_rule_version=site.rule_version if repair else None,
                 source_rule_sha256=source_rule_sha256,
             )
-            self.store.create_build(record)
+            self.store.create_build(record, promote_trial=promote_trial)
             self.store.update_batch_site(
                 batch.batch_id,
                 site.site_key,
@@ -2328,7 +2328,21 @@ candidate; the host validates and installs it.
         catalog_products = int(
             task.extra.get("catalog_products") or task.limits.get("max_products") or 1
         )
-        if catalog_scope == "full":
+        if catalog_scope == "batch":
+            catalog_lines = (
+                f"- Catalog scope: the submitted entry `{task.site['entry_urls'][0]}`\n"
+                "- Plan discovery for the requested range. The host only tests a small sample.\n"
+            )
+            discovery_instruction = (
+                "For a homepage, identify the catalog discovery routes and how they end. "
+                "For an explicit path or query, start discovery at that exact URL, "
+                "preserve its filters, and stay inside that range. Use a listing or "
+                "HTML index from that entry; use the actual next-page or load-more "
+                "mechanism if the site has one. A single-page listing is valid when "
+                "it really ends there. Do not limit the rule to the products sampled "
+                "during validation or invent a minimum catalog size."
+            )
+        elif catalog_scope == "full":
             catalog_lines = (
                 f"- Catalog scope: **full site** (target at least {catalog_products} products)\n"
                 f"- Host validation sample: {task.limits.get('max_products')} products\n"
@@ -2695,7 +2709,12 @@ domain-mismatched, or produces no valid product.
         catalog_products = int(
             task.extra.get("catalog_products") or task.limits.get("max_products") or 1
         )
-        if catalog == "full":
+        if catalog == "batch":
+            scope_note = (
+                " Build discovery for the submitted range, including any observed "
+                "pagination. The host validates only a small sample."
+            )
+        elif catalog == "full":
             scope_note = (
                 " This is a full-catalog build: enumerate the top-level product "
                 "categories and their pagination, and set scope.max_products to the "
@@ -2761,6 +2780,8 @@ domain-mismatched, or produces no valid product.
                 if record is None:
                     return
                 session = self._session(build_id)
+                if self._stopping.is_set():
+                    return
                 if session is None:
                     self._finalize(build_id, error="build session is no longer available")
                     return
@@ -3617,7 +3638,14 @@ domain-mismatched, or produces no valid product.
     def _assert_catalog_rule(self, build_id: str, rule: Any) -> None:
         catalog = self._catalog_configs.get(build_id, {})
         catalog_scope = str(catalog.get("catalog_scope"))
-        if catalog_scope not in {"full", "target"}:
+        if catalog_scope not in {"batch", "full", "target"}:
+            return
+        if not rule_has_catalog_discovery(rule):
+            raise BuildError(
+                f"{catalog_scope} catalog build requires a catalog discovery source; "
+                "entry_links alone only validates an entry sample"
+            )
+        if catalog_scope == "batch":
             return
         target = int(
             catalog.get("catalog_products")
@@ -3628,24 +3656,6 @@ domain-mismatched, or produces no valid product.
             raise BuildError(
                 f"{catalog_scope} catalog build requires scope.max_products >= "
                 f"{target}; got {scope_products}"
-            )
-        sources = rule.discovery.get("sources")
-        source_types = {
-            str(source.get("type"))
-            for source in sources or []
-            if isinstance(source, dict)
-        }
-        has_product_source = bool(rule.product_source)
-        if not has_product_source and not source_types & {
-            "listing",
-            "sitemap",
-            "html_index",
-            "public_json",
-        }:
-            raise BuildError(
-                f"{catalog_scope} catalog build requires discovery.sources with a "
-                "listing, sitemap, html_index or public_json source, or a "
-                "Shopify product_source; entry_links alone does not cover the target"
             )
 
     def _start_repair(

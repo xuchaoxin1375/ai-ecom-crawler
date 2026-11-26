@@ -90,7 +90,7 @@ def post(page: Page, button: Locator, origin: str, path: str, status: int) -> di
     return response.json()
 
 
-def verify_zip(path: Path, name: str, batch: str, task: str, fixture: str) -> None:
+def verify_zip(path: Path, name: str, batch: str, task: str, fixture: str, site_key: str) -> None:
     with zipfile.ZipFile(path) as archive:
         manifest = json.loads(archive.read("batch.json"))
         check(
@@ -100,12 +100,12 @@ def verify_zip(path: Path, name: str, batch: str, task: str, fixture: str) -> No
         sites = manifest["sites"]
         check(
             len(sites) == 1
-            and sites[0]["site_key"] == SITE
+            and sites[0]["site_key"] == site_key
             and sites[0]["task_id"] == task
             and sites[0]["export_status"] == "sample",
             f"Wrong site/task in export: {sites}",
         )
-        task_path = f"sites/{SITE}"
+        task_path = f"sites/{site_key}"
         result = json.loads(archive.read(f"{task_path}/task-result.json"))
         check(
             result["task_id"] == task
@@ -183,6 +183,7 @@ def exercise(page: Page, origin: str, fixture: str, root: Path) -> None:
     )
     created = post(page, draft.get_by_role("button", name="保存草稿"), origin, "/api/batches", 201)
     batch = created["batch"]["batch_id"]
+    site_key = created["batch"]["sites"][0]["site_key"]
     check(
         created["batch"]["name"] == name and created["import"]["summary"]["stored"] == 1,
         f"Wrong saved draft: {created}",
@@ -242,17 +243,17 @@ def exercise(page: Page, origin: str, fixture: str, root: Path) -> None:
     search.fill("workbench-fixture")
     filters.select_option("startable")
     row_link.click()
-    expect(page).to_have_url(re.compile(rf"/sites/{re.escape(SITE)}$"))
+    expect(page).to_have_url(re.compile(rf"/sites/{re.escape(site_key)}$"))
     page.get_by_role("link", name=f"返回 {name}", exact=True).click()
     expect(search).to_have_value("workbench-fixture")
     expect(filters).to_have_value("startable")
     expect(row_link).to_be_focused()
     row_link.press("Enter")
-    expect(page).to_have_url(re.compile(rf"/sites/{re.escape(SITE)}$"))
+    expect(page).to_have_url(re.compile(rf"/sites/{re.escape(site_key)}$"))
     page.go_back()
     expect(filters).to_have_value("startable")
     expect(row_link).to_be_focused()
-    page.goto(f"{origin}/next/#/batches/{batch}/sites/{SITE}")
+    page.goto(f"{origin}/next/#/batches/{batch}/sites/{site_key}")
     page.get_by_role("link", name=f"返回 {name}", exact=True).click()
     expect(search).to_have_value("")
     expect(filters).to_have_value("all")
@@ -278,7 +279,7 @@ def exercise(page: Page, origin: str, fixture: str, root: Path) -> None:
     check(
         len(accepted["accepted"]) == 1
         and not accepted["skipped"]
-        and accepted["accepted"][0]["site_key"] == SITE,
+        and accepted["accepted"][0]["site_key"] == site_key,
         f"Wrong start result: {accepted}",
     )
     task = accepted["accepted"][0]["task_id"]
@@ -319,7 +320,14 @@ def exercise(page: Page, origin: str, fixture: str, root: Path) -> None:
         "link", name=SITE, exact=True
     ).click()
     expect(page.get_by_role("tab", name=re.compile("当前采集"))).to_be_visible()
-    expect(page.get_by_role("button", name="导出当前任务 ZIP", exact=True)).to_have_count(1)
+    site_export = page.get_by_role("button", name="导出已采用结果 ZIP", exact=True)
+    expect(site_export).to_have_count(1)
+    with page.expect_download() as pending:
+        site_export.click()
+    check(
+        pending.value.url == f"{origin}/api/tasks/{task}/export",
+        f"Wrong site export URL: {pending.value.url}",
+    )
     page.get_by_role("tab", name=re.compile("规则与构建")).click()
     expect(page.get_by_role("heading", name="规则版本", exact=True)).to_be_visible()
     page.get_by_role("tab", name=re.compile("站点资料")).click()
@@ -350,7 +358,7 @@ def exercise(page: Page, origin: str, fixture: str, root: Path) -> None:
     )
     target = root / "batch.zip"
     download.save_as(str(target))
-    verify_zip(target, name, batch, task, fixture)
+    verify_zip(target, name, batch, task, fixture, site_key)
     page.get_by_role("button", name="开始正式采集…", exact=True).click()
     formal = page.get_by_role("dialog", name="开始正式采集", exact=True)
     promoted = post(

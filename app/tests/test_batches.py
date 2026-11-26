@@ -25,10 +25,10 @@ from ecom_crawler.runtime.models import (
     utc_now,
 )
 from ecom_crawler.runtime.rule import load_rule
-from ecom_crawler.runtime.store import TaskStore
+from ecom_crawler.runtime.store import RuleVersionError, TaskStore
 from ecom_crawler.runtime.worker import Worker
 from ecom_crawler.web.app import create_app
-from tests.test_execution import RULE_TEMPLATE, fixture_server
+from tests.test_execution import RULE_TEMPLATE, fixture_server, product_html
 
 CLIENT_HEADERS = {
     "Host": "127.0.0.1:8765",
@@ -229,7 +229,9 @@ class BatchApiTests(unittest.TestCase):
         body.update(overrides)
         return self.client.post("/api/batches", json=body).json()
 
-    def _add_familidoo_version(self, version: str) -> tuple[str, str]:
+    def _add_familidoo_version(
+        self, version: str, *, source_build_id: str | None = None,
+    ) -> tuple[str, str]:
         payload = yaml.safe_load(
             (self.rules_dir / "familidoo.yaml").read_text(encoding="utf-8")
         )
@@ -249,6 +251,7 @@ class BatchApiTests(unittest.TestCase):
                 path=target.name,
                 status="candidate",
                 parent_version="2026.11.21-1",
+                source_build_id=source_build_id,
             )
         )
         return target.name, digest
@@ -457,6 +460,97 @@ class BatchApiTests(unittest.TestCase):
                 self.assertIn(f"Product {index}", csv_file)
                 self.assertIn(f"{origin}/p{index}.html", csv_file)
 
+    def test_shared_rule_activation_and_rollback_are_target_local(self) -> None:
+        domain = "familidoo.fr"
+        legacy = self._create(sites=[domain])["batch"]
+        self._activate_fixture_rule("familidoo.yaml", domain)
+        scoped = self._create(
+            collection_mode="sample", sites=["https://www.familidoo.fr/fr/"],
+        )["batch"]
+        target = scoped["sites"][0]["site_key"]
+        original = self.store.get_site_rule(domain)
+        self.assertEqual(self.store.get_site_rule(target).sha256, original.sha256)
+        started = self.client.post(f"/api/batches/{legacy['batch_id']}/start").json()
+        original_task = started["accepted"][0]["task_id"]
+        self.store.update_task(original_task, state="FINISHED", outcome="COMPLETED")
+
+        # Exercise upgrade from the old ledger shape before permitting split versions.
+        db = self.store.path
+        with sqlite3.connect(db) as connection:
+            connection.execute(
+                "CREATE UNIQUE INDEX idx_rule_versions_one_active ON rule_versions(rule_id) "
+                "WHERE status = 'active'"
+            )
+        connection.close()
+        self.store = TaskStore(db)
+        build_id = "build-category-repair"
+        self.store.create_build(BuildRecord(
+            build_id=build_id, batch_id=scoped["batch_id"], site_key=target, state="FINISHED",
+        ))
+        version = "2026.11.26-category"
+        _, digest = self._add_familidoo_version(version, source_build_id=build_id)
+        for key, expected_count in ((domain, 0), (target, 1)):
+            rule = self.client.get(f"/api/sites/{key}/rule").json()
+            self.assertEqual(len(rule["candidates"]), expected_count)
+        with self.assertRaisesRegex(RuleVersionError, "candidate belongs to another site"):
+            self.store.activate_rule(
+                site_key=domain, rule_id=original.rule_id, rule_version=version,
+                sha256=digest, request_id="activate-wrong-target",
+            )
+        self.store.activate_rule(
+            site_key=target, rule_id=original.rule_id, rule_version=version,
+            sha256=digest, request_id="activate-category",
+        )
+        self.assertEqual(self.store.get_site_rule(domain), original)
+        self.assertEqual(self.store.get_site_rule(target).rule_version, version)
+        self.assertEqual(self.store.get_rule_version(original.rule_id, original.rule_version).status, "active")
+        self.assertEqual(self.store.get_task(original_task).rule_sha256, original.sha256)
+        wrong = self.client.post(
+            f"/api/sites/{domain}/rule/rollback",
+            json={"request_id": "rollback-wrong-site", "to_version": version},
+        )
+        self.assertEqual(wrong.status_code, 409, wrong.text)
+        self.assertEqual(wrong.json()["error"]["code"], "RULE_NOT_ACTIVE")
+        rolled_back = self.client.post(
+            f"/api/sites/{target}/rule/rollback", json={"request_id": "rollback-category"},
+        )
+        self.assertEqual(rolled_back.status_code, 200, rolled_back.text)
+        self.assertEqual(rolled_back.json()["target"]["rule_version"], original.rule_version)
+        self.assertEqual(self.store.get_site_rule(domain), original)
+        self.assertEqual(self.store.get_site_rule(target).sha256, original.sha256)
+        self.assertEqual(self.store.get_rule_version(original.rule_id, version).status, "superseded")
+
+    def test_homepage_market_bindings_share_quota_and_keep_old_links(self) -> None:
+        domain = "familidoo.fr"
+        legacy = self._create(market="FR", sites=[domain])["batch"]
+        self._activate_fixture_rule("familidoo.yaml", domain)
+        original = self.store.get_site_rule(domain)
+        us_rule = yaml.safe_load((self.rules_dir / "familidoo.yaml").read_text(encoding="utf-8"))
+        us_rule["rule_version"] = "2026.11.26-us"
+        us_rule["status"] = "verified"
+        us_rule["site"].update({"market": "US", "locale": "en-US", "currency": "USD"})
+        (self.rules_dir / "familidoo-us.yaml").write_text(yaml.safe_dump(us_rule), encoding="utf-8")
+
+        expected_versions = {"FR": original.rule_version, "US": us_rule["rule_version"]}
+        for market, version in expected_versions.items():
+            batch = self._create(collection_mode="formal", sites=[domain], market=market)["batch"]
+            key = target_key(domain, None, market)
+            site = batch["sites"][0]
+            self.assertNotEqual(key, domain)
+            self.assertEqual(site["site_key"], key)
+            self.assertIsNone(site["target_entry"])
+            self.assertIsNotNone(site["rule"], site["note"])
+            self.assertEqual(site["rule"]["rule_version"], version)
+            started = self.client.post(f"/api/batches/{batch['batch_id']}/start").json()
+            task = self.store.get_task(started["accepted"][0]["task_id"])
+            self.assertEqual((task.site_key, task.domain_key, task.market), (key, domain, market))
+            self.assertEqual((task.plan_id, task.plan_version), (original.rule_id, version))
+
+        old = self.client.get(f"/api/batches/{legacy['batch_id']}").json()["sites"][0]
+        self.assertEqual(old["site_key"], domain)
+        self.assertEqual(self.client.get(f"/api/sites/{domain}/rule").status_code, 200)
+        self.assertEqual(self.store.get_site_rule(domain), original)
+
     def test_formal_pagination_limit_preserves_prior_trial_delivery(self) -> None:
         origin = "http://limited-catalog.test"
         entry = f"{origin}/list?brand=one&brand=two&p=2"
@@ -476,6 +570,10 @@ class BatchApiTests(unittest.TestCase):
             trial = self.client.post(f"{path}/start", json={}).json()["accepted"][0]["task_id"]
             worker.run_once()
             formal = self.client.post(f"{path}/start", json={"promote_trial": True}).json()["accepted"][0]["task_id"]
+            replay = self.client.post(f"{path}/start", json={"promote_trial": True})
+            self.assertEqual(replay.status_code, 202, replay.text)
+            self.assertEqual(replay.json()["accepted"], [])
+            self.assertEqual(len(self.store.list_batch_tasks(batch["batch_id"])), 2)
             worker.run_once()
         result = self.store.get_task(formal)
         self.assertEqual((result.state, result.outcome, result.stop_reason), ("FINISHED", "PARTIAL", "BUDGET_EXHAUSTED"))
@@ -518,6 +616,59 @@ class BatchApiTests(unittest.TestCase):
         with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
             row = json.loads(archive.read("batch.json"))["sites"][0]
         self.assertEqual((row["task_id"], row["export_status"]), (last_page, "complete"))
+
+    def test_trial_promotion_without_eligible_work_keeps_sample_plan(self) -> None:
+        batch = self._create(collection_mode="sample", sites=["unknown-scope.example"])["batch"]
+        response = self.client.post(
+            f"/api/batches/{batch['batch_id']}/start", json={"promote_trial": True}
+        )
+        self.assertEqual(response.status_code, 202, response.text)
+        self.assertEqual(response.json()["accepted"], [])
+        self.assertEqual(response.json()["batch"]["collection_mode"], "sample")
+
+    def test_empty_formal_rerun_keeps_existing_delivery(self) -> None:
+        origin = "http://quality-catalog.test"
+        entry = f"{origin}/list?p=2"
+        rule = yaml.safe_load(RULE_TEMPLATE.replace("__BASE__", origin))
+        rule["rule_id"] = "quality-catalog"
+        rule["site"]["entry_urls"] = [entry]
+        rule["discovery"]["entry_url"] = entry
+        filename = "quality-catalog.yaml"
+        (self.rules_dir / filename).write_text(yaml.safe_dump(rule), encoding="utf-8")
+        key = target_key("quality-catalog.test", entry, "GB")
+        self._activate_fixture_rule(filename, key)
+        batch = self._create(collection_mode="formal", market="GB", sites=[entry])["batch"]
+        path = f"/api/batches/{batch['batch_id']}"
+
+        def run_with_proxy(*, rerun: bool) -> str:
+            with fixture_server(proxy_origin=origin) as proxy:
+                response = self.client.post(
+                    f"{path}/start", json={"proxy": proxy, "rerun_finished": rerun}
+                )
+                self.assertEqual(response.status_code, 202, response.text)
+                task_id = response.json()["accepted"][0]["task_id"]
+                Worker(self.store, out_root=self.out_root, per_domain_rps=50, proxy=proxy).run_once()
+                return task_id
+
+        def zero_price(base: str, index: int) -> str:
+            return product_html(base, index).replace(
+                'content="12.00"', 'content="0"'
+            ).replace('content="10.00"', 'content="0"')
+
+        delivered = run_with_proxy(rerun=False)
+        with patch("tests.test_execution.product_html", side_effect=zero_price):
+            latest = run_with_proxy(rerun=True)
+
+        task = self.store.get_task(latest)
+        self.assertEqual(task.outcome, "COMPLETED")
+        self.assertEqual(task.counters["valid_products"], 0)
+        self.assertEqual(task.counters["excluded_products"], 1)
+        response = self.client.get(f"{path}/export")
+        self.assertEqual(response.status_code, 200, response.text)
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            row = json.loads(archive.read("batch.json"))["sites"][0]
+            self.assertEqual((row["task_id"], row["current_task_id"]), (delivered, latest))
+            self.assertEqual(row["counts"]["valid_products"], 1)
 
     def test_import_prefers_active_rule_over_candidate(self) -> None:
         self._add_familidoo_version("2026.11.22-2")

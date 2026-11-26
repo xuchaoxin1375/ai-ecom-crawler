@@ -193,7 +193,9 @@ export function BuildPanel({
             <MetaItem label="目录">
               {build.catalog?.catalog_scope === "full"
                 ? `全量目标 ${build.catalog.catalog_products ?? "—"}`
-                : "样例"}
+                : build.catalog?.catalog_scope === "batch"
+                  ? "批次目标范围"
+                  : "样例"}
             </MetaItem>
             <MetaItem label="样例存档">
               {build.archive_stats

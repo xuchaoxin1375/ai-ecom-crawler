@@ -1919,10 +1919,14 @@ class TaskRunner:
         _write_json(self.task_result_path, task_result)
         self._write_urls_csv()
         self._write_products_csv()
+        can_adopt = state == "FINISHED" and outcome == "COMPLETED" and (
+            self.task.input.get("collection_mode") != "formal"
+            or task_result["counts"].get("valid_products", 0) > 0
+        )
         self.store.update_task(
             self.task.task_id,
             lease=self.lease,
-            delivery=self.task if state == "FINISHED" and outcome == "COMPLETED" else None,
+            delivery=self.task if can_adopt else None,
             state=state,
             outcome=outcome,
             stop_reason=stop_reason,

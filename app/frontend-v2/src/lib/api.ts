@@ -695,6 +695,7 @@ export interface BatchSite {
   site_key: string;
   domain: string;
   input_value: string;
+  target_entry?: string | null;
   readiness: Readiness;
   note: string | null;
   rule: RuleRef | null;

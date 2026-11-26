@@ -100,8 +100,9 @@ import {
   siteCanPauseTask,
   siteCanResumeTask,
   siteExportIsPartial,
+  siteExportLabel,
+  siteResultTask,
   siteStartMode,
-  taskExportLabel,
 } from "./actions";
 import {
   batchHasActiveTasks,
@@ -629,9 +630,10 @@ export function BatchDetailPage() {
   }
 
   function downloadSite(site: BatchSite) {
-    if (!site.task) return;
+    const result = siteResultTask(site);
+    if (!result) return;
     const link = document.createElement("a");
-    link.href = taskExportUrl(site.task.task_id, siteExportIsPartial(site));
+    link.href = taskExportUrl(result.task_id, siteExportIsPartial(site));
     link.download = "";
     document.body.appendChild(link);
     link.click();
@@ -806,7 +808,7 @@ export function BatchDetailPage() {
       groups.push([
         {
           key: "export",
-          label: taskExportLabel(siteExportIsPartial(site)),
+          label: siteExportLabel(site),
           icon: <Download size={14} />,
           onSelect: () => downloadSite(site),
         },
@@ -973,9 +975,7 @@ export function BatchDetailPage() {
             }
           >
             <span className="truncate" title={site.input_value}>
-              {batch.collection_mode && site.site_key.includes("--")
-                ? site.input_value
-                : site.domain}
+              {site.target_entry ? site.input_value : site.domain}
             </span>
           </Link>
           {compact ? null : (

@@ -15,6 +15,7 @@ import {
   formatAmount,
   taskStateLabel,
 } from "../../lib/format";
+import { siteExportLabel } from "../batches/actions";
 
 export type SiteActionKind =
   | "build"
@@ -292,9 +293,11 @@ export function siteNextStep(
         return {
           tone: "success",
           title: "采集完成",
-          description: "导出当前任务结果，或回批次详情复跑该站点。",
+          description: site.delivery_task
+            ? "导出已采用结果，或回批次详情复跑该站点。"
+            : "导出当前任务结果，或回批次详情复跑该站点。",
           action: "export",
-          actionLabel: "导出当前任务 ZIP",
+          actionLabel: siteExportLabel(site),
         };
       }
       if (task.outcome === "CANCELLED") {

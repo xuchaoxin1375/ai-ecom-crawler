@@ -74,7 +74,12 @@ import { ErrorNotice } from "../../components/ui/ErrorNotice";
 import { InlineNotice } from "../../components/ui/InlineNotice";
 import { RowActionsMenu, type RowActionItem } from "../../components/ui/DropdownMenu";
 import { ConfirmBatchActionDialog } from "../batches/ConfirmBatchActionDialog";
-import { siteCanCancelTask, taskExportLabel } from "../batches/actions";
+import {
+  siteCanCancelTask,
+  siteExportIsPartial,
+  siteExportLabel,
+  siteResultTask,
+} from "../batches/actions";
 import { ProductPreviewSection } from "../tasks/ProductPreviewSection";
 import { QualityExceptionsSection } from "../tasks/QualityExceptionsSection";
 import { BuildApprovals } from "./BuildApprovals";
@@ -393,9 +398,11 @@ export function SiteDetailPage() {
   }
 
   function downloadTask() {
-    if (!task) return;
+    if (!site) return;
+    const result = siteResultTask(site);
+    if (!result) return;
     const link = document.createElement("a");
-    link.href = taskExportUrl(task.task_id, taskActive);
+    link.href = taskExportUrl(result.task_id, siteExportIsPartial(site));
     link.download = "";
     document.body.appendChild(link);
     link.click();
@@ -844,11 +851,11 @@ export function SiteDetailPage() {
   };
 
   const moreActions: RowActionItem[][] = [];
-  if (task && step?.action !== "export") {
+  if (siteResultTask(site) && step?.action !== "export") {
     moreActions.push([
       {
         key: "export",
-        label: taskExportLabel(taskActive),
+        label: siteExportLabel(site),
         icon: <Download size={14} />,
         onSelect: downloadTask,
       },
@@ -954,13 +961,26 @@ export function SiteDetailPage() {
         <div className="bg-surface px-4 py-3">
           <dt className="text-xs text-ink-3">结果</dt>
           <dd className="mt-0.5 text-sm text-ink">
-            {taskActive ? "任务未结束，结果会继续更新" : "已生成，可用于导出"}
+            {taskActive
+              ? "任务未结束，结果会继续更新"
+              : task.counts.valid_products === 0
+                ? "本次没有有效商品"
+                : "结果已生成"}
           </dd>
         </div>
       </dl>
-      <p className="px-4 py-2.5 text-xs leading-5 text-ink-3 max-sm:hidden sm:px-5">
-        导出只包含当前任务；任务运行中为部分结果，历史任务见「任务历史」。
-      </p>
+      {site.delivery_task && site.delivery_task.task_id !== task.task_id ? (
+        <div className="px-4 py-2.5 text-xs leading-5 text-ink-3 sm:px-5">
+          站点和批次导出仍使用{" "}
+          <Link
+            className="text-accent hover:underline"
+            to={`/tasks/${encodeURIComponent(site.delivery_task.task_id)}`}
+          >
+            上次已采用的结果
+          </Link>
+          。
+        </div>
+      ) : null}
     </section>
   ) : null;
 

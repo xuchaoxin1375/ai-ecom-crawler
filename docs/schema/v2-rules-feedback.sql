@@ -100,11 +100,7 @@ CREATE INDEX IF NOT EXISTS idx_rule_versions_status
 CREATE INDEX IF NOT EXISTS idx_rule_versions_hash
     ON rule_versions(rule_id, sha256);
 
--- One active version per site-level rule_id.  Activation and rollback must
--- mark the current active row superseded before promoting the target row.
-CREATE UNIQUE INDEX IF NOT EXISTS idx_rule_versions_one_active
-    ON rule_versions(rule_id) WHERE status = 'active';
-
+-- Each target binds one version. Different targets may use different versions.
 CREATE TABLE IF NOT EXISTS site_rules (
     site_key TEXT PRIMARY KEY,
     rule_id TEXT NOT NULL,

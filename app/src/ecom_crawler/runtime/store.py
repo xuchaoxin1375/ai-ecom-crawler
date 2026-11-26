@@ -205,9 +205,6 @@ CREATE INDEX IF NOT EXISTS idx_rule_versions_status
 CREATE INDEX IF NOT EXISTS idx_rule_versions_hash
     ON rule_versions(rule_id, sha256);
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_rule_versions_one_active
-    ON rule_versions(rule_id) WHERE status = 'active';
-
 CREATE TABLE IF NOT EXISTS site_rules (
     site_key TEXT PRIMARY KEY,
     rule_id TEXT NOT NULL,
@@ -408,6 +405,7 @@ class TaskStore:
     def _init_schema(self) -> None:
         with self._connect() as connection:
             connection.executescript(SCHEMA)
+            connection.execute("DROP INDEX IF EXISTS idx_rule_versions_one_active")
             task_columns = {
                 row["name"] for row in connection.execute("PRAGMA table_info(tasks)")
             }
@@ -1488,21 +1486,21 @@ class TaskStore:
             ).fetchone()
         return _batch_from_row(row) if row else None
 
-    def promote_batch_collection(self, batch_id: str) -> Batch:
-        with self._connect() as connection:
-            cursor = connection.execute(
-                "UPDATE batches SET collection_mode = 'formal', updated_at = ? "
-                "WHERE batch_id = ? AND archived_at IS NULL AND collection_mode = 'sample' "
-                "AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.batch_id = batches.batch_id "
-                "AND t.state NOT IN ('FINISHED', 'CANCELLED')) "
-                "AND NOT EXISTS (SELECT 1 FROM batch_sites s WHERE s.batch_id = batches.batch_id "
-                "AND s.readiness = 'building')",
-                (utc_now(), batch_id),
-            )
-        batch = self.get_batch(batch_id)
-        if cursor.rowcount != 1 or batch is None:
+    @staticmethod
+    def _promote_batch_collection(connection: sqlite3.Connection, batch_id: str) -> None:
+        cursor = connection.execute(
+            "UPDATE batches SET collection_mode = 'formal', updated_at = ? "
+            "WHERE batch_id = ? AND archived_at IS NULL AND collection_mode = 'sample' "
+            "AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.batch_id = batches.batch_id "
+            "AND t.state NOT IN ('FINISHED', 'CANCELLED')) "
+            "AND NOT EXISTS (SELECT 1 FROM builds b WHERE b.batch_id = batches.batch_id "
+            "AND b.state NOT IN ('FINISHED', 'CANCELLED', 'INTERRUPTED')) "
+            "AND NOT EXISTS (SELECT 1 FROM batch_sites s WHERE s.batch_id = batches.batch_id "
+            "AND s.readiness = 'building')",
+            (utc_now(), batch_id),
+        )
+        if cursor.rowcount != 1:
             raise BatchTransitionError("only idle trial batches can start formal collection")
-        return batch
 
     def list_batches(self, *, include_archived: bool = False) -> list[Batch]:
         query = "SELECT * FROM batches"
@@ -1637,7 +1635,12 @@ class TaskStore:
         return site
 
     def create_task_for_site(
-        self, task: Task, *, site_key: str, replace_existing: bool = False
+        self,
+        task: Task,
+        *,
+        site_key: str,
+        replace_existing: bool = False,
+        promote_trial: bool = False,
     ) -> bool:
         """Create a task and link it to a batch site in one transaction.
 
@@ -1651,6 +1654,8 @@ class TaskStore:
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
+                if promote_trial:
+                    self._promote_batch_collection(connection, task.batch_id)
                 row = connection.execute(
                     "SELECT bs.task_id, t.state, b.collection_mode FROM batch_sites bs "
                     "JOIN batches b ON b.batch_id = bs.batch_id AND b.archived_at IS NULL "
@@ -1722,9 +1727,12 @@ class TaskStore:
             ).fetchall()
         return _batch_from_row(batch), list(map(_batch_site_from_row, sites)), list(map(_task_from_row, tasks))
 
-    def create_build(self, build: BuildRecord) -> None:
-        with self._connect() as connection:
+    def create_build(self, build: BuildRecord, *, promote_trial: bool = False) -> None:
+        with self._connect() as connection, connection:
             try:
+                if promote_trial:
+                    connection.execute("BEGIN IMMEDIATE")
+                    self._promote_batch_collection(connection, build.batch_id)
                 connection.execute(
                     """
                     INSERT INTO builds (
@@ -2277,6 +2285,39 @@ class TaskStore:
             ).fetchone()
         return _site_rule_from_row(row) if row else None
 
+    def bind_verified_site_rule(self, rule: SiteRule) -> SiteRule | None:
+        with self._connect() as connection, connection:
+            connection.execute("BEGIN IMMEDIATE")
+            current = connection.execute(
+                "SELECT * FROM site_rules WHERE site_key = ?", (rule.site_key,)
+            ).fetchone()
+            if current is not None:
+                return _site_rule_from_row(current)
+            connection.execute(
+                """
+                INSERT INTO rule_versions (
+                    rule_id, rule_version, sha256, path, status, created_at,
+                    activated_at, activated_by
+                ) VALUES (?, ?, ?, ?, 'active', ?, ?, 'legacy-migration')
+                ON CONFLICT(rule_id, rule_version) DO NOTHING
+                """,
+                (rule.rule_id, rule.rule_version, rule.sha256, rule.path, rule.updated_at, rule.updated_at),
+            )
+            version = connection.execute(
+                "SELECT sha256, status FROM rule_versions WHERE rule_id = ? AND rule_version = ?",
+                (rule.rule_id, rule.rule_version),
+            ).fetchone()
+            if version["status"] != "active" or version["sha256"] != rule.sha256:
+                return None
+            connection.execute(
+                """
+                INSERT INTO site_rules (site_key, rule_id, rule_version, sha256, path, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (rule.site_key, rule.rule_id, rule.rule_version, rule.sha256, rule.path, rule.updated_at),
+            )
+        return rule
+
     def upsert_site_rule(self, site_rule: SiteRule) -> SiteRule:
         with self._connect() as connection:
             connection.execute(
@@ -2325,23 +2366,41 @@ class TaskStore:
             ).fetchall()
         return [_batch_site_from_row(row) for row in rows]
 
-    def list_candidate_rules(self, rule_id: str) -> list[RuleVersion]:
-        versions, _ = self.list_rule_versions(
-            rule_id, status="candidate", limit=200, offset=0
-        )
-        return versions
-
-    def latest_superseded_rule(self, rule_id: str) -> RuleVersion | None:
+    def list_candidate_rules(self, rule_id: str, site_key: str) -> list[RuleVersion]:
         with self._connect() as connection:
-            row = connection.execute(
+            rows = connection.execute(
                 """
-                SELECT * FROM rule_versions
-                WHERE rule_id = ? AND status = 'superseded'
-                ORDER BY activated_at DESC, created_at DESC
-                LIMIT 1
+                SELECT r.* FROM rule_versions r
+                JOIN builds b ON b.build_id = r.source_build_id
+                WHERE r.rule_id = ? AND r.status = 'candidate' AND b.site_key = ?
+                ORDER BY r.created_at DESC, r.rule_version DESC LIMIT 200
                 """,
-                (rule_id,),
-            ).fetchone()
+                (rule_id, site_key),
+            ).fetchall()
+        return [_rule_version_from_row(row) for row in rows]
+
+    @staticmethod
+    def _find_rollback_rule(
+        connection: sqlite3.Connection, current: SiteRule, version: str | None,
+    ) -> sqlite3.Row | None:
+        return connection.execute(
+            """
+            SELECT r.* FROM rule_activations a
+            JOIN rule_versions r ON r.rule_id = a.rule_id
+                AND r.rule_version = a.from_version AND r.sha256 = a.from_sha256
+            WHERE a.site_key = ? AND a.rule_id = ? AND r.rule_version != ?
+              AND r.status IN ('active', 'superseded')
+              AND (? IS NULL OR r.rule_version = ?)
+            ORDER BY a.rowid DESC LIMIT 1
+            """,
+            (current.site_key, current.rule_id, current.rule_version, version, version),
+        ).fetchone()
+
+    def find_rollback_rule(
+        self, current: SiteRule, version: str | None = None,
+    ) -> RuleVersion | None:
+        with self._connect() as connection:
+            row = self._find_rollback_rule(connection, current, version)
         return _rule_version_from_row(row) if row else None
 
     def get_activation_by_request(
@@ -2388,11 +2447,10 @@ class TaskStore:
                     raise RuleVersionError(
                         f"rule hash mismatch: {rule_id}@{rule_version}"
                     )
-                required = "candidate" if action == "activate" else "superseded"
-                if target.status != required:
+                if action == "activate" and target.status != "candidate":
                     raise RuleVersionError(
                         f"rule {rule_id}@{rule_version} is {target.status}, "
-                        f"expected {required}"
+                        "expected candidate"
                     )
                 current_row = connection.execute(
                     "SELECT * FROM site_rules WHERE site_key = ?", (site_key,)
@@ -2414,6 +2472,21 @@ class TaskStore:
                     raise RuleVersionError(
                         f"site rule_id mismatch: {current.rule_id} != {rule_id}"
                     )
+                if action == "rollback":
+                    if current is None or self._find_rollback_rule(connection, current, rule_version) is None:
+                        raise RuleVersionError("rollback target was not used by this site")
+                else:
+                    if target.source_build_id and connection.execute(
+                        "SELECT 1 FROM builds WHERE build_id = ? AND site_key = ?",
+                        (target.source_build_id, site_key),
+                    ).fetchone() is None:
+                        raise RuleVersionError("candidate belongs to another site")
+                    if target.parent_version and (
+                        current is None or current.rule_version != target.parent_version
+                    ):
+                        raise RuleActivationConflictError(
+                            "candidate was validated against a different active version"
+                        )
                 if current is not None:
                     connection.execute(
                         """
@@ -2430,7 +2503,9 @@ class TaskStore:
                 connection.execute(
                     """
                     UPDATE rule_versions
-                    SET status = 'active', activated_at = ?, activated_by = ?
+                    SET status = 'active',
+                        activated_at = CASE WHEN status = 'active' THEN activated_at ELSE ? END,
+                        activated_by = CASE WHEN status = 'active' THEN activated_by ELSE ? END
                     WHERE rule_id = ? AND rule_version = ?
                     """,
                     (now, actor, rule_id, rule_version),
@@ -2472,7 +2547,7 @@ class TaskStore:
                         site_key,
                     ),
                 )
-                linked_feedback = feedback_id or target.source_feedback_id
+                linked_feedback = (feedback_id or target.source_feedback_id) if action == "activate" else None
                 if linked_feedback:
                     feedback = connection.execute(
                         "SELECT * FROM quality_feedback WHERE feedback_id = ?",

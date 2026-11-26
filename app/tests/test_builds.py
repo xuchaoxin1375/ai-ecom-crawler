@@ -619,7 +619,7 @@ class BuildWorkflowTests(unittest.TestCase):
         )
 
     def test_batch_onboarding_queues_collection_only_after_validation(self) -> None:
-        adapter = FakeBuildAdapter(self.root)
+        adapter = FakeBuildAdapter(self.root, rule_payloads=[listing_rule_payload()])
         manager = self._manager(adapter, activation_mode="manual")
         with self._client(manager) as client:
             created = client.post("/api/batches", json={
@@ -632,16 +632,35 @@ class BuildWorkflowTests(unittest.TestCase):
             regular = client.post(path, json={})
             self.assertEqual(regular.status_code, 202, regular.text)
             self.assertEqual(regular.json()["onboarding"], [])
-            started = client.post(path, json={"onboard": True})
+            started = client.post(path, json={"onboard": True, "promote_trial": True})
             self.assertEqual(started.status_code, 202, started.text)
+            self.assertEqual(started.json()["batch"]["collection_mode"], "formal")
             build_id = started.json()["onboarding"][0]["build_id"]
-            self.assertEqual(self._wait_ready(client, build_id)["outcome"], "succeeded")
-            site = self.store.get_batch_site(batch_id, "example.fr")
+            result = self._wait_ready(client, build_id)
+            self.assertEqual(result["outcome"], "succeeded", result.get("error"))
+            self.assertEqual(result["catalog"]["catalog_scope"], "batch")
+            site_key = started.json()["onboarding"][0]["site_key"]
+            site = self.store.get_batch_site(batch_id, site_key)
             task = self.store.get_task(site.task_id)
             self.assertEqual(task.state, "QUEUED")
-            self.assertEqual(task.input["collection_mode"], "sample")
-            self.assertEqual(task.limits["max_products"], 20)
+            self.assertEqual(task.input["collection_mode"], "formal")
+            self.assertEqual(task.limits["max_products"], 10000)
             self.assertEqual(len(self.store.list_batch_tasks(batch_id)), 1)
+
+    def test_formal_batch_onboarding_rejects_sample_only_rule(self) -> None:
+        manager = self._manager(FakeBuildAdapter(self.root))
+        with self._client(manager) as client:
+            batch = client.post("/api/batches", json={
+                "name": "Formal", "market": "FR", "collection_mode": "formal",
+                "sites": ["https://example.fr/"],
+            }).json()["batch"]
+            path = f"/api/batches/{batch['batch_id']}/start"
+            started = client.post(path, json={"onboard": True})
+            build_id = started.json()["onboarding"][0]["build_id"]
+            result = self._wait_ready(client, build_id)
+            self.assertEqual(result["outcome"], "failed")
+            self.assertIn("entry_links alone", result["error"])
+            self.assertEqual(self.store.list_batch_tasks(batch["batch_id"]), [])
 
     def test_build_permissions_share_skills_and_keep_workspace_boundaries(self) -> None:
         workspace = self.root / "out" / "build-permissions"

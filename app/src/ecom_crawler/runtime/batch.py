@@ -114,10 +114,18 @@ def target_entry(value: str) -> str | None:
 
 
 def target_key(domain: str, entry: str | None, market: str | None) -> str:
-    if entry is None:
+    normalized_market = (market or "").strip().upper()
+    if entry is None and not normalized_market:
         return domain
-    digest = sha256(f"{entry}\n{(market or '').strip().upper()}".encode()).hexdigest()[:16]
+    digest = sha256(f"{entry or ''}\n{normalized_market}".encode()).hexdigest()[:16]
     return f"{domain}--{digest}"
+
+
+def rule_has_catalog_discovery(rule: RulePackage) -> bool:
+    return bool(rule.product_source) or any(
+        source.get("type") in {"listing", "sitemap", "html_index", "public_json"}
+        for source in rule.sources
+    )
 
 
 def rule_covers_entry(rule: RulePackage, entry: str | None) -> bool:

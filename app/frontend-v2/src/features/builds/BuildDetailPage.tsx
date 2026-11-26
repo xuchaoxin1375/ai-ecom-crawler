@@ -739,7 +739,9 @@ export function BuildDetailPage() {
         <BuildFact label="目录">
           {build.catalog?.catalog_scope === "full"
             ? `全量目标 ${build.catalog.catalog_products ?? "—"}`
-            : "样例"}
+            : build.catalog?.catalog_scope === "batch"
+              ? "批次目标范围"
+              : "样例"}
         </BuildFact>
         <BuildFact label="思考">
           {!build.reasoning_capture_enabled

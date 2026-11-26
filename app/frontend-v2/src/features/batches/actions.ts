@@ -77,9 +77,19 @@ export function siteCanCancelTask(site: BatchSite): boolean {
 }
 
 export function siteCanExport(site: BatchSite): boolean {
-  return Boolean(site.task);
+  return Boolean(siteResultTask(site));
+}
+
+export function siteResultTask(site: BatchSite): TaskSummary | null | undefined {
+  return site.delivery_task ?? site.task;
 }
 
 export function siteExportIsPartial(site: BatchSite): boolean {
-  return siteTaskIsLive(site.task);
+  return siteTaskIsLive(siteResultTask(site));
+}
+
+export function siteExportLabel(site: BatchSite): string {
+  return site.delivery_task
+    ? "导出已采用结果 ZIP"
+    : taskExportLabel(siteExportIsPartial(site));
 }

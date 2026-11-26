@@ -53,7 +53,9 @@ from ..runtime.batch import (
     parse_sites,
     rule_covers_entry,
     rule_domains,
+    rule_has_catalog_discovery,
     target_entry,
+    target_key,
 )
 from ..runtime.models import (
     Batch,
@@ -1108,7 +1110,7 @@ def create_app(
         if build_manager is not None:
             return build_manager.ensure_site_rule(site_key)
         current = store.get_site_rule(site_key)
-        if current is not None:
+        if current is not None or read_only:
             return current
         latest = store.latest_batch_site_rule(site_key)
         if (
@@ -1122,20 +1124,16 @@ def create_app(
         path = rules / latest.rule_path
         if not path.is_file():
             return None
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()
-        store.create_rule_version(
-            RuleVersion(
-                rule_id=latest.rule_id,
-                rule_version=latest.rule_version,
-                sha256=digest,
-                path=latest.rule_path,
-                status="active",
-                created_at=latest.updated_at,
-                activated_at=latest.updated_at,
-                activated_by="legacy-migration",
-            )
-        )
-        return store.upsert_site_rule(
+        try:
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            if (
+                store.get_rule_version(latest.rule_id, latest.rule_version) is None
+                and load_rule(path).raw.get("status") != "verified"
+            ):
+                return None
+        except (OSError, RuleError):
+            return None
+        return store.bind_verified_site_rule(
             SiteRule(
                 site_key=site_key,
                 rule_id=latest.rule_id,
@@ -1167,7 +1165,7 @@ def create_app(
             if builds and builds[0].rule_id:
                 rule_id = builds[0].rule_id
         if rule_id:
-            candidates = store.list_candidate_rules(rule_id)
+            candidates = store.list_candidate_rules(rule_id, site_key)
         tasks = [
             task
             for task in store.list_tasks()
@@ -1542,6 +1540,22 @@ def create_app(
         ]
         return matches[0] if len(matches) == 1 else None
 
+    def verified_catalog_rule(entry: dict[str, Any]) -> bool:
+        if entry.get("status") != "verified":
+            return False
+        known = store.get_rule_version(entry["rule_id"], entry["rule_version"])
+        return known is None or (known.status == "active" and known.sha256 == entry["sha256"])
+
+    def covers_target(rule: dict[str, Any], entry: str | None) -> bool:
+        if entry is None:
+            return True
+        if rules is None:
+            return False
+        try:
+            return rule_covers_entry(load_rule(rules / str(rule["path"])), entry)
+        except (OSError, RuleError):
+            return False
+
     def match_rule(
         site_key: str, entries: list[dict[str, Any]]
     ) -> tuple[dict[str, Any] | None, str]:
@@ -1569,7 +1583,7 @@ def create_app(
         stored = store.latest_batch_site_rule(site_key)
         if stored is not None and stored.rule_id and stored.rule_version:
             entry = find_rule_entry(stored.rule_id, stored.rule_version, entries)
-            if entry is not None and entry.get("status") == "verified":
+            if entry is not None and verified_catalog_rule(entry):
                 return (
                     entry,
                     f"已复核版本 {entry['rule_id']}@{entry['rule_version']}",
@@ -1579,18 +1593,29 @@ def create_app(
                     None,
                     f"规则 {entry['rule_id']}@{entry['rule_version']} 未在生效账本中",
                 )
+        return match_catalog(site_key, entries)
+
+    def match_catalog(
+        domain: str, entries: list[dict[str, Any]], *,
+        market: str | None = None, entry: str | None = None,
+    ) -> tuple[dict[str, Any] | None, str]:
+        matching = [
+            rule for rule in entries
+            if rule.get("valid") and domain in rule.get("domains", [])
+        ]
         verified = [
-            entry
-            for entry in entries
-            if entry.get("valid")
-            and entry.get("status") == "verified"
-            and site_key in entry.get("domains", [])
+            rule for rule in matching
+            if not market_conflict(rule, market)
+            and covers_target(rule, entry)
+            and verified_catalog_rule(rule)
         ]
         if verified:
+            wanted = normalize_market(market)
             verified.sort(
-                key=lambda entry: (
-                    str(entry.get("rule_version") or ""),
-                    str(entry.get("path") or ""),
+                key=lambda rule: (
+                    bool(wanted and normalize_market(rule.get("market")) == wanted),
+                    str(rule.get("rule_version") or ""),
+                    str(rule.get("path") or ""),
                 )
             )
             entry = verified[-1]
@@ -1598,11 +1623,7 @@ def create_app(
             if len(verified) > 1:
                 note += f"（{len(verified)} 个已复核版本，使用最高版本）"
             return entry, note
-        unactivated = [
-            entry
-            for entry in entries
-            if entry.get("valid") and site_key in entry.get("domains", [])
-        ]
+        unactivated = [rule for rule in matching if not market_conflict(rule, market)]
         if unactivated:
             unactivated.sort(
                 key=lambda entry: (
@@ -1646,6 +1667,12 @@ def create_app(
             for site in existing
             if not site.site_key.startswith("!")
         }
+        if scoped:
+            for site in existing_keys.copy().values():
+                if domain := normalize_site(site.input_value).site_key:
+                    existing_keys.setdefault(
+                        target_key(domain, target_entry(site.input_value), batch_market), site
+                    )
         used = {site.site_key for site in existing}
         rows: list[BatchSite] = []
         items: list[dict[str, Any]] = []
@@ -1672,7 +1699,9 @@ def create_app(
                 note = f"与批次内 {existing_keys[item.site_key].domain} 重复"
                 stored = True
             else:
-                rule, note = match_target(item.site_key or "", item.input_value, entries, scoped)
+                rule, note = match_target(
+                    item.site_key or "", item.input_value, entries, scoped, batch_market,
+                )
                 if rule is None:
                     readiness = "needs_onboarding"
                 else:
@@ -1682,6 +1711,26 @@ def create_app(
                         note = f"{conflict}；请调整批次市场或换用匹配规则"
                     else:
                         readiness = "ready"
+                        if scoped and persist and item.site_key:
+                            binding = store.bind_verified_site_rule(SiteRule(
+                                site_key=item.site_key,
+                                rule_id=rule["rule_id"],
+                                rule_version=rule["rule_version"],
+                                sha256=rule["sha256"],
+                                path=rule["path"],
+                            ))
+                            if binding is None:
+                                rule = None
+                                readiness = "needs_onboarding"
+                                note = "规则已变更，请重新匹配目标"
+                            elif (binding.rule_id, binding.rule_version, binding.sha256) != (
+                                rule["rule_id"], rule["rule_version"], rule["sha256"],
+                            ):
+                                rule, note = match_target(
+                                    item.site_key, item.input_value, entries, scoped, batch_market,
+                                )
+                                if rule is None or market_conflict(rule, batch_market):
+                                    readiness = "needs_onboarding"
                 stored = True
             if scoped and readiness in {"invalid", "duplicate"}:
                 stored = False
@@ -1743,23 +1792,37 @@ def create_app(
         return {"summary": summary, "items": items}, rows
 
     def match_target(
-        site_key: str, value: str, entries: list[dict[str, Any]], scoped: bool
+        site_key: str, value: str, entries: list[dict[str, Any]], scoped: bool,
+        market: str | None,
     ) -> tuple[dict[str, Any] | None, str]:
         rule, note = match_rule(site_key, entries)
-        entry = target_entry(value) if scoped else None
-        if entry is None:
+        if not scoped:
             return rule, note
-        if rule is None and store.get_site_rule(site_key) is None:
-            domain = normalize_site(value).site_key
-            rule, _ = match_rule(domain or site_key, entries)
-        if rule is not None and rules is not None:
-            try:
-                package = load_rule(rules / str(rule["path"]))
-                if rule_covers_entry(package, entry):
-                    return rule, f"适用版本 {rule['rule_id']}@{rule['rule_version']}"
-            except (OSError, RuleError):
-                pass
-        return None, "当前规则未验证此入口，需接入指定范围"
+        domain = normalize_site(value).site_key or site_key
+        entry = target_entry(value)
+        if site_key == domain:
+            return rule, note
+        if rule is not None and covers_target(rule, entry):
+            return rule, note
+        if store.get_site_rule(site_key) is not None:
+            return None, note if rule is None else "当前规则未验证此入口，需接入指定范围"
+        market_note = None
+        for default_key in dict.fromkeys((target_key(domain, None, market), domain)):
+            if default_key == site_key:
+                continue
+            default_rule, default_note = match_rule(default_key, entries)
+            if default_rule is None or not covers_target(default_rule, entry):
+                continue
+            conflict = market_conflict(default_rule, market)
+            if not conflict:
+                return default_rule, default_note
+            market_note = conflict
+        rule, note = match_catalog(domain, entries, market=market, entry=entry)
+        if rule is not None:
+            return rule, note
+        if market_note:
+            return None, f"{market_note}；需接入所选市场"
+        return None, "当前规则未验证此入口，需接入指定范围" if entry else note
 
     def batch_status(
         batch: Batch,
@@ -1947,6 +2010,7 @@ def create_app(
                     "site_key": site.site_key,
                     "domain": site.domain,
                     "input_value": site.input_value,
+                    "target_entry": target_entry(site.input_value) if batch.collection_mode else None,
                     "readiness": site.readiness,
                     "note": site.note,
                     "rule": (
@@ -3041,6 +3105,15 @@ def create_app(
     ) -> dict[str, Any]:
         existing = store.get_activation_by_request(payload.request_id)
         if existing is not None:
+            if (
+                existing.site_key != site_key
+                or existing.action != "activate"
+                or existing.to_version != payload.rule_version
+                or (payload.rule_id is not None and existing.rule_id != payload.rule_id)
+                or (payload.expected_active_version is not None and existing.from_version != payload.expected_active_version)
+                or (payload.expected_active_sha256 is not None and existing.from_sha256 != payload.expected_active_sha256)
+            ):
+                raise _error("ACTIVATION_CONFLICT", "request ID belongs to another rule activation", 409)
             return {
                 "activated": True,
                 "site": site_rule_payload(site_key).model_dump(),
@@ -3052,7 +3125,7 @@ def create_app(
         busy = site_busy(site_key)
         if busy:
             raise _error("SITE_BUSY", "site has active work", 409, busy)
-        active = store.get_site_rule(site_key)
+        active = ensure_site_rule(site_key)
         target = store.get_rule_version(
             payload.rule_id or (active.rule_id if active else ""),
             payload.rule_version,
@@ -3124,6 +3197,12 @@ def create_app(
     ) -> dict[str, Any]:
         existing = store.get_activation_by_request(payload.request_id)
         if existing is not None:
+            if (
+                existing.site_key != site_key
+                or existing.action != "rollback"
+                or (payload.to_version is not None and existing.to_version != payload.to_version)
+            ):
+                raise _error("ACTIVATION_CONFLICT", "request ID belongs to another rule activation", 409)
             return {
                 "rolled_back": True,
                 "site": site_rule_payload(site_key).model_dump(),
@@ -3142,11 +3221,7 @@ def create_app(
         active = ensure_site_rule(site_key)
         if active is None:
             raise _error("RULE_NOT_ACTIVE", "site has no active rule", 409)
-        target = None
-        if payload.to_version:
-            target = store.get_rule_version(active.rule_id, payload.to_version)
-        else:
-            target = store.latest_superseded_rule(active.rule_id)
+        target = store.find_rollback_rule(active, payload.to_version)
         if target is None:
             raise _error("RULE_NOT_ACTIVE", "no rollback target found", 409)
         require_file_hash(target)
@@ -3159,6 +3234,7 @@ def create_app(
                 expected_active_version=(
                     payload.expected_active_version or active.rule_version
                 ),
+                expected_active_sha256=active.sha256,
                 feedback_id=None,
                 request_id=payload.request_id,
                 reason=payload.reason,
@@ -3332,6 +3408,22 @@ def create_app(
         accepted: list[dict[str, Any]] = []
         skipped: list[dict[str, Any]] = []
         onboarding: list[dict[str, Any]] = []
+        promote = bool(payload and payload.promote_trial)
+        if promote and wanted:
+            raise _error("VALIDATION_ERROR", "转为正式采集适用于整个批次", 422)
+
+        def promotion_result(current: Batch) -> dict[str, Any]:
+            return {
+                "accepted": [],
+                "onboarding": [],
+                "skipped": [],
+                "batch": batch_payload(current, detail=True),
+            }
+
+        if promote and batch.collection_mode == "formal":
+            return promotion_result(batch)
+        if promote and batch.collection_mode != "sample":
+            raise _error("INVALID_STATE", "只有试采批次可以转为正式采集", 409)
         if payload is not None and payload.onboard:
             if not batch.collection_mode or builds_disabled or build_manager is None:
                 raise _error("BUILD_UNAVAILABLE", "构建服务不可用或批次未设置采集计划", 409)
@@ -3341,16 +3433,10 @@ def create_app(
             )]
             if len(pending) > 10:
                 raise _error("VALIDATION_ERROR", "一次最多接入 10 个目标，请先选择要接入的站点", 422)
-        promote = bool(payload and payload.promote_trial)
-        if promote:
-            if wanted:
-                raise _error("VALIDATION_ERROR", "转为正式采集适用于整个批次", 422)
-            try:
-                batch = store.promote_batch_collection(batch_id)
-            except BatchTransitionError as exc:
-                raise _error("INVALID_STATE", "请先完成或取消当前试采和接入任务", 409) from exc
-        if batch.collection_mode in BATCH_COLLECTION_LIMITS:
-            limits = Limits(**BATCH_COLLECTION_LIMITS[batch.collection_mode])
+        promotion_pending = promote
+        collection_mode = "formal" if promote else batch.collection_mode
+        if collection_mode in BATCH_COLLECTION_LIMITS:
+            limits = Limits(**BATCH_COLLECTION_LIMITS[collection_mode])
         for site in sites:
             if wanted and site.site_key not in wanted:
                 continue
@@ -3390,7 +3476,7 @@ def create_app(
                 )
                 continue
             rule, rule_note = match_target(
-                site.site_key, site.input_value, entries, batch.collection_mode is not None
+                site.site_key, site.input_value, entries, batch.collection_mode is not None, batch.market,
             )
             conflict = market_conflict(rule, batch.market) if rule else None
             if site.readiness != "ready":
@@ -3401,11 +3487,18 @@ def create_app(
                             batch, site, max_products=6, max_seconds=600, max_total_seconds=600,
                             max_input_tokens=200000, max_output_tokens=30000, repair_rounds=1,
                             proxy=proxy_override or site.proxy, auto_collect=True,
+                            promote_trial=promotion_pending,
                         )
+                    except BatchTransitionError as exc:
+                        current = require_batch(batch_id)
+                        if current.collection_mode == "formal":
+                            return promotion_result(current)
+                        raise _error("INVALID_STATE", "请先完成或取消当前试采和接入任务", 409) from exc
                     except BuildError as exc:
                         skipped.append({**item, "reason": str(exc)})
                     else:
                         onboarding.append({**item, "build_id": build.build_id})
+                        promotion_pending = False
                     continue
                 if conflict:
                     reason = conflict
@@ -3427,6 +3520,17 @@ def create_app(
                 skipped.append({**item, "reason": "规则包不支持商品任务"})
                 continue
             try:
+                if collection_mode == "formal":
+                    version = store.get_rule_version(rule["rule_id"], rule["rule_version"])
+                    build = store.get_build(version.source_build_id) if version and version.source_build_id else None
+                    if (
+                        build is not None
+                        and build.request.get("auto_collect")
+                        and (build.request.get("catalog") or {}).get("catalog_scope") == "sample"
+                        and not rule_has_catalog_discovery(load_rule(rules / str(rule["path"])))
+                    ):
+                        skipped.append({**item, "reason": "旧规则只验证了入口试采，请先补齐目录发现范围"})
+                        continue
                 task = build_task(
                     rule_path=rules / str(rule["path"]),
                     task_id=f"web-{uuid.uuid4().hex[:12]}",
@@ -3452,8 +3556,8 @@ def create_app(
                 continue
             task.batch_id = batch_id
             task.site_key = site.site_key
-            if batch.collection_mode:
-                task.input["collection_mode"] = batch.collection_mode
+            if collection_mode:
+                task.input["collection_mode"] = collection_mode
                 if entry := target_entry(site.input_value):
                     task.input["target_entry"] = entry
             task.state = "QUEUED"
@@ -3467,14 +3571,23 @@ def create_app(
                 task.rule_sha256 = str(rule["sha256"])
             try:
                 created = store.create_task_for_site(
-                    task, site_key=site.site_key, replace_existing=rerun
+                    task,
+                    site_key=site.site_key,
+                    replace_existing=rerun,
+                    promote_trial=promotion_pending,
                 )
+            except BatchTransitionError as exc:
+                current = require_batch(batch_id)
+                if current.collection_mode == "formal":
+                    return promotion_result(current)
+                raise _error("INVALID_STATE", "请先完成或取消当前试采和接入任务", 409) from exc
             except BatchNotFoundError:
                 skipped.append({**item, "reason": "站点在批次中不存在"})
                 continue
             if not created:
                 skipped.append({**item, "reason": "站点已开始"})
                 continue
+            promotion_pending = False
             accepted.append(
                 {
                     "site_key": site.site_key,
@@ -3572,6 +3685,8 @@ def create_app(
                 elif summary["outcome"] == "COMPLETED":
                     if not {"products.csv", "task-result.json"}.issubset(files):
                         export_status = "missing"
+                    elif task and task.input.get("collection_mode") == "formal" and not summary["counts"].get("valid_products"):
+                        export_status = "empty"
                     else:
                         export_status = "sample" if task and task.input.get("collection_mode") == "sample" else "complete"
                 elif summary["outcome"] == "PARTIAL":
