@@ -41,10 +41,19 @@ class ControlTransitionTests(unittest.TestCase):
         settled = self.store.request_pause("pause-1")
         self.assertEqual(settled.state, "PAUSED")
 
-    def test_pause_queued_is_rejected(self) -> None:
+    def test_pause_queued_is_final_and_resumable(self) -> None:
         self.store.create_task(make_task("pause-2", state="QUEUED"))
+        task = self.store.request_pause("pause-2")
+        self.assertEqual(task.state, "PAUSED")
+        again = self.store.request_pause("pause-2")
+        self.assertEqual(again.state, "PAUSED")
+        resumed = self.store.request_resume("pause-2")
+        self.assertEqual(resumed.state, "QUEUED")
+
+    def test_pause_draft_is_rejected(self) -> None:
+        self.store.create_task(make_task("pause-3", state="DRAFT"))
         with self.assertRaises(TaskTransitionError):
-            self.store.request_pause("pause-2")
+            self.store.request_pause("pause-3")
 
     def test_resume_paused_and_running(self) -> None:
         self.store.create_task(make_task("resume-1", state="PAUSED"))

@@ -2536,6 +2536,47 @@
         "summary": "Restore Batch"
       }
     },
+    "/api/batches/{batch_id}/resume": {
+      "post": {
+        "operationId": "resume_batch_api_batches__batch_id__resume_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "title": "Batch Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Resume Batch Api Batches  Batch Id  Resume Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resume Batch"
+      }
+    },
     "/api/batches/{batch_id}/sites/{site_key}/build": {
       "post": {
         "operationId": "start_site_build_api_batches__batch_id__sites__site_key__build_post",

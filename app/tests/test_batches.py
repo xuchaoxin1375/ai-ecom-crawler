@@ -802,8 +802,24 @@ class BatchApiTests(unittest.TestCase):
         self.assertIn("站点已开始", [item["reason"] for item in again["skipped"]])
 
         paused = self.client.post(f"/api/batches/{batch_id}/pause").json()
-        self.assertEqual(paused["accepted"], [])
-        self.assertIn("排队任务", paused["skipped"][0]["reason"])
+        self.assertEqual(len(paused["accepted"]), 1, paused)
+        self.assertEqual(paused["accepted"][0]["task_id"], task_id)
+        self.assertEqual(paused["accepted"][0]["state"], "PAUSED")
+        self.assertEqual(paused["batch"]["counts"]["paused"], 1)
+        self.assertEqual(paused["batch"]["counts"]["queued"], 0)
+
+        resumed = self.client.post(f"/api/batches/{batch_id}/resume").json()
+        self.assertEqual(len(resumed["accepted"]), 1, resumed)
+        self.assertEqual(resumed["accepted"][0]["task_id"], task_id)
+        self.assertEqual(resumed["accepted"][0]["state"], "QUEUED")
+        self.assertEqual(resumed["batch"]["counts"]["queued"], 1)
+        self.assertEqual(resumed["batch"]["counts"]["paused"], 0)
+
+        repeated_resume = self.client.post(
+            f"/api/batches/{batch_id}/resume"
+        ).json()
+        self.assertEqual(repeated_resume["accepted"], [])
+        self.assertIn("任务未暂停", repeated_resume["skipped"][0]["reason"])
 
         cancelled = self.client.post(f"/api/batches/{batch_id}/cancel")
         self.assertEqual(cancelled.status_code, 202)

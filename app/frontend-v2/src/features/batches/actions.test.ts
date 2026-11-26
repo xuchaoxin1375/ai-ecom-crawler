@@ -14,6 +14,7 @@ import {
   siteCanResumeTask,
   siteExportIsPartial,
   siteExportLabel,
+  sitePrimaryControl,
   siteResultTask,
   siteStartMode,
   taskExportLabel,
@@ -109,6 +110,13 @@ describe("batch action availability", () => {
     expect(batchCanResume(value)).toBe(true);
     expect(batchCanExport(value)).toBe(true);
     expect(batchExportIsPartial(value)).toBe(true);
+  });
+
+  it("allows pausing a queue-only batch", () => {
+    const value = batch({
+      counts: { ...COUNTS, queued: 1, running: 0, paused: 0 },
+    });
+    expect(batchCanPause(value)).toBe(true);
   });
 
   it("hides execution actions for archived batches", () => {
@@ -208,11 +216,37 @@ describe("site action availability", () => {
     expect(siteCanPauseTask(paused)).toBe(false);
     expect(siteCanResumeTask(paused)).toBe(true);
 
-    expect(siteCanPauseTask(queued)).toBe(false);
+    expect(siteCanPauseTask(queued)).toBe(true);
+    expect(siteCanResumeTask(queued)).toBe(false);
     expect(siteCanCancelTask(queued)).toBe(true);
 
     const cancelling = site({ task_id: "t-1", task: task({ state: "CANCELLING" }) });
     expect(siteCanCancelTask(cancelling)).toBe(false);
+  });
+
+  it("picks one inline primary control per site state", () => {
+    expect(sitePrimaryControl(site())).toBe("start");
+    expect(
+      sitePrimaryControl(site({ task_id: "t-1", task: task({ state: "QUEUED" }) })),
+    ).toBe("pause");
+    expect(
+      sitePrimaryControl(site({ task_id: "t-1", task: task({ state: "RUNNING" }) })),
+    ).toBe("pause");
+    expect(
+      sitePrimaryControl(site({ task_id: "t-1", task: task({ state: "PAUSED" }) })),
+    ).toBe("resume");
+    expect(
+      sitePrimaryControl(site({ task_id: "t-1", task: task({ state: "PAUSING" }) })),
+    ).toBeNull();
+    expect(
+      sitePrimaryControl(site({ task_id: "t-1", task: task({ state: "FINISHED" }) })),
+    ).toBeNull();
+    expect(
+      sitePrimaryControl(site({ task_id: "t-1", task: task({ state: "DRAFT" }) })),
+    ).toBeNull();
+    expect(
+      sitePrimaryControl(site({ readiness: "needs_onboarding", task_id: "t-1" })),
+    ).toBeNull();
   });
 
   it("only exports sites that have a task and marks live tasks partial", () => {

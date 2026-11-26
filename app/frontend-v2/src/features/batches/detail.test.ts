@@ -178,13 +178,13 @@ describe("batch detail primary action", () => {
     expect(action).toBe("pause");
   });
 
-  it("exposes the queue in the filter, without claiming queued tasks are running", () => {
+  it("exposes the queue in the filter and offers pausing it", () => {
     const sites = [site({ task_id: "t-1", task: task({ state: "QUEUED" }) })];
     const current = batch({
       sites,
       counts: { ...EMPTY_COUNTS, sites: 1, tasks: 1, queued: 1 },
     });
-    expect(batchPrimaryAction(current)).toBe("export");
+    expect(batchPrimaryAction(current)).toBe("pause");
     expect(siteFilterOptions(sites, "all").map(({ key }) => key)).toEqual([
       "all",
       "ready",
@@ -197,6 +197,15 @@ describe("batch detail primary action", () => {
       label: "处理中",
       count: 0,
     });
+  });
+
+  it("offers resume when the batch only has paused tasks", () => {
+    const sites = [site({ task_id: "t-1", task: task({ state: "PAUSED" }) })];
+    const current = batch({
+      sites,
+      counts: { ...EMPTY_COUNTS, sites: 1, tasks: 1, paused: 1 },
+    });
+    expect(batchPrimaryAction(current)).toBe("resume");
   });
 
   it("keeps export accessible after unsuccessful tasks finish", () => {

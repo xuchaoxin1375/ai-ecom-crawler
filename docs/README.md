@@ -2,7 +2,7 @@
 title: 电商采集项目核心
 document_type: business-core
 status: active
-updated: 2026-11-25
+updated: 2026-11-27
 ---
 
 ## 用途与适用范围
@@ -80,6 +80,7 @@ updated: 2026-11-25
 | 按需 | [访问密钥登录与会话认证设计](43-访问密钥登录与会话认证设计.md) | 固定用户名 `ecom` + 访问密钥登录页、会话 Cookie、自定义/随机密钥、限流、公开静态边界、401 跳转、兼容与回滚；含登录时序、访问判定、密钥生命周期图和实现证据；已实现，待验收 |
 | 按需 | [采集视觉证据与待办](44-采集视觉证据与待办.md) | 每站至少一张商品页截图、一张本地商品图、基线字段和试采对比；证据落点、软门禁、`premierangling` 记录及 P0–P3 待办 |
 | 按需 | [批次采集与交付改进计划](45-批次采集与交付改进计划.md) | 目标范围、交付结果、统一启动计划和批次异常入口 |
+| 按需 | [单任务控制与排队暂停设计](47-单任务控制与排队暂停设计.md) | 行内主控制、批次任务控制区、排队任务暂停和批次继续接口 |
 | 按需 | [方案 manifest JSON Schema](schema/manifest.schema.json) | 规则包（`rule_*`）与方案包（`plan_*`）的机器可校验结构；跨字段约束仍由执行器校验 |
 | 按需 | [系统 v2 规则／反馈 DDL](schema/v2-rules-feedback.sql) | 质量反馈、规则版本、站点规则指针和激活审计的 SQLite 建表／加列参考；迁移由 `TaskStore._init_schema()` 条件执行 |
 | 按需 | [系统 v2 构建变更摘要 Schema](schema/v2-build-change-summary.schema.json) | 修复构建 `change_summary` 的机器可校验结构；主机验证后记录 |

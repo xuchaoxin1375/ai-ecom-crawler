@@ -205,7 +205,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     for name, help_text in (
-        ("pause", "request a pause for a running task"),
+        ("pause", "pause a queued or running task"),
         ("resume", "requeue a paused task"),
         ("cancel", "cancel a task and reject late results"),
     ):

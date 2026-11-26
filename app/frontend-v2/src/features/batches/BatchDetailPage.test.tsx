@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { BatchDetail, BatchSite, TaskSummary } from "../../lib/api";
 import { renderPage } from "../../test/renderPage";
@@ -101,4 +101,87 @@ it("splits the task status and stop reason into separate aligned columns", async
   expect(taskLink).not.toHaveTextContent("用户取消");
   expect(within(table).getByText("用户取消")).toBeVisible();
   expect(within(table).queryByText("任务详情")).not.toBeInTheDocument();
+});
+
+it("pauses a running site from the row control", async () => {
+  const runningTask: TaskSummary = {
+    ...cancelledTask,
+    state: "RUNNING",
+    outcome: null,
+    stop_reason: null,
+    finished_at: null,
+  };
+  const runningBatch: BatchDetail = {
+    ...batch,
+    status: "RUNNING",
+    counts: { ...batch.counts, cancelled: 0, running: 1 },
+    sites: [{ ...site, task: runningTask }],
+  };
+  const pausedTask: TaskSummary = { ...runningTask, state: "PAUSED" };
+  const calls: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init?: RequestInit) => {
+      const path = url.split("?")[0];
+      calls.push(`${init?.method ?? "GET"} ${path}`);
+      if (path === "/api/batches/b-fixture") return Response.json(runningBatch);
+      if (path === "/api/tasks/web-1/pause" && init?.method === "POST")
+        return Response.json({ accepted: true });
+      if (path === "/api/tasks/web-1") return Response.json(pausedTask);
+      throw new Error(`Unexpected request: ${url}`);
+    }),
+  );
+  renderPage("/batches/:batchId", "/batches/b-fixture", <BatchDetailPage />);
+
+  const pause = await screen.findByRole("button", {
+    name: "暂停站点「fixture.test」采集",
+  });
+  fireEvent.click(pause);
+
+  expect(await screen.findByText("暂停请求已受理。")).toBeVisible();
+  expect(calls).toContain("POST /api/tasks/web-1/pause");
+});
+
+it("lists live tasks in the control panel and resumes the batch", async () => {
+  const pausedTask: TaskSummary = {
+    ...cancelledTask,
+    state: "PAUSED",
+    outcome: null,
+    stop_reason: null,
+  };
+  const pausedBatch: BatchDetail = {
+    ...batch,
+    status: "RUNNING",
+    counts: { ...batch.counts, cancelled: 0, paused: 1 },
+    sites: [{ ...site, task: pausedTask }],
+  };
+  const resumedBatch: BatchDetail = {
+    ...pausedBatch,
+    counts: { ...pausedBatch.counts, paused: 0, queued: 1 },
+    sites: [{ ...site, task: { ...pausedTask, state: "QUEUED" } }],
+  };
+  const calls: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init?: RequestInit) => {
+      const path = url.split("?")[0];
+      calls.push(`${init?.method ?? "GET"} ${path}`);
+      if (path === "/api/batches/b-fixture") return Response.json(pausedBatch);
+      if (path === "/api/batches/b-fixture/resume" && init?.method === "POST")
+        return Response.json({
+          accepted: [{ task_id: "web-1", state: "QUEUED" }],
+          skipped: [],
+          batch: resumedBatch,
+        });
+      throw new Error(`Unexpected request: ${url}`);
+    }),
+  );
+  renderPage("/batches/:batchId", "/batches/b-fixture", <BatchDetailPage />);
+
+  const panel = await screen.findByRole("region", { name: "任务控制" });
+  expect(within(panel).getByText("运行中 0 · 排队中 0 · 已暂停 1")).toBeVisible();
+  fireEvent.click(within(panel).getByRole("button", { name: "继续全部" }));
+
+  expect(await screen.findByText(/继续请求已受理：受理 1 个/)).toBeVisible();
+  expect(calls).toContain("POST /api/batches/b-fixture/resume");
 });

@@ -1,5 +1,5 @@
 import type { BatchDetail, BatchSite } from "../../lib/api";
-import { siteStartMode, TASK_LIVE_STATES } from "./actions";
+import { siteCanPauseTask, siteStartMode, TASK_LIVE_STATES } from "./actions";
 
 const SITE_FILTERS = [
   ["all", "全部站点"],
@@ -89,7 +89,8 @@ export function batchHasActiveTasks(batch: BatchDetail): boolean {
   return counts.draft + counts.queued + counts.running + counts.paused > 0;
 }
 
-export type BatchPrimaryAction = "unarchive" | "import" | "start" | "pause" | "export";
+export type BatchPrimaryAction =
+  "unarchive" | "import" | "start" | "pause" | "resume" | "export";
 
 export function batchPrimaryAction(batch: BatchDetail): BatchPrimaryAction {
   if (batch.status === "ARCHIVED") return "unarchive";
@@ -100,7 +101,8 @@ export function batchPrimaryAction(batch: BatchDetail): BatchPrimaryAction {
     batch.counts.needs_onboarding > 0
   )
     return "start";
-  if (batch.sites.some((site) => site.task?.state === "RUNNING")) return "pause";
+  if (batch.sites.some((site) => siteCanPauseTask(site))) return "pause";
+  if (batch.counts.paused > 0) return "resume";
   if (batch.counts.tasks > 0) return "export";
   return "import";
 }

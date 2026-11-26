@@ -894,13 +894,18 @@ class TaskStore:
         )
 
     def request_pause(self, task_id: str) -> Task:
-        """Request a pause; the runner settles to PAUSED after in-flight items."""
+        """Request a pause.
+
+        A queued task has no in-flight items and pauses directly.  A running
+        task first moves to PAUSING and settles to PAUSED after the runner
+        drains in-flight work.
+        """
         return self._transition(
             task_id,
             action="pause",
-            allowed={"RUNNING"},
+            allowed={"QUEUED", "RUNNING"},
             idempotent={"PAUSING", "PAUSED"},
-            target="PAUSING",
+            target={"QUEUED": "PAUSED", "RUNNING": "PAUSING"},
         )
 
     def request_resume(self, task_id: str) -> Task:

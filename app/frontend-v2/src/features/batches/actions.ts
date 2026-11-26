@@ -1,4 +1,5 @@
 import type { BatchSite, BatchSummary, TaskSummary } from "../../lib/api";
+import { taskPrimaryControl, type TaskPrimaryControl } from "../../lib/taskControl";
 
 /** States that still have work to settle or can be controlled. */
 export const TASK_LIVE_STATES = new Set([
@@ -22,7 +23,9 @@ export function batchCanStart(batch: BatchSummary): boolean {
 }
 
 export function batchCanPause(batch: BatchSummary): boolean {
-  return !batchIsArchived(batch) && batch.counts.running > 0;
+  return (
+    !batchIsArchived(batch) && (batch.counts.running > 0 || batch.counts.queued > 0)
+  );
 }
 
 export function batchCanResume(batch: BatchSummary): boolean {
@@ -61,7 +64,13 @@ export function siteTaskIsLive(task: TaskSummary | null | undefined): boolean {
 }
 
 export function siteCanPauseTask(site: BatchSite): boolean {
-  return site.task?.state === "RUNNING";
+  return site.task?.state === "RUNNING" || site.task?.state === "QUEUED";
+}
+
+/** Primary control shown inline in a batch site row; start still opens a dialog. */
+export function sitePrimaryControl(site: BatchSite): TaskPrimaryControl | null {
+  if (siteStartMode(site) === "start") return "start";
+  return taskPrimaryControl(site.task?.state, { allowDraftStart: false });
 }
 
 export function siteCanResumeTask(site: BatchSite): boolean {

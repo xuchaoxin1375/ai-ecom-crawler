@@ -2056,12 +2056,39 @@ def create_app(
             if task is None:
                 skipped.append({**item, "reason": "任务不存在"})
                 continue
-            if action == "pause" and task.state == "QUEUED":
-                skipped.append(
-                    {**item, "reason": "排队任务尚未运行，不能暂停；可取消"}
-                )
-                continue
-            if task.state in {"FINISHED", "CANCELLED"}:
+            if action == "pause":
+                if task.state == "DRAFT":
+                    skipped.append(
+                        {**item, "reason": "草稿任务尚未启动，不能暂停；可取消"}
+                    )
+                    continue
+                if task.state in {"FINISHED", "CANCELLED"}:
+                    skipped.append(
+                        {**item, "reason": f"任务已结束（{task.state}）"}
+                    )
+                    continue
+                if task.state == "CANCELLING":
+                    skipped.append(
+                        {**item, "reason": "任务正在取消，不能暂停"}
+                    )
+                    continue
+            elif action == "resume":
+                if task.state in {"FINISHED", "CANCELLED"}:
+                    skipped.append(
+                        {**item, "reason": f"任务已结束（{task.state}）"}
+                    )
+                    continue
+                if task.state == "PAUSING":
+                    skipped.append(
+                        {**item, "reason": "任务正在暂停，请稍后重试"}
+                    )
+                    continue
+                if task.state != "PAUSED":
+                    skipped.append(
+                        {**item, "reason": f"任务未暂停（{task.state}）"}
+                    )
+                    continue
+            elif task.state in {"FINISHED", "CANCELLED"}:
                 skipped.append({**item, "reason": f"任务已结束（{task.state}）"})
                 continue
             try:
@@ -3605,6 +3632,10 @@ def create_app(
     @app.post("/api/batches/{batch_id}/pause", status_code=202)
     def pause_batch(batch_id: str) -> dict[str, Any]:
         return control_batch(batch_id, "pause")
+
+    @app.post("/api/batches/{batch_id}/resume", status_code=202)
+    def resume_batch(batch_id: str) -> dict[str, Any]:
+        return control_batch(batch_id, "resume")
 
     @app.post("/api/batches/{batch_id}/cancel", status_code=202)
     def cancel_batch(batch_id: str) -> dict[str, Any]:

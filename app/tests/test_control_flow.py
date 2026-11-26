@@ -371,6 +371,24 @@ class ControlFlowTests(unittest.TestCase):
         worker.run_once()
         self._assert_plan_error("market-mismatch", "market mismatch")
 
+    def test_paused_queued_task_is_not_claimed(self) -> None:
+        task = self._queued_task("queued-pause")
+        store = TaskStore(self.db_path)
+        paused = store.request_pause(task.task_id)
+        self.assertEqual(paused.state, "PAUSED")
+
+        _worker, thread = self._worker()
+        thread.join(10)
+        self.assertFalse(thread.is_alive(), "worker did not stop")
+        self.assertEqual(store.get_task(task.task_id).state, "PAUSED")
+
+        store.request_resume(task.task_id)
+        _resumed_worker, resumed_thread = self._worker()
+        resumed_thread.join(10)
+        self.assertFalse(resumed_thread.is_alive(), "worker did not stop")
+        self.assertEqual(store.get_task(task.task_id).state, "FINISHED")
+        self.assertTrue((self.out_root / task.task_id / "task-result.json").is_file())
+
     def test_a20_pause_one_task_keeps_other_running(self) -> None:
         task_a = self._submit_prefixed("a", "a20-pause-a")
         task_b = self._submit_prefixed("b", "a20-pause-b")
@@ -693,11 +711,17 @@ class ControlFlowTests(unittest.TestCase):
         self.assertEqual(code, 0, stderr)
         self.assertEqual(json.loads(stdout)["state"], "QUEUED")
 
-        code, _, stderr = self._run_cli(
+        code, stdout, stderr = self._run_cli(
             ["pause", "--db", str(self.db_path), "--task-id", "cli-control"]
         )
-        self.assertEqual(code, 2)
-        self.assertIn("cannot pause", stderr)
+        self.assertEqual(code, 0, stderr)
+        self.assertIn("state=PAUSED", stdout)
+
+        code, stdout, stderr = self._run_cli(
+            ["resume", "--db", str(self.db_path), "--task-id", "cli-control"]
+        )
+        self.assertEqual(code, 0, stderr)
+        self.assertIn("state=QUEUED", stdout)
 
         code, stdout, stderr = self._run_cli(
             ["cancel", "--db", str(self.db_path), "--task-id", "cli-control"]

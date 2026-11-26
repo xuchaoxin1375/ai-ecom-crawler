@@ -28,7 +28,7 @@ import {
   getBatches,
   pauseBatch,
   restoreBatch,
-  resumeTask,
+  resumeBatch,
   type BatchDetail,
   type BatchPage,
   type BatchSummary,
@@ -313,41 +313,25 @@ export function BatchesPage() {
   async function resumeOne(batch: BatchSummary) {
     setRowBusy(batch.batch_id);
     try {
-      const detail = await getBatch(batch.batch_id);
-      const paused = detail.sites.filter(
-        (site) => site.task?.state === "PAUSED" && site.task,
-      );
-      if (paused.length === 0) {
-        showToast("info", "没有已暂停的任务。");
-        return;
-      }
-
-      let resumed = 0;
-      const failed: string[] = [];
-      for (const site of paused) {
-        if (!site.task) continue;
-        try {
-          await resumeTask(site.task.task_id);
-          resumed += 1;
-        } catch (exc) {
-          failed.push(`${site.domain}（${errorText(exc)}）`);
-        }
-      }
-      if (failed.length) {
+      const response = await resumeBatch(batch.batch_id);
+      applyBatch(response.batch);
+      void queryClient.invalidateQueries({
+        queryKey: ["batch", batch.batch_id],
+      });
+      const resumed = response.accepted.length;
+      const skipped = response.skipped.length;
+      if (skipped) {
         setBulkNotice({
           tone: "warning",
           title: "继续请求已受理",
-          text: `${formatNumber(resumed)} 个任务已恢复，${formatNumber(
-            failed.length,
-          )} 个失败。`,
-          details: failed.slice(0, 3),
+          text: `恢复 ${formatNumber(resumed)} 个，跳过 ${formatNumber(skipped)} 个。`,
+          details: response.skipped
+            .slice(0, 3)
+            .map((item) => `${item.domain}（${item.reason}）`),
         });
       } else {
         showToast("success", `继续请求已受理：${formatNumber(resumed)} 个任务已恢复。`);
       }
-      await queryClient.invalidateQueries({
-        queryKey: ["batch", batch.batch_id],
-      });
       refreshBatches();
     } catch (exc) {
       showToast("error", `继续失败：${errorText(exc)}`);

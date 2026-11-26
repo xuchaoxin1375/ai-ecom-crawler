@@ -40,6 +40,7 @@ import {
   pauseBatch,
   pauseTask,
   restoreBatch,
+  resumeBatch,
   resumeTask,
   startBatch,
   taskExportUrl,
@@ -81,6 +82,7 @@ import { EmptyState } from "../../components/ui/EmptyState";
 import { ErrorNotice } from "../../components/ui/ErrorNotice";
 import { InlineNotice } from "../../components/ui/InlineNotice";
 import { RowActionsMenu, type RowActionItem } from "../../components/ui/DropdownMenu";
+import { RowControlButton } from "../../components/ui/RowControlButton";
 import { BulkActionBar, type BulkAction } from "../../components/ui/BulkActionBar";
 import { Toast, useToast } from "../../components/ui/Toast";
 import {
@@ -88,6 +90,7 @@ import {
   type RowSelection,
 } from "../../components/ui/useRowSelection";
 import { BatchStatusBand } from "./BatchStatusBand";
+import { BatchTaskControlPanel } from "./BatchTaskControlPanel";
 import { ConfirmBatchActionDialog } from "./ConfirmBatchActionDialog";
 import { ImportSitesDialog } from "./ImportSitesDialog";
 import { StartBatchDialog } from "./StartBatchDialog";
@@ -101,6 +104,7 @@ import {
   siteCanResumeTask,
   siteExportIsPartial,
   siteExportLabel,
+  sitePrimaryControl,
   siteResultTask,
   siteStartMode,
 } from "./actions";
@@ -121,7 +125,7 @@ import {
 } from "./siteListReturn";
 
 type DialogKind = "" | "start" | "import" | "cancel" | "archive";
-type BusyKind = "" | "pause" | "cancel" | "archive" | "restore";
+type BusyKind = "" | "pause" | "resume" | "cancel" | "archive" | "restore";
 
 type SiteDialog =
   | { kind: "start"; site: BatchSite; rerun: boolean }
@@ -460,6 +464,10 @@ export function BatchDetailPage() {
         const response = await pauseBatch(batch.batch_id);
         applyBatch(response.batch);
         setNotice(actionNotice("暂停请求已受理", response));
+      } else if (kind === "resume") {
+        const response = await resumeBatch(batch.batch_id);
+        applyBatch(response.batch);
+        setNotice(actionNotice("继续请求已受理", response));
       } else if (kind === "cancel") {
         const response = await cancelBatch(batch.batch_id);
         applyBatch(response.batch);
@@ -864,10 +872,22 @@ export function BatchDetailPage() {
     icon: <Pause size={14} />,
     onSelect: () => void runBatchAction("pause"),
   };
+  const resumeAction: RowActionItem = {
+    key: "resume",
+    label: "继续已暂停任务",
+    icon: <Play size={14} />,
+    onSelect: () => void runBatchAction("resume"),
+  };
   const primaryActions: Record<typeof primaryKind, RowActionItem> = {
     import: importAction,
     export: exportAction,
     pause: pauseAction,
+    resume: {
+      ...resumeAction,
+      label: batch.counts.paused
+        ? `继续 ${formatNumber(batch.counts.paused)} 个已暂停任务`
+        : resumeAction.label,
+    },
     start: {
       key: "start",
       label: batch.counts.startable
@@ -889,6 +909,8 @@ export function BatchDetailPage() {
   if (canExport && primaryKind !== "export") moreActions[0].push(exportAction);
   if (!archived && primaryKind !== "pause" && sites.some(siteCanPauseTask))
     moreActions[0].push(pauseAction);
+  if (!archived && primaryKind !== "resume" && batch.counts.paused > 0)
+    moreActions[0].push(resumeAction);
   if (!archived && batch.counts.startable === 0 && batchRerunnableSites(batch) > 0) {
     moreActions[0].push({
       key: "rerun",
@@ -1166,7 +1188,7 @@ export function BatchDetailPage() {
       key: "actions",
       label: "操作",
       header: <span className="sr-only">操作</span>,
-      width: 40,
+      width: 76,
       resizable: false,
       sticky: "right",
       hideable: false,
@@ -1174,13 +1196,46 @@ export function BatchDetailPage() {
       headerClassName: "px-1",
       cellClassName: "px-1",
       skeleton: false,
-      cell: (site) => (
-        <RowActionsMenu
-          label={`打开站点「${site.domain}」的操作菜单`}
-          groups={siteActions(site)}
-          busy={rowBusy === site.site_key}
-        />
-      ),
+      cell: (site) => {
+        const groups = siteActions(site);
+        const control = sitePrimaryControl(site);
+        const busy = rowBusy === site.site_key;
+        return groups.length || control ? (
+          <div className="flex items-center justify-end gap-0.5">
+            {control ? (
+              <RowControlButton
+                label={
+                  control === "start"
+                    ? `启动站点「${site.domain}」采集`
+                    : control === "pause"
+                      ? `暂停站点「${site.domain}」采集`
+                      : `继续站点「${site.domain}」采集`
+                }
+                icon={
+                  control === "pause" ? (
+                    <Pause size={15} aria-hidden="true" />
+                  ) : (
+                    <Play size={15} aria-hidden="true" />
+                  )
+                }
+                accent={control === "start"}
+                busy={busy}
+                onClick={() => {
+                  if (control === "start") openStartSite(site);
+                  else void runTaskControl(site, control);
+                }}
+              />
+            ) : null}
+            {groups.length ? (
+              <RowActionsMenu
+                label={`打开站点「${site.domain}」的操作菜单`}
+                groups={groups}
+                busy={busy}
+              />
+            ) : null}
+          </div>
+        ) : null;
+      },
     },
   ];
 
@@ -1284,9 +1339,11 @@ export function BatchDetailPage() {
               <span aria-hidden="true">{primary.icon}</span>
               {busy === "pause" && primaryKind === "pause"
                 ? "正在暂停…"
-                : busy === "restore" && primaryKind === "unarchive"
-                  ? "正在取消归档…"
-                  : primary.label}
+                : busy === "resume" && primaryKind === "resume"
+                  ? "正在继续…"
+                  : busy === "restore" && primaryKind === "unarchive"
+                    ? "正在取消归档…"
+                    : primary.label}
             </Button>
             {batch.collection_mode === "sample" &&
             !archived &&
@@ -1323,6 +1380,20 @@ export function BatchDetailPage() {
       ) : null}
 
       <BatchStatusBand batch={batch} />
+
+      {!archived ? (
+        <BatchTaskControlPanel
+          sites={sites}
+          rowBusy={rowBusy}
+          batchBusy={Boolean(busy) || bulkBusy !== ""}
+          onPauseSite={(site) => void runTaskControl(site, "pause")}
+          onResumeSite={(site) => void runTaskControl(site, "resume")}
+          onCancelSite={(site) => requestCancelSites([site])}
+          onPauseAll={() => void runBatchAction("pause")}
+          onResumeAll={() => void runBatchAction("resume")}
+          onOpenTask={openTask}
+        />
+      ) : null}
 
       <BatchSiteListSection
         sectionRef={siteListRef}

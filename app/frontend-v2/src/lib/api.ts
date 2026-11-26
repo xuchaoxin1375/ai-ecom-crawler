@@ -1023,6 +1023,13 @@ export function pauseBatch(batchId: string): Promise<BatchActionResponse> {
   );
 }
 
+export function resumeBatch(batchId: string): Promise<BatchActionResponse> {
+  return sendJson<BatchActionResponse>(
+    `/api/batches/${encodeURIComponent(batchId)}/resume`,
+    "POST",
+  );
+}
+
 export function cancelBatch(batchId: string): Promise<BatchActionResponse> {
   return sendJson<BatchActionResponse>(
     `/api/batches/${encodeURIComponent(batchId)}/cancel`,
@@ -1109,7 +1116,7 @@ export function getTaskCsv(
 
 async function controlTask(
   taskId: string,
-  action: "pause" | "resume" | "cancel" | "archive" | "restore",
+  action: "start" | "pause" | "resume" | "cancel" | "archive" | "restore",
 ): Promise<TaskSummary> {
   await sendJson<{ accepted?: boolean; state?: string }>(
     `/api/tasks/${encodeURIComponent(taskId)}/${action}`,
@@ -1118,6 +1125,10 @@ async function controlTask(
   // Control endpoints return an acknowledgement, not the task summary. Read
   // the task back so callers can keep using the full counts/rule payload.
   return getTask(taskId);
+}
+
+export function startTask(taskId: string): Promise<TaskSummary> {
+  return controlTask(taskId, "start");
 }
 
 export function pauseTask(taskId: string): Promise<TaskSummary> {

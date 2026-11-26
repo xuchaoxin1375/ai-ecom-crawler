@@ -29,6 +29,7 @@ import {
   pauseTask,
   restoreTask,
   resumeTask,
+  startTask,
   taskExportUrl,
   type TaskSummary,
 } from "../../lib/api";
@@ -60,8 +61,10 @@ import { ErrorNotice } from "../../components/ui/ErrorNotice";
 import { MetricStrip } from "../../components/ui/MetricStrip";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { RowActionsMenu, type RowActionItem } from "../../components/ui/DropdownMenu";
+import { RowControlButton } from "../../components/ui/RowControlButton";
 import { ConfirmBatchActionDialog } from "../batches/ConfirmBatchActionDialog";
 import { taskIsActive } from "../sites/site";
+import { taskPrimaryControl } from "../../lib/taskControl";
 import {
   TASK_STATE_OPTIONS,
   TASK_TYPE_OPTIONS,
@@ -219,23 +222,26 @@ export function TasksPage() {
 
   async function runAction(
     task: TaskSummary,
-    kind: "pause" | "resume" | "archive" | "restore",
+    kind: "start" | "pause" | "resume" | "archive" | "restore",
   ) {
     setBusy(`${kind}-${task.task_id}`);
     setError("");
     try {
-      if (kind === "pause") await pauseTask(task.task_id);
+      if (kind === "start") await startTask(task.task_id);
+      else if (kind === "pause") await pauseTask(task.task_id);
       else if (kind === "resume") await resumeTask(task.task_id);
       else if (kind === "archive") await archiveTask(task.task_id);
       else await restoreTask(task.task_id);
       setNotice(
-        kind === "pause"
-          ? `暂停请求已受理：${task.task_id}`
-          : kind === "resume"
-            ? `继续请求已受理：${task.task_id}`
-            : kind === "archive"
-              ? `任务已归档：${task.task_id}`
-              : `任务已恢复：${task.task_id}`,
+        kind === "start"
+          ? `启动请求已受理：${task.task_id}`
+          : kind === "pause"
+            ? `暂停请求已受理：${task.task_id}`
+            : kind === "resume"
+              ? `继续请求已受理：${task.task_id}`
+              : kind === "archive"
+                ? `任务已归档：${task.task_id}`
+                : `任务已恢复：${task.task_id}`,
       );
       refresh();
     } catch (exc) {
@@ -322,7 +328,7 @@ export function TasksPage() {
     ];
 
     const control: RowActionItem[] = [];
-    if (task.state === "RUNNING" || task.state === "PAUSING") {
+    if (task.state === "QUEUED" || task.state === "RUNNING") {
       control.push({
         key: "pause",
         label: "暂停任务",
@@ -587,7 +593,7 @@ export function TasksPage() {
       key: "actions",
       label: "操作",
       header: <span className="sr-only">操作</span>,
-      width: 52,
+      width: 76,
       resizable: false,
       sticky: "right",
       hideable: false,
@@ -595,13 +601,40 @@ export function TasksPage() {
       headerClassName: "px-2",
       cellClassName: "px-2",
       skeleton: false,
-      cell: (task) => (
-        <RowActionsMenu
-          label={`打开任务「${task.task_id}」的操作菜单`}
-          groups={taskActions(task)}
-          busy={busy.includes(task.task_id)}
-        />
-      ),
+      cell: (task) => {
+        const control = taskPrimaryControl(task.state);
+        const rowBusy = busy.includes(task.task_id);
+        return (
+          <div className="flex items-center justify-end gap-0.5">
+            {control ? (
+              <RowControlButton
+                label={
+                  control === "start"
+                    ? `启动任务 ${task.task_id}`
+                    : control === "pause"
+                      ? `暂停任务 ${task.task_id}`
+                      : `继续任务 ${task.task_id}`
+                }
+                icon={
+                  control === "pause" ? (
+                    <Pause size={15} aria-hidden="true" />
+                  ) : (
+                    <Play size={15} aria-hidden="true" />
+                  )
+                }
+                accent={control === "start"}
+                busy={rowBusy}
+                onClick={() => void runAction(task, control)}
+              />
+            ) : null}
+            <RowActionsMenu
+              label={`打开任务「${task.task_id}」的操作菜单`}
+              groups={taskActions(task)}
+              busy={rowBusy}
+            />
+          </div>
+        );
+      },
     },
   ];
 
