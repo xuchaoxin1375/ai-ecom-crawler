@@ -1837,14 +1837,26 @@ def create_app(
 
     def batch_payload(batch: Batch, *, detail: bool = False) -> dict[str, Any]:
         sites = store.list_batch_sites(batch.batch_id)
-        tasks = {
-            task.task_id: task
-            for task in store.list_batch_tasks(batch.batch_id)
-        }
-        summaries = {
-            task_id: _summary(store, task, root)
-            for task_id, task in tasks.items()
-        }
+        tasks = {task.task_id: task for task in store.list_batch_tasks(batch.batch_id)}
+        summaries = {task_id: _summary(store, task, root) for task_id, task in tasks.items()}
+        return summarize_batch(batch, sites, tasks, summaries, detail=detail)
+
+    def delivery_task(site: BatchSite, tasks: dict[str, Task]) -> Task | None:
+        if site.delivery_task_id:
+            return tasks.get(site.delivery_task_id)
+        current = tasks.get(site.task_id or "")
+        if current is not None and not current.input.get("feedback_id"):
+            return current
+        return None
+
+    def summarize_batch(
+        batch: Batch,
+        sites: list[BatchSite],
+        tasks: dict[str, Task],
+        summaries: dict[str, dict[str, Any]],
+        *,
+        detail: bool = False,
+    ) -> dict[str, Any]:
         current_task_ids = {site.task_id for site in sites if site.task_id}
         current_summaries = {
             task_id: summaries[task_id]
@@ -1852,10 +1864,9 @@ def create_app(
             if task_id in summaries
         }
         result_summaries = [
-            summaries[task_id]
+            summaries[task.task_id]
             for site in sites
-            if (task_id := site.delivery_task_id or site.task_id) in summaries
-            and (site.delivery_task_id or not tasks[task_id].input.get("feedback_id"))
+            if (task := delivery_task(site, tasks)) is not None
         ]
         readiness = Counter(site.readiness for site in sites)
         states = Counter(summary["state"] for summary in current_summaries.values())
@@ -3506,12 +3517,11 @@ def create_app(
 
     @app.get("/api/batches/{batch_id}/export")
     def export_batch(batch_id: str, partial: bool = False) -> Response:
-        batch = require_batch(batch_id)
-        sites = store.list_batch_sites(batch_id)
-        tasks = {
-            task.task_id: task
-            for task in store.list_batch_tasks(batch_id)
-        }
+        try:
+            batch, sites, runs = store.read_batch_snapshot(batch_id)
+        except BatchNotFoundError as exc:
+            raise _error("NOT_FOUND", str(exc), 404) from exc
+        tasks = {task.task_id: task for task in runs}
         if not partial and any(
             not site.delivery_task_id and site.task_id in tasks
             and tasks[site.task_id].state in ACTIVE_TASK_STATES | {"DRAFT"}
@@ -3523,16 +3533,15 @@ def create_app(
                 409,
             )
         manifest_sites: list[dict[str, Any]] = []
+        summaries = {task_id: _summary(store, task, root) for task_id, task in tasks.items()}
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
             for site in sites:
-                current = tasks.get(site.task_id) if site.task_id else None
-                task = tasks.get(site.delivery_task_id) if site.delivery_task_id else current
-                if task is current and task is not None and not site.delivery_task_id and task.input.get("feedback_id"):
-                    task = None
-                summary = _summary(store, task, root) if task else None
+                current = tasks.get(site.task_id or "")
+                task = delivery_task(site, tasks)
+                summary = summaries[task.task_id] if task else None
                 files: list[str] = []
-                if task is not None:
+                if task is not None and task.state in {"FINISHED", "CANCELLED"}:
                     run_dir = root / task.task_id
                     if run_dir.is_dir():
                         for name in EXPORT_FILES:
@@ -3561,7 +3570,7 @@ def create_app(
                 elif summary["state"] in ACTIVE_TASK_STATES or summary["state"] == "DRAFT":
                     export_status = "running"
                 elif summary["outcome"] == "COMPLETED":
-                    if not files:
+                    if not {"products.csv", "task-result.json"}.issubset(files):
                         export_status = "missing"
                     else:
                         export_status = "sample" if task and task.input.get("collection_mode") == "sample" else "complete"
@@ -3578,22 +3587,30 @@ def create_app(
                         "note": site.note,
                         "task_id": task.task_id if task else None,
                         "current_task_id": site.task_id,
+                        "current_task_state": current.state if current else None,
                         "collection_mode": (task.input.get("collection_mode") if task else None),
                         "task_state": summary["state"] if summary else None,
                         "outcome": summary["outcome"] if summary else None,
                         "stop_reason": summary["stop_reason"] if summary else None,
                         "export_status": export_status,
                         "files": files,
-                        "counts": summary["counts"] if summary else None,
-                        "coverage": summary["coverage"] if summary else None,
+                        "counts": summary["counts"] if summary and export_status != "running" else None,
+                        "coverage": summary["coverage"] if summary and export_status != "running" else None,
                         "quality_exceptions": (
                             summary["quality_exceptions"] if summary else []
                         ),
                     }
                 )
+            batch_summary = summarize_batch(batch, sites, tasks, summaries)
+            for key in ("valid_products", "failed_products"):
+                batch_summary[key] = sum(
+                    (item["counts"] or {}).get(key, 0)
+                    for item in manifest_sites
+                    if "task-result.json" in item["files"]
+                )
             manifest = {
                 "generated_at": utc_now(),
-                "batch": batch_payload(batch),
+                "batch": batch_summary,
                 "sites": manifest_sites,
             }
             archive.writestr(

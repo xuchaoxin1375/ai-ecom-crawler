@@ -570,12 +570,15 @@ class TaskRunner:
         pagination = item.result.get("pagination", {"type": "none"})
         next_url, state = self._next_public_json_url(item, payload, pagination)
         if added and next_url:
-            self._add_navigation(
-                next_url,
-                source="public_json",
-                parent=item.url,
-                result={**item.result, **state},
-            )
+            if int(item.result.get("page", 1)) >= max(1, int(pagination.get("max_pages", 20))):
+                self._note_discovery_limit("public JSON pagination reached max_pages")
+            else:
+                self._add_navigation(
+                    next_url,
+                    source="public_json",
+                    parent=item.url,
+                    result={**item.result, **state},
+                )
         return "DONE", {
             "items": len(items),
             "added": added,
@@ -588,9 +591,6 @@ class TaskRunner:
     ) -> tuple[str | None, dict[str, Any]]:
         pagination_type = str(pagination.get("type", "none"))
         if pagination_type == "none":
-            return None, {}
-        max_pages = max(1, int(pagination.get("max_pages", 20)))
-        if int(item.result.get("page", 1)) >= max_pages:
             return None, {}
         if pagination_type == "page_param":
             param = str(pagination.get("param", "page"))
@@ -767,6 +767,8 @@ class TaskRunner:
                 result={"page": page + 1, "limit": self._shopify.page_size},
             )
 
+        if page >= self._shopify.max_pages and len(products) >= self._shopify.page_size:
+            self._note_discovery_limit("Shopify product source reached max_pages")
         self._shopify_stats["pages"] = int(self._shopify_stats.get("pages", 0)) + 1
         self._shopify_stats["products_seen"] = (
             int(self._shopify_stats.get("products_seen", 0)) + len(products)
@@ -889,12 +891,14 @@ class TaskRunner:
                 ):
                     products += 1
                 continue
-            if depth >= max_depth or not patterns:
-                continue
             parsed = urlparse(absolute)
-            if any(
-                pattern.search(parsed.path) for pattern in patterns
-            ) and self._add_navigation(
+            if not any(pattern.search(parsed.path) for pattern in patterns):
+                continue
+            if depth >= max_depth:
+                if self._is_new_navigation(absolute):
+                    self._note_discovery_limit("HTML index reached max_depth")
+                continue
+            if self._add_navigation(
                 absolute,
                 source="html_index",
                 parent=item.url,
@@ -964,13 +968,18 @@ class TaskRunner:
         advance = self._listing_advance(item) or {"type": "none"}
         next_url = self._next_listing_url(item, page, advance) if added else None
         if next_url:
-            next_page = int(item.result.get("page", 1)) + 1
-            self._add_navigation(
-                next_url,
-                source="listing",
-                parent=item.url,
-                result={**item.result, "page": next_page},
-            )
+            current = int(item.result.get("page", 1))
+            default_max = int(self.rule.discovery.get("limits", {}).get("max_pages", 20))
+            if current >= max(1, int(advance.get("max_pages", default_max))):
+                if self._is_new_navigation(next_url):
+                    self._note_discovery_limit("listing pagination reached max_pages")
+            else:
+                self._add_navigation(
+                    next_url,
+                    source="listing",
+                    parent=item.url,
+                    result={**item.result, "page": current + 1},
+                )
         payload: dict[str, Any] = {
             "links": len(urls),
             "added": added,
@@ -980,6 +989,8 @@ class TaskRunner:
         advance_stats = result.meta.get("advance")
         if advance_stats:
             payload["advance"] = advance_stats
+            if advance_stats.get("stop") == "MAX_STEPS":
+                self._note_discovery_limit("browser listing reached its action limit")
         return "DONE", payload
 
     def _next_listing_url(
@@ -989,10 +1000,6 @@ class TaskRunner:
         if advance_type not in {"page_param", "next_link"}:
             return None
         current = int(item.result.get("page", 1))
-        default_max = int(self.rule.discovery.get("limits", {}).get("max_pages", 20))
-        max_pages = max(1, int(advance.get("max_pages", default_max)))
-        if current >= max_pages:
-            return None
         if advance_type == "page_param":
             param = str(advance.get("param", "page"))
             parsed = urlparse(page.url or item.url)
@@ -1071,6 +1078,8 @@ class TaskRunner:
                     added += 1
                 else:
                     skipped += 1
+            if any(self._is_new_navigation(url) for url in children[self._max_sitemaps :]):
+                self._note_discovery_limit("sitemap index reached max_sitemaps")
             return "DONE", {
                 "sitemap_type": "index",
                 "children": len(locations),
@@ -1454,6 +1463,8 @@ class TaskRunner:
         }
         self._adapter_stats = stats
         self._event("adapter_finished", **stats)
+        if done.get("stop") in {"MAX_STEPS", "MAX_BATCHES", "MAX_ITEMS", "MAX_REQUESTS", "BUDGET_EXHAUSTED"}:
+            self._note_discovery_limit(f"discovery adapter reported {done['stop']}")
         if added == 0 and self.store.count_items(self.task.task_id, "product") == 0:
             raise AdapterError(
                 "adapter_empty", "adapter returned no usable product URLs"
@@ -1595,13 +1606,14 @@ class TaskRunner:
         parent: str | None = None,
         result: dict[str, Any] | None = None,
     ) -> bool:
-        target = self.task.input.get("target_entry")
-        if not self._is_allowed_url(url) or (target and not within_target_navigation(url, target)):
+        if not self._navigation_allowed(url):
             return False
         if (
             self.store.count_items(self.task.task_id, "navigation")
             >= self._max_navigation
         ):
+            if self._is_new_navigation(url):
+                self._note_discovery_limit("navigation queue reached max_navigation")
             return False
         normalized = _normalize_url(url)
         item_id = hashlib.sha1(f"nav:{normalized}".encode()).hexdigest()[:16]
@@ -1620,6 +1632,32 @@ class TaskRunner:
             ),
             lease=self.lease,
         )
+
+    def _navigation_allowed(self, url: str) -> bool:
+        target = self.task.input.get("target_entry")
+        return self._is_allowed_url(url) and (
+            not target or within_target_navigation(url, target)
+        )
+
+    def _is_new_navigation(self, url: str) -> bool:
+        if self.task.input.get("collection_mode") != "formal" or not self._navigation_allowed(url):
+            return False
+        if self.task.counters.get("discovery_limit"):
+            return False
+        normalized = _normalize_url(url)
+        return all(
+            item.normalized_url != normalized
+            for item in self.store.items(self.task.task_id, "navigation")
+        )
+
+    def _note_discovery_limit(self, detail: str) -> None:
+        if self.task.input.get("collection_mode") != "formal":
+            return
+        # Preserve the first proven truncation across pauses and worker replacement.
+        with self._write_lock:
+            if "discovery_limit" not in self.task.counters:
+                self.task.counters["discovery_limit"] = detail
+                self.store.update_task(self.task.task_id, lease=self.lease, counters=self.task.counters)
 
     def _add_product_item(
         self,
@@ -1844,13 +1882,17 @@ class TaskRunner:
         valid = counts.get("DONE", 0)
         pending = counts.get("PENDING", 0) + counts.get("IN_FLIGHT", 0)
         failed = counts.get("FAILED", 0)
-        if (
-            self.task.input.get("collection_mode") == "formal"
-            and self._stop_reason == "NATURAL_END"
-            and self._remaining_product_limit() <= 0
-        ):
-            self._stop_reason = "BUDGET_EXHAUSTED"
-            self._stop_detail = "formal collection reached its product limit"
+        if self.task.input.get("collection_mode") == "formal" and self._stop_reason == "NATURAL_END":
+            limit = self.task.counters.get("discovery_limit")
+            if self._remaining_product_limit() <= 0:
+                limit = limit or "formal collection reached its product limit"
+            if limit:
+                self._stop_reason = "BUDGET_EXHAUSTED"
+                self._stop_detail = limit
+            elif self.store.item_counts(self.task.task_id, "navigation").get("FAILED", 0):
+                self._stop_reason = "OTHER"
+                self._stop_detail = "one or more discovery sources failed"
+                return "PARTIAL" if valid else "FAILED"
         if self._stop_reason in {
             "ACCESS_DENIED",
             "ADAPTER_FAILED",

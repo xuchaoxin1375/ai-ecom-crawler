@@ -1704,6 +1704,24 @@ class TaskStore:
             ).fetchall()
         return [_task_from_row(row) for row in rows]
 
+    def read_batch_snapshot(self, batch_id: str) -> tuple[Batch, list[BatchSite], list[Task]]:
+        with self._connect() as connection:
+            connection.execute("BEGIN")
+            batch = connection.execute(
+                "SELECT * FROM batches WHERE batch_id = ?", (batch_id,)
+            ).fetchone()
+            if batch is None:
+                raise BatchNotFoundError(f"unknown batch: {batch_id}")
+            sites = connection.execute(
+                "SELECT * FROM batch_sites WHERE batch_id = ? ORDER BY created_at, rowid",
+                (batch_id,),
+            ).fetchall()
+            tasks = connection.execute(
+                "SELECT * FROM tasks WHERE batch_id = ? ORDER BY created_at, task_id",
+                (batch_id,),
+            ).fetchall()
+        return _batch_from_row(batch), list(map(_batch_site_from_row, sites)), list(map(_task_from_row, tasks))
+
     def create_build(self, build: BuildRecord) -> None:
         with self._connect() as connection:
             try:

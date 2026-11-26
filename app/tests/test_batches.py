@@ -9,6 +9,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 import yaml
 from fastapi.testclient import TestClient
@@ -456,6 +457,64 @@ class BatchApiTests(unittest.TestCase):
                 self.assertIn(f"Product {index}", csv_file)
                 self.assertIn(f"{origin}/p{index}.html", csv_file)
 
+    def test_formal_pagination_limit_preserves_prior_trial_delivery(self) -> None:
+        origin = "http://limited-catalog.test"
+        entry = f"{origin}/list"
+        rule = yaml.safe_load(RULE_TEMPLATE.replace("__BASE__", origin))
+        rule["rule_id"] = "limited-catalog"
+        rule["site"]["entry_urls"] = [entry]
+        rule["discovery"]["sources"] = [{
+            "type": "listing", "url": entry, "product_link_selector": "a.product",
+            "advance": {"type": "page_param", "param": "p", "max_pages": 1},
+        }]
+        (self.rules_dir / "limited.yaml").write_text(yaml.safe_dump(rule), encoding="utf-8")
+        self._activate_fixture_rule("limited.yaml", target_key("limited-catalog.test", entry, "GB"))
+        batch = self._create(collection_mode="sample", market="GB", sites=[entry])["batch"]
+        path = f"/api/batches/{batch['batch_id']}"
+        with fixture_server(proxy_origin=origin) as proxy:
+            worker = Worker(self.store, out_root=self.out_root, per_domain_rps=50, proxy=proxy)
+            trial = self.client.post(f"{path}/start", json={}).json()["accepted"][0]["task_id"]
+            worker.run_once()
+            formal = self.client.post(f"{path}/start", json={"promote_trial": True}).json()["accepted"][0]["task_id"]
+            worker.run_once()
+        result = self.store.get_task(formal)
+        self.assertEqual((result.state, result.outcome, result.stop_reason), ("FINISHED", "PARTIAL", "BUDGET_EXHAUSTED"))
+        result_json = json.loads((self.out_root / formal / "task-result.json").read_text(encoding="utf-8"))
+        self.assertIn("max_pages", result_json["stop_detail"])
+        response = self.client.get(f"{path}/export")
+        self.assertEqual(response.status_code, 200, response.text)
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            row = json.loads(archive.read("batch.json"))["sites"][0]
+        self.assertEqual((row["task_id"], row["current_task_id"], row["export_status"]), (trial, formal, "sample"))
+
+        rule["rule_version"] = "2026.11.26-1"
+        rule["discovery"]["sources"][0]["advance"] = {
+            "type": "next_link", "selector": "a[rel=next]", "max_pages": 1,
+        }
+        last_page_rule = self.rules_dir / "last-page.yaml"
+        last_page_rule.write_text(yaml.safe_dump(rule), encoding="utf-8")
+        digest = hashlib.sha256(last_page_rule.read_bytes()).hexdigest()
+        self.store.create_rule_version(RuleVersion(
+            rule_id=rule["rule_id"], rule_version=rule["rule_version"],
+            sha256=digest, path=last_page_rule.name, status="candidate", created_at=utc_now(),
+        ))
+        self.store.activate_rule(
+            site_key=target_key("limited-catalog.test", entry, "GB"),
+            rule_id=rule["rule_id"], rule_version=rule["rule_version"],
+            sha256=digest, request_id="activate-last-page",
+        )
+        with fixture_server(proxy_origin=origin) as proxy:
+            started = self.client.post(f"{path}/start", json={"rerun_finished": True})
+            self.assertEqual(started.status_code, 202, started.text)
+            last_page = started.json()["accepted"][0]["task_id"]
+            Worker(self.store, out_root=self.out_root, per_domain_rps=50, proxy=proxy).run_once()
+        complete = self.store.get_task(last_page)
+        self.assertEqual((complete.outcome, complete.stop_reason), ("COMPLETED", "NATURAL_END"))
+        response = self.client.get(f"{path}/export")
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            row = json.loads(archive.read("batch.json"))["sites"][0]
+        self.assertEqual((row["task_id"], row["export_status"]), (last_page, "complete"))
+
     def test_import_prefers_active_rule_over_candidate(self) -> None:
         self._add_familidoo_version("2026.11.22-2")
         batch = self._create(sites=["https://www.familidoo.fr/fr/"])["batch"]
@@ -678,6 +737,9 @@ class BatchApiTests(unittest.TestCase):
         }
         self.assertEqual(statuses["example-boutique.fr"], "needs_onboarding")
         self.assertEqual(statuses["familidoo.fr"], "running")
+        running = next(item for item in manifest["sites"] if item["site_key"] == "familidoo.fr")
+        self.assertIsNone(running["counts"])
+        self.assertEqual(running["files"], [])
 
         self.store.update_task(
             task_id,
@@ -723,7 +785,14 @@ class BatchApiTests(unittest.TestCase):
             ).read_bytes(),
         }
 
-        complete = self.client.get(f"/api/batches/{batch_id}/export")
+        write_file = zipfile.ZipFile.write
+
+        def finish_during_export(archive: zipfile.ZipFile, path: Path, **kwargs: str) -> None:
+            self.store.update_task(task_id, state="FINISHED", outcome="FAILED")
+            write_file(archive, path, **kwargs)
+
+        with patch.object(zipfile.ZipFile, "write", finish_during_export):
+            complete = self.client.get(f"/api/batches/{batch_id}/export")
         self.assertEqual(complete.status_code, 200)
         with zipfile.ZipFile(io.BytesIO(complete.content)) as archive:
             names = set(archive.namelist())
@@ -742,6 +811,9 @@ class BatchApiTests(unittest.TestCase):
         )
         self.assertEqual(ready["export_status"], "complete")
         self.assertEqual(ready["counts"]["valid_products"], 1)
+        self.assertEqual(manifest["batch"]["counts"]["failed"], 0)
+        self.assertEqual(manifest["batch"]["valid_products"], 1)
+        self.assertEqual(self.client.get(f"/api/batches/{batch_id}").json()["counts"]["failed"], 1)
 
     def test_unknown_batch_returns_404(self) -> None:
         self.assertEqual(self.client.get("/api/batches/missing").status_code, 404)
