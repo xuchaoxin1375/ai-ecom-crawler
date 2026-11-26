@@ -124,6 +124,7 @@ export interface BatchSummary {
   language: string | null;
   category: string | null;
   note: string | null;
+  folder_id?: string | null;
   status: BatchStatus;
   archived_at: string | null;
   created_at: string;
@@ -136,6 +137,52 @@ export interface BatchSummary {
 export interface BatchPage {
   total: number;
   items: BatchSummary[];
+}
+
+export interface BatchFolder {
+  folder_id: string;
+  parent_id: string | null;
+  name: string;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BatchTreeFolder extends BatchFolder {
+  batch_count: number;
+  descendant_batch_count: number;
+}
+
+export interface BatchTreeBatch {
+  batch_id: string;
+  name: string;
+  folder_id: string | null;
+  updated_at: string;
+  signals: {
+    running: number;
+    failed: number;
+    needs_onboarding: number;
+  };
+}
+
+export interface BatchTreePayload {
+  folders: BatchTreeFolder[];
+  batches: BatchTreeBatch[];
+  unfiled: { batch_count: number };
+  archived: { batch_count: number };
+}
+
+export interface BatchFolderMutationResponse {
+  folder: BatchFolder;
+}
+
+export interface BatchFolderDeleteResponse {
+  removed: {
+    folder_id: string;
+    parent_id: string | null;
+    moved_folders: number;
+    moved_batches: number;
+  };
 }
 
 export interface TaskCounts {
@@ -752,6 +799,7 @@ export interface BatchDraftRequest {
   language?: string | null;
   category?: string | null;
   note?: string | null;
+  folder_id?: string | null;
   sites?: string[];
   sites_text?: string;
 }
@@ -817,9 +865,35 @@ export interface BatchListParams {
   status?: string;
   country?: string;
   category?: string;
+  folderId?: string;
+  includeDescendants?: boolean;
+  unfiled?: boolean;
+  archivedOnly?: boolean;
   includeArchived?: boolean;
   limit?: number;
   offset?: number;
+}
+
+export interface BatchFolderCreateRequest {
+  name: string;
+  parent_id?: string | null;
+}
+
+export interface BatchFolderUpdateRequest {
+  name?: string;
+  parent_id?: string | null;
+}
+
+export interface BatchUpdateRequest {
+  name?: string;
+  category?: string | null;
+  note?: string | null;
+  folder_id?: string | null;
+}
+
+export interface BatchMoveRequest {
+  batch_ids: string[];
+  folder_id?: string | null;
 }
 
 export class ApiError extends Error {
@@ -928,6 +1002,9 @@ export function getBatches(
       status: params.status,
       country: params.country,
       category: params.category,
+      folder_id: params.folderId,
+      unfiled: params.unfiled,
+      archived_only: params.archivedOnly,
       include_archived: params.includeArchived,
       limit: params.limit ?? 100,
       offset: params.offset,
@@ -938,6 +1015,57 @@ export function getBatches(
 
 export function getBatch(batchId: string, signal?: AbortSignal): Promise<BatchDetail> {
   return getJson<BatchDetail>(`/api/batches/${encodeURIComponent(batchId)}`, signal);
+}
+
+export function getBatchTree(signal?: AbortSignal): Promise<BatchTreePayload> {
+  return getJson<BatchTreePayload>("/api/batch-tree", signal);
+}
+
+export function createBatchFolder(
+  body: BatchFolderCreateRequest,
+): Promise<BatchFolderMutationResponse> {
+  return sendJson<BatchFolderMutationResponse>("/api/batch-folders", "POST", body);
+}
+
+export function updateBatchFolder(
+  folderId: string,
+  body: BatchFolderUpdateRequest,
+): Promise<BatchFolderMutationResponse> {
+  return sendJson<BatchFolderMutationResponse>(
+    `/api/batch-folders/${encodeURIComponent(folderId)}`,
+    "PATCH",
+    body,
+  );
+}
+
+export function deleteBatchFolder(
+  folderId: string,
+): Promise<BatchFolderDeleteResponse> {
+  return sendJson<BatchFolderDeleteResponse>(
+    `/api/batch-folders/${encodeURIComponent(folderId)}`,
+    "DELETE",
+  );
+}
+
+export function updateBatch(
+  batchId: string,
+  body: BatchUpdateRequest,
+): Promise<{ accepted: boolean; batch: BatchDetail }> {
+  return sendJson<{ accepted: boolean; batch: BatchDetail }>(
+    `/api/batches/${encodeURIComponent(batchId)}`,
+    "PATCH",
+    body,
+  );
+}
+
+export function moveBatches(
+  body: BatchMoveRequest,
+): Promise<{ accepted: boolean; moved: number; folder_id: string | null }> {
+  return sendJson<{ accepted: boolean; moved: number; folder_id: string | null }>(
+    "/api/batches/move",
+    "POST",
+    body,
+  );
 }
 
 async function sendJson<T>(

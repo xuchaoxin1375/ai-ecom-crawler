@@ -18,6 +18,8 @@ import { ErrorNotice } from "../../components/ui/ErrorNotice";
 
 interface NewBatchDialogProps {
   open: boolean;
+  folderId?: string | null;
+  folderName?: string | null;
   onOpenChange: (open: boolean) => void;
   onSaved: (
     batchId: string,
@@ -46,7 +48,13 @@ function previewItems(report: ImportReport | null) {
   );
 }
 
-export function NewBatchDialog({ open, onOpenChange, onSaved }: NewBatchDialogProps) {
+export function NewBatchDialog({
+  open,
+  folderId = null,
+  folderName = null,
+  onOpenChange,
+  onSaved,
+}: NewBatchDialogProps) {
   const queryClient = useQueryClient();
   const [form, setForm] = useState(EMPTY_FORM);
   const [preview, setPreview] = useState<BatchPreviewResponse["preview"] | null>(null);
@@ -98,6 +106,7 @@ export function NewBatchDialog({ open, onOpenChange, onSaved }: NewBatchDialogPr
       language: optional(form.language),
       category: optional(form.category),
       note: optional(form.note),
+      folder_id: folderId,
       sites_text: form.sitesText,
     };
   }
@@ -262,6 +271,12 @@ export function NewBatchDialog({ open, onOpenChange, onSaved }: NewBatchDialogPr
                 {nameError ? (
                   <p id="new-batch-name-error" className="mt-1 text-xs text-danger">
                     {nameError}
+                  </p>
+                ) : null}
+                {folderName ? (
+                  <p className="mt-2 text-xs text-ink-3">
+                    将保存到分组：
+                    <span className="font-medium text-ink-2">{folderName}</span>
                   </p>
                 ) : null}
               </div>

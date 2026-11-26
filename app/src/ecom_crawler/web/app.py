@@ -59,6 +59,7 @@ from ..runtime.batch import (
 )
 from ..runtime.models import (
     Batch,
+    BatchFolder,
     BatchSite,
     BuildContinuation,
     BuildRecord,
@@ -71,6 +72,10 @@ from ..runtime.models import (
 )
 from ..runtime.rule import RuleError, load_rule
 from ..runtime.store import (
+    BatchFolderConflictError,
+    BatchFolderError,
+    BatchFolderNameError,
+    BatchFolderNotFoundError,
     BatchNotFoundError,
     BatchTransitionError,
     BuildContinuationConflictError,
@@ -339,9 +344,32 @@ class BatchCreateRequest(BaseModel):
     language: str | None = Field(default=None, max_length=80)
     category: str | None = Field(default=None, max_length=120)
     note: str | None = Field(default=None, max_length=2000)
+    folder_id: str | None = Field(default=None, max_length=40)
     sites: list[str] = Field(default_factory=list, max_length=5000)
     sites_text: str = Field(default="", max_length=500000)
     preview: bool = False
+
+
+class BatchUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    category: str | None = Field(default=None, max_length=120)
+    note: str | None = Field(default=None, max_length=2000)
+    folder_id: str | None = Field(default=None, max_length=40)
+
+
+class BatchMoveRequest(BaseModel):
+    batch_ids: list[str] = Field(min_length=1, max_length=500)
+    folder_id: str | None = Field(default=None, max_length=40)
+
+
+class BatchFolderCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    parent_id: str | None = Field(default=None, max_length=40)
+
+
+class BatchFolderUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    parent_id: str | None = Field(default=None, max_length=40)
 
 
 class BatchImportRequest(BaseModel):
@@ -1904,6 +1932,91 @@ def create_app(
         summaries = {task_id: _summary(store, task, root) for task_id, task in tasks.items()}
         return summarize_batch(batch, sites, tasks, summaries, detail=detail)
 
+    def folder_payload(folder: BatchFolder) -> dict[str, Any]:
+        return {
+            "folder_id": folder.folder_id,
+            "parent_id": folder.parent_id,
+            "name": folder.name,
+            "sort_order": folder.sort_order,
+            "created_at": folder.created_at,
+            "updated_at": folder.updated_at,
+        }
+
+    def folder_error(exc: BatchFolderError) -> None:
+        if isinstance(exc, BatchFolderNotFoundError):
+            raise _error("NOT_FOUND", str(exc), 404) from exc
+        if isinstance(exc, BatchFolderConflictError):
+            raise _error("CONFLICT", str(exc), 409) from exc
+        if isinstance(exc, BatchFolderNameError):
+            raise _error("INVALID_NAME", str(exc), 400) from exc
+        raise _error("INVALID_FOLDER", str(exc), 400) from exc
+
+    def require_folder(folder_id: str) -> BatchFolder:
+        folder = store.get_batch_folder(folder_id)
+        if folder is None:
+            raise _error("NOT_FOUND", f"unknown batch folder: {folder_id}", 404)
+        return folder
+
+    def folder_scope_ids(folder_id: str, *, include_descendants: bool) -> set[str]:
+        folders = store.list_batch_folders()
+        known = {folder.folder_id for folder in folders}
+        if folder_id not in known:
+            raise _error("NOT_FOUND", f"unknown batch folder: {folder_id}", 404)
+        if not include_descendants:
+            return {folder_id}
+        children: dict[str | None, list[str]] = {}
+        for folder in folders:
+            children.setdefault(folder.parent_id, []).append(folder.folder_id)
+        result: set[str] = set()
+        stack = [folder_id]
+        while stack:
+            current = stack.pop()
+            if current in result:
+                continue
+            result.add(current)
+            stack.extend(children.get(current, []))
+        return result
+
+    def batch_tree_payload() -> dict[str, Any]:
+        folders = store.list_batch_folders()
+        batches = store.list_batches(include_archived=False)
+        archived = store.list_batches(include_archived=True)
+        signals = store.batch_tree_signals()
+        children: dict[str | None, list[BatchFolder]] = {}
+        for folder in folders:
+            children.setdefault(folder.parent_id, []).append(folder)
+        direct_counts = Counter(batch.folder_id for batch in batches)
+
+        def descendant_count(folder_id: str) -> int:
+            total = direct_counts.get(folder_id, 0)
+            for child in children.get(folder_id, []):
+                total += descendant_count(child.folder_id)
+            return total
+
+        zero_signal = {"running": 0, "failed": 0, "needs_onboarding": 0}
+        return {
+            "folders": [
+                {
+                    **folder_payload(folder),
+                    "batch_count": direct_counts.get(folder.folder_id, 0),
+                    "descendant_batch_count": descendant_count(folder.folder_id),
+                }
+                for folder in folders
+            ],
+            "batches": [
+                {
+                    "batch_id": batch.batch_id,
+                    "name": batch.name,
+                    "folder_id": batch.folder_id,
+                    "updated_at": batch.updated_at,
+                    "signals": signals.get(batch.batch_id, zero_signal),
+                }
+                for batch in batches
+            ],
+            "unfiled": {"batch_count": direct_counts.get(None, 0)},
+            "archived": {"batch_count": len(archived) - len(batches)},
+        }
+
     def delivery_task(site: BatchSite, tasks: dict[str, Task]) -> Task | None:
         if site.delivery_task_id:
             return tasks.get(site.delivery_task_id)
@@ -1980,6 +2093,7 @@ def create_app(
             "language": batch.language,
             "category": batch.category,
             "note": batch.note,
+            "folder_id": batch.folder_id,
             "status": batch_status(batch, sites, current_summaries),
             "archived_at": batch.archived_at,
             "created_at": batch.created_at,
@@ -3295,11 +3409,30 @@ def create_app(
         status: Annotated[str | None, Query()] = None,
         country: Annotated[str | None, Query()] = None,
         category: Annotated[str | None, Query()] = None,
+        folder_id: Annotated[str | None, Query(max_length=40)] = None,
+        include_descendants: Annotated[bool, Query()] = True,
+        unfiled: Annotated[bool, Query()] = False,
+        archived_only: Annotated[bool, Query()] = False,
         include_archived: Annotated[bool, Query()] = False,
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         offset: Annotated[int, Query(ge=0)] = 0,
     ) -> dict[str, Any]:
-        batches = store.list_batches(include_archived=include_archived)
+        if folder_id and unfiled:
+            raise _error(
+                "INVALID_FILTER", "folder_id and unfiled cannot be combined", 400
+            )
+        batches = store.list_batches(
+            include_archived=include_archived or archived_only
+        )
+        if archived_only:
+            batches = [batch for batch in batches if batch.archived_at is not None]
+        if unfiled:
+            batches = [batch for batch in batches if batch.folder_id is None]
+        elif folder_id:
+            scope = folder_scope_ids(
+                folder_id, include_descendants=include_descendants
+            )
+            batches = [batch for batch in batches if batch.folder_id in scope]
         items = [batch_payload(batch) for batch in batches]
         if status:
             wanted = status.strip().upper()
@@ -3320,6 +3453,51 @@ def create_app(
             ]
         total = len(items)
         return {"total": total, "items": items[offset : offset + limit]}
+
+    @app.get("/api/batch-tree")
+    def get_batch_tree() -> dict[str, Any]:
+        return batch_tree_payload()
+
+    @app.post("/api/batch-folders", status_code=201)
+    def create_batch_folder(payload: BatchFolderCreateRequest) -> dict[str, Any]:
+        try:
+            folder = store.create_batch_folder(
+                BatchFolder(
+                    folder_id=f"f-{uuid.uuid4().hex[:12]}",
+                    name=payload.name,
+                    parent_id=payload.parent_id,
+                )
+            )
+        except BatchFolderError as exc:
+            folder_error(exc)
+        return {"folder": folder_payload(folder)}
+
+    @app.patch("/api/batch-folders/{folder_id}")
+    def update_batch_folder(
+        folder_id: str, payload: BatchFolderUpdateRequest
+    ) -> dict[str, Any]:
+        updates = payload.model_dump(exclude_unset=True)
+        try:
+            if not updates:
+                folder = require_folder(folder_id)
+            else:
+                values: dict[str, Any] = {}
+                if "name" in updates:
+                    values["name"] = updates["name"]
+                if "parent_id" in updates:
+                    values["parent_id"] = updates["parent_id"]
+                folder = store.update_batch_folder(folder_id, **values)
+        except BatchFolderError as exc:
+            folder_error(exc)
+        return {"folder": folder_payload(folder)}
+
+    @app.delete("/api/batch-folders/{folder_id}")
+    def delete_batch_folder(folder_id: str) -> dict[str, Any]:
+        try:
+            result = store.delete_batch_folder(folder_id)
+        except BatchFolderError as exc:
+            folder_error(exc)
+        return {"removed": result}
 
     @app.post("/api/batches", status_code=201)
     def create_batch(payload: BatchCreateRequest) -> JSONResponse:
@@ -3345,10 +3523,13 @@ def create_app(
                         "market": payload.market,
                         "language": payload.language,
                         "category": payload.category,
+                        "folder_id": payload.folder_id,
                         "import": report,
                     },
                 },
             )
+        if payload.folder_id is not None:
+            require_folder(payload.folder_id)
         batch = Batch(
             batch_id=f"b-{uuid.uuid4().hex[:12]}",
             name=payload.name.strip(),
@@ -3358,6 +3539,7 @@ def create_app(
             category=payload.category,
             note=payload.note,
             collection_mode=payload.collection_mode,
+            folder_id=payload.folder_id,
         )
         try:
             store.create_batch(batch)
@@ -3380,6 +3562,44 @@ def create_app(
                 "import": report,
             },
         )
+
+    @app.post("/api/batches/move")
+    def move_batches(payload: BatchMoveRequest) -> dict[str, Any]:
+        if payload.folder_id is not None:
+            require_folder(payload.folder_id)
+        try:
+            moved = store.move_batches(payload.batch_ids, payload.folder_id)
+        except BatchNotFoundError as exc:
+            raise _error("NOT_FOUND", str(exc), 404) from exc
+        except BatchFolderNotFoundError as exc:
+            raise _error("NOT_FOUND", str(exc), 404) from exc
+        return {
+            "accepted": True,
+            "moved": moved,
+            "folder_id": payload.folder_id,
+        }
+
+    @app.patch("/api/batches/{batch_id}")
+    def update_batch(batch_id: str, payload: BatchUpdateRequest) -> dict[str, Any]:
+        require_batch(batch_id)
+        updates = payload.model_dump(exclude_unset=True)
+        if "name" in updates:
+            name = updates["name"]
+            if name is None or not str(name).strip():
+                raise _error("INVALID_NAME", "批次名称不能为空", 400)
+            updates["name"] = str(name).strip()
+        if "folder_id" in updates and updates["folder_id"] is not None:
+            require_folder(str(updates["folder_id"]))
+        try:
+            store.update_batch(batch_id, **updates)
+        except BatchNotFoundError as exc:
+            raise _error("NOT_FOUND", str(exc), 404) from exc
+        except ValueError as exc:
+            raise _error("INVALID_BATCH", str(exc), 400) from exc
+        return {
+            "accepted": True,
+            "batch": batch_payload(require_batch(batch_id), detail=True),
+        }
 
     @app.get("/api/batches/{batch_id}")
     def get_batch(batch_id: str) -> dict[str, Any]:

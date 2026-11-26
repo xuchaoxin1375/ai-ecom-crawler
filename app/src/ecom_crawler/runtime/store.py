@@ -12,6 +12,7 @@ from typing import Any
 
 from .models import (
     Batch,
+    BatchFolder,
     BatchSite,
     BuildContinuation,
     BuildRecord,
@@ -26,6 +27,9 @@ from .models import (
     json_loads,
     utc_now,
 )
+
+BATCH_FOLDER_MAX_DEPTH = 4
+_UNSET = object()
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS tasks (
@@ -57,6 +61,18 @@ CREATE TABLE IF NOT EXISTS tasks (
     finished_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS batch_folders (
+    folder_id TEXT PRIMARY KEY,
+    parent_id TEXT,
+    name TEXT NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_batch_folders_parent
+    ON batch_folders(parent_id, name);
+
 CREATE TABLE IF NOT EXISTS batches (
     batch_id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -68,7 +84,8 @@ CREATE TABLE IF NOT EXISTS batches (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     archived_at TEXT,
-    collection_mode TEXT
+    collection_mode TEXT,
+    folder_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS batch_sites (
@@ -332,6 +349,22 @@ class BatchTransitionError(ValueError):
     """Raised when a batch command is invalid for the batch's current members."""
 
 
+class BatchFolderError(ValueError):
+    """Base error for invalid batch folder operations."""
+
+
+class BatchFolderNotFoundError(BatchFolderError):
+    """Raised when a folder operation targets an unknown folder."""
+
+
+class BatchFolderNameError(BatchFolderError):
+    """The folder name is empty, too long or contains invalid characters."""
+
+
+class BatchFolderConflictError(BatchFolderError):
+    """A sibling name conflict, cycle or depth limit blocks the operation."""
+
+
 class FeedbackNotFoundError(ValueError):
     """Raised when a feedback command targets an unknown feedback record."""
 
@@ -441,10 +474,16 @@ class TaskStore:
                     "AND NOT EXISTS (SELECT 1 FROM quality_feedback f WHERE f.rerun_task_id = t.task_id "
                     "AND f.status != 'RESOLVED'))"
                 )
-            if "collection_mode" not in {
+            batch_columns = {
                 row["name"] for row in connection.execute("PRAGMA table_info(batches)")
-            }:
+            }
+            if "collection_mode" not in batch_columns:
                 connection.execute("ALTER TABLE batches ADD COLUMN collection_mode TEXT")
+            if "folder_id" not in batch_columns:
+                connection.execute("ALTER TABLE batches ADD COLUMN folder_id TEXT")
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_batches_folder ON batches(folder_id)"
+            )
             build_columns = {
                 row["name"]
                 for row in connection.execute("PRAGMA table_info(builds)")
@@ -1464,8 +1503,9 @@ class TaskStore:
                     """
                     INSERT INTO batches (
                         batch_id, name, country, market, language, category,
-                        note, created_at, updated_at, archived_at, collection_mode
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        note, created_at, updated_at, archived_at, collection_mode,
+                        folder_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         batch.batch_id,
@@ -1479,6 +1519,7 @@ class TaskStore:
                         batch.updated_at,
                         batch.archived_at,
                         batch.collection_mode,
+                        batch.folder_id,
                     ),
                 )
             except sqlite3.IntegrityError as exc:
@@ -1517,7 +1558,7 @@ class TaskStore:
         return [_batch_from_row(row) for row in rows]
 
     def update_batch(self, batch_id: str, **fields: Any) -> Batch:
-        allowed = {"name", "country", "market", "language", "category", "note"}
+        allowed = {"name", "country", "market", "language", "category", "note", "folder_id"}
         unknown = set(fields) - allowed
         if unknown:
             raise ValueError(f"unknown batch fields: {sorted(unknown)}")
@@ -1537,6 +1578,255 @@ class TaskStore:
         if batch is None:
             raise BatchNotFoundError(f"unknown batch: {batch_id}")
         return batch
+
+    def list_batch_folders(self) -> list[BatchFolder]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM batch_folders ORDER BY name COLLATE NOCASE, folder_id"
+            ).fetchall()
+        return [_batch_folder_from_row(row) for row in rows]
+
+    def get_batch_folder(self, folder_id: str) -> BatchFolder | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM batch_folders WHERE folder_id = ?", (folder_id,)
+            ).fetchone()
+        return _batch_folder_from_row(row) if row else None
+
+    def create_batch_folder(self, folder: BatchFolder) -> BatchFolder:
+        name = _normalize_batch_folder_name(folder.name)
+        now = utc_now()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                if folder.parent_id is not None:
+                    chain = _batch_folder_chain(connection, folder.parent_id)
+                    if len(chain) >= BATCH_FOLDER_MAX_DEPTH:
+                        raise BatchFolderConflictError(
+                            f"分组最多 {BATCH_FOLDER_MAX_DEPTH} 层"
+                        )
+                _ensure_batch_folder_name_available(
+                    connection, name, folder.parent_id, exclude_id=None
+                )
+                connection.execute(
+                    """
+                    INSERT INTO batch_folders (
+                        folder_id, parent_id, name, sort_order, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        folder.folder_id,
+                        folder.parent_id,
+                        name,
+                        folder.sort_order,
+                        folder.created_at or now,
+                        now,
+                    ),
+                )
+                connection.execute("COMMIT")
+            except sqlite3.IntegrityError as exc:
+                connection.execute("ROLLBACK")
+                raise BatchFolderConflictError("分组 ID 已存在") from exc
+            except Exception:
+                connection.execute("ROLLBACK")
+                raise
+        created = self.get_batch_folder(folder.folder_id)
+        if created is None:
+            raise BatchFolderNotFoundError(
+                f"unknown batch folder: {folder.folder_id}"
+            )
+        return created
+
+    def update_batch_folder(
+        self,
+        folder_id: str,
+        *,
+        name: Any = _UNSET,
+        parent_id: Any = _UNSET,
+    ) -> BatchFolder:
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                row = connection.execute(
+                    "SELECT * FROM batch_folders WHERE folder_id = ?", (folder_id,)
+                ).fetchone()
+                if row is None:
+                    raise BatchFolderNotFoundError(
+                        f"unknown batch folder: {folder_id}"
+                    )
+                if name is not _UNSET and name is None:
+                    raise BatchFolderNameError("分组名称不能为空")
+                next_name = (
+                    row["name"]
+                    if name is _UNSET
+                    else _normalize_batch_folder_name(str(name))
+                )
+                next_parent = (
+                    row["parent_id"] if parent_id is _UNSET else parent_id
+                )
+                if next_parent is not None:
+                    if next_parent == folder_id:
+                        raise BatchFolderConflictError("分组不能移动到自己下面")
+                    chain = _batch_folder_chain(connection, next_parent)
+                    if folder_id in chain:
+                        raise BatchFolderConflictError("分组不能移动到自己的后代下面")
+                    subtree_height = _batch_folder_subtree_height(
+                        connection, folder_id
+                    )
+                    if len(chain) + subtree_height > BATCH_FOLDER_MAX_DEPTH:
+                        raise BatchFolderConflictError(
+                            f"分组最多 {BATCH_FOLDER_MAX_DEPTH} 层"
+                        )
+                _ensure_batch_folder_name_available(
+                    connection,
+                    next_name,
+                    next_parent,
+                    exclude_id=folder_id,
+                )
+                connection.execute(
+                    "UPDATE batch_folders SET name = ?, parent_id = ?, updated_at = ? "
+                    "WHERE folder_id = ?",
+                    (next_name, next_parent, utc_now(), folder_id),
+                )
+                connection.execute("COMMIT")
+            except Exception:
+                connection.execute("ROLLBACK")
+                raise
+        updated = self.get_batch_folder(folder_id)
+        if updated is None:
+            raise BatchFolderNotFoundError(f"unknown batch folder: {folder_id}")
+        return updated
+
+    def delete_batch_folder(self, folder_id: str) -> dict[str, Any]:
+        """Dissolve a folder without deleting batches or nested work."""
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                row = connection.execute(
+                    "SELECT * FROM batch_folders WHERE folder_id = ?", (folder_id,)
+                ).fetchone()
+                if row is None:
+                    raise BatchFolderNotFoundError(
+                        f"unknown batch folder: {folder_id}"
+                    )
+                parent_id = row["parent_id"]
+                conflicts = connection.execute(
+                    """
+                    SELECT child.name FROM batch_folders child
+                    WHERE child.parent_id = ?
+                      AND EXISTS (
+                        SELECT 1 FROM batch_folders sibling
+                        WHERE COALESCE(sibling.parent_id, '') = COALESCE(?, '')
+                          AND sibling.folder_id <> ?
+                          AND lower(sibling.name) = lower(child.name)
+                      )
+                    """,
+                    (folder_id, parent_id, folder_id),
+                ).fetchall()
+                if conflicts:
+                    names = "、".join(item["name"] for item in conflicts)
+                    raise BatchFolderConflictError(
+                        f"上一级已有同名分组：{names}；请先改名"
+                    )
+                now = utc_now()
+                moved_folders = connection.execute(
+                    "UPDATE batch_folders SET parent_id = ?, updated_at = ? "
+                    "WHERE parent_id = ?",
+                    (parent_id, now, folder_id),
+                ).rowcount
+                moved_batches = connection.execute(
+                    "UPDATE batches SET folder_id = ?, updated_at = ? "
+                    "WHERE folder_id = ?",
+                    (parent_id, now, folder_id),
+                ).rowcount
+                connection.execute(
+                    "DELETE FROM batch_folders WHERE folder_id = ?", (folder_id,)
+                )
+                connection.execute("COMMIT")
+            except Exception:
+                connection.execute("ROLLBACK")
+                raise
+        return {
+            "folder_id": folder_id,
+            "parent_id": parent_id,
+            "moved_folders": moved_folders,
+            "moved_batches": moved_batches,
+        }
+
+    def move_batches(
+        self, batch_ids: list[str], folder_id: str | None
+    ) -> int:
+        unique_ids = list(dict.fromkeys(batch_ids))
+        if not unique_ids:
+            raise ValueError("batch_ids must not be empty")
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                if folder_id is not None and connection.execute(
+                    "SELECT 1 FROM batch_folders WHERE folder_id = ?",
+                    (folder_id,),
+                ).fetchone() is None:
+                    raise BatchFolderNotFoundError(
+                        f"unknown batch folder: {folder_id}"
+                    )
+                placeholders = ",".join("?" for _ in unique_ids)
+                found = {
+                    row["batch_id"]
+                    for row in connection.execute(
+                        f"SELECT batch_id FROM batches WHERE batch_id IN ({placeholders})",
+                        unique_ids,
+                    ).fetchall()
+                }
+                missing = [batch_id for batch_id in unique_ids if batch_id not in found]
+                if missing:
+                    raise BatchNotFoundError(
+                        f"unknown batch: {', '.join(missing)}"
+                    )
+                cursor = connection.execute(
+                    f"UPDATE batches SET folder_id = ?, updated_at = ? "
+                    f"WHERE batch_id IN ({placeholders})",
+                    [folder_id, utc_now(), *unique_ids],
+                )
+                connection.execute("COMMIT")
+            except Exception:
+                connection.execute("ROLLBACK")
+                raise
+        return cursor.rowcount
+
+    def batch_tree_signals(self) -> dict[str, dict[str, int]]:
+        """Return lightweight per-batch signals for the directory tree.
+
+        The tree must not reuse the full batch payload: doing so would read
+        sites, tasks and result summaries for every batch.  These signals are
+        operational hints only; the batch table and detail remain authoritative.
+        """
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    bs.batch_id,
+                    COALESCE(SUM(CASE WHEN t.state IN
+                        ('RUNNING', 'PAUSING', 'CANCELLING') THEN 1 ELSE 0 END), 0)
+                        AS running,
+                    COALESCE(SUM(CASE WHEN t.state = 'FINISHED'
+                        AND t.outcome = 'FAILED' THEN 1 ELSE 0 END), 0)
+                        AS failed,
+                    COALESCE(SUM(CASE WHEN bs.readiness = 'needs_onboarding'
+                        THEN 1 ELSE 0 END), 0)
+                        AS needs_onboarding
+                FROM batch_sites bs
+                LEFT JOIN tasks t ON t.task_id = bs.task_id
+                GROUP BY bs.batch_id
+                """
+            ).fetchall()
+        return {
+            row["batch_id"]: {
+                "running": int(row["running"]),
+                "failed": int(row["failed"]),
+                "needs_onboarding": int(row["needs_onboarding"]),
+            }
+            for row in rows
+        }
 
     def add_batch_sites(self, sites: list[BatchSite]) -> int:
         """Insert site rows, skipping keys that already exist in the batch."""
@@ -2945,6 +3235,89 @@ def _reject_in_flight(
     return cursor.rowcount
 
 
+def _normalize_batch_folder_name(name: str) -> str:
+    value = name.strip()
+    if not value:
+        raise BatchFolderNameError("分组名称不能为空")
+    if len(value) > 80:
+        raise BatchFolderNameError("分组名称不能超过 80 个字符")
+    if "/" in value:
+        raise BatchFolderNameError("分组名称不能包含 /")
+    if any(ord(character) < 32 or ord(character) == 127 for character in value):
+        raise BatchFolderNameError("分组名称不能包含控制字符")
+    return value
+
+
+def _batch_folder_chain(
+    connection: sqlite3.Connection, folder_id: str
+) -> list[str]:
+    chain: list[str] = []
+    current: str | None = folder_id
+    while current is not None:
+        row = connection.execute(
+            "SELECT parent_id FROM batch_folders WHERE folder_id = ?", (current,)
+        ).fetchone()
+        if row is None:
+            raise BatchFolderNotFoundError(f"unknown batch folder: {current}")
+        chain.append(current)
+        current = row["parent_id"]
+        if len(chain) > BATCH_FOLDER_MAX_DEPTH + 1:
+            raise BatchFolderConflictError(
+                f"分组最多 {BATCH_FOLDER_MAX_DEPTH} 层"
+            )
+    return chain
+
+
+def _batch_folder_subtree_height(
+    connection: sqlite3.Connection, folder_id: str
+) -> int:
+    height = 0
+    stack: list[tuple[str, int]] = [(folder_id, 1)]
+    while stack:
+        current, level = stack.pop()
+        height = max(height, level)
+        if height > BATCH_FOLDER_MAX_DEPTH:
+            raise BatchFolderConflictError(
+                f"分组最多 {BATCH_FOLDER_MAX_DEPTH} 层"
+            )
+        children = connection.execute(
+            "SELECT folder_id FROM batch_folders WHERE parent_id = ?", (current,)
+        ).fetchall()
+        stack.extend((child["folder_id"], level + 1) for child in children)
+    return height
+
+
+def _ensure_batch_folder_name_available(
+    connection: sqlite3.Connection,
+    name: str,
+    parent_id: str | None,
+    *,
+    exclude_id: str | None,
+) -> None:
+    row = connection.execute(
+        """
+        SELECT folder_id FROM batch_folders
+        WHERE COALESCE(parent_id, '') = COALESCE(?, '')
+          AND lower(name) = lower(?)
+          AND folder_id <> ?
+        """,
+        (parent_id, name, exclude_id or ""),
+    ).fetchone()
+    if row is not None:
+        raise BatchFolderConflictError(f"同级已存在分组：{name}")
+
+
+def _batch_folder_from_row(row: sqlite3.Row) -> BatchFolder:
+    return BatchFolder(
+        folder_id=row["folder_id"],
+        name=row["name"],
+        parent_id=row["parent_id"],
+        sort_order=row["sort_order"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
 def _batch_from_row(row: sqlite3.Row) -> Batch:
     return Batch(
         batch_id=row["batch_id"],
@@ -2958,6 +3331,7 @@ def _batch_from_row(row: sqlite3.Row) -> Batch:
         updated_at=row["updated_at"],
         archived_at=row["archived_at"],
         collection_mode=dict(row).get("collection_mode"),
+        folder_id=dict(row).get("folder_id"),
     )
 
 

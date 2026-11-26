@@ -111,6 +111,23 @@ class Batch:
     updated_at: str = field(default_factory=utc_now)
     archived_at: str | None = None
     collection_mode: str | None = None
+    folder_id: str | None = None
+
+
+@dataclass
+class BatchFolder:
+    """A user-created, nestable grouping for batches.
+
+    Folders only change how batches are presented.  They never own tasks,
+    results or delivery records, so dissolving a folder must not delete work.
+    """
+
+    folder_id: str
+    name: str
+    parent_id: str | None = None
+    sort_order: int = 0
+    created_at: str = field(default_factory=utc_now)
+    updated_at: str = field(default_factory=utc_now)
 
 
 BATCH_READINESS = {
