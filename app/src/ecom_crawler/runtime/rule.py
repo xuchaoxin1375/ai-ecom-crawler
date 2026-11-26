@@ -35,7 +35,7 @@ SUPPORTED_ADVANCE = {
     "infinite_scroll",
 }
 SUPPORTED_SCROLL_MODES = {"auto", "scroll", "wheel"}
-SUPPORTED_ENGINES = {"static", "browser", "http_json"}
+SUPPORTED_ENGINES = {"static", "browser", "stealth", "http_json"}
 SUPPORTED_WAIT_UNTIL = {"commit", "domcontentloaded", "load", "networkidle"}
 SUPPORTED_SELECTOR_STATES = {"attached", "detached", "hidden", "visible"}
 BROWSER_OPTION_KEYS = {
@@ -428,7 +428,7 @@ def _validate_common(data: dict[str, Any]) -> None:
                 for settings in per_type.values()
                 if isinstance(settings, dict) and settings.get("engine")
             )
-        if "browser" in engines:
+        if engines & {"browser", "stealth"}:
             raise RuleError(
                 "fetch.browser=false conflicts with a browser engine; "
                 "remove browser: false or use a static engine"
@@ -998,9 +998,10 @@ def _validate_product_source(data: dict[str, Any], fetch: dict[str, Any]) -> Non
             description["fallback_engine"],
             "product_source.description.fallback_engine",
         ).lower()
-        if engine not in {"static", "browser"}:
+        if engine not in {"static", "browser", "stealth"}:
             raise RuleError(
-                "product_source.description.fallback_engine must be static or browser"
+                "product_source.description.fallback_engine must be static, "
+                "browser or stealth"
             )
         effective = _product_engine(fetch)
         if effective != engine:

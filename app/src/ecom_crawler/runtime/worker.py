@@ -25,6 +25,7 @@ from .models import Lease, Task, utc_now
 from .resources import cleanup_orphan_profiles, cleanup_task_resources
 from .rule import RulePackage, load_rule
 from .runner import TaskRunner
+from .stealth import StealthConfig, StealthFetcher
 from .store import LeaseLostError, TaskStore
 
 logger = logging.getLogger(__name__)
@@ -107,6 +108,23 @@ def _make_browser(context: FetcherContext) -> BrowserFetcher:
     )
 
 
+def _make_stealth(context: FetcherContext) -> StealthFetcher:
+    max_attempts, backoff_ms = _retry_values(context.rule)
+    config = StealthConfig.from_fetch(context.rule.fetch)
+    if context.proxy and not config.proxy:
+        config = replace(config, proxy=context.proxy)
+    return StealthFetcher(
+        context.store,
+        task_id=context.task.task_id,
+        out_root=context.out_root,
+        config=config,
+        limiter=context.limiter,
+        lease_token=context.lease.token,
+        max_attempts=max_attempts,
+        backoff_ms=backoff_ms,
+    )
+
+
 @contextmanager
 def default_fetcher(context: FetcherContext) -> Iterator[Any]:
     default, overrides = engine_plan(context.rule)
@@ -125,9 +143,17 @@ def default_fetcher(context: FetcherContext) -> Iterator[Any]:
         finally:
             fetcher.close()
         return
+    if engines == {"stealth"}:
+        fetcher = _make_stealth(context)
+        try:
+            yield fetcher
+        finally:
+            fetcher.close()
+        return
     builders: dict[str, Callable[[], Any]] = {
         "static": lambda: _make_static(context),
         "browser": lambda: _make_browser(context),
+        "stealth": lambda: _make_stealth(context),
     }
     hybrid = HybridFetcher(
         default_engine=default,
@@ -322,16 +348,18 @@ class Worker:
         stop_event: threading.Event | None = None,
     ) -> int:
         self.out_root.mkdir(parents=True, exist_ok=True)
-        try:
-            sweep = cleanup_orphan_profiles(
-                self.store,
-                self.out_root,
-                min_age_seconds=self.profile_sweep_age_seconds,
-            )
-            if sweep["removed"] or sweep["failed"]:
-                logger.warning("orphan adapter profile sweep: %s", sweep)
-        except Exception:
-            logger.exception("orphan adapter profile sweep failed")
+        for profile_dir in ("adapter-browser-profile", "stealth-profile"):
+            try:
+                sweep = cleanup_orphan_profiles(
+                    self.store,
+                    self.out_root,
+                    dirname=profile_dir,
+                    min_age_seconds=self.profile_sweep_age_seconds,
+                )
+                if sweep["removed"] or sweep["failed"]:
+                    logger.warning("orphan %s sweep: %s", profile_dir, sweep)
+            except Exception:
+                logger.exception("orphan %s sweep failed", profile_dir)
         running: dict[str, threading.Thread] = {}
         started = 0
         self._maybe_settle(force=True)

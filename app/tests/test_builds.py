@@ -27,6 +27,7 @@ from ecom_crawler.builds import (
     _live_timeline,
     _merge_reasoning_timeline,
     _probe_robots,
+    _rule_needs_browser,
     _seconds_since,
     _trace_timeline,
     default_permissions,
@@ -852,6 +853,8 @@ class BuildWorkflowTests(unittest.TestCase):
             self.assertIn("product_source", brief)
             self.assertIn("schema_version: \"1.3\"", brief)
             self.assertIn("shopify_json", brief)
+            self.assertIn("default_engine: stealth", brief)
+            self.assertIn("resilient-browser-fetch", brief)
             self.assertIn("Host validation budget", brief)
             self.assertIn(
                 "robots.txt",
@@ -3053,6 +3056,21 @@ class BuildWorkflowTests(unittest.TestCase):
             self.assertEqual(seen["max_seconds"], 30)
             self.assertEqual(result["validation"]["products_budget"], 6)
             self.assertEqual(result["validation"]["seconds_budget"], 30)
+
+    def test_stealth_rule_counts_as_browser_for_validation_budget(self) -> None:
+        rule = mock.Mock(
+            kind="declarative",
+            fetch={"default_engine": "stealth"},
+        )
+        self.assertTrue(_rule_needs_browser(rule))
+        rule = mock.Mock(
+            kind="declarative",
+            fetch={
+                "default_engine": "static",
+                "per_url_type": {"product": {"engine": "stealth"}},
+            },
+        )
+        self.assertTrue(_rule_needs_browser(rule))
 
     def test_build_timeline_merges_trace_parts(self) -> None:
         trace = {

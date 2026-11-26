@@ -164,7 +164,15 @@ python -m uv run --project app ecom-crawler serve `
 - `target`：`catalog_products` 指定执行目标（例如 10），要求 `scope.max_products` 和发现来源覆盖该目标；主机验证仍只用 `max_products` 样本。Shopify 可用 `product_source` 覆盖目标。
 - `full`：全站目录，要求 listing／sitemap／html_index／public_json 来源（或 Shopify `product_source`），并自动把 `scope.max_products` 提升到目录目标。
 
-主机验证的 `max_products` 和秒数会写入构建验证记录；规则使用浏览器时，验证秒数自动提升到 `ECOM_BUILD_BROWSER_VALIDATION_SECONDS`，避免 120 秒只验完 1 件。
+主机验证的 `max_products` 和秒数会写入构建验证记录；规则使用浏览器时，验证秒数自动提升到 `ECOM_BUILD_BROWSER_VALIDATION_SECONDS`，避免 120 秒只验完 1 件。`stealth` 引擎同样按浏览器规则计时。
+
+### 挑战站与 stealth 引擎
+
+- `fetch.default_engine` 支持 `static`、`browser`、`stealth`、`http_json`。`browser` 是 Patchright 渲染，不求解挑战；`stealth` 使用 Scrapling `StealthySession` 和 `solve_cloudflare`，用于 Cloudflare 类挑战挡住静态与 Patchright 的站点。
+- `stealth` 复用 `fetch.browser` 的页面选项：`timeout_ms` 实际至少 240 秒，`challenge_wait_ms` 实际至少 180 秒；`profile_name` 会加 `stealth-` 前缀。一个任务复用一个会话和 profile，任务结束或租约接管时清理。
+- 构建简报会给出宿主 Python 和 `resilient-browser-fetch` 的 Scrapling 探针命令。构建 Agent 只有在静态和 Patchright 都被挑战挡住、且 stealth 样本返回真实商品内容时才写 `default_engine: stealth`；stealth 仍被挡时记录 `ACCESS` 并停止。
+- `stealth` 不支持 `load_more`／`infinite_scroll`；挑战站优先用 sitemap／listing 的 URL 分页。sitemap 是索引时用 `sitemap_patterns` 选中商品子图，并给足 `max_sitemaps`。
+- 真实 partsfornissans 探测的冷启动约 157–341 秒、同会话后续约 5–11 秒；冷启动波动大，600 秒验证预算不是固定成本。设计见 [ADR 0021](adr/0021-stealth挑战引擎.md)。
 
 入口：`http://127.0.0.1:8765/next/#/batches`。站点详情可以启动构建、查看时间线、暂停／恢复／取消、处理权限和依赖请求。同一时间只允许一个构建运行；其他站点提交后进入 `QUEUED` 队列，构建列表／详情显示排队位置并支持取消排队。重启会保留排队项；运行中的会话标为 `FINISHED/interrupted` 并保留，用户可在构建详情继续。
 

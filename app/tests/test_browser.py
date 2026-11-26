@@ -296,6 +296,31 @@ class BrowserConfigTests(unittest.TestCase):
             with self.assertRaises(RuleError):
                 load_rule(rule)
 
+    def test_rule_accepts_stealth_engine(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            rule = Path(temporary) / "rule.yaml"
+            text = RULE_TEMPLATE.replace("__BASE__", "https://example.test")
+            text = text.replace('"browser"', '"stealth"')
+            rule.write_text(text, encoding="utf-8")
+            loaded = load_rule(rule)
+            self.assertEqual(loaded.fetch["default_engine"], "stealth")
+            self.assertEqual(
+                loaded.fetch["per_url_type"]["product"]["engine"], "stealth"
+            )
+
+    def test_rule_rejects_browser_false_with_stealth_engine(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            rule = Path(temporary) / "rule.yaml"
+            text = RULE_TEMPLATE.replace("__BASE__", "https://example.test")
+            text = text.replace('"browser"', '"stealth"')
+            text = text.replace(
+                "  browser:\n    headless: true\n    disable_resources: true",
+                "  browser: false",
+            )
+            rule.write_text(text, encoding="utf-8")
+            with self.assertRaises(RuleError):
+                load_rule(rule)
+
     def test_rule_rejects_browser_false_with_browser_engine(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             rule = Path(temporary) / "rule.yaml"
@@ -312,7 +337,7 @@ class BrowserConfigTests(unittest.TestCase):
 class HybridRoutingTests(unittest.TestCase):
     def _fetcher(self, engine: str, calls: list[tuple[str, str, str | None]]) -> Any:
         class FakeFetcher:
-            thread_affine = engine == "browser"
+            thread_affine = engine in {"browser", "stealth"}
 
             def __init__(self) -> None:
                 self.requests = 0
@@ -363,6 +388,15 @@ class HybridRoutingTests(unittest.TestCase):
         self.assertEqual(description["engines_used"], ["browser", "static"])
         router.close()
         self.assertTrue(all(fetcher.closed for fetcher in fetchers.values()))
+
+    def test_stealth_engine_is_thread_affine(self) -> None:
+        router = HybridFetcher(
+            default_engine="stealth",
+            overrides={},
+            builders={"stealth": lambda: self._fetcher("stealth", [])},
+        )
+        self.assertTrue(router.thread_affine)
+        router.close()
 
     def test_robots_txt_is_fetched_with_static_engine(self) -> None:
         calls: list[tuple[str, str, str | None]] = []

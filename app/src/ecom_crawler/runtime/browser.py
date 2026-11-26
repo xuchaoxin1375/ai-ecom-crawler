@@ -304,7 +304,7 @@ class BrowserFetcher:
                 logger.debug("network idle wait timed out", exc_info=True)
         if options.wait_ms:
             page.wait_for_timeout(options.wait_ms)
-        if self.config.launch.challenge_wait_ms and _is_challenge_title(page.title()):
+        if self.config.launch.challenge_wait_ms and is_challenge_title(page.title()):
             self._wait_for_challenge(page)
         meta: dict[str, Any] = {"engine": "browser"}
         if advance:
@@ -313,7 +313,7 @@ class BrowserFetcher:
         if rendered_status:
             status = rendered_status
         body = page.content().encode("utf-8")
-        if _is_challenge_title(page.title()):
+        if is_challenge_title(page.title()):
             meta["challenge_suspected"] = True
         return FetchResult(status=status, url=final_url, body=body, meta=meta)
 
@@ -344,7 +344,7 @@ class BrowserFetcher:
         while time.monotonic() < deadline:
             time.sleep(min(1.0, max(deadline - time.monotonic(), 0.1)))
             try:
-                if not _is_challenge_title(page.title()):
+                if not is_challenge_title(page.title()):
                     return
             except Exception:  # noqa: BLE001 - page may be navigating
                 return
@@ -826,7 +826,7 @@ def _block_heavy_resources(route: Any) -> None:
         route.continue_()
 
 
-def _is_challenge_title(title: str) -> bool:
+def is_challenge_title(title: str) -> bool:
     normalized = (title or "").strip().lower()
     return any(marker in normalized for marker in CHALLENGE_TITLE_MARKERS)
 

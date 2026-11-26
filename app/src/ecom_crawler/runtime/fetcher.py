@@ -147,9 +147,9 @@ class HybridFetcher:
     """Route each work item to a lazily built engine.
 
     ``default_engine`` and ``overrides`` use the same names as the rule
-    package: ``static``, ``browser`` or ``http_json``.  ``http_json`` is a
-    static HTTP request in this runtime.  Engines are built lazily so a rule
-    that never reaches a browser URL does not launch one.
+    package: ``static``, ``browser``, ``stealth`` or ``http_json``.
+    ``http_json`` is a static HTTP request in this runtime.  Engines are built
+    lazily so a rule that never reaches a browser URL does not launch one.
     """
 
     def __init__(
@@ -166,10 +166,9 @@ class HybridFetcher:
         self.builders = builders
         self._fetchers: dict[str, Any] = {}
         self._lock = threading.Lock()
-        self._thread_affine = "browser" in {
-            self.default_engine,
-            *self.overrides.values(),
-        }
+        self._thread_affine = bool(
+            {"browser", "stealth"} & {self.default_engine, *self.overrides.values()}
+        )
 
     @property
     def thread_affine(self) -> bool:
@@ -239,7 +238,7 @@ class HybridFetcher:
             "engines_used": engines_used,
             "engines": descriptions,
         }
-        browser = descriptions.get("browser")
+        browser = descriptions.get("browser") or descriptions.get("stealth")
         if browser:
             for key in (
                 "browser_launched",
@@ -291,6 +290,6 @@ def normalize_engine(value: str) -> str:
     engine = str(value or "static").strip().lower()
     if engine == "http_json":
         return "static"
-    if engine not in {"static", "browser"}:
+    if engine not in {"static", "browser", "stealth"}:
         raise ValueError(f"unsupported fetch engine: {value!r}")
     return engine

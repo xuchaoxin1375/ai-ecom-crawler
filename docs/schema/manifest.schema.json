@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "采集方案 manifest v1.0～v1.2",
+  "title": "采集方案 manifest v1.0～v1.3",
   "description": "校验运行时规则包（rule_*）与对外方案包（plan_*）两种投影。两种投影共享 site/scope/discovery/fetch/extract 语义；跨字段约束仍由执行器校验。",
   "oneOf": [
     {
@@ -474,7 +474,7 @@
       "required": ["default_engine", "retry"],
       "properties": {
         "default_engine": {
-          "enum": ["static", "browser", "http_json"]
+          "enum": ["static", "browser", "stealth", "http_json"]
         },
         "concurrency": {
           "type": "integer",
@@ -566,7 +566,7 @@
           "additionalProperties": {
             "type": "object",
             "properties": {
-              "engine": {"enum": ["static", "browser", "http_json"]},
+              "engine": {"enum": ["static", "browser", "stealth", "http_json"]},
               "wait_until": {
                 "enum": ["commit", "domcontentloaded", "load", "networkidle"]
               },
@@ -893,7 +893,7 @@
                   "minimum": 1
                 },
                 "fallback_engine": {
-                  "enum": ["static", "browser"]
+                  "enum": ["static", "browser", "stealth"]
                 },
                 "fallback_concurrency": {
                   "type": "integer",

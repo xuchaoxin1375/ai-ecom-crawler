@@ -22,6 +22,7 @@ import logging
 import os
 import re
 import shutil
+import sys
 import threading
 import time
 import urllib.error
@@ -371,14 +372,15 @@ def _rule_needs_browser(rule: Any) -> bool:
     if str(getattr(rule, "kind", "")) == "hybrid":
         return True
     fetch = getattr(rule, "fetch", {}) or {}
-    if str(fetch.get("default_engine", "")).lower() == "browser":
+    browser_engines = {"browser", "stealth"}
+    if str(fetch.get("default_engine", "")).lower() in browser_engines:
         return True
     per_type = fetch.get("per_url_type")
     if isinstance(per_type, dict):
         for settings in per_type.values():
             if isinstance(settings, dict) and str(
                 settings.get("engine", "")
-            ).lower() == "browser":
+            ).lower() in browser_engines:
                 return True
     return False
 
@@ -2255,6 +2257,30 @@ candidate; the host validates and installs it.
             "the batch currency. Per-product `.js`/`.json` extraction is not "
             "implemented yet; do not claim it in the rule.\n"
         )
+        stealth_instruction = (
+            "If static and Patchright samples both hit a Cloudflare-style challenge, "
+            "probe one product page with the `resilient-browser-fetch` skill and the "
+            f"host runtime Python `{sys.executable}`:\n\n"
+            "```text\n"
+            f'"{sys.executable}" "<resilient-browser-fetch>/scripts/resilient_fetch.py" '
+            "--url <product-url> --engine scrapling "
+            "--profile-dir work/stealth-profile --timeout-ms 300000 "
+            "--challenge-wait-ms 180000 --out ../out/evidence/stealth-sample.html "
+            "--expect-text <product-title-or-price>\n"
+            "```\n\n"
+            "Replace `<resilient-browser-fetch>` with the installed skill directory. "
+            "Pass the same proxy and reuse `work/stealth-profile` for the next "
+            "sample. If the sitemap is an index, select product children with "
+            "`sitemap_patterns` (for example `/sitemaps/products/`) and raise "
+            "`max_sitemaps` enough to cover them; the host handles `.xml.gz`. If the "
+            "stealth sample returns the real product title and price, "
+            "set `fetch.default_engine: stealth`, `fetch.timeout_ms: 240000`, "
+            "`fetch.browser.challenge_wait_ms: 180000` and a stable "
+            "`fetch.browser.wait_selector`. The host validation uses the same stealth "
+            "engine and gets at least 600 seconds. If the stealth sample still shows "
+            "a challenge, record `ACCESS` and stop; do not declare a browser rule "
+            "from a challenge page.\n"
+        )
         robots_note = str(task.extra.get("robots_note") or "robots.txt not probed")
         expected_currency = MARKET_CURRENCY.get((batch.market or "").upper(), "")
         expected_currency_line = (
@@ -2294,7 +2320,7 @@ Budget checkpoint: write a minimal valid rule by about 50% of the wall-clock
 budget, stop discovery by about 70%, and leave the remainder for host
 validation and repair. Do not wait until the budget is exhausted to write the
 first rule.
-{discovery_instruction}{shopify_instruction}
+{discovery_instruction}{shopify_instruction}{stealth_instruction}
 ## Required output
 
 Write these files from the workspace (`work/` is your current directory):
@@ -2326,14 +2352,14 @@ live target.
 
 If two responses from the same client are a challenge page (for example titles
 such as "Verify your browser" or "Verifying your connection"), stop retrying
-that path. Switch to a browser sample only when the final rule will use the
-browser engine and the host can validate it; otherwise stop and record `ACCESS`
+that path. Switch to a browser or stealth sample only when the final rule will
+use that engine and the host can validate it; otherwise stop and record `ACCESS`
 in `../out/evidence/build-notes.md`. Do not spend the remaining wall-clock
 budget on repeated challenge retries.
 
 Keep one exit for the rest of the build and host validation. If static product
 pages return 429 on that exit, you may test at most two alternate same-market
-exits or switch to the browser engine, record the chosen exit, and stop
+exits or switch to the browser/stealth engine, record the chosen exit, and stop
 rotating; do not change exit per request. Minor price differences are
 acceptable, but the currency must remain the batch currency.
 
@@ -2399,24 +2425,41 @@ Required top-level keys: `schema_version`, `rule_id`, `rule_version`, `kind`,
   `shopify_json_unavailable` and continues with `discovery`; do not invent a
   second JSON endpoint. Product `.js`/`.json` per-product extraction is not
   implemented.
-- `fetch`: `default_engine` is `static` unless the page truly needs JavaScript;
-  `concurrency: 1`, `delay_ms` at least `1000`, `retry: {{max_attempts: 2,
-  backoff_ms: 1000}}`, `timeout_ms: 45000`, `browser: false` for static pages.
-  If a challenge page appears, verify one product page through
-  Patchright/Chromium with the same proxy before changing the rule. When the
-  browser sample passes, set `default_engine: browser` and a browser block:
+- `fetch`: `default_engine` is `static` unless the page truly needs JavaScript
+  or challenge handling. Supported values: `static`, `browser`, `stealth`,
+  `http_json`. Use `browser` for JavaScript-rendered pages that are not behind a
+  challenge, and `stealth` only when a Cloudflare-style challenge blocks the
+  static and browser paths. Keep `concurrency: 1`, `delay_ms` at least `1000`,
+  `retry: {{max_attempts: 2, backoff_ms: 1000}}`, `timeout_ms: 45000`, and
+  `browser: false` for static pages.
+
+  For a JavaScript page that passes a plain browser sample:
 
   ```yaml
+  default_engine: browser
   browser:
     headless: true
     wait_selector: "h1"
     challenge_wait_ms: 15000
   ```
 
-  The host validation uses the same browser engine. If the browser sample also
-  hits a challenge, stop and record `ACCESS` instead of declaring a browser
-  rule. Use `schema_version: "1.1"` by default, `"1.2"` only for
-  `load_more`/`infinite_scroll`, and `"1.3"` when `product_source` is present.
+  For a page where the static and Patchright samples hit a challenge and the
+  stealth sample returns the product content:
+
+  ```yaml
+  default_engine: stealth
+  timeout_ms: 240000
+  browser:
+    headless: true
+    wait_selector: "h1"
+    challenge_wait_ms: 180000
+  ```
+
+  The host validation uses the same engine. A stealth rule gets at least 600
+  seconds. If the stealth sample also hits a challenge, stop and record `ACCESS`
+  instead of declaring the rule. Use `schema_version: "1.1"` by default, `"1.2"`
+  only for `load_more`/`infinite_scroll`, and `"1.3"` when `product_source` is
+  present.
 - `extract.fields` must cover `name`, `price.amount`, `price.currency`,
   `primary_image_url`, `source_url`; add `description_html`, `category`,
   `brand`, `options` when available. Every field needs an ordered `fallbacks`
