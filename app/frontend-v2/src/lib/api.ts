@@ -120,6 +120,7 @@ export interface BatchSummary {
   name: string;
   country: string | null;
   market: string | null;
+  collection_mode?: "sample" | "formal" | null;
   language: string | null;
   category: string | null;
   note: string | null;
@@ -465,6 +466,7 @@ export interface BuildSummary {
   queue_position?: number | null;
   proxy: string | null;
   error: string | null;
+  approval_required?: boolean;
   rule: RuleRef | null;
   updated_at: string;
 }
@@ -698,6 +700,12 @@ export interface BatchSite {
   rule: RuleRef | null;
   task_id: string | null;
   task: TaskSummary | null;
+  delivery_task?: TaskSummary | null;
+  feedback_action?: {
+    task_id: string;
+    feedback_id: string;
+    status: FeedbackStatus;
+  } | null;
   build_id: string | null;
   build: BuildSummary | null;
   proxy: string | null;
@@ -708,6 +716,7 @@ export interface BatchSite {
 
 export interface BatchDetail extends BatchSummary {
   sites: BatchSite[];
+  onboarding_available?: boolean;
 }
 
 export interface ImportItem {
@@ -736,6 +745,7 @@ export interface ImportReport {
 
 export interface BatchDraftRequest {
   name: string;
+  collection_mode?: "sample" | "formal";
   country?: string | null;
   market?: string | null;
   language?: string | null;
@@ -793,6 +803,7 @@ export interface BatchActionSkipped {
 export interface BatchActionResponse {
   accepted: BatchActionAccepted[];
   skipped: BatchActionSkipped[];
+  onboarding?: { site_key: string; build_id: string }[];
   batch: BatchDetail;
 }
 
@@ -988,6 +999,8 @@ export interface BatchStartOptions {
   archive_max_bytes?: number;
   archive_reuse?: boolean;
   rerun_finished?: boolean;
+  onboard?: boolean;
+  promote_trial?: boolean;
   proxy?: string | null;
 }
 

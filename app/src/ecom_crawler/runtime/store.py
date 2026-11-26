@@ -67,7 +67,8 @@ CREATE TABLE IF NOT EXISTS batches (
     note TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    archived_at TEXT
+    archived_at TEXT,
+    collection_mode TEXT
 );
 
 CREATE TABLE IF NOT EXISTS batch_sites (
@@ -80,6 +81,7 @@ CREATE TABLE IF NOT EXISTS batch_sites (
     rule_version TEXT,
     rule_path TEXT,
     task_id TEXT,
+    delivery_task_id TEXT,
     build_id TEXT,
     proxy TEXT,
     note TEXT,
@@ -433,6 +435,18 @@ class TaskStore:
                 connection.execute("ALTER TABLE batch_sites ADD COLUMN build_id TEXT")
             if "proxy" not in batch_site_columns:
                 connection.execute("ALTER TABLE batch_sites ADD COLUMN proxy TEXT")
+            if "delivery_task_id" not in batch_site_columns:
+                connection.execute("ALTER TABLE batch_sites ADD COLUMN delivery_task_id TEXT")
+                connection.execute(
+                    "UPDATE batch_sites SET delivery_task_id = task_id WHERE task_id IN "
+                    "(SELECT t.task_id FROM tasks t WHERE t.state = 'FINISHED' AND t.outcome = 'COMPLETED' "
+                    "AND NOT EXISTS (SELECT 1 FROM quality_feedback f WHERE f.rerun_task_id = t.task_id "
+                    "AND f.status != 'RESOLVED'))"
+                )
+            if "collection_mode" not in {
+                row["name"] for row in connection.execute("PRAGMA table_info(batches)")
+            }:
+                connection.execute("ALTER TABLE batches ADD COLUMN collection_mode TEXT")
             build_columns = {
                 row["name"]
                 for row in connection.execute("PRAGMA table_info(builds)")
@@ -566,6 +580,8 @@ class TaskStore:
         task: Task,
         request_id: str,
         request_json: str,
+        *,
+        feedback_id: str | None = None,
     ) -> tuple[Task, bool]:
         """Insert a task once per request id; return (task, created)."""
         with self._connect() as connection:
@@ -587,6 +603,28 @@ class TaskStore:
                         raise TaskNotFoundError(f"unknown task: {task_id}")
                     return existing, False
                 self._insert_task(connection, task)
+                if feedback_id is not None:
+                    updated = connection.execute(
+                        "UPDATE quality_feedback SET status = 'RERUN_PENDING', rerun_task_id = ?, "
+                        "updated_at = ? WHERE feedback_id = ? AND status = 'AWAITING_RERUN'",
+                        (task.task_id, utc_now(), feedback_id),
+                    )
+                    if updated.rowcount != 1:
+                        raise FeedbackTransitionError("feedback no longer awaits a rerun")
+                    linked = connection.execute(
+                        "UPDATE batch_sites SET delivery_task_id = COALESCE(delivery_task_id, "
+                        "(SELECT t.task_id FROM tasks t WHERE t.task_id = batch_sites.task_id "
+                        "AND t.state = 'FINISHED' AND t.outcome = 'COMPLETED' "
+                        "AND NOT EXISTS (SELECT 1 FROM quality_feedback f WHERE f.rerun_task_id = t.task_id))), "
+                        "task_id = ?, updated_at = ? "
+                        "WHERE batch_id = ? AND site_key = ? "
+                        "AND EXISTS (SELECT 1 FROM batches WHERE batch_id = ? AND archived_at IS NULL) "
+                        "AND (task_id IS NULL OR task_id IN "
+                        "(SELECT task_id FROM tasks WHERE state IN ('FINISHED', 'CANCELLED')))",
+                        (task.task_id, utc_now(), task.batch_id, task.site_key, task.batch_id),
+                    )
+                    if linked.rowcount != 1:
+                        raise FeedbackTransitionError("batch target is unavailable or busy")
                 connection.execute(
                     """
                     INSERT INTO task_requests (request_id, task_id, request_json, created_at)
@@ -602,6 +640,18 @@ class TaskStore:
                 connection.rollback()
                 raise
         return task, True
+
+    def get_task_request(self, request_id: str, request_json: str) -> Task | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT task_id, request_json FROM task_requests WHERE request_id = ?",
+                (request_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        if row["request_json"] != request_json:
+            raise RequestConflictError(f"request_id {request_id} was used with a different request")
+        return self.get_task(row["task_id"])
 
     def get_task(self, task_id: str) -> Task | None:
         with self._connect() as connection:
@@ -627,6 +677,7 @@ class TaskStore:
         task_id: str,
         *,
         lease: Lease | None = None,
+        delivery: Task | None = None,
         **fields: Any,
     ) -> None:
         unknown = set(fields) - TASK_COLUMNS
@@ -655,6 +706,15 @@ class TaskStore:
             try:
                 _require_lease(connection, lease)
                 connection.execute(statement, values)
+                if delivery is not None and delivery.batch_id and delivery.site_key:
+                    connection.execute(
+                        "UPDATE batch_sites SET delivery_task_id = ?, updated_at = ? "
+                        "WHERE batch_id = ? AND site_key = ? AND task_id = ? "
+                        "AND NOT EXISTS (SELECT 1 FROM quality_feedback WHERE rerun_task_id = ?) "
+                        "AND (? = 1 OR delivery_task_id IS NULL)",
+                        (task_id, utc_now(), delivery.batch_id, delivery.site_key, task_id,
+                         task_id, int(delivery.input.get("collection_mode") != "sample")),
+                    )
                 connection.commit()
             except Exception:
                 connection.rollback()
@@ -1401,8 +1461,8 @@ class TaskStore:
                     """
                     INSERT INTO batches (
                         batch_id, name, country, market, language, category,
-                        note, created_at, updated_at, archived_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        note, created_at, updated_at, archived_at, collection_mode
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         batch.batch_id,
@@ -1415,6 +1475,7 @@ class TaskStore:
                         batch.created_at,
                         batch.updated_at,
                         batch.archived_at,
+                        batch.collection_mode,
                     ),
                 )
             except sqlite3.IntegrityError as exc:
@@ -1426,6 +1487,22 @@ class TaskStore:
                 "SELECT * FROM batches WHERE batch_id = ?", (batch_id,)
             ).fetchone()
         return _batch_from_row(row) if row else None
+
+    def promote_batch_collection(self, batch_id: str) -> Batch:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "UPDATE batches SET collection_mode = 'formal', updated_at = ? "
+                "WHERE batch_id = ? AND archived_at IS NULL AND collection_mode = 'sample' "
+                "AND NOT EXISTS (SELECT 1 FROM tasks t WHERE t.batch_id = batches.batch_id "
+                "AND t.state NOT IN ('FINISHED', 'CANCELLED')) "
+                "AND NOT EXISTS (SELECT 1 FROM batch_sites s WHERE s.batch_id = batches.batch_id "
+                "AND s.readiness = 'building')",
+                (utc_now(), batch_id),
+            )
+        batch = self.get_batch(batch_id)
+        if cursor.rowcount != 1 or batch is None:
+            raise BatchTransitionError("only idle trial batches can start formal collection")
+        return batch
 
     def list_batches(self, *, include_archived: bool = False) -> list[Batch]:
         query = "SELECT * FROM batches"
@@ -1575,14 +1652,22 @@ class TaskStore:
             connection.execute("BEGIN IMMEDIATE")
             try:
                 row = connection.execute(
-                    "SELECT task_id FROM batch_sites WHERE batch_id = ? AND site_key = ?",
+                    "SELECT bs.task_id, t.state, b.collection_mode FROM batch_sites bs "
+                    "JOIN batches b ON b.batch_id = bs.batch_id AND b.archived_at IS NULL "
+                    "LEFT JOIN tasks t ON t.task_id = bs.task_id "
+                    "WHERE bs.batch_id = ? AND bs.site_key = ?",
                     (task.batch_id, site_key),
                 ).fetchone()
                 if row is None:
                     raise BatchNotFoundError(
                         f"unknown batch site: {task.batch_id}/{site_key}"
                     )
-                if row["task_id"] and not replace_existing:
+                if row["collection_mode"] != task.input.get("collection_mode"):
+                    connection.rollback()
+                    return False
+                if row["task_id"] and (
+                    not replace_existing or row["state"] not in {"FINISHED", "CANCELLED", None}
+                ):
                     connection.rollback()
                     return False
                 self._insert_task(connection, task)
@@ -2316,8 +2401,13 @@ class TaskStore:
                         """
                         UPDATE rule_versions SET status = 'superseded'
                         WHERE rule_id = ? AND rule_version = ? AND status = 'active'
+                        AND NOT EXISTS (
+                            SELECT 1 FROM site_rules s
+                            WHERE s.rule_id = rule_versions.rule_id
+                            AND s.rule_version = rule_versions.rule_version AND s.site_key != ?
+                        )
                         """,
-                        (current.rule_id, current.rule_version),
+                        (current.rule_id, current.rule_version, site_key),
                     )
                 connection.execute(
                     """
@@ -2529,6 +2619,42 @@ class TaskStore:
             raise FeedbackNotFoundError(f"unknown feedback: {feedback_id}")
         return feedback
 
+    def adopt_feedback_result(
+        self, feedback: QualityFeedback, *, note: str | None, actor: str
+    ) -> QualityFeedback:
+        now = utc_now()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            task = connection.execute(
+                "SELECT state, outcome FROM tasks t WHERE task_id = ? AND batch_id = ? AND site_key = ? "
+                "AND NOT EXISTS (SELECT 1 FROM site_rules s WHERE s.site_key = t.site_key "
+                "AND (s.rule_id != t.plan_id OR s.rule_version != t.plan_version OR s.sha256 != t.rule_sha256))",
+                (feedback.rerun_task_id, feedback.batch_id, feedback.site_key),
+            ).fetchone()
+            if task is None or task["state"] != "FINISHED" or task["outcome"] != "COMPLETED":
+                raise FeedbackTransitionError("rerun must complete successfully before adoption")
+            adopted = connection.execute(
+                "UPDATE batch_sites SET delivery_task_id = ?, updated_at = ? "
+                "WHERE batch_id = ? AND site_key = ? AND task_id = ? "
+                "AND EXISTS (SELECT 1 FROM batches WHERE batch_id = ? AND archived_at IS NULL)",
+                (feedback.rerun_task_id, now, feedback.batch_id, feedback.site_key,
+                 feedback.rerun_task_id, feedback.batch_id),
+            )
+            if adopted.rowcount != 1:
+                raise FeedbackTransitionError("rerun is no longer the current batch target task")
+            closed = connection.execute(
+                "UPDATE quality_feedback SET status = 'RESOLVED', resolution = 'RESOLVED', "
+                "resolution_note = ?, resolved_by = ?, closed_at = ?, updated_at = ? "
+                "WHERE feedback_id = ? AND status = 'RERUN_PENDING' AND rerun_task_id = ?",
+                (note, actor, now, now, feedback.feedback_id, feedback.rerun_task_id),
+            )
+            if closed.rowcount != 1:
+                raise FeedbackTransitionError("feedback no longer awaits review")
+            connection.commit()
+        updated = self.get_feedback(feedback.feedback_id)
+        assert updated is not None
+        return updated
+
     def triage_feedback(
         self,
         feedback_id: str,
@@ -2733,6 +2859,7 @@ def _batch_from_row(row: sqlite3.Row) -> Batch:
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         archived_at=row["archived_at"],
+        collection_mode=dict(row).get("collection_mode"),
     )
 
 
@@ -2747,6 +2874,7 @@ def _batch_site_from_row(row: sqlite3.Row) -> BatchSite:
         rule_version=row["rule_version"],
         rule_path=row["rule_path"],
         task_id=row["task_id"],
+        delivery_task_id=dict(row).get("delivery_task_id"),
         build_id=row["build_id"],
         proxy=row["proxy"],
         note=row["note"],

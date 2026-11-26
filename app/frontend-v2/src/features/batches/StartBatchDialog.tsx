@@ -12,6 +12,8 @@ interface StartBatchDialogProps {
   open: boolean;
   batch: BatchDetail;
   initialRerun?: boolean;
+  selectedSites?: string[];
+  promoteTrial?: boolean;
   onOpenChange: (open: boolean) => void;
   onStarted: (response: BatchActionResponse) => void;
   onCloseFocus?: () => void;
@@ -21,18 +23,32 @@ export function StartBatchDialog({
   open,
   batch,
   initialRerun = false,
+  selectedSites,
+  promoteTrial = false,
   onOpenChange,
   onStarted,
   onCloseFocus,
 }: StartBatchDialogProps) {
   const [fullCatalog, setFullCatalog] = useState(false);
-  const [rerunFinished, setRerunFinished] = useState(initialRerun);
+  const [rerunFinished, setRerunFinished] = useState(initialRerun || promoteTrial);
+  const [onboard, setOnboard] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  const finishedOrCancelled = batchRerunnableSites(batch);
-  const startCount = batch.counts.startable + (rerunFinished ? finishedOrCancelled : 0);
-  const canStart = startCount > 0 && !busy;
+  const targets = selectedSites
+    ? batch.sites.filter((site) => selectedSites.includes(site.site_key))
+    : batch.sites;
+  const finishedOrCancelled = batchRerunnableSites({ ...batch, sites: targets });
+  const startable = targets.filter(
+    (site) => site.readiness === "ready" && !site.task_id,
+  ).length;
+  const pending =
+    batch.collection_mode && batch.onboarding_available
+      ? targets.filter((site) => site.readiness === "needs_onboarding" && !site.task_id)
+          .length
+      : 0;
+  const startCount = startable + (rerunFinished ? finishedOrCancelled : 0);
+  const canStart = (startCount > 0 || onboard) && !busy && (!onboard || pending <= 10);
 
   async function runStart() {
     if (!canStart) return;
@@ -41,6 +57,9 @@ export function StartBatchDialog({
     try {
       const response = await startBatch(batch.batch_id, {
         rerun_finished: rerunFinished,
+        site_keys: selectedSites,
+        onboard,
+        promote_trial: promoteTrial,
         ...(fullCatalog
           ? {
               limits: {
@@ -81,7 +100,11 @@ export function StartBatchDialog({
           <header className="flex items-start justify-between gap-4 border-b border-line px-4 py-4 sm:gap-6 sm:px-6">
             <div>
               <Dialog.Title className="text-[22px] leading-8 font-semibold tracking-[-0.01em] text-ink">
-                {initialRerun ? "重新采集已结束站点" : "启动可采站点"}
+                {promoteTrial
+                  ? "开始正式采集"
+                  : initialRerun
+                    ? "重新采集已结束站点"
+                    : "启动可采站点"}
               </Dialog.Title>
               <Dialog.Description className="mt-1 text-sm text-ink-2">
                 确认后会创建新任务并加入队列；正在处理或已暂停的任务不受影响。
@@ -108,56 +131,94 @@ export function StartBatchDialog({
                 </p>
               </div>
               <p className="text-xs text-ink-3">
-                首次采集 {formatNumber(batch.counts.startable)} · 重新采集{" "}
+                首次采集 {formatNumber(startable)} · 重新采集{" "}
                 {formatNumber(rerunFinished ? finishedOrCancelled : 0)}
               </p>
             </div>
 
-            <div className="flex items-start gap-3 rounded-control border border-line px-3 py-3">
-              <Checkbox
-                id="start-full-catalog"
-                className="mt-1"
-                checked={fullCatalog}
-                disabled={busy}
-                onChange={(event) => setFullCatalog(event.target.checked)}
-              />
-              <div>
-                <label
-                  className="block text-sm font-medium text-ink"
-                  htmlFor="start-full-catalog"
-                >
-                  不设采集数量或时长上限
-                </label>
-                <p className="mt-0.5 text-xs leading-5 text-ink-3">
-                  不设
-                  URL／商品数量或时长上限，由站点目录和规则包自然结束；仍保留重试次数与进程安全超时。页面按
-                  sample 模式存档 20 页。任务可能运行很久，请用暂停或取消控制。
-                </p>
+            {batch.collection_mode ? (
+              <p className="text-sm text-ink-2">
+                {batch.collection_mode === "sample" && !promoteTrial
+                  ? "按批次计划试采"
+                  : "按批次计划正式采集"}
+              </p>
+            ) : (
+              <div className="flex items-start gap-3 rounded-control border border-line px-3 py-3">
+                <Checkbox
+                  id="start-full-catalog"
+                  className="mt-1"
+                  checked={fullCatalog}
+                  disabled={busy}
+                  onChange={(event) => setFullCatalog(event.target.checked)}
+                />
+                <div>
+                  <label
+                    className="block text-sm font-medium text-ink"
+                    htmlFor="start-full-catalog"
+                  >
+                    不设采集数量或时长上限
+                  </label>
+                  <p className="mt-0.5 text-xs leading-5 text-ink-3">
+                    不设
+                    URL／商品数量或时长上限，由站点目录和规则包自然结束；仍保留重试次数与进程安全超时。页面按
+                    sample 模式存档 20 页。任务可能运行很久，请用暂停或取消控制。
+                  </p>
+                </div>
               </div>
-            </div>
+            )}
 
-            <div className="flex items-start gap-3 rounded-control border border-line px-3 py-3">
-              <Checkbox
-                id="start-rerun-finished"
-                className="mt-1"
-                checked={rerunFinished}
-                disabled={busy || finishedOrCancelled === 0}
-                onChange={(event) => setRerunFinished(event.target.checked)}
-              />
-              <div>
-                <label
-                  className="block text-sm font-medium text-ink"
-                  htmlFor="start-rerun-finished"
-                >
-                  包含任务已结束的站点
-                </label>
-                <p className="mt-0.5 text-xs leading-5 text-ink-3">
-                  {finishedOrCancelled > 0
-                    ? "为可采且任务已结束（含取消）的站点创建新任务；尚未启动的可采站点也会加入队列，旧结果保留。"
-                    : "当前没有可重新采集的站点。"}
-                </p>
+            {pending ? (
+              <div className="flex items-start gap-3 rounded-control border border-line px-3 py-3">
+                <Checkbox
+                  id="start-onboard"
+                  checked={onboard}
+                  disabled={busy || pending > 10}
+                  onChange={(event) => setOnboard(event.target.checked)}
+                />
+                <div>
+                  <label
+                    htmlFor="start-onboard"
+                    className="text-sm font-medium text-ink"
+                  >
+                    接入 {pending} 个待接入目标，通过验证后采集
+                  </label>
+                  <p className="mt-1 text-xs text-ink-3">
+                    {pending > 10
+                      ? "一次最多接入 10 个，请先在清单选择目标。"
+                      : "每目标的构建最多 10 分钟、20 万输入及 3 万输出 token。"}
+                  </p>
+                </div>
               </div>
-            </div>
+            ) : null}
+
+            {promoteTrial ? (
+              <p className="text-xs text-ink-3">
+                已生成的试采结果仍可导出。正式采集成功后更新交付结果。
+              </p>
+            ) : (
+              <div className="flex items-start gap-3 rounded-control border border-line px-3 py-3">
+                <Checkbox
+                  id="start-rerun-finished"
+                  className="mt-1"
+                  checked={rerunFinished}
+                  disabled={busy || finishedOrCancelled === 0}
+                  onChange={(event) => setRerunFinished(event.target.checked)}
+                />
+                <div>
+                  <label
+                    className="block text-sm font-medium text-ink"
+                    htmlFor="start-rerun-finished"
+                  >
+                    包含任务已结束的站点
+                  </label>
+                  <p className="mt-0.5 text-xs leading-5 text-ink-3">
+                    {finishedOrCancelled > 0
+                      ? "为可采且任务已结束（含取消）的站点创建新任务；尚未启动的可采站点也会加入队列，旧结果保留。"
+                      : "当前没有可重新采集的站点。"}
+                  </p>
+                </div>
+              </div>
+            )}
 
             {error ? <ErrorNotice title="启动失败" message={error} compact /> : null}
           </div>
@@ -182,7 +243,9 @@ export function StartBatchDialog({
                 <Play size={14} aria-hidden="true" />
                 {busy
                   ? "正在加入队列…"
-                  : `将 ${formatNumber(startCount)} 个站点加入队列`}
+                  : onboard
+                    ? `开始 ${formatNumber(startCount)} 个 · 接入 ${formatNumber(pending)} 个`
+                    : `将 ${formatNumber(startCount)} 个站点加入队列`}
               </Button>
             </div>
           </footer>

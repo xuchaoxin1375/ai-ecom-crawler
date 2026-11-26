@@ -1396,7 +1396,17 @@ export function BatchesPage() {
         <NewBatchDialog
           open
           onOpenChange={(next) => (next ? openNewBatch() : closeNewBatch())}
-          onSaved={(value) => setNotice(value)}
+          onSaved={(batchId, value) => {
+            const params = new URLSearchParams(location.search);
+            params.delete("new");
+            navigate(batchHref(batchId), {
+              replace: true,
+              state: {
+                createdNotice: value,
+                from: `/batches${params.size ? `?${params}` : ""}`,
+              },
+            });
+          }}
         />
       ) : null}
 

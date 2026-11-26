@@ -1,5 +1,5 @@
 import * as Dialog from "@radix-ui/react-dialog";
-import { useState, type ChangeEvent } from "react";
+import { useEffect, useState, type ChangeEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { FileUp, X } from "lucide-react";
 import {
@@ -19,14 +19,17 @@ import { ErrorNotice } from "../../components/ui/ErrorNotice";
 interface NewBatchDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSaved: (notice: { tone: "success" | "warning"; text: string }) => void;
+  onSaved: (
+    batchId: string,
+    notice: { tone: "success" | "warning"; text: string },
+  ) => void;
 }
 
 const EMPTY_FORM = {
   name: "",
-  country: "FR",
-  market: "FR",
-  language: "fr-FR",
+  country: "",
+  market: "",
+  language: "",
   category: "",
   note: "",
   sitesText: "",
@@ -47,10 +50,13 @@ export function NewBatchDialog({ open, onOpenChange, onSaved }: NewBatchDialogPr
   const queryClient = useQueryClient();
   const [form, setForm] = useState(EMPTY_FORM);
   const [preview, setPreview] = useState<BatchPreviewResponse["preview"] | null>(null);
-  const [previewDirty, setPreviewDirty] = useState(false);
+  const [previewKey, setPreviewKey] = useState("");
+  const [previewError, setPreviewError] = useState("");
+  const [retryPreview, setRetryPreview] = useState(0);
+  const [collectionMode, setCollectionMode] = useState<"sample" | "formal">("formal");
   const [nameError, setNameError] = useState("");
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState<"" | "preview" | "save" | "start">("");
+  const [busy, setBusy] = useState<"" | "save" | "start">("");
   const [fileName, setFileName] = useState("");
   const [confirmDiscard, setConfirmDiscard] = useState(false);
 
@@ -80,12 +86,13 @@ export function NewBatchDialog({ open, onOpenChange, onSaved }: NewBatchDialogPr
 
   function update<K extends keyof typeof form>(key: K, value: string) {
     setForm((current) => ({ ...current, [key]: value }));
-    if (preview) setPreviewDirty(true);
+    if (key === "name") setNameError("");
   }
 
   function body(): BatchDraftRequest {
     return {
       name: form.name.trim(),
+      collection_mode: collectionMode,
       country: optional(form.country),
       market: optional(form.market),
       language: optional(form.language),
@@ -95,28 +102,46 @@ export function NewBatchDialog({ open, onOpenChange, onSaved }: NewBatchDialogPr
     };
   }
 
-  async function runPreview() {
-    setNameError("");
-    setError("");
+  const sitesText = form.sitesText.trim();
+  const market = form.market.trim();
+  const currentPreviewKey = JSON.stringify([sitesText, market, retryPreview]);
+  const previewDirty = previewKey !== currentPreviewKey;
+
+  useEffect(() => {
+    if (!open || !sitesText) return;
+    let ignore = false;
+    const timer = window.setTimeout(() => {
+      void previewBatch({
+        name: "匹配预览",
+        sites_text: sitesText,
+        market: market || null,
+        collection_mode: "formal",
+      })
+        .then((payload) => {
+          if (ignore) return;
+          setPreview(payload.preview);
+          setPreviewError("");
+          setPreviewKey(currentPreviewKey);
+        })
+        .catch((exc: unknown) => {
+          if (ignore) return;
+          setPreviewError(exc instanceof Error ? exc.message : String(exc));
+          setPreview(null);
+          setPreviewKey(currentPreviewKey);
+        });
+    }, 350);
+    return () => {
+      ignore = true;
+      window.clearTimeout(timer);
+    };
+  }, [currentPreviewKey, market, open, sitesText]);
+
+  async function save(start: boolean) {
     if (!form.name.trim()) {
-      setNameError("先给批次起一个名称，再解析站点。");
+      setNameError("请输入批次名称。");
       document.getElementById("new-batch-name")?.focus();
       return;
     }
-    setBusy("preview");
-    try {
-      const payload = await previewBatch(body());
-      setPreview(payload.preview);
-      setPreviewDirty(false);
-    } catch (exc) {
-      setError(exc instanceof Error ? exc.message : String(exc));
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function save(start: boolean) {
-    if (!preview || previewDirty) return;
     setBusy(start ? "start" : "save");
     setError("");
     try {
@@ -127,8 +152,8 @@ export function NewBatchDialog({ open, onOpenChange, onSaved }: NewBatchDialogPr
         try {
           const result = await startBatch(batchId);
           await queryClient.invalidateQueries({ queryKey: ["batches"] });
-          onSaved({
-            tone: "success",
+          onSaved(batchId, {
+            tone: result.accepted.length > 0 ? "success" : "warning",
             text: `批次已保存：受理 ${formatNumber(
               result.accepted.length,
             )} 个站点，跳过 ${formatNumber(result.skipped.length)} 个。`,
@@ -137,17 +162,17 @@ export function NewBatchDialog({ open, onOpenChange, onSaved }: NewBatchDialogPr
           return;
         } catch (exc) {
           await queryClient.invalidateQueries({ queryKey: ["batches"] });
-          onSaved({
+          onSaved(batchId, {
             tone: "warning",
             text: `批次已保存，但启动失败：${
               exc instanceof Error ? exc.message : String(exc)
-            }。可在批次列表中重试启动。`,
+            }。可在批次中重试启动。`,
           });
           onOpenChange(false);
           return;
         }
       }
-      onSaved({ tone: "success", text: "批次草稿已保存。" });
+      onSaved(batchId, { tone: "success", text: "批次草稿已保存。" });
       onOpenChange(false);
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : String(exc));
@@ -174,16 +199,15 @@ export function NewBatchDialog({ open, onOpenChange, onSaved }: NewBatchDialogPr
         ? `${current.sitesText.trim()}\n${cleaned}`
         : cleaned,
     }));
-    if (preview) setPreviewDirty(true);
     setFileName(file.name);
     event.target.value = "";
   }
 
   const invalidItems = previewItems(preview?.import ?? null);
   const summary = preview?.import.summary;
-  const canSave = Boolean(preview) && !previewDirty && !busy;
-  const canStart = canSave && Boolean(summary && summary.ready > 0);
-  const parsePrimary = !preview || previewDirty;
+  const canSave =
+    !busy && (!sitesText || (!previewDirty && Boolean(summary?.accepted)));
+  const canStart = canSave && Boolean(summary?.ready);
 
   return (
     <Dialog.Root open={open} onOpenChange={requestOpenChange}>
@@ -202,7 +226,7 @@ export function NewBatchDialog({ open, onOpenChange, onSaved }: NewBatchDialogPr
                 新建采集批次
               </Dialog.Title>
               <Dialog.Description className="mt-1 text-sm text-ink-2">
-                导入一批站点，先看匹配结果，再保存草稿或启动可采站点；解析不会创建批次。
+                提交采集入口和计划，查看哪些目标可以开始。
               </Dialog.Description>
             </div>
             <Dialog.Close asChild>
@@ -246,16 +270,28 @@ export function NewBatchDialog({ open, onOpenChange, onSaved }: NewBatchDialogPr
                 <div>
                   <label
                     className="mb-1 block text-xs font-medium text-ink-3"
-                    htmlFor="new-batch-country"
+                    htmlFor="new-batch-plan"
                   >
-                    国家
+                    采集计划
                   </label>
-                  <Input
-                    id="new-batch-country"
-                    value={form.country}
-                    placeholder="如 FR"
-                    onChange={(event) => update("country", event.target.value)}
-                  />
+                  <select
+                    id="new-batch-plan"
+                    className="h-9 w-full rounded-control border border-line px-2 text-sm"
+                    value={collectionMode}
+                    onChange={(event) =>
+                      setCollectionMode(
+                        event.target.value === "sample" ? "sample" : "formal",
+                      )
+                    }
+                  >
+                    <option value="formal">正式采集</option>
+                    <option value="sample">试采</option>
+                  </select>
+                  <p className="mt-1 text-xs text-ink-3">
+                    {collectionMode === "formal"
+                      ? "按约定范围，每目标最多 1 万件或 1 小时。"
+                      : "每目标最多 20 件商品或 180 秒。"}
+                  </p>
                 </div>
                 <div>
                   <label
@@ -271,51 +307,70 @@ export function NewBatchDialog({ open, onOpenChange, onSaved }: NewBatchDialogPr
                     onChange={(event) => update("market", event.target.value)}
                   />
                 </div>
-                <div>
-                  <label
-                    className="mb-1 block text-xs font-medium text-ink-3"
-                    htmlFor="new-batch-language"
-                  >
-                    语言
-                  </label>
-                  <Input
-                    id="new-batch-language"
-                    value={form.language}
-                    placeholder="如 fr-FR"
-                    onChange={(event) => update("language", event.target.value)}
-                  />
-                </div>
-                <div>
-                  <label
-                    className="mb-1 block text-xs font-medium text-ink-3"
-                    htmlFor="new-batch-category"
-                  >
-                    品类
-                  </label>
-                  <Input
-                    id="new-batch-category"
-                    value={form.category}
-                    placeholder="如 手工／纺织"
-                    onChange={(event) => update("category", event.target.value)}
-                  />
-                </div>
               </div>
-
-              <div>
-                <label
-                  className="mb-1 block text-xs font-medium text-ink-3"
-                  htmlFor="new-batch-note"
-                >
-                  备注
-                </label>
-                <Input
-                  id="new-batch-note"
-                  value={form.note}
-                  maxLength={2000}
-                  placeholder="可选，用于交接说明"
-                  onChange={(event) => update("note", event.target.value)}
-                />
-              </div>
+              <details className="rounded-control border border-line px-3 py-2">
+                <summary className="cursor-pointer text-sm text-ink-2">
+                  批次资料
+                </summary>
+                <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <label
+                      className="mb-1 block text-xs text-ink-3"
+                      htmlFor="new-batch-country"
+                    >
+                      国家
+                    </label>
+                    <Input
+                      id="new-batch-country"
+                      value={form.country}
+                      onChange={(event) => update("country", event.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label
+                      className="mb-1 block text-xs font-medium text-ink-3"
+                      htmlFor="new-batch-language"
+                    >
+                      语言
+                    </label>
+                    <Input
+                      id="new-batch-language"
+                      value={form.language}
+                      placeholder="如 fr-FR"
+                      onChange={(event) => update("language", event.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label
+                      className="mb-1 block text-xs font-medium text-ink-3"
+                      htmlFor="new-batch-category"
+                    >
+                      品类
+                    </label>
+                    <Input
+                      id="new-batch-category"
+                      value={form.category}
+                      placeholder="如 手工／纺织"
+                      onChange={(event) => update("category", event.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label
+                      className="mb-1 block text-xs font-medium text-ink-3"
+                      htmlFor="new-batch-note"
+                    >
+                      备注
+                    </label>
+                    <Input
+                      id="new-batch-note"
+                      value={form.note}
+                      maxLength={2000}
+                      placeholder="可选，用于交接说明"
+                      onChange={(event) => update("note", event.target.value)}
+                    />
+                  </div>
+                </div>
+              </details>
 
               <div>
                 <label
@@ -378,24 +433,23 @@ export function NewBatchDialog({ open, onOpenChange, onSaved }: NewBatchDialogPr
                 </div>
               </div>
 
-              {!preview ? (
+              {!sitesText || previewDirty || !preview ? (
                 <div className="mt-8 rounded-panel border border-dashed border-line-strong px-4 py-8">
-                  <p className="text-sm font-medium text-ink">还没有解析结果</p>
-                  <p className="mt-1 text-sm text-ink-3">
-                    填写批次名称和站点后，点击“解析并预览”。
-                  </p>
+                  {sitesText && !previewDirty && previewError ? (
+                    <ErrorNotice
+                      title="匹配失败"
+                      message={previewError}
+                      compact
+                      onRetry={() => setRetryPreview((value) => value + 1)}
+                    />
+                  ) : (
+                    <p className="text-sm text-ink-3" role="status">
+                      {sitesText ? "正在匹配采集范围…" : "输入站点后会自动匹配。"}
+                    </p>
+                  )}
                 </div>
               ) : (
                 <div className="mt-4 space-y-4">
-                  {previewDirty ? (
-                    <p
-                      className="rounded-control border border-warning/25 bg-warning-soft px-3 py-2 text-xs text-warning"
-                      role="status"
-                    >
-                      表单已修改，当前预览不再对应当前输入；请重新解析。
-                    </p>
-                  ) : null}
-
                   <div className="grid grid-cols-2 gap-2">
                     {[
                       { label: "可采", value: summary?.ready ?? 0 },
@@ -463,32 +517,34 @@ export function NewBatchDialog({ open, onOpenChange, onSaved }: NewBatchDialogPr
                         </tr>
                       </thead>
                       <tbody>
-                        {preview.import.items.map((item, index) => (
-                          <tr
-                            key={`${item.input_value}-${index}`}
-                            className="border-b border-line last:border-0"
-                          >
-                            <td className="px-3 py-2 align-top">
-                              <p
-                                className="truncate font-medium text-ink"
-                                title={item.domain}
-                              >
-                                {item.domain}
-                              </p>
-                              <p
-                                className="mt-0.5 truncate text-[11px] text-ink-3"
-                                title={item.reason}
-                              >
-                                {item.reason}
-                              </p>
-                            </td>
-                            <td className="px-3 py-2 align-top">
-                              <Badge tone={readinessTone(item.readiness)}>
-                                {READINESS_LABELS[item.readiness]}
-                              </Badge>
-                            </td>
-                          </tr>
-                        ))}
+                        {preview.import.items
+                          .filter((item) => item.stored)
+                          .map((item, index) => (
+                            <tr
+                              key={`${item.input_value}-${index}`}
+                              className="border-b border-line last:border-0"
+                            >
+                              <td className="px-3 py-2 align-top">
+                                <p
+                                  className="truncate font-medium text-ink"
+                                  title={item.input_value}
+                                >
+                                  {item.input_value}
+                                </p>
+                                <p
+                                  className="mt-0.5 truncate text-[11px] text-ink-3"
+                                  title={item.reason}
+                                >
+                                  {item.reason}
+                                </p>
+                              </td>
+                              <td className="px-3 py-2 align-top">
+                                <Badge tone={readinessTone(item.readiness)}>
+                                  {READINESS_LABELS[item.readiness]}
+                                </Badge>
+                              </td>
+                            </tr>
+                          ))}
                         {preview.import.items.length === 0 ? (
                           <tr>
                             <td
@@ -541,21 +597,9 @@ export function NewBatchDialog({ open, onOpenChange, onSaved }: NewBatchDialogPr
                 </Button>
               </Dialog.Close>
               <Button
-                variant={parsePrimary ? "primary" : "secondary"}
-                onClick={runPreview}
-                disabled={Boolean(busy)}
-              >
-                {busy === "preview" ? "解析中…" : "解析并预览"}
-              </Button>
-              <Button
-                variant={
-                  !parsePrimary && Boolean(preview) && !canStart
-                    ? "primary"
-                    : "secondary"
-                }
+                variant={canStart ? "secondary" : "primary"}
                 onClick={() => void save(false)}
                 disabled={!canSave}
-                title={previewDirty ? "表单已修改，请重新解析" : undefined}
               >
                 {busy === "save" ? "保存中…" : "保存草稿"}
               </Button>
@@ -564,7 +608,6 @@ export function NewBatchDialog({ open, onOpenChange, onSaved }: NewBatchDialogPr
                   variant="primary"
                   onClick={() => void save(true)}
                   disabled={!canStart}
-                  title={previewDirty ? "表单已修改，请重新解析" : undefined}
                 >
                   {busy === "start"
                     ? "启动中…"

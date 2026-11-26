@@ -36,6 +36,7 @@ from ecom_crawler.robots import extract_sitemaps, robots_url_for
 
 from .archive import ArchiveMissError
 from .atomic import append_jsonl, write_json, write_text
+from .batch import within_target_navigation
 from .fetcher import UnsupportedAdvanceError
 from .models import Lease, Task, WorkItem, utc_now
 from .resources import register_path, register_process
@@ -180,7 +181,6 @@ class TaskRunner:
                     self.task.batch_id,
                     self.task.site_key,
                     readiness="ready",
-                    task_id=self.task.task_id,
                     note=f"执行中：{self.task.task_id}",
                 )
             except Exception:
@@ -457,6 +457,10 @@ class TaskRunner:
             return self._failure(item, "transient", f"http_{result.status}")
         if not result.ok:
             return self._failure(item, "permanent", f"http_{result.status}")
+
+        target = self.task.input.get("target_entry")
+        if item.item_type == "navigation" and target and not within_target_navigation(result.url, target):
+            return self._failure(item, "permanent", "redirect_outside_target")
 
         if item.item_type == "navigation" and item.discovered_from == "listing":
             return self._process_listing(item, result)
@@ -1591,7 +1595,8 @@ class TaskRunner:
         parent: str | None = None,
         result: dict[str, Any] | None = None,
     ) -> bool:
-        if not self._is_allowed_url(url):
+        target = self.task.input.get("target_entry")
+        if not self._is_allowed_url(url) or (target and not within_target_navigation(url, target)):
             return False
         if (
             self.store.count_items(self.task.task_id, "navigation")
@@ -1839,6 +1844,13 @@ class TaskRunner:
         valid = counts.get("DONE", 0)
         pending = counts.get("PENDING", 0) + counts.get("IN_FLIGHT", 0)
         failed = counts.get("FAILED", 0)
+        if (
+            self.task.input.get("collection_mode") == "formal"
+            and self._stop_reason == "NATURAL_END"
+            and self._remaining_product_limit() <= 0
+        ):
+            self._stop_reason = "BUDGET_EXHAUSTED"
+            self._stop_detail = "formal collection reached its product limit"
         if self._stop_reason in {
             "ACCESS_DENIED",
             "ADAPTER_FAILED",
@@ -1871,6 +1883,7 @@ class TaskRunner:
         self.store.update_task(
             self.task.task_id,
             lease=self.lease,
+            delivery=self.task if state == "FINISHED" and outcome == "COMPLETED" else None,
             state=state,
             outcome=outcome,
             stop_reason=stop_reason,
@@ -1887,7 +1900,6 @@ class TaskRunner:
                     self.task.batch_id,
                     self.task.site_key,
                     readiness="ready",
-                    task_id=self.task.task_id,
                     note=(
                         f"{prefix}：{self.task.task_id}，{valid} 有效、"
                         f"{failed} 失败"

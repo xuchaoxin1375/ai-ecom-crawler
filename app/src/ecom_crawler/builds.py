@@ -38,7 +38,7 @@ from urllib.parse import urlsplit, urlunsplit
 import yaml
 
 from .build_models import BuildModelPool, ModelPoolError
-from .execution import run_task
+from .execution import build_task, run_task
 from .executor.preflight import check_rule_selectors, format_selector_errors
 from .harness import (
     BuildService,
@@ -64,7 +64,13 @@ from .rule_diff import (
     normalize_validation,
 )
 from .runtime.archive import prefetch_rule_samples
-from .runtime.batch import normalize_site, rule_domains
+from .runtime.batch import (
+    BATCH_COLLECTION_LIMITS,
+    normalize_site,
+    rule_covers_entry,
+    rule_domains,
+    target_entry,
+)
 from .runtime.models import (
     Batch,
     BatchSite,
@@ -74,7 +80,7 @@ from .runtime.models import (
     utc_now,
 )
 from .runtime.rule import load_rule
-from .runtime.store import TaskStore
+from .runtime.store import BatchNotFoundError, TaskStore
 
 ACTIVE_TASK_STATES = {"DRAFT", "QUEUED", "RUNNING", "PAUSING", "PAUSED"}
 
@@ -1404,6 +1410,7 @@ class BuildManager:
         feedback_id: str | None = None,
         request_id: str | None = None,
         model_ref: str | None = None,
+        auto_collect: bool = False,
     ) -> BuildRecord:
         if self.read_only:
             raise BuildError("build manager is read-only")
@@ -1562,6 +1569,7 @@ class BuildManager:
                 "archive": dict(self._archive_configs[build_id]),
                 "catalog": dict(self._catalog_configs[build_id]),
                 "model_selection": selection,
+                "auto_collect": auto_collect,
             }
             record = BuildRecord(
                 build_id=build_id,
@@ -3068,11 +3076,17 @@ domain-mismatched, or produces no valid product.
                     )
                     self._archive_stats[build_id] = archive_stats
                 domains = rule_domains(rule.site)
-                if record.site_key not in domains:
+                target = self.store.get_batch_site(record.batch_id, record.site_key)
+                if target is None or normalize_site(target.input_value).site_key not in domains:
                     raise BuildError(
                         "rule domains do not include the target site: "
                         f"{sorted(domains)}"
                     )
+                batch = self.store.get_batch(record.batch_id)
+                if batch is not None and batch.collection_mode and not rule_covers_entry(
+                    rule, target_entry(target.input_value)
+                ):
+                    raise BuildError("rule discovery sources must start at the requested entry URL")
                 self.store.update_build(build_id, state="VALIDATING")
                 validating_site = self.store.get_batch_site(
                     record.batch_id, record.site_key
@@ -3361,6 +3375,30 @@ domain-mismatched, or produces no valid product.
                             status="AWAITING_RERUN",
                             repair_build_id=build_id,
                         )
+                if record.request.get("auto_collect") and batch is not None and site is not None:
+                    mode = batch.collection_mode
+                    if mode in BATCH_COLLECTION_LIMITS and site.build_id == build_id:
+                        task = build_task(
+                            rule_path=self.rules_dir / rule_name,
+                            task_id=f"web-{uuid.uuid4().hex[:12]}",
+                            task_type="product",
+                            max_attempts=2,
+                            proxy=record.proxy,
+                            **BATCH_COLLECTION_LIMITS[mode],
+                        )
+                        task.batch_id = batch.batch_id
+                        task.site_key = site.site_key
+                        task.domain_key = normalize_site(site.input_value).site_key or site.domain
+                        task.market = batch.market or task.market
+                        task.rule_sha256 = rule_sha256
+                        task.input["collection_mode"] = mode
+                        if entry := target_entry(site.input_value):
+                            task.input["target_entry"] = entry
+                        task.state = "QUEUED"
+                        try:
+                            self.store.create_task_for_site(task, site_key=site.site_key)
+                        except BatchNotFoundError:
+                            logger.info("skipping automatic collection for unavailable batch target %s", site.site_key)
             elif site is not None and site.build_id == build_id:
                 self.store.update_batch_site(
                     record.batch_id,

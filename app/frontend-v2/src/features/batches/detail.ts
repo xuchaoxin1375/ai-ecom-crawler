@@ -94,6 +94,12 @@ export type BatchPrimaryAction = "unarchive" | "import" | "start" | "pause" | "e
 export function batchPrimaryAction(batch: BatchDetail): BatchPrimaryAction {
   if (batch.status === "ARCHIVED") return "unarchive";
   if (batch.counts.startable > 0) return "start";
+  if (
+    batch.collection_mode &&
+    batch.onboarding_available &&
+    batch.counts.needs_onboarding > 0
+  )
+    return "start";
   if (batch.sites.some((site) => site.task?.state === "RUNNING")) return "pause";
   if (batch.counts.tasks > 0) return "export";
   return "import";

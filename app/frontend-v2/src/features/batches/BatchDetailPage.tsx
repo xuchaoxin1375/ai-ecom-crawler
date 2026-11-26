@@ -258,11 +258,16 @@ export function BatchDetailPage() {
   const filter = parseFilter(searchParams.get("site"));
   const queryParam = searchParams.get("q") ?? "";
 
-  const [notice, setNotice] = useState<Notice | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(() => {
+    const saved = location.state?.createdNotice;
+    return saved && typeof saved.text === "string" ? saved : null;
+  });
   const [actionError, setActionError] = useState("");
   const [confirmError, setConfirmError] = useState("");
   const [dialog, setDialog] = useState<DialogKind>("");
   const [startRerun, setStartRerun] = useState(false);
+  const [promoteTrial, setPromoteTrial] = useState(false);
+  const [startTargets, setStartTargets] = useState<string[]>();
   const [busy, setBusy] = useState<BusyKind>("");
   const [rowBusy, setRowBusy] = useState("");
   const [bulkBusy, setBulkBusy] = useState<BulkBusy>("");
@@ -277,7 +282,9 @@ export function BatchDetailPage() {
     refetchOnMount: "always",
     refetchInterval: (current) => {
       const data = current.state.data;
-      return data && batchHasActiveTasks(data) ? 5000 : false;
+      return data && (batchHasActiveTasks(data) || data.counts.building > 0)
+        ? 5000
+        : false;
     },
   });
 
@@ -347,7 +354,9 @@ export function BatchDetailPage() {
     updateParam("site", next === "all" ? "" : next);
   }
 
-  function openStart(rerun = false) {
+  function openStart(rerun = false, promote = false) {
+    setStartTargets(undefined);
+    setPromoteTrial(promote);
     setStartRerun(rerun);
     setDialog("start");
   }
@@ -480,7 +489,15 @@ export function BatchDetailPage() {
   function handleStarted(response: BatchActionResponse) {
     applyBatch(response.batch);
     setDialog("");
-    setNotice(actionNotice("启动请求已受理", response));
+    const queued = response.onboarding?.length ?? 0;
+    setNotice(
+      queued
+        ? {
+            tone: "success",
+            text: `已受理 ${response.accepted.length} 个采集目标，${queued} 个目标进入接入队列，跳过 ${response.skipped.length} 个。`,
+          }
+        : actionNotice("启动请求已受理", response),
+    );
   }
 
   function handleImported(response: BatchImportResponse) {
@@ -624,6 +641,13 @@ export function BatchDetailPage() {
   async function bulkStartSelected() {
     if (!batch) return;
     const selected = selection.selectedRows;
+    if (batch.collection_mode && selected.length) {
+      setPromoteTrial(false);
+      setStartTargets(selected.map((site) => site.site_key));
+      setStartRerun(selected.some((site) => siteStartMode(site) === "rerun"));
+      setDialog("start");
+      return;
+    }
     const eligible = selected.filter((site) => siteStartMode(site) !== null);
     const excluded = selected.filter((site) => siteStartMode(site) === null);
 
@@ -844,7 +868,9 @@ export function BatchDetailPage() {
     pause: pauseAction,
     start: {
       key: "start",
-      label: `启动 ${formatNumber(batch.counts.startable)} 个可采站点`,
+      label: batch.counts.startable
+        ? `启动 ${formatNumber(batch.counts.startable)} 个可采站点`
+        : "接入待采目标",
       icon: <Play size={14} />,
       onSelect: () => openStart(),
     },
@@ -946,7 +972,11 @@ export function BatchDetailPage() {
                 : `${site.domain}：查看站点详情`
             }
           >
-            <span className="truncate">{site.domain}</span>
+            <span className="truncate" title={site.input_value}>
+              {batch.collection_mode && site.site_key.includes("--")
+                ? site.input_value
+                : site.domain}
+            </span>
           </Link>
           {compact ? null : (
             <p
@@ -956,6 +986,51 @@ export function BatchDetailPage() {
               {site.note || site.input_value}
             </p>
           )}
+          {site.delivery_task && site.delivery_task.task_id !== site.task_id ? (
+            <Link
+              className="text-xs text-accent hover:underline"
+              to={`/tasks/${encodeURIComponent(site.delivery_task.task_id)}`}
+            >
+              查看上次交付结果
+            </Link>
+          ) : null}
+          {site.build?.approval_required ? (
+            <Link
+              className="block text-xs font-medium text-accent hover:underline"
+              to={`/builds/${encodeURIComponent(site.build.build_id)}`}
+              state={{
+                listReturn: {
+                  href: `${location.pathname}${location.search}`,
+                  label: "批次清单",
+                  scrollTop: window.scrollY,
+                },
+              }}
+            >
+              处理构建审批
+            </Link>
+          ) : site.feedback_action ? (
+            <Link
+              className="block text-xs font-medium text-accent hover:underline"
+              to={
+                site.feedback_action.status === "AWAITING_ACTIVATION"
+                  ? `${siteHref(site)}?view=rules`
+                  : `/tasks/${encodeURIComponent(site.feedback_action.task_id)}?view=quality&feedback=${encodeURIComponent(site.feedback_action.feedback_id)}`
+              }
+              state={{
+                listReturn: {
+                  href: `${location.pathname}${location.search}`,
+                  label: "批次清单",
+                  scrollTop: window.scrollY,
+                },
+              }}
+            >
+              {site.feedback_action.status === "AWAITING_ACTIVATION"
+                ? "核对候选规则"
+                : site.feedback_action.status === "AWAITING_RERUN"
+                  ? "复跑修复结果"
+                  : "查看复跑与验收"}
+            </Link>
+          ) : null}
         </div>
       ),
     },
@@ -1137,7 +1212,13 @@ export function BatchDetailPage() {
       onClick: () => void bulkStartSelected(),
       disabled:
         archived ||
-        !selection.selectedRows.some((site) => siteStartMode(site) !== null),
+        !selection.selectedRows.some(
+          (site) =>
+            siteStartMode(site) !== null ||
+            (batch.collection_mode &&
+              batch.onboarding_available &&
+              site.readiness === "needs_onboarding"),
+        ),
     },
     {
       key: "pause",
@@ -1185,6 +1266,11 @@ export function BatchDetailPage() {
                 {batch.name}
               </h1>
               <BatchStatusBadge status={batch.status} />
+              {batch.collection_mode ? (
+                <span className="text-xs text-ink-3">
+                  {batch.collection_mode === "sample" ? "试采" : "正式采集"}
+                </span>
+              ) : null}
             </div>
           </div>
 
@@ -1202,6 +1288,15 @@ export function BatchDetailPage() {
                   ? "正在取消归档…"
                   : primary.label}
             </Button>
+            {batch.collection_mode === "sample" &&
+            !archived &&
+            !batchHasActiveTasks(batch) &&
+            batch.counts.building === 0 &&
+            batchRerunnableSites(batch) > 0 ? (
+              <Button onClick={() => openStart(false, true)} disabled={Boolean(busy)}>
+                开始正式采集…
+              </Button>
+            ) : null}
             {moreActions.some((group) => group.length > 0) && (
               <RowActionsMenu
                 label="更多批次操作"
@@ -1288,6 +1383,8 @@ export function BatchDetailPage() {
           open
           batch={batch}
           initialRerun={startRerun}
+          selectedSites={startTargets}
+          promoteTrial={promoteTrial}
           onCloseFocus={() => restoreBatchFocus(startRerun)}
           onOpenChange={(next) => {
             if (!next) setDialog("");
@@ -1350,6 +1447,7 @@ export function BatchDetailPage() {
           open
           batchId={batch.batch_id}
           site={siteDialog.site}
+          collectionMode={batch.collection_mode}
           rerun={siteDialog.rerun}
           onOpenChange={(next) => {
             if (!next) setSiteDialog(null);

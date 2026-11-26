@@ -35,6 +35,7 @@ from ecom_crawler.builds import (
     dependency_policy_from_env,
     normalize_permission_rules,
 )
+from ecom_crawler.execution import run_task
 from ecom_crawler.harness.adapter import BuildSession
 from ecom_crawler.harness.dependencies import DependencyPolicy
 from ecom_crawler.harness.models import BuildTask, HarnessEvent, utc_now
@@ -49,6 +50,7 @@ from ecom_crawler.runtime.models import (
 from ecom_crawler.runtime.store import TaskStore
 from ecom_crawler.runtime.worker import Worker
 from ecom_crawler.web.app import create_app
+from tests.support import serve_http_fixture
 from tests.test_execution import RULE_TEMPLATE, fixture_server
 
 CLIENT_HEADERS = {
@@ -615,6 +617,31 @@ class BuildWorkflowTests(unittest.TestCase):
             ),
             10.0,
         )
+
+    def test_batch_onboarding_queues_collection_only_after_validation(self) -> None:
+        adapter = FakeBuildAdapter(self.root)
+        manager = self._manager(adapter, activation_mode="manual")
+        with self._client(manager) as client:
+            created = client.post("/api/batches", json={
+                "name": "Onboarding", "market": "FR", "collection_mode": "sample",
+                "sites": ["https://example.fr/"],
+            })
+            self.assertEqual(created.status_code, 201, created.text)
+            batch_id = created.json()["batch"]["batch_id"]
+            path = f"/api/batches/{batch_id}/start"
+            regular = client.post(path, json={})
+            self.assertEqual(regular.status_code, 202, regular.text)
+            self.assertEqual(regular.json()["onboarding"], [])
+            started = client.post(path, json={"onboard": True})
+            self.assertEqual(started.status_code, 202, started.text)
+            build_id = started.json()["onboarding"][0]["build_id"]
+            self.assertEqual(self._wait_ready(client, build_id)["outcome"], "succeeded")
+            site = self.store.get_batch_site(batch_id, "example.fr")
+            task = self.store.get_task(site.task_id)
+            self.assertEqual(task.state, "QUEUED")
+            self.assertEqual(task.input["collection_mode"], "sample")
+            self.assertEqual(task.limits["max_products"], 20)
+            self.assertEqual(len(self.store.list_batch_tasks(batch_id)), 1)
 
     def test_build_permissions_share_skills_and_keep_workspace_boundaries(self) -> None:
         workspace = self.root / "out" / "build-permissions"
@@ -1452,6 +1479,13 @@ class BuildWorkflowTests(unittest.TestCase):
         bad_rule = yaml.safe_load(RULE_TEMPLATE.replace("__BASE__", origin))
         bad_rule["discovery"]["link_selector"] = "a.product:not(:first-of-type)"
         adapter = FakeBuildAdapter(self.root, rule_payloads=[bad_rule, good_rule])
+        fixture_rps = 50
+
+        def run_fixture_validation(**options: Any) -> tuple[dict[str, Any], Path]:
+            # This test exercises the complete build/export flow against the local fixture.
+            options["per_domain_rps"] = fixture_rps
+            return run_task(**options)
+
         with (
             mock.patch.dict(
                 os.environ,
@@ -1462,6 +1496,7 @@ class BuildWorkflowTests(unittest.TestCase):
                     "no_proxy": "127.0.0.1",
                 },
             ),
+            mock.patch("ecom_crawler.builds.run_task", new=run_fixture_validation),
             fixture_server(products=10, proxy_origin=origin) as proxy,
         ):
             manager = BuildManager(
@@ -1534,7 +1569,9 @@ class BuildWorkflowTests(unittest.TestCase):
                 queued = self.store.get_task(task_id)
                 assert queued is not None
                 self.assertEqual(queued.input.get("proxy"), proxy)
-                worker = Worker(self.store, out_root=self.root / "out", max_tasks=1)
+                worker = Worker(
+                    self.store, out_root=self.root / "out", max_tasks=1, per_domain_rps=fixture_rps,
+                )
                 worker.run_once(poll_interval=0.05)
                 self.assertEqual(worker.active_leases, {})
                 self.assertEqual(adapter.started, [build_id])
@@ -2276,12 +2313,39 @@ class BuildWorkflowTests(unittest.TestCase):
                 self.store.get_task(rerun_task_id).plan_version, "2026.11.23-2"
             )
 
+            def exported_task() -> str:
+                response = client.get("/api/batches/b-1/export")
+                self.assertEqual(response.status_code, 200, response.text)
+                with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+                    return json.loads(archive.read("batch.json"))["sites"][0]["task_id"]
+
+            self.assertEqual(client.get("/api/batches/b-1").json()["status"], "RUNNING")
+            self.assertEqual(exported_task(), "task-existing")
+            replay = client.post(
+                f"/api/feedback/{feedback_id}/rerun",
+                json={"request_id": "rerun-1", "limits": {"max_products": 3, "max_urls": 5, "max_seconds": 60}},
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(replay.status_code, 202, replay.text)
+            self.assertFalse(replay.json()["created"])
+            self.assertEqual(replay.json()["task"]["task_id"], rerun_task_id)
+
+            self.store.update_task(rerun_task_id, state="FINISHED", outcome="FAILED")
+            not_adopted = client.post(
+                f"/api/feedback/{feedback_id}/resolve",
+                json={"request_id": "resolve-failed", "resolution": "RESOLVED"},
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(not_adopted.status_code, 409, not_adopted.text)
+            self.assertEqual(exported_task(), "task-existing")
+
             self.store.update_task(
                 rerun_task_id,
                 state="FINISHED",
                 outcome="COMPLETED",
                 stop_reason="NATURAL_END",
             )
+            self.assertEqual(exported_task(), "task-existing")
             resolved = client.post(
                 f"/api/feedback/{feedback_id}/resolve",
                 json={
@@ -2293,6 +2357,7 @@ class BuildWorkflowTests(unittest.TestCase):
             )
             self.assertEqual(resolved.status_code, 200, resolved.text)
             self.assertEqual(resolved.json()["feedback"]["status"], "RESOLVED")
+            self.assertEqual(exported_task(), rerun_task_id)
             self.assertEqual(self.store.get_task("task-existing").state, "FINISHED")
 
             rolled_back = client.post(
@@ -2596,15 +2661,10 @@ class BuildWorkflowTests(unittest.TestCase):
                 return
 
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        try:
+        with serve_http_fixture(server):
             note, sitemaps = _probe_robots(
                 f"http://127.0.0.1:{server.server_port}/"
             )
-        finally:
-            server.shutdown()
-            server.server_close()
         self.assertIn("2", note)
         self.assertEqual(
             sitemaps,

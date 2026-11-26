@@ -13,7 +13,7 @@ from pathlib import Path
 import yaml
 from fastapi.testclient import TestClient
 
-from ecom_crawler.runtime.batch import parse_site_text, parse_sites
+from ecom_crawler.runtime.batch import parse_site_text, parse_sites, target_key
 from ecom_crawler.runtime.models import (
     Batch,
     BatchSite,
@@ -25,7 +25,9 @@ from ecom_crawler.runtime.models import (
 )
 from ecom_crawler.runtime.rule import load_rule
 from ecom_crawler.runtime.store import TaskStore
+from ecom_crawler.runtime.worker import Worker
 from ecom_crawler.web.app import create_app
+from tests.test_execution import RULE_TEMPLATE, fixture_server
 
 CLIENT_HEADERS = {
     "Host": "127.0.0.1:8765",
@@ -393,6 +395,66 @@ class BatchApiTests(unittest.TestCase):
         self.assertEqual(
             second.json()["accepted"][0]["site_key"], "familidoo.fr"
         )
+
+    def test_planned_batch_matches_explicit_entry_and_keeps_other_scope(self) -> None:
+        batch = self._create(
+            collection_mode="formal",
+            sites=[
+                "https://www.familidoo.fr/fr/",
+                "https://www.familidoo.fr/another-category/",
+                "https://www.familidoo.fr/fr/#products",
+            ],
+        )["batch"]
+        self.assertEqual(batch["counts"]["sites"], 2)
+        self.assertEqual(batch["counts"]["startable"], 1)
+        self.assertEqual(batch["counts"]["needs_onboarding"], 1)
+        by_input = {site["input_value"]: site for site in batch["sites"]}
+        matched = by_input["https://www.familidoo.fr/fr/"]
+        other = by_input["https://www.familidoo.fr/another-category/"]
+        self.assertNotEqual(matched["site_key"], other["site_key"])
+        response = self.client.post(
+            f"/api/batches/{batch['batch_id']}/start",
+            json={"limits": {"max_products": 1, "max_seconds": 1}},
+        )
+        result = response.json()
+        self.assertEqual(response.status_code, 202, result)
+        self.assertEqual([item["site_key"] for item in result["accepted"]], [matched["site_key"]])
+        self.assertEqual([item["site_key"] for item in result["skipped"]], [other["site_key"]])
+        task = self.store.get_task(result["accepted"][0]["task_id"])
+        self.assertEqual(task.input["target_entry"], matched["input_value"])
+        self.assertEqual(task.domain_key, "familidoo.fr")
+        self.assertEqual(task.limits["max_products"], 10000)
+        self.assertEqual(task.limits["max_seconds"], 3600)
+
+    def test_two_targets_on_same_domain_export_their_own_products(self) -> None:
+        origin = "http://batch-catalog.test"
+        entries = [f"{origin}/list?p={index}" for index in (2, 3)]
+        for index, entry in zip((2, 3), entries, strict=True):
+            rule = yaml.safe_load(RULE_TEMPLATE.replace("__BASE__", origin))
+            rule["rule_id"] = f"batch-catalog-{index}"
+            rule["site"]["entry_urls"] = [entry]
+            rule["discovery"]["entry_url"] = entry
+            filename = f"batch-catalog-{index}.yaml"
+            (self.rules_dir / filename).write_text(yaml.safe_dump(rule), encoding="utf-8")
+            self._activate_fixture_rule(filename, target_key("batch-catalog.test", entry, "GB"))
+
+        batch = self._create(collection_mode="formal", market="GB", sites=entries)["batch"]
+        path = f"/api/batches/{batch['batch_id']}"
+        with fixture_server(proxy_origin=origin) as proxy:
+            started = self.client.post(f"{path}/start", json={"proxy": proxy}).json()
+            self.assertEqual(len(started["accepted"]), 2, started)
+            Worker(self.store, out_root=self.out_root, per_domain_rps=50).run_once()
+        response = self.client.get(f"{path}/export")
+        self.assertEqual(response.status_code, 200, response.text)
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            manifest = json.loads(archive.read("batch.json"))
+            by_entry = {row["input_value"]: row for row in manifest["sites"]}
+            for index, entry in zip((2, 3), entries, strict=True):
+                row = by_entry[entry]
+                self.assertEqual(row["counts"]["valid_products"], 1, row)
+                csv_file = archive.read(f"sites/{row['site_key']}/products.csv").decode("utf-8")
+                self.assertIn(f"Product {index}", csv_file)
+                self.assertIn(f"{origin}/p{index}.html", csv_file)
 
     def test_import_prefers_active_rule_over_candidate(self) -> None:
         self._add_familidoo_version("2026.11.22-2")

@@ -1557,6 +1557,7 @@ export function SiteDetailPage() {
           open
           batchId={batch.batch_id}
           site={site}
+          collectionMode={batch.collection_mode}
           onOpenChange={(next) => {
             if (!next) setDialog("");
           }}

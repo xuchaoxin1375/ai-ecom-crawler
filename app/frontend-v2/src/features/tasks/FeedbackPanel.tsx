@@ -1,9 +1,10 @@
-import { useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, useLocation } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronDown, Send, ShieldAlert, Wrench } from "lucide-react";
 import {
   createTaskFeedback,
+  getTask,
   getTaskFeedback,
   repairFeedback,
   rerunFeedback,
@@ -57,6 +58,7 @@ interface FeedbackCardProps {
 
 function FeedbackCard({ feedback, onChanged }: FeedbackCardProps) {
   const queryClient = useQueryClient();
+  const location = useLocation();
   const [triageOpen, setTriageOpen] = useState(false);
   const [triage, setTriage] = useState<FeedbackTriage>("RULE_REPAIR");
   const [note, setNote] = useState("");
@@ -67,7 +69,14 @@ function FeedbackCard({ feedback, onChanged }: FeedbackCardProps) {
   const [actionBusy, setActionBusy] = useState("");
   const [actionError, setActionError] = useState("");
   const [actionMessage, setActionMessage] = useState("");
-  const [rerunTaskId, setRerunTaskId] = useState("");
+  const rerunId = feedback.status === "RERUN_PENDING" ? feedback.rerun_task_id : null;
+  const rerun = useQuery({
+    queryKey: ["task", rerunId],
+    queryFn: ({ signal }) => getTask(rerunId!, signal),
+    enabled: Boolean(rerunId),
+    refetchInterval: (query) =>
+      ["FINISHED", "CANCELLED"].includes(query.state.data?.state ?? "") ? false : 2500,
+  });
 
   const ruleRepair =
     feedback.status === "TRIAGED"
@@ -86,6 +95,10 @@ function FeedbackCard({ feedback, onChanged }: FeedbackCardProps) {
     void queryClient.invalidateQueries({
       queryKey: ["site-rule", feedback.site_key],
     });
+    if (feedback.batch_id) {
+      void queryClient.invalidateQueries({ queryKey: ["batch", feedback.batch_id] });
+      void queryClient.invalidateQueries({ queryKey: ["batches"] });
+    }
     onChanged();
   }
 
@@ -115,7 +128,6 @@ function FeedbackCard({ feedback, onChanged }: FeedbackCardProps) {
       const response = await rerunFeedback(feedback.feedback_id, {
         request_id: requestId("fb-rerun"),
       });
-      setRerunTaskId(response.task.task_id);
       setActionMessage(`复跑任务已创建：${response.task.task_id}`);
       refresh();
     } catch (exc) {
@@ -133,7 +145,7 @@ function FeedbackCard({ feedback, onChanged }: FeedbackCardProps) {
       await resolveFeedback(feedback.feedback_id, {
         request_id: requestId("fb-resolve"),
         resolution,
-        note: resolution === "RESOLVED" ? "复跑结果确认改善" : "用户确认不再处理",
+        note: resolution === "RESOLVED" && rerunId ? "用户采用复跑结果" : undefined,
       });
       setActionMessage(
         resolution === "RESOLVED" ? "反馈已标记为已解决。" : "反馈已标记为不处理。",
@@ -174,7 +186,10 @@ function FeedbackCard({ feedback, onChanged }: FeedbackCardProps) {
   }
 
   return (
-    <article className="rounded-panel border border-line bg-surface">
+    <article
+      id={feedback.feedback_id}
+      className="rounded-panel border border-line bg-surface"
+    >
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-line px-4 py-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -247,17 +262,6 @@ function FeedbackCard({ feedback, onChanged }: FeedbackCardProps) {
       {actionMessage ? (
         <p className="mx-4 mb-3 rounded-control border border-success/20 bg-success-soft px-3 py-2 text-xs leading-5 text-success">
           {actionMessage}
-          {rerunTaskId ? (
-            <>
-              {" "}
-              <Link
-                className="font-medium underline"
-                to={`/tasks/${encodeURIComponent(rerunTaskId)}`}
-              >
-                打开复跑任务
-              </Link>
-            </>
-          ) : null}
         </p>
       ) : null}
 
@@ -281,9 +285,16 @@ function FeedbackCard({ feedback, onChanged }: FeedbackCardProps) {
             </Button>
           ) : null}
           {feedback.status === "AWAITING_ACTIVATION" ? (
-            <span className="text-xs text-ink-3">
-              等待在站点详情激活候选规则后再复跑。
-            </span>
+            feedback.batch_id && feedback.site_key ? (
+              <Link
+                className="text-sm font-medium text-accent underline"
+                to={`/batches/${encodeURIComponent(feedback.batch_id)}/sites/${encodeURIComponent(feedback.site_key)}?view=rules`}
+              >
+                核对候选规则
+              </Link>
+            ) : (
+              <span className="text-xs text-ink-3">等待激活候选规则</span>
+            )
           ) : null}
           {feedback.status === "AWAITING_RERUN" ? (
             <Button
@@ -295,14 +306,42 @@ function FeedbackCard({ feedback, onChanged }: FeedbackCardProps) {
               {actionBusy === "rerun" ? "创建中…" : "创建复跑任务"}
             </Button>
           ) : null}
-          {feedback.status === "RERUN_PENDING" || runtimeBusiness ? (
+          {rerunId ? (
+            <>
+              <Link
+                className="text-sm font-medium text-accent underline"
+                to={`/tasks/${encodeURIComponent(rerunId)}`}
+                state={{
+                  listReturn: {
+                    href: `${location.pathname}${location.search}`,
+                    label: "复跑验收",
+                    scrollTop: window.scrollY,
+                  },
+                }}
+              >
+                {rerun.data?.state === "FINISHED" ? "查看复跑结果" : "查看复跑进度"}
+              </Link>
+              {rerun.data?.state === "FINISHED" ? (
+                <span className="text-xs text-ink-3">
+                  {rerun.data.counts.valid_products} 件有效 ·{" "}
+                  {rerun.data.counts.failed_products} 件失败
+                </span>
+              ) : null}
+            </>
+          ) : null}
+          {(rerun.data?.state === "FINISHED" && rerun.data.outcome === "COMPLETED") ||
+          runtimeBusiness ? (
             <Button
               size="sm"
               variant="primary"
               onClick={() => void close("RESOLVED")}
               disabled={Boolean(actionBusy)}
             >
-              {actionBusy === "RESOLVED" ? "提交中…" : "标记解决"}
+              {actionBusy === "RESOLVED"
+                ? "提交中…"
+                : rerunId
+                  ? "采用复跑结果"
+                  : "标记解决"}
             </Button>
           ) : null}
           {!["RESOLVED", "WONTFIX"].includes(feedback.status) ? (
@@ -407,6 +446,7 @@ function FeedbackCard({ feedback, onChanged }: FeedbackCardProps) {
 }
 
 export function FeedbackPanel({ task }: FeedbackPanelProps) {
+  const location = useLocation();
   const queryClient = useQueryClient();
   const feedbackId = useRef(requestId("fb-request"));
   const [open, setOpen] = useState(false);
@@ -425,6 +465,15 @@ export function FeedbackPanel({ task }: FeedbackPanelProps) {
   });
 
   const records = query.data?.items ?? [];
+  const requestedFeedback = new URLSearchParams(location.search).get("feedback");
+  const requestedFeedbackExists = records.some(
+    (record) => record.feedback_id === requestedFeedback,
+  );
+  useEffect(() => {
+    if (requestedFeedback && requestedFeedbackExists) {
+      document.getElementById(requestedFeedback)?.scrollIntoView({ block: "center" });
+    }
+  }, [requestedFeedback, requestedFeedbackExists]);
   const total = query.data?.total ?? records.length;
   const openCount = records.filter(feedbackIsUnclosed).length;
   const taskActive = !["FINISHED", "CANCELLED"].includes(task.state);

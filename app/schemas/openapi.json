@@ -15,6 +15,21 @@
             ],
             "title": "Category"
           },
+          "collection_mode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "sample",
+                  "formal"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection Mode"
+          },
           "country": {
             "anyOf": [
               {
@@ -169,6 +184,16 @@
           "offline": {
             "default": false,
             "title": "Offline",
+            "type": "boolean"
+          },
+          "onboard": {
+            "default": false,
+            "title": "Onboard",
+            "type": "boolean"
+          },
+          "promote_trial": {
+            "default": false,
+            "title": "Promote Trial",
             "type": "boolean"
           },
           "proxy": {

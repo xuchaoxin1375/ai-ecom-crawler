@@ -19,11 +19,12 @@ from scrapling.fetchers import FetcherSession
 
 from .archive import ArchiveFetcher, ArchiveStore, normalize_archive_mode
 from .atomic import write_json
+from .batch import rule_covers_entry
 from .browser import BrowserConfig, BrowserFetcher
 from .fetcher import DomainLimiter, HybridFetcher, ScraplingFetcher, normalize_engine
 from .models import Lease, Task, utc_now
 from .resources import cleanup_orphan_profiles, cleanup_task_resources
-from .rule import RulePackage, load_rule
+from .rule import RuleError, RulePackage, load_rule
 from .runner import TaskRunner
 from .stealth import StealthConfig, StealthFetcher
 from .store import LeaseLostError, TaskStore
@@ -448,6 +449,8 @@ class Worker:
             try:
                 rule = load_rule(rule_path)
                 rule.validate_task_type(task.task_type)
+                if not rule_covers_entry(rule, task.input.get("target_entry")):
+                    raise RuleError("rule discovery sources no longer cover the requested entry")
             except Exception as exc:  # noqa: BLE001 - task boundary
                 self._fail(task, lease, "PLAN_ERROR", f"{type(exc).__name__}: {exc}")
                 return

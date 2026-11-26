@@ -46,7 +46,15 @@ from ..executor.runner import CSV_COLUMNS
 from ..harness.adapter import HarnessStateError
 from ..harness.dependencies import DependencyPolicy
 from ..model import ContractError
-from ..runtime.batch import parse_site_text, parse_sites, rule_domains
+from ..runtime.batch import (
+    BATCH_COLLECTION_LIMITS,
+    normalize_site,
+    parse_site_text,
+    parse_sites,
+    rule_covers_entry,
+    rule_domains,
+    target_entry,
+)
 from ..runtime.models import (
     Batch,
     BatchSite,
@@ -323,6 +331,7 @@ class RuleRejectRequest(BaseModel):
 
 class BatchCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=200)
+    collection_mode: Literal["sample", "formal"] | None = None
     country: str | None = Field(default=None, max_length=80)
     market: str | None = Field(default=None, max_length=80)
     language: str | None = Field(default=None, max_length=80)
@@ -349,6 +358,8 @@ class BatchStartRequest(BaseModel):
     archive_reuse: bool = False
     offline: bool = False
     rerun_finished: bool = False
+    onboard: bool = False
+    promote_trial: bool = False
 
 
 class BuildStartRequest(BaseModel):
@@ -1624,8 +1635,9 @@ def create_app(
         *,
         persist: bool,
         batch_market: str | None = None,
+        scoped: bool = False,
     ) -> tuple[dict[str, Any], list[BatchSite]]:
-        parsed = parse_sites(values)
+        parsed = parse_sites(values, scoped=scoped, market=batch_market)
         existing_input: dict[str, BatchSite] = {}
         for site in existing:
             existing_input.setdefault(site.input_value.strip(), site)
@@ -1660,7 +1672,7 @@ def create_app(
                 note = f"与批次内 {existing_keys[item.site_key].domain} 重复"
                 stored = True
             else:
-                rule, note = match_rule(item.site_key or "", entries)
+                rule, note = match_target(item.site_key or "", item.input_value, entries, scoped)
                 if rule is None:
                     readiness = "needs_onboarding"
                 else:
@@ -1671,6 +1683,8 @@ def create_app(
                     else:
                         readiness = "ready"
                 stored = True
+            if scoped and readiness in {"invalid", "duplicate"}:
+                stored = False
             if stored:
                 if readiness in {"ready", "needs_onboarding", "building"} and item.site_key:
                     site_key = item.site_key
@@ -1728,6 +1742,25 @@ def create_app(
         summary["stored"] = len(rows)
         return {"summary": summary, "items": items}, rows
 
+    def match_target(
+        site_key: str, value: str, entries: list[dict[str, Any]], scoped: bool
+    ) -> tuple[dict[str, Any] | None, str]:
+        rule, note = match_rule(site_key, entries)
+        entry = target_entry(value) if scoped else None
+        if entry is None:
+            return rule, note
+        if rule is None and store.get_site_rule(site_key) is None:
+            domain = normalize_site(value).site_key
+            rule, _ = match_rule(domain or site_key, entries)
+        if rule is not None and rules is not None:
+            try:
+                package = load_rule(rules / str(rule["path"]))
+                if rule_covers_entry(package, entry):
+                    return rule, f"适用版本 {rule['rule_id']}@{rule['rule_version']}"
+            except (OSError, RuleError):
+                pass
+        return None, "当前规则未验证此入口，需接入指定范围"
+
     def batch_status(
         batch: Batch,
         sites: list[BatchSite],
@@ -1735,6 +1768,8 @@ def create_app(
     ) -> str:
         if batch.archived_at:
             return "ARCHIVED"
+        if batch.collection_mode and any(site.readiness == "building" for site in sites):
+            return "RUNNING"
         if any(
             summary["state"] in ACTIVE_TASK_STATES
             for summary in summaries.values()
@@ -1775,10 +1810,17 @@ def create_app(
         record = store.get_build(build_id)
         if record is None:
             return None
+        approval_required = False
+        if build_manager is not None and record.state in {"RUNNING", "PAUSED"}:
+            details = build_manager.describe(build_id, event_limit=1)
+            approval_required = bool(
+                details.get("pending_permissions") or details.get("pending_dependencies")
+            )
         return {
             "build_id": record.build_id,
             "state": record.state,
             "outcome": record.outcome,
+            "approval_required": approval_required,
             "proxy": _mask_proxy(record.proxy),
             "error": record.error,
             "rule": (
@@ -1809,6 +1851,12 @@ def create_app(
             for task_id in current_task_ids
             if task_id in summaries
         }
+        result_summaries = [
+            summaries[task_id]
+            for site in sites
+            if (task_id := site.delivery_task_id or site.task_id) in summaries
+            and (site.delivery_task_id or not tasks[task_id].input.get("feedback_id"))
+        ]
         readiness = Counter(site.readiness for site in sites)
         states = Counter(summary["state"] for summary in current_summaries.values())
         failed_tasks = sum(
@@ -1854,6 +1902,7 @@ def create_app(
             "name": batch.name,
             "country": batch.country,
             "market": batch.market,
+            "collection_mode": batch.collection_mode,
             "language": batch.language,
             "category": batch.category,
             "note": batch.note,
@@ -1864,14 +1913,24 @@ def create_app(
             "counts": counts,
             "valid_products": sum(
                 int(summary["counts"].get("valid_products", 0))
-                for summary in current_summaries.values()
+                for summary in result_summaries
             ),
             "failed_products": sum(
                 int(summary["counts"].get("failed_products", 0))
-                for summary in current_summaries.values()
+                for summary in result_summaries
             ),
         }
         if detail:
+            payload["onboarding_available"] = build_manager is not None and not builds_disabled and not read_only
+            actionable = {}
+            for task_id, summary in summaries.items():
+                if summary["feedback"]["latest_status"] in {
+                    "AWAITING_ACTIVATION", "AWAITING_RERUN", "RERUN_PENDING",
+                }:
+                    actionable.setdefault(tasks[task_id].site_key, {
+                        "task_id": task_id, "status": summary["feedback"]["latest_status"],
+                        "feedback_id": summary["feedback"]["latest_id"],
+                    })
             payload["sites"] = [
                 {
                     "site_key": site.site_key,
@@ -1890,6 +1949,9 @@ def create_app(
                     ),
                     "task_id": site.task_id,
                     "task": summaries.get(site.task_id) if site.task_id else None,
+                    "delivery_task_id": site.delivery_task_id,
+                    "delivery_task": summaries.get(site.delivery_task_id) if site.delivery_task_id else None,
+                    "feedback_action": actionable.get(site.site_key),
                     "build_id": site.build_id,
                     "build": build_summary(site.build_id),
                     "proxy": _mask_proxy(site.proxy),
@@ -2759,6 +2821,20 @@ def create_app(
         feedback = store.get_feedback(feedback_id)
         if feedback is None:
             raise _error("FEEDBACK_NOT_FOUND", f"unknown feedback: {feedback_id}", 404)
+        request_json = json.dumps(
+            {"feedback_id": feedback_id, **payload.model_dump()},
+            ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+        )
+        try:
+            existing = store.get_task_request(payload.request_id, request_json)
+        except RequestConflictError as exc:
+            raise _error("CONFLICT", str(exc), 409) from exc
+        if existing is not None:
+            return {
+                "accepted": True, "created": False,
+                "task": _summary(store, existing, root),
+                "feedback": _feedback_payload(feedback),
+            }
         if feedback.status != "AWAITING_RERUN":
             raise _error(
                 "INVALID_FEEDBACK_STATE",
@@ -2782,35 +2858,45 @@ def create_app(
         if not rule_path.is_file():
             raise _error("RULE_HASH_MISMATCH", "active rule file is missing", 409)
         task_id = f"web-{uuid.uuid4().hex[:12]}"
+        source = store.get_task(feedback.task_id)
+        limits = payload.limits.model_dump()
+        if batch.collection_mode and source is not None:
+            limits = {key: source.limits.get(key, value) for key, value in limits.items()}
+            site = store.get_batch_site(feedback.batch_id, feedback.site_key)
+            if site is None or not rule_covers_entry(load_rule(rule_path), target_entry(site.input_value)):
+                raise _error("INVALID_STATE", "active rule does not cover the requested entry", 409)
         task = build_task(
             rule_path=rule_path,
             task_id=task_id,
             task_type="product",
-            max_urls=payload.limits.max_urls,
-            max_products=payload.limits.max_products,
-            max_seconds=payload.limits.max_seconds,
-            max_attempts=payload.limits.max_attempts,
+            max_urls=limits["max_urls"],
+            max_products=limits["max_products"],
+            max_seconds=limits["max_seconds"],
+            max_attempts=limits["max_attempts"],
+            proxy=source.input.get("proxy") if source is not None else None,
             archive_mode=payload.archive_mode,
             archive_root=root / "archive",
         )
         task.batch_id = feedback.batch_id
         task.site_key = feedback.site_key
-        request_json = json.dumps(
-            {"feedback_id": feedback_id, **payload.model_dump()},
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        )
-        task, created = store.create_task_idempotent(
-            task, payload.request_id, request_json
-        )
-        if created:
-            store.request_start(task.task_id)
-        store.update_feedback(
-            feedback_id,
-            status="RERUN_PENDING",
-            rerun_task_id=task.task_id,
-        )
+        task.rule_sha256 = active.sha256
+        task.input["feedback_id"] = feedback_id
+        task.state = "QUEUED"
+        if source is not None:
+            task.domain_key = source.domain_key
+            task.market = source.market or task.market
+            if mode := source.input.get("collection_mode"):
+                task.input["collection_mode"] = mode
+            if entry := source.input.get("target_entry"):
+                task.input["target_entry"] = entry
+        try:
+            task, created = store.create_task_idempotent(
+                task, payload.request_id, request_json, feedback_id=feedback_id
+            )
+        except RequestConflictError as exc:
+            raise _error("CONFLICT", str(exc), 409) from exc
+        except FeedbackTransitionError as exc:
+            raise _error("INVALID_FEEDBACK_STATE", str(exc), 409) from exc
         updated = store.get_feedback(feedback_id) or feedback
         return {
             "accepted": True,
@@ -2832,13 +2918,13 @@ def create_app(
                     raise _error(
                         "INVALID_FEEDBACK_STATE", "rerun task is missing", 409
                     )
-                rerun = store.get_task(feedback.rerun_task_id)
-                if rerun is None or rerun.state not in {"FINISHED", "CANCELLED"}:
-                    raise _error(
-                        "INVALID_FEEDBACK_STATE",
-                        "rerun task is not terminal",
-                        409,
+                try:
+                    updated = store.adopt_feedback_result(
+                        feedback, note=payload.note, actor=payload.actor or "local-user"
                     )
+                except FeedbackTransitionError as exc:
+                    raise _error("INVALID_FEEDBACK_STATE", str(exc), 409) from exc
+                return {"feedback": _feedback_payload(updated)}
             elif feedback.status == "TRIAGED" and feedback.triage in {
                 "RUNTIME",
                 "BUSINESS",
@@ -3133,6 +3219,7 @@ def create_app(
                 entries,
                 persist=False,
                 batch_market=payload.market,
+                scoped=payload.collection_mode is not None,
             )
             return JSONResponse(
                 status_code=200,
@@ -3156,6 +3243,7 @@ def create_app(
             language=payload.language,
             category=payload.category,
             note=payload.note,
+            collection_mode=payload.collection_mode,
         )
         try:
             store.create_batch(batch)
@@ -3168,6 +3256,7 @@ def create_app(
             entries,
             persist=True,
             batch_market=batch.market,
+            scoped=batch.collection_mode is not None,
         )
         return JSONResponse(
             status_code=201,
@@ -3194,6 +3283,7 @@ def create_app(
             _rule_entries(rules),
             persist=True,
             batch_market=batch.market,
+            scoped=batch.collection_mode is not None,
         )
         return {
             "batch_id": batch_id,
@@ -3230,6 +3320,26 @@ def create_app(
                 )
         accepted: list[dict[str, Any]] = []
         skipped: list[dict[str, Any]] = []
+        onboarding: list[dict[str, Any]] = []
+        if payload is not None and payload.onboard:
+            if not batch.collection_mode or builds_disabled or build_manager is None:
+                raise _error("BUILD_UNAVAILABLE", "构建服务不可用或批次未设置采集计划", 409)
+            pending = [site for site in sites if (
+                site.readiness == "needs_onboarding" and not site.task_id
+                and (not wanted or site.site_key in wanted)
+            )]
+            if len(pending) > 10:
+                raise _error("VALIDATION_ERROR", "一次最多接入 10 个目标，请先选择要接入的站点", 422)
+        promote = bool(payload and payload.promote_trial)
+        if promote:
+            if wanted:
+                raise _error("VALIDATION_ERROR", "转为正式采集适用于整个批次", 422)
+            try:
+                batch = store.promote_batch_collection(batch_id)
+            except BatchTransitionError as exc:
+                raise _error("INVALID_STATE", "请先完成或取消当前试采和接入任务", 409) from exc
+        if batch.collection_mode in BATCH_COLLECTION_LIMITS:
+            limits = Limits(**BATCH_COLLECTION_LIMITS[batch.collection_mode])
         for site in sites:
             if wanted and site.site_key not in wanted:
                 continue
@@ -3238,7 +3348,7 @@ def create_app(
                 "domain": site.domain,
                 "task_id": site.task_id,
             }
-            rerun = bool(payload is not None and payload.rerun_finished)
+            rerun = promote or bool(payload is not None and payload.rerun_finished)
             if site.task_id:
                 existing = store.get_task(site.task_id)
                 if not rerun:
@@ -3268,9 +3378,24 @@ def create_app(
                     }
                 )
                 continue
-            rule, rule_note = match_rule(site.site_key, entries)
+            rule, rule_note = match_target(
+                site.site_key, site.input_value, entries, batch.collection_mode is not None
+            )
             conflict = market_conflict(rule, batch.market) if rule else None
             if site.readiness != "ready":
+                if (payload is not None and payload.onboard and build_manager is not None
+                    and site.readiness == "needs_onboarding" and not site.task_id and not conflict):
+                    try:
+                        build = build_manager.start(
+                            batch, site, max_products=6, max_seconds=600, max_total_seconds=600,
+                            max_input_tokens=200000, max_output_tokens=30000, repair_rounds=1,
+                            proxy=proxy_override or site.proxy, auto_collect=True,
+                        )
+                    except BuildError as exc:
+                        skipped.append({**item, "reason": str(exc)})
+                    else:
+                        onboarding.append({**item, "build_id": build.build_id})
+                    continue
                 if conflict:
                     reason = conflict
                 elif site.readiness == "needs_onboarding" and rule is None:
@@ -3316,7 +3441,12 @@ def create_app(
                 continue
             task.batch_id = batch_id
             task.site_key = site.site_key
-            task.domain_key = site.site_key
+            if batch.collection_mode:
+                task.input["collection_mode"] = batch.collection_mode
+                if entry := target_entry(site.input_value):
+                    task.input["target_entry"] = entry
+            task.state = "QUEUED"
+            task.domain_key = normalize_site(site.input_value).site_key or site.domain
             task.market = (
                 normalize_market(batch.market)
                 or normalize_market(rule.get("market"))
@@ -3334,12 +3464,6 @@ def create_app(
             if not created:
                 skipped.append({**item, "reason": "站点已开始"})
                 continue
-            try:
-                store.request_start(task.task_id)
-            except TaskTransitionError as exc:
-                store.request_cancel(task.task_id)
-                skipped.append({**item, "reason": f"任务受理失败：{exc}"})
-                continue
             accepted.append(
                 {
                     "site_key": site.site_key,
@@ -3349,6 +3473,7 @@ def create_app(
             )
         return {
             "accepted": accepted,
+            "onboarding": onboarding,
             "skipped": skipped,
             "batch": batch_payload(require_batch(batch_id), detail=True),
         }
@@ -3388,8 +3513,9 @@ def create_app(
             for task in store.list_batch_tasks(batch_id)
         }
         if not partial and any(
-            task.state in ACTIVE_TASK_STATES or task.state == "DRAFT"
-            for task in tasks.values()
+            not site.delivery_task_id and site.task_id in tasks
+            and tasks[site.task_id].state in ACTIVE_TASK_STATES | {"DRAFT"}
+            for site in sites
         ):
             raise _error(
                 "EXPORT_NOT_READY",
@@ -3400,7 +3526,10 @@ def create_app(
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
             for site in sites:
-                task = tasks.get(site.task_id) if site.task_id else None
+                current = tasks.get(site.task_id) if site.task_id else None
+                task = tasks.get(site.delivery_task_id) if site.delivery_task_id else current
+                if task is current and task is not None and not site.delivery_task_id and task.input.get("feedback_id"):
+                    task = None
                 summary = _summary(store, task, root) if task else None
                 files: list[str] = []
                 if task is not None:
@@ -3426,13 +3555,16 @@ def create_app(
                         else site.readiness
                     )
                 elif summary is None:
-                    export_status = "missing"
+                    export_status = "awaiting_review" if current and current.input.get("feedback_id") else "missing"
                 elif summary["state"] == "CANCELLED":
                     export_status = "partial" if files else "cancelled"
                 elif summary["state"] in ACTIVE_TASK_STATES or summary["state"] == "DRAFT":
                     export_status = "running"
                 elif summary["outcome"] == "COMPLETED":
-                    export_status = "complete" if files else "missing"
+                    if not files:
+                        export_status = "missing"
+                    else:
+                        export_status = "sample" if task and task.input.get("collection_mode") == "sample" else "complete"
                 elif summary["outcome"] == "PARTIAL":
                     export_status = "partial"
                 else:
@@ -3444,7 +3576,9 @@ def create_app(
                         "input_value": site.input_value,
                         "readiness": site.readiness,
                         "note": site.note,
-                        "task_id": site.task_id,
+                        "task_id": task.task_id if task else None,
+                        "current_task_id": site.task_id,
+                        "collection_mode": (task.input.get("collection_mode") if task else None),
                         "task_state": summary["state"] if summary else None,
                         "outcome": summary["outcome"] if summary else None,
                         "stop_reason": summary["stop_reason"] if summary else None,

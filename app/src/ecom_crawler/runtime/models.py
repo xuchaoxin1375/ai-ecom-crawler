@@ -110,6 +110,7 @@ class Batch:
     created_at: str = field(default_factory=utc_now)
     updated_at: str = field(default_factory=utc_now)
     archived_at: str | None = None
+    collection_mode: str | None = None
 
 
 BATCH_READINESS = {
@@ -177,6 +178,7 @@ class BatchSite:
     note: str | None = None
     created_at: str = field(default_factory=utc_now)
     updated_at: str = field(default_factory=utc_now)
+    delivery_task_id: str | None = None
 
     def __post_init__(self) -> None:
         if self.readiness not in BATCH_READINESS:

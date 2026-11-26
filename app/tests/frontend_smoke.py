@@ -102,7 +102,7 @@ def verify_zip(path: Path, name: str, batch: str, task: str, fixture: str) -> No
             len(sites) == 1
             and sites[0]["site_key"] == SITE
             and sites[0]["task_id"] == task
-            and sites[0]["export_status"] == "complete",
+            and sites[0]["export_status"] == "sample",
             f"Wrong site/task in export: {sites}",
         )
         task_path = f"sites/{SITE}"
@@ -161,15 +161,18 @@ def exercise(page: Page, origin: str, fixture: str, root: Path) -> None:
     )
     page.get_by_role("region", name="采集批次列表").get_by_role("button", name="新建批次").click()
     draft = page.get_by_role("dialog", name="新建采集批次")
-    parse = draft.get_by_role("button", name="解析并预览")
-    parse.click()
-    expect(draft.get_by_text("先给批次起一个名称，再解析站点。")).to_be_visible()
+    draft.get_by_role("button", name="保存草稿").click()
+    expect(draft.get_by_text("请输入批次名称。")).to_be_visible()
     expect(draft.get_by_label("批次名称")).to_be_focused()
     draft.get_by_label("批次名称").fill(name)
-    draft.get_by_label("国家", exact=True).fill("GB")
     draft.get_by_label("市场", exact=True).fill("GB")
-    draft.get_by_label("站点列表").fill(f"https://{SITE}/")
-    preview = post(page, parse, origin, "/api/batches", 200)
+    draft.get_by_label("采集计划").select_option("sample")
+    with page.expect_response(
+        lambda response: response.url == f"{origin}/api/batches"
+        and response.request.method == "POST" and response.status == 200
+    ) as preview_response:
+        draft.get_by_label("站点列表").fill(f"https://{SITE}/")
+    preview = preview_response.value.json()
     check(
         preview["created"] is False and preview["preview"]["import"]["summary"]["ready"] == 1,
         f"Wrong import preview: {preview}",
@@ -185,8 +188,8 @@ def exercise(page: Page, origin: str, fixture: str, root: Path) -> None:
         f"Wrong saved draft: {created}",
     )
     expect(draft).to_be_hidden()
+    expect(page).to_have_url(re.compile(rf"/next/#/batches/{batch}$"))
     page.reload(wait_until="domcontentloaded")
-    page.get_by_role("link", name=name, exact=True).click()
     expect(page).to_have_url(re.compile(rf"/next/#/batches/{batch}$"))
     row_link = page.get_by_role("link", name=SITE, exact=True)
     action = page.get_by_role("button", name="启动 1 个可采站点", exact=True)
@@ -198,7 +201,12 @@ def exercise(page: Page, origin: str, fixture: str, root: Path) -> None:
         expect(row_link).to_be_in_viewport()
         scroll_width = page.evaluate("document.documentElement.scrollWidth")
         check(scroll_width <= width, f"Batch detail is {scroll_width}px wide at {width}px")
-        check(region.locator("table").evaluate("""table => {
+        cards = region.get_by_role("list", name="批次站点清单", exact=True)
+        table = region.get_by_role("table", name="批次站点清单", exact=True)
+        if cards.is_visible():
+            expect(cards.get_by_role("listitem")).to_have_count(1)
+        else:
+            check(table.evaluate("""table => {
           const header = [...table.tHead.rows[0].cells];
           const body = [...table.tBodies[0].rows[0].cells];
           return header.every((cell, i) => {
@@ -210,18 +218,19 @@ def exercise(page: Page, origin: str, fixture: str, root: Path) -> None:
         if width in (1280, 390) and (evidence := os.environ.get("ECOM_SMOKE_SCREENSHOT_DIR")):
             page.screenshot(path=str(Path(evidence) / f"batch-ready-{width}.png"), animations="disabled")
         if width == 390:
-            table = region.get_by_role("region", name="批次站点清单")
             menu = region.get_by_role("button", name=f"打开站点「{SITE}」的操作菜单")
-            initial_menu_x = menu.bounding_box()["x"]
-            table.evaluate("el => { el.scrollLeft = 180; }")
-            expect(menu).to_be_in_viewport()
-            check(abs(menu.bounding_box()["x"] - initial_menu_x) <= 1,
-                  "Site menu moved when the table was scrolled horizontally")
+            if table.is_visible():
+                scroller = region.get_by_role("region", name="批次站点清单")
+                initial_menu_x = menu.bounding_box()["x"]
+                scroller.evaluate("el => { el.scrollLeft = 180; }")
+                expect(menu).to_be_in_viewport()
+                check(abs(menu.bounding_box()["x"] - initial_menu_x) <= 1,
+                      "Site menu moved when the table was scrolled horizontally")
+                scroller.evaluate("el => { el.scrollLeft = 0; }")
             menu.click()
             expect(page.get_by_role("menuitem", name="查看站点详情")).to_be_visible()
             page.keyboard.press("Escape")
             expect(menu).to_be_focused()
-            table.evaluate("el => { el.scrollLeft = 0; }")
     page.set_viewport_size({"width": 1280, "height": 900})
     axe_script = APP / "frontend-v2" / "node_modules" / "axe-core" / "axe.min.js"
     page.add_script_tag(path=axe_script)
@@ -273,7 +282,7 @@ def exercise(page: Page, origin: str, fixture: str, root: Path) -> None:
         f"Wrong start result: {accepted}",
     )
     task = accepted["accepted"][0]["task_id"]
-    page.get_by_role("link", name="任务详情", exact=True).click()
+    page.get_by_role("link", name=re.compile(rf"查看任务 {re.escape(task)} 详情")).click()
     expect(page).to_have_url(re.compile(rf"/next/#/tasks/{task}$"))
     expect(page.get_by_role("button", name="导出 ZIP", exact=True)).to_be_visible(timeout=25_000)
     expect(page.get_by_role("button", name="导出 ZIP", exact=True)).to_have_count(1)
@@ -342,6 +351,14 @@ def exercise(page: Page, origin: str, fixture: str, root: Path) -> None:
     target = root / "batch.zip"
     download.save_as(str(target))
     verify_zip(target, name, batch, task, fixture)
+    page.get_by_role("button", name="开始正式采集…", exact=True).click()
+    formal = page.get_by_role("dialog", name="开始正式采集", exact=True)
+    promoted = post(
+        page, formal.get_by_role("button", name="将 1 个站点加入队列", exact=True),
+        origin, f"/api/batches/{batch}/start", 202,
+    )
+    check(promoted["batch"]["collection_mode"] == "formal", f"Trial did not promote: {promoted}")
+    check(promoted["accepted"][0]["task_id"] != task, "Formal collection reused the trial task")
     print(
         f"Verified {batch} / {task}: persisted after reload; two GBP products in the downloaded ZIP.",
         flush=True,
@@ -374,14 +391,18 @@ def exercise_many_sites(page: Page, origin: str) -> None:
     expect(status).to_have_value("needs")
     # Use the last rendered row, rather than relying on API row ordering.
     row = region.get_by_role("link", name=re.compile(r"sample-\d{2}\.example\.test")).last
-    row.scroll_into_view_if_needed()
+    row.evaluate("element => element.scrollIntoView({ block: 'center', behavior: 'instant' })")
+    row.focus()
     before = page.evaluate("window.scrollY")
     check(before > 0, "Many-site fixture did not require scrolling")
-    row.click()
+    row.press("Enter")
     page.get_by_role("link", name=f"返回 {name}", exact=True).click()
     expect(status).to_have_value("needs")
     expect(row).to_be_focused()
-    check(abs(page.evaluate("window.scrollY") - before) <= 2, "Batch scroll position was not restored")
+    after, max_scroll = page.evaluate("[window.scrollY, document.documentElement.scrollHeight - innerHeight]")
+    expect(row).to_be_in_viewport()
+    expected = min(before, max_scroll)
+    check(abs(after - expected) <= 2, f"Batch scroll position changed from {before} to {after}; max {max_scroll}")
     print("Verified scroll position, filter, and row focus on the many-site batch.", flush=True)
 
 

@@ -1,7 +1,12 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { useState } from "react";
 import { Play, X } from "lucide-react";
-import { startBatch, type BatchActionResponse, type BatchSite } from "../../lib/api";
+import {
+  startBatch,
+  type BatchActionResponse,
+  type BatchSite,
+  type BatchSummary,
+} from "../../lib/api";
 import { Button } from "../../components/ui/Button";
 import { Checkbox } from "../../components/ui/Input";
 import { ErrorNotice } from "../../components/ui/ErrorNotice";
@@ -9,6 +14,7 @@ import { ErrorNotice } from "../../components/ui/ErrorNotice";
 interface StartSiteDialogProps {
   open: boolean;
   batchId: string;
+  collectionMode?: BatchSummary["collection_mode"];
   site: BatchSite;
   rerun?: boolean;
   onOpenChange: (open: boolean) => void;
@@ -18,6 +24,7 @@ interface StartSiteDialogProps {
 export function StartSiteDialog({
   open,
   batchId,
+  collectionMode,
   site,
   rerun = false,
   onOpenChange,
@@ -100,31 +107,37 @@ export function StartSiteDialog({
                   1 个站点
                 </p>
               </div>
-              <p className="text-xs text-ink-3">{site.domain}</p>
+              <p className="text-xs break-all text-ink-3">{site.input_value}</p>
             </div>
 
-            <div className="flex items-start gap-3 rounded-control border border-line px-3 py-3">
-              <Checkbox
-                id="start-site-full-catalog"
-                className="mt-1"
-                checked={fullCatalog}
-                disabled={busy}
-                onChange={(event) => setFullCatalog(event.target.checked)}
-              />
-              <div>
-                <label
-                  className="block text-sm font-medium text-ink"
-                  htmlFor="start-site-full-catalog"
-                >
-                  全量采集
-                </label>
-                <p className="mt-0.5 text-xs leading-5 text-ink-3">
-                  不设
-                  URL／商品数量或时长上限，由站点目录和规则包自然结束；仍保留重试次数与进程安全超时。页面按
-                  sample 模式存档 20 页。任务可能运行很久，请用暂停或取消控制。
-                </p>
+            {collectionMode ? (
+              <p className="text-sm text-ink-2">
+                {collectionMode === "sample" ? "按批次计划试采" : "按批次计划正式采集"}
+              </p>
+            ) : (
+              <div className="flex items-start gap-3 rounded-control border border-line px-3 py-3">
+                <Checkbox
+                  id="start-site-full-catalog"
+                  className="mt-1"
+                  checked={fullCatalog}
+                  disabled={busy}
+                  onChange={(event) => setFullCatalog(event.target.checked)}
+                />
+                <div>
+                  <label
+                    className="block text-sm font-medium text-ink"
+                    htmlFor="start-site-full-catalog"
+                  >
+                    全量采集
+                  </label>
+                  <p className="mt-0.5 text-xs leading-5 text-ink-3">
+                    不设
+                    URL／商品数量或时长上限，由站点目录和规则包自然结束；仍保留重试次数与进程安全超时。页面按
+                    sample 模式存档 20 页。任务可能运行很久，请用暂停或取消控制。
+                  </p>
+                </div>
               </div>
-            </div>
+            )}
 
             <p className="rounded-control border border-line bg-surface-muted px-3 py-2 text-xs leading-5 text-ink-2">
               任务会进入队列；当前服务未启动 worker

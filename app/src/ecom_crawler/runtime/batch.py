@@ -13,10 +13,17 @@ import io
 import ipaddress
 import re
 from dataclasses import dataclass
-from urllib.parse import urlsplit
+from hashlib import sha256
+from urllib.parse import parse_qsl, urlsplit, urlunsplit
+
+from .rule import RulePackage
 
 _HEADER_CELLS = {"url", "site", "domain", "website", "网址", "站点", "域名"}
 _LABEL = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+BATCH_COLLECTION_LIMITS = {
+    "sample": {"max_urls": 100, "max_products": 20, "max_seconds": 180},
+    "formal": {"max_urls": None, "max_products": 10000, "max_seconds": 3600},
+}
 
 
 @dataclass(frozen=True)
@@ -98,7 +105,54 @@ def normalize_site(raw: str) -> ParsedSite:
     return ParsedSite(value, hostname, site_key)
 
 
-def parse_sites(values: list[str]) -> list[ParsedSite]:
+def target_entry(value: str) -> str | None:
+    parts = urlsplit(value if "://" in value else f"https://{value}")
+    path = parts.path or "/"
+    if path == "/" and not parts.query:
+        return None
+    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), path, parts.query, ""))
+
+
+def target_key(domain: str, entry: str | None, market: str | None) -> str:
+    if entry is None:
+        return domain
+    digest = sha256(f"{entry}\n{(market or '').strip().upper()}".encode()).hexdigest()[:16]
+    return f"{domain}--{digest}"
+
+
+def rule_covers_entry(rule: RulePackage, entry: str | None) -> bool:
+    if entry is None:
+        return True
+    sources = rule.sources
+    return (
+        not rule.product_source
+        and bool(sources)
+        and all(
+            source.get("type") in {"entry_links", "listing", "html_index"}
+            and target_entry(str(source.get("url") or source.get("seed") or rule.entry_url))
+            == entry
+            for source in sources
+        )
+    )
+
+
+def within_target_navigation(url: str, entry: str) -> bool:
+    target = urlsplit(entry)
+    actual = urlsplit(url)
+    path = target.path.rstrip("/")
+    target_query = set(parse_qsl(target.query, keep_blank_values=True))
+    actual_query = set(parse_qsl(actual.query, keep_blank_values=True))
+    return (
+        actual.scheme == target.scheme
+        and actual.netloc.lower() == target.netloc.lower()
+        and (actual.path.rstrip("/") == path or actual.path.startswith(f"{path}/"))
+        and target_query.issubset(actual_query)
+    )
+
+
+def parse_sites(
+    values: list[str], *, scoped: bool = False, market: str | None = None
+) -> list[ParsedSite]:
     """Normalize entries in order and mark duplicates after the first one.
 
     A duplicate is reported against the first input that produced the same
@@ -109,6 +163,11 @@ def parse_sites(values: list[str]) -> list[ParsedSite]:
     for raw in values:
         item = normalize_site(raw)
         if item.site_key is not None:
+            if scoped:
+                item = ParsedSite(
+                    item.input_value, item.domain,
+                    target_key(item.site_key, target_entry(item.input_value), market),
+                )
             previous = first_seen.get(item.site_key)
             if previous is not None:
                 item = ParsedSite(
