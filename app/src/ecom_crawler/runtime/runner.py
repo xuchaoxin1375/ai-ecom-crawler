@@ -458,8 +458,8 @@ class TaskRunner:
         if not result.ok:
             return self._failure(item, "permanent", f"http_{result.status}")
 
-        target = self.task.input.get("target_entry")
-        if item.item_type == "navigation" and target and not within_target_navigation(result.url, target):
+        if (item.item_type == "navigation" and self.task.input.get("target_entry")
+            and not self._navigation_allowed(result.url, item.result.get("advance"))):
             return self._failure(item, "permanent", "redirect_outside_target")
 
         if item.item_type == "navigation" and item.discovered_from == "listing":
@@ -971,7 +971,7 @@ class TaskRunner:
             current = int(item.result.get("page", 1))
             default_max = int(self.rule.discovery.get("limits", {}).get("max_pages", 20))
             if current >= max(1, int(advance.get("max_pages", default_max))):
-                if self._is_new_navigation(next_url):
+                if self._is_new_navigation(next_url, advance):
                     self._note_discovery_limit("listing pagination reached max_pages")
             else:
                 self._add_navigation(
@@ -1002,19 +1002,7 @@ class TaskRunner:
         current = int(item.result.get("page", 1))
         if advance_type == "page_param":
             param = str(advance.get("param", "page"))
-            parsed = urlparse(page.url or item.url)
-            query = dict(parse_qsl(parsed.query, keep_blank_values=True))
-            query[param] = str(current + 1)
-            return urlunparse(
-                (
-                    parsed.scheme,
-                    parsed.netloc,
-                    parsed.path,
-                    parsed.params,
-                    urlencode(query, doseq=True),
-                    "",
-                )
-            )
+            return _with_query(page.url or item.url, {param: current + 1})
         selector = str(advance.get("selector") or "a[rel=next]")
         elements = page.css(selector)
         if not elements:
@@ -1209,12 +1197,19 @@ class TaskRunner:
                 for key in ("max_pages", "start"):
                     if key in source and key not in advance:
                         advance[key] = source[key]
+                page = int(advance.get("start", 1))
+                if advance.get("type") == "page_param" and self.task.input.get("target_entry"):
+                    param = str(advance.get("param", "page"))
+                    query = dict(parse_qsl(urlparse(url).query, keep_blank_values=True))
+                    value = query.get(param, "")
+                    if re.fullmatch(r"[0-9]{1,9}", value) and int(value) > 0:
+                        page = int(value)
                 self._add_navigation(
                     url,
                     source="listing",
                     result={
                         "advance": advance,
-                        "page": int(advance.get("start", 1)),
+                        "page": page,
                         "link_selector": source.get("product_link_selector")
                         or self.rule.discovery.get("link_selector", ""),
                     },
@@ -1606,13 +1601,14 @@ class TaskRunner:
         parent: str | None = None,
         result: dict[str, Any] | None = None,
     ) -> bool:
-        if not self._navigation_allowed(url):
+        advance = (result or {}).get("advance")
+        if not self._navigation_allowed(url, advance):
             return False
         if (
             self.store.count_items(self.task.task_id, "navigation")
             >= self._max_navigation
         ):
-            if self._is_new_navigation(url):
+            if self._is_new_navigation(url, advance):
                 self._note_discovery_limit("navigation queue reached max_navigation")
             return False
         normalized = _normalize_url(url)
@@ -1633,14 +1629,15 @@ class TaskRunner:
             lease=self.lease,
         )
 
-    def _navigation_allowed(self, url: str) -> bool:
+    def _navigation_allowed(self, url: str, advance: dict[str, Any] | None = None) -> bool:
         target = self.task.input.get("target_entry")
+        page_param = str(advance.get("param", "page")) if advance and advance.get("type") == "page_param" else None
         return self._is_allowed_url(url) and (
-            not target or within_target_navigation(url, target)
+            not target or within_target_navigation(url, target, page_param=page_param)
         )
 
-    def _is_new_navigation(self, url: str) -> bool:
-        if self.task.input.get("collection_mode") != "formal" or not self._navigation_allowed(url):
+    def _is_new_navigation(self, url: str, advance: dict[str, Any] | None = None) -> bool:
+        if self.task.input.get("collection_mode") != "formal" or not self._navigation_allowed(url, advance):
             return False
         if self.task.counters.get("discovery_limit"):
             return False
@@ -2378,9 +2375,8 @@ def _json_get(value: Any, path: str) -> Any:
 
 def _with_query(url: str, values: dict[str, Any]) -> str:
     parsed = urlparse(url)
-    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
-    for key, value in values.items():
-        query[str(key)] = str(value)
+    query = [(key, value) for key, value in parse_qsl(parsed.query, keep_blank_values=True) if key not in values]
+    query.extend((key, str(value)) for key, value in values.items())
     return urlunparse(
         (
             parsed.scheme,

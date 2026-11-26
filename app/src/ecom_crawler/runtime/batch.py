@@ -136,17 +136,18 @@ def rule_covers_entry(rule: RulePackage, entry: str | None) -> bool:
     )
 
 
-def within_target_navigation(url: str, entry: str) -> bool:
+def within_target_navigation(url: str, entry: str, *, page_param: str | None = None) -> bool:
     target = urlsplit(entry)
     actual = urlsplit(url)
     path = target.path.rstrip("/")
-    target_query = set(parse_qsl(target.query, keep_blank_values=True))
-    actual_query = set(parse_qsl(actual.query, keep_blank_values=True))
+    target_query = {(key, value) for key, value in parse_qsl(target.query, keep_blank_values=True) if key != page_param}
+    filter_keys = {key for key, _ in target_query}
+    actual_query = {(key, value) for key, value in parse_qsl(actual.query, keep_blank_values=True) if key in filter_keys}
     return (
         actual.scheme == target.scheme
         and actual.netloc.lower() == target.netloc.lower()
         and (actual.path.rstrip("/") == path or actual.path.startswith(f"{path}/"))
-        and target_query.issubset(actual_query)
+        and target_query == actual_query
     )
 
 

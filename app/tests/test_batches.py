@@ -459,13 +459,13 @@ class BatchApiTests(unittest.TestCase):
 
     def test_formal_pagination_limit_preserves_prior_trial_delivery(self) -> None:
         origin = "http://limited-catalog.test"
-        entry = f"{origin}/list"
+        entry = f"{origin}/list?brand=one&brand=two&p=2"
         rule = yaml.safe_load(RULE_TEMPLATE.replace("__BASE__", origin))
         rule["rule_id"] = "limited-catalog"
         rule["site"]["entry_urls"] = [entry]
         rule["discovery"]["sources"] = [{
             "type": "listing", "url": entry, "product_link_selector": "a.product",
-            "advance": {"type": "page_param", "param": "p", "max_pages": 1},
+            "advance": {"type": "page_param", "param": "p", "max_pages": 3},
         }]
         (self.rules_dir / "limited.yaml").write_text(yaml.safe_dump(rule), encoding="utf-8")
         self._activate_fixture_rule("limited.yaml", target_key("limited-catalog.test", entry, "GB"))
@@ -481,6 +481,10 @@ class BatchApiTests(unittest.TestCase):
         self.assertEqual((result.state, result.outcome, result.stop_reason), ("FINISHED", "PARTIAL", "BUDGET_EXHAUSTED"))
         result_json = json.loads((self.out_root / formal / "task-result.json").read_text(encoding="utf-8"))
         self.assertIn("max_pages", result_json["stop_detail"])
+        rows = (self.out_root / formal / "products.csv").read_text(encoding="utf-8")
+        self.assertIn(f"{origin}/p2.html", rows)
+        self.assertIn(f"{origin}/p3.html", rows)
+        self.assertNotIn(f"{origin}/p1.html", rows)
         response = self.client.get(f"{path}/export")
         self.assertEqual(response.status_code, 200, response.text)
         with zipfile.ZipFile(io.BytesIO(response.content)) as archive:

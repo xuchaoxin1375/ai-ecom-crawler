@@ -187,6 +187,13 @@ def fixture_server(*, products: int = 2, proxy_origin: str | None = None) -> Ite
         f'<a class="product" href="/p{i}.html">Product {i}</a>' for i in range(1, products + 1)
     )
     listing = f"<html><body>{links}</body></html>".encode()
+    listing_pages = {
+        "/list": 1,
+        "/list?p=2": 2,
+        "/list?p=3": 3,
+        "/list?brand=one&brand=two&p=2": 2,
+        "/list?brand=one&brand=two&p=3": 3,
+    }
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -225,10 +232,8 @@ def fixture_server(*, products: int = 2, proxy_origin: str | None = None) -> Ite
                 self.end_headers()
                 self.wfile.write(body)
                 return
-            if path in {"/list", "/list?p=2", "/list?p=3"}:
-                page = 1
-                if "p=" in path:
-                    page = int(path.rsplit("=", 1)[1])
+            if path in listing_pages:
+                page = listing_pages[path]
                 body = (
                     f"<html><body><a class='product' href='/p{page}.html'>P{page}</a>"
                     "</body></html>"
