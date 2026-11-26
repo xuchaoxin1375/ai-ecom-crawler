@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { BuildMessages, BuildStatus } from "../../lib/api";
 import { BuildTimeline } from "./BuildTimeline";
@@ -89,10 +89,82 @@ describe("BuildTimeline", () => {
 
     expect(screen.getByText("构建时间线")).toBeInTheDocument();
     expect(screen.getByText("先检查站点结构和分页。")).toBeInTheDocument();
-    expect(screen.getByText("fetch_page")).toBeInTheDocument();
+    expect(screen.getByText("抓取")).toBeInTheDocument();
+    expect(screen.getByText("https://site.fr/")).toBeInTheDocument();
     expect(screen.getByText("正在生成候选规则。")).toBeInTheDocument();
     expect(screen.getByText("实时")).toBeInTheDocument();
     expect(screen.getByText("思考仅实时展示，不写入 trace。")).toBeInTheDocument();
+  });
+
+  it("groups consecutive tools and expands one tool's details", () => {
+    render(
+      <BuildTimeline
+        build={build()}
+        messages={messages({
+          live: false,
+          timeline: [
+            {
+              kind: "tool",
+              created_at: "2026-11-23T10:00:02Z",
+              name: "webfetch",
+              status: "success",
+              input: { url: "https://site.fr/" },
+              output: "HTTP 200",
+              duration_ms: 1400,
+            },
+            {
+              kind: "tool",
+              created_at: "2026-11-23T10:00:03Z",
+              name: "read",
+              status: "success",
+              input: { path: "rules/site.yml" },
+              output: "ok",
+              duration_ms: 200,
+            },
+          ],
+        })}
+        live={false}
+        connected={false}
+        streamError=""
+        ended
+      />,
+    );
+
+    expect(screen.getByText("工具活动")).toBeInTheDocument();
+    expect(screen.getByText("2 次")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /工具活动/ }));
+    fireEvent.click(screen.getByRole("button", { name: /抓取.*site\.fr/ }));
+
+    expect(screen.getByText("入参")).toBeInTheDocument();
+    expect(screen.getByText("HTTP 200")).toBeInTheDocument();
+  });
+
+  it("renders markdown text and fenced code blocks", () => {
+    render(
+      <BuildTimeline
+        build={build({ state: "FINISHED" })}
+        messages={messages({
+          live: false,
+          timeline: [
+            {
+              kind: "text",
+              created_at: "2026-11-23T10:00:03Z",
+              text: "## 检查结果\n\n- 第一项\n- **重点**\n\n`code`\n\n```yaml\nstatus: ok\n```",
+            },
+          ],
+        })}
+        live={false}
+        connected={false}
+        streamError=""
+        ended
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "检查结果" })).toBeInTheDocument();
+    expect(screen.getByText("第一项")).toBeInTheDocument();
+    expect(screen.getByText("重点")).toBeInTheDocument();
+    expect(screen.getByText("status: ok")).toBeInTheDocument();
   });
 
   it("explains when the server has not enabled live reasoning", () => {
