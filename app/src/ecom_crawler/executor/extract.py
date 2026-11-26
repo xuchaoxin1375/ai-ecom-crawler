@@ -31,6 +31,20 @@ JSON_LD_TYPE_XPATH = (
     '"abcdefghijklmnopqrstuvwxyz")="application/ld+json"]'
 )
 
+# A page can contain more than one Product JSON-LD block (for example a review
+# widget that names the shop).  Prefer the block that looks like the real
+# product offer; a bare name-only block is usually a widget or organisation.
+PRODUCT_IDENTITY_KEYS = (
+    "sku",
+    "mpn",
+    "gtin",
+    "gtin8",
+    "gtin12",
+    "gtin13",
+    "gtin14",
+    "productID",
+)
+
 
 @dataclass
 class FieldHit:
@@ -90,13 +104,17 @@ class HtmlPage:
             types = [node_type] if isinstance(node_type, str) else node_type
             if isinstance(types, list) and "Product" in types:
                 candidates.append(node)
-        product = None
-        for candidate in candidates:
-            if "name" in candidate or "offers" in candidate:
-                product = candidate
-                break
-        if product is None and candidates:
-            product = candidates[0]
+
+        def product_rank(candidate: dict[str, Any]) -> tuple[int, int, int]:
+            return (
+                0 if "offers" in candidate else 1,
+                0
+                if any(key in candidate for key in PRODUCT_IDENTITY_KEYS)
+                else 1,
+                0 if "name" in candidate else 1,
+            )
+
+        product = min(candidates, key=product_rank, default=None)
         self._json_ld_product = product
         return product
 

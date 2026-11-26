@@ -172,7 +172,10 @@ python -m uv run --project app ecom-crawler serve `
 - `stealth` 复用 `fetch.browser` 的页面选项：`timeout_ms` 实际至少 240 秒，`challenge_wait_ms` 实际至少 180 秒；`profile_name` 会加 `stealth-` 前缀。一个任务复用一个会话和 profile，任务结束或租约接管时清理。
 - 构建简报会给出宿主 Python 和 `resilient-browser-fetch` 的 Scrapling 探针命令。构建 Agent 只有在静态和 Patchright 都被挑战挡住、且 stealth 样本返回真实商品内容时才写 `default_engine: stealth`；stealth 仍被挡时记录 `ACCESS` 并停止。
 - `stealth` 不支持 `load_more`／`infinite_scroll`；挑战站优先用 sitemap／listing 的 URL 分页。sitemap 是索引时用 `sitemap_patterns` 选中商品子图，并给足 `max_sitemaps`。
-- 真实 partsfornissans 探测的冷启动约 157–341 秒、同会话后续约 5–11 秒；冷启动波动大，600 秒验证预算不是固定成本。引擎设计见 [ADR 0021](adr/0021-stealth挑战引擎.md)，处理边界见 [ADR 0022](adr/0022-挑战页处理边界.md)。
+- 挑战站的目标构建应把入口页或 listing 放在 `discovery.sources` 第一位，sitemap 后置；只声明 sitemap 会让第一个请求落在文档 URL 上，冷启动挑战可能耗尽 600 秒验证预算。构建简报已给出 listing-first 示例。
+- 构建 Agent 在规划发现前必须加载 `product-crawl-workflow`，挑战探测前必须加载 `resilient-browser-fetch`；`build-notes.md` 记录实际加载的 skill 和应用到的发现／字段／挑战规则。构建简报不再只写“available, use relevant ones”。
+- 主机验证拒绝重复样本：≥3 个商品样本的名称或主图全部相同即失败，避免 review widget／organisation JSON-LD 造成的假通过。运行期 `json_ld_product()` 在多个 Product 块中优先 `offers`，其次 `sku`／`mpn`／`gtin`，最后 `name`。
+- 真实 partsfornissans 探测的冷启动约 157–341 秒、同会话后续约 5–11 秒；premierangling 冷启动约 337 秒，人工点击约 101 秒。冷启动波动大，600 秒验证预算不是固定成本。引擎设计见 [ADR 0021](adr/0021-stealth挑战引擎.md)，处理边界见 [ADR 0022](adr/0022-挑战页处理边界.md)。
 
 入口：`http://127.0.0.1:8765/next/#/batches`。站点详情可以启动构建、查看时间线、暂停／恢复／取消、处理权限和依赖请求。同一时间只允许一个构建运行；其他站点提交后进入 `QUEUED` 队列，构建列表／详情显示排队位置并支持取消排队。重启会保留排队项；运行中的会话标为 `FINISHED/interrupted` 并保留，用户可在构建详情继续。
 

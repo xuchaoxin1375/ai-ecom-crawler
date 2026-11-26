@@ -24,6 +24,7 @@ from ecom_crawler.build_models import BuildModelPool, ModelPoolError
 from ecom_crawler.builds import (
     BuildError,
     BuildManager,
+    _duplicate_product_sample_error,
     _live_timeline,
     _merge_reasoning_timeline,
     _probe_robots,
@@ -847,6 +848,8 @@ class BuildWorkflowTests(unittest.TestCase):
                 encoding="utf-8"
             )
             self.assertIn("Host skills are available read-only", agents)
+            self.assertIn("Before planning discovery, load", agents)
+            self.assertIn("before any challenge probe, load", agents)
             self.assertIn("browse` and `htmlmini` MCP tools are available", agents)
             self.assertIn("Read local files from", agents)
             self.assertIn("Read local files from", brief)
@@ -856,6 +859,9 @@ class BuildWorkflowTests(unittest.TestCase):
             self.assertIn("default_engine: stealth", brief)
             self.assertIn("resilient-browser-fetch", brief)
             self.assertIn("Host validation budget", brief)
+            self.assertIn("Keep the entry page or a listing source first", brief)
+            self.assertIn("A sitemap-only source makes the first request", brief)
+            self.assertIn("product_link_selector", brief)
             self.assertIn(
                 "robots.txt",
                 (workspace / "input" / "build-brief.md").read_text(
@@ -1498,6 +1504,9 @@ class BuildWorkflowTests(unittest.TestCase):
                 digest = hashlib.sha256((self.rules / active.path).read_bytes()).hexdigest()
                 self.assertEqual(digest, active.sha256)
                 self.assertEqual(active.rule_version, good_rule["rule_version"])
+                site_payload = client.get(f"/api/batches/{batch}").json()["sites"][0]
+                self.assertEqual(site_payload["readiness"], "ready")
+                self.assertIn("已激活方案", site_payload["note"])
                 trace = client.get(f"/api/builds/{build_id}/trace?format=json")
                 self.assertEqual(trace.status_code, 200, trace.text)
                 trace_data = trace.json()
@@ -1526,6 +1535,10 @@ class BuildWorkflowTests(unittest.TestCase):
                 assert task is not None
                 self.assertEqual((task.state, task.outcome), ("FINISHED", "COMPLETED"), task)
                 self.assertEqual((task.plan_version, task.rule_sha256), (active.rule_version, digest))
+                batch_site = self.store.get_batch_site(batch, site)
+                assert batch_site is not None
+                self.assertEqual(batch_site.readiness, "ready")
+                self.assertIn("执行完成", batch_site.note)
 
                 export = client.get(f"/api/batches/{batch}/export")
                 self.assertEqual(export.status_code, 200, export.text[:400])
@@ -3721,6 +3734,40 @@ class BuildWorkflowTests(unittest.TestCase):
         site = self.store.get_batch_site("b-1", "example.fr")
         assert site is not None
         self.assertEqual(site.readiness, "needs_onboarding")
+
+
+class DuplicateProductSampleTests(unittest.TestCase):
+    def test_rejects_identical_names(self) -> None:
+        samples = [
+            {"name": "Premier Angling", "primary_image_url": f"https://x/{i}.jpg"}
+            for i in range(3)
+        ]
+        error = _duplicate_product_sample_error(samples)
+        self.assertIn("share name", error or "")
+
+    def test_rejects_identical_images(self) -> None:
+        samples = [
+            {"name": f"Product {i}", "primary_image_url": "https://x/avatar.jpg"}
+            for i in range(3)
+        ]
+        error = _duplicate_product_sample_error(samples)
+        self.assertIn("share primary image", error or "")
+
+    def test_allows_distinct_or_short_samples(self) -> None:
+        self.assertIsNone(
+            _duplicate_product_sample_error(
+                [{"name": "Same"}, {"name": "Same"}]
+            )
+        )
+        self.assertIsNone(
+            _duplicate_product_sample_error(
+                [
+                    {"name": "A", "primary_image_url": "https://x/a.jpg"},
+                    {"name": "B", "primary_image_url": "https://x/b.jpg"},
+                    {"name": "C", "primary_image_url": "https://x/c.jpg"},
+                ]
+            )
+        )
 
 
 if __name__ == "__main__":

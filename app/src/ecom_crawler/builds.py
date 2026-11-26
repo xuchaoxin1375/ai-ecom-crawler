@@ -717,6 +717,43 @@ def _runtime_task_lines(runtime: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _duplicate_product_sample_error(
+    samples: list[dict[str, Any]],
+) -> str | None:
+    """Reject a validation sample that is obviously one repeated product.
+
+    A review widget or organisation JSON-LD block can make every product sample
+    share the shop name or avatar.  Field-presence checks alone would accept
+    that, so require at least three samples and fail only when every non-empty
+    name or image is identical.
+    """
+
+    if len(samples) < 3:
+        return None
+    names = {
+        str(item.get("name") or "").strip().casefold()
+        for item in samples
+        if isinstance(item, dict)
+    }
+    names.discard("")
+    if len(names) == 1:
+        value = next(iter(names))
+        return f"all {len(samples)} product samples share name {value[:120]!r}"
+    images = {
+        str(item.get("primary_image_url") or "").strip()
+        for item in samples
+        if isinstance(item, dict)
+    }
+    images.discard("")
+    if len(images) == 1:
+        value = next(iter(images))
+        return (
+            f"all {len(samples)} product samples share primary image "
+            f"{value[:160]!r}"
+        )
+    return None
+
+
 def _validation_error_message(
     task_result: dict[str, Any], *, valid: int, failed: int
 ) -> str:
@@ -2132,11 +2169,14 @@ Read first, in this order:
 - Read local files from `../input`, `../out`, `work/` and the host skills
   directories. Do not read project site records, other repositories, user
   directories, prior run output or credentials.
-- Host skills are available read-only: `product-crawl-workflow`,
-  `resilient-browser-fetch`, `browser-automation`, `network-access`, `htmlmini`,
-  `scrapling-official` and other installed user skills. Use the relevant ones;
-  read their references or scripts as needed, but do not write into the skills
-  directories.
+- Host skills are available read-only. Before planning discovery, load
+  `product-crawl-workflow`; before any challenge probe, load
+  `resilient-browser-fetch`. Do not skip these two because the brief is short.
+  Read their references or scripts as needed, but do not write into the skills
+  directories. Other installed skills (`browser-automation`, `network-access`,
+  `htmlmini`, `scrapling-official`, ...) are available when relevant.
+- In `../out/evidence/build-notes.md`, state which skills you loaded and which
+  discovery, field and challenge rules you applied.
 - The `browse` and `htmlmini` MCP tools are available. Other MCP servers are
   disabled.
 - Prefer the target origin and path prefixes in the brief; network and search
@@ -2279,7 +2319,22 @@ candidate; the host validates and installs it.
             "`fetch.browser.wait_selector`. The host validation uses the same stealth "
             "engine and gets at least 600 seconds. If the stealth sample still shows "
             "a challenge, record `ACCESS` and stop; do not declare a browser rule "
-            "from a challenge page.\n"
+            "from a challenge page.\n\n"
+            "Keep the entry page or a listing source first in `discovery.sources`; "
+            "put a sitemap after it. A sitemap-only source makes the first request "
+            "a document and pays the full challenge cold start on it, which can "
+            "exhaust the host validation budget. Example:\n\n"
+            "```yaml\n"
+            "discovery:\n"
+            "  strategies: [\"entry_links\"]\n"
+            "  sources:\n"
+            "    - type: listing\n"
+            "      url: <entry-url>\n"
+            "      product_link_selector: 'a[href*=\"/product/\"]'\n"
+            "    - type: sitemap\n"
+            "      urls: [<product-sitemap-url>]\n"
+            "      max_sitemaps: 3\n"
+            "```\n"
         )
         robots_note = str(task.extra.get("robots_note") or "robots.txt not probed")
         expected_currency = MARKET_CURRENCY.get((batch.market or "").upper(), "")
@@ -2903,6 +2958,19 @@ domain-mismatched, or produces no valid product.
                         f"{sorted(domains)}"
                     )
                 self.store.update_build(build_id, state="VALIDATING")
+                validating_site = self.store.get_batch_site(
+                    record.batch_id, record.site_key
+                )
+                if (
+                    validating_site is not None
+                    and validating_site.build_id == build_id
+                ):
+                    self.store.update_batch_site(
+                        record.batch_id,
+                        record.site_key,
+                        readiness="building",
+                        note=f"验证中：{build_id}",
+                    )
                 work_dir = Path(session.workspace.root) / "validation"
                 feedback = (
                     self.store.get_feedback(record.feedback_id)
@@ -3027,6 +3095,13 @@ domain-mismatched, or produces no valid product.
                         "use a market-localized URL or fix the rule currency"
                     )
                 product_samples = task_result.get("product_samples") or []
+                duplicate_error = _duplicate_product_sample_error(product_samples)
+                if duplicate_error:
+                    raise BuildError(
+                        "host validation product samples look duplicated: "
+                        f"{duplicate_error}; check the product JSON-LD or selector "
+                        "source before retrying"
+                    )
                 site = self.store.get_batch_site(record.batch_id, record.site_key)
                 parent_rule = self.store.get_site_rule(record.site_key)
                 has_parent = record.mode == "repair" or bool(
@@ -3146,6 +3221,18 @@ domain-mismatched, or produces no valid product.
                     actor="build" if record.mode == "build" else "legacy-build",
                     action="activate",
                 )
+                if site is not None and site.build_id == build_id:
+                    self.store.update_batch_site(
+                        record.batch_id,
+                        record.site_key,
+                        readiness="ready",
+                        build_id=build_id,
+                        proxy=record.proxy,
+                        rule_id=rule_id,
+                        rule_version=rule_version,
+                        rule_path=rule_name,
+                        note=note,
+                    )
                 if record.feedback_id:
                     feedback = self.store.get_feedback(record.feedback_id)
                     if feedback and feedback.status == "REPAIRING":

@@ -75,6 +75,54 @@ class JsonLdTakeTests(unittest.TestCase):
         self.assertEqual(product.values["price.amount"], 19)
 
 
+class JsonLdProductSelectionTests(unittest.TestCase):
+    @staticmethod
+    def _page(*nodes: dict) -> HtmlPage:
+        scripts = "".join(
+            "<script type='application/ld+json'>" + json.dumps(node) + "</script>"
+            for node in nodes
+        )
+        return HtmlPage(
+            f"<html><head>{scripts}</head><body></body></html>",
+            "https://example.test/products/pack",
+        )
+
+    def test_offer_product_wins_over_name_only_widget(self) -> None:
+        widget = {
+            "@context": "https://schema.org",
+            "@type": "Product",
+            "name": "Example Shop",
+            "image": "https://example.test/avatar.jpg",
+        }
+        product = {
+            "@context": "https://schema.org",
+            "@type": "Product",
+            "name": "Example Pack",
+            "image": "https://example.test/pack.jpg",
+            "offers": {"price": "1.75", "priceCurrency": "GBP"},
+        }
+        chosen = self._page(widget, product).json_ld_product()
+        assert chosen is not None
+        self.assertEqual(chosen["name"], "Example Pack")
+        self.assertEqual(chosen["image"], "https://example.test/pack.jpg")
+
+    def test_identity_product_wins_when_offer_is_absent(self) -> None:
+        widget = {
+            "@context": "https://schema.org",
+            "@type": "Product",
+            "name": "Example Shop",
+        }
+        product = {
+            "@context": "https://schema.org",
+            "@type": "Product",
+            "name": "Example Pack",
+            "sku": "PACK-1",
+        }
+        chosen = self._page(widget, product).json_ld_product()
+        assert chosen is not None
+        self.assertEqual(chosen["name"], "Example Pack")
+
+
 class ComposeDescriptionTests(unittest.TestCase):
     HTML = """
     <html><head>

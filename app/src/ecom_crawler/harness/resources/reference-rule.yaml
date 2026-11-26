@@ -39,6 +39,16 @@ discovery:
   product_url_patterns: ["/products/[^/]+$"]
   url_identity: "canonical"
   notes: "Use product links visible on the entry page, or switch to a listing source."
+  # For a target build on a challenge site, put the entry/listing source first
+  # and the sitemap second; a sitemap-only source pays the cold challenge on
+  # the first document request.
+  # sources:
+  #   - type: listing
+  #     url: "https://example.com/"
+  #     product_link_selector: "a.product-link"
+  #   - type: sitemap
+  #     urls: ["https://example.com/sitemap.xml"]
+  #     max_sitemaps: 3
 
 fetch:
   default_engine: "static"

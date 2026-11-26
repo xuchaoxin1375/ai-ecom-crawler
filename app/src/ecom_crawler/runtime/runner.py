@@ -7,6 +7,7 @@ import gzip
 import hashlib
 import io
 import json
+import logging
 import os
 import re
 import shutil
@@ -45,6 +46,8 @@ from .shopify import (
     parse_products_payload,
 )
 from .store import LeaseLostError, TaskStore
+
+logger = logging.getLogger(__name__)
 
 RUNTIME_VERSION = "r06-runtime/0.3"
 UNLIMITED_ITEMS = 2**31 - 1
@@ -171,6 +174,17 @@ class TaskRunner:
             state="RUNNING",
             started_at=started_at,
         )
+        if self.task.batch_id and self.task.site_key:
+            try:
+                self.store.update_batch_site(
+                    self.task.batch_id,
+                    self.task.site_key,
+                    readiness="ready",
+                    task_id=self.task.task_id,
+                    note=f"执行中：{self.task.task_id}",
+                )
+            except Exception:
+                logger.debug("batch site note update failed", exc_info=True)
         self._event("task_reconciled", **self._recovery)
         self._event(
             "task_started", task_type=self.task.task_type, plan_id=self.task.plan_id
@@ -1863,6 +1877,25 @@ class TaskRunner:
             counters=task_result["counts"],
             finished_at=finished_at,
         )
+        if self.task.batch_id and self.task.site_key:
+            counts = task_result.get("counts") or {}
+            valid = int(counts.get("valid_products") or 0)
+            failed = int(counts.get("failed_products") or 0)
+            prefix = "执行完成" if outcome == "COMPLETED" else "执行结束"
+            try:
+                self.store.update_batch_site(
+                    self.task.batch_id,
+                    self.task.site_key,
+                    readiness="ready",
+                    task_id=self.task.task_id,
+                    note=(
+                        f"{prefix}：{self.task.task_id}，{valid} 有效、"
+                        f"{failed} 失败"
+                        + ("" if outcome == "COMPLETED" else f"，{outcome}")
+                    ),
+                )
+            except Exception:
+                logger.debug("batch site note update failed", exc_info=True)
         self._event("task_finished", state=state, outcome=outcome, stop_reason=stop_reason)
 
     def _write_progress(self) -> None:
