@@ -175,6 +175,7 @@ python -m uv run --project app ecom-crawler serve `
 - 挑战站的目标构建应把入口页或 listing 放在 `discovery.sources` 第一位，sitemap 后置；只声明 sitemap 会让第一个请求落在文档 URL 上，冷启动挑战可能耗尽 600 秒验证预算。构建简报已给出 listing-first 示例。
 - 构建 Agent 在规划发现前必须加载 `product-crawl-workflow`，挑战探测前必须加载 `resilient-browser-fetch`；`build-notes.md` 记录实际加载的 skill 和应用到的发现／字段／挑战规则。构建简报不再只写“available, use relevant ones”。
 - 主机验证拒绝重复样本：≥3 个商品样本的名称或主图全部相同即失败，避免 review widget／organisation JSON-LD 造成的假通过。运行期 `json_ld_product()` 在多个 Product 块中优先 `offers`，其次 `sku`／`mpn`／`gtin`，最后 `name`。
+- 构建还要留视觉证据：至少一个代表性商品页截图、一张本地商品图、`out/evidence/visual/baseline.json` 和 `compare.md`。截图和商品图优先走同一已放行浏览器会话；静态图片请求被挡时保存渲染后的元素截图并标记 `rendered`。模型不能看图时在基线里标记待人工复核，不能写成已核对。当前是软要求，缺失时记录警告和原因，不直接判构建失败；格式见[采集视觉证据与待办](44-采集视觉证据与待办.md)。
 - 真实 partsfornissans 探测的冷启动约 157–341 秒、同会话后续约 5–11 秒；premierangling 冷启动约 337 秒，人工点击约 101 秒。冷启动波动大，600 秒验证预算不是固定成本。引擎设计见 [ADR 0021](adr/0021-stealth挑战引擎.md)，处理边界见 [ADR 0022](adr/0022-挑战页处理边界.md)。
 
 入口：`http://127.0.0.1:8765/next/#/batches`。站点详情可以启动构建、查看时间线、暂停／恢复／取消、处理权限和依赖请求。同一时间只允许一个构建运行；其他站点提交后进入 `QUEUED` 队列，构建列表／详情显示排队位置并支持取消排队。重启会保留排队项；运行中的会话标为 `FINISHED/interrupted` 并保留，用户可在构建详情继续。

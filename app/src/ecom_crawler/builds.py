@@ -2205,6 +2205,28 @@ Read first, in this order:
   the operator explicitly includes them.
 - Stay within the brief's request and time budget; do not crawl the whole site.
 
+## Visual evidence
+
+- Before you finish the rule, pick one representative product page. Capture a
+  viewport screenshot that shows the product name, current price, currency and
+  main image. Save one product image locally; prefer the original image bytes,
+  and use the same browser or stealth session that passed any challenge. If the
+  image request is blocked, capture the rendered image element and record
+  `capture_method: rendered`.
+- Write `../out/evidence/visual/baseline.json` and
+  `../out/evidence/visual/compare.md`. The baseline must include product URL,
+  screenshot path, image path and source URL, capture method, viewport,
+  expected name, price, currency, image URL and description fragment, and
+  review status.
+- If a screenshot tool only writes inside its own file root, save there and
+  copy the file into `../out/evidence/visual/` with the shell; do not leave
+  evidence only in a temporary directory.
+- If the model cannot inspect images, set `review.status` to `pending_manual`;
+  never write that visual review passed.
+- Visual evidence is a soft requirement in this pilot. If it is genuinely
+  unavailable, record the attempted URL, blocker and missing files in
+  `build-notes.md`; do not silently omit it.
+
 ## Outputs
 
 Write only the files named in the brief. The rule must remain a declarative
@@ -2383,6 +2405,28 @@ Write these files from the workspace (`work/` is your current directory):
 - `../out/plan/rule.yaml` — the complete rule manifest.
 - `../out/evidence/build-notes.md` — what you inspected, sample URLs, selectors,
   limitations and anything you could not verify.
+- `../out/evidence/visual/` — at least one product page screenshot, one local
+  product image, `baseline.json` and `compare.md`.
+
+Visual evidence:
+
+- Screenshot one representative product page with the name, current price,
+  currency and main image visible. Save one product image locally; prefer the
+  original bytes from the same browser or stealth session that passed any
+  challenge. If the image request is blocked, save a rendered image-element
+  screenshot and mark `capture_method: rendered`.
+- `baseline.json` records product URL, screenshot path, image path and source
+  URL, capture method, viewport, expected name, price, currency, image URL and
+  description fragment, and `review.status`.
+- `compare.md` compares the planned or sampled product fields with the visual
+  baseline. Check name, price, currency, image, description and URL; call out
+  all-same names or images, placeholders, review-widget images and material
+  price or currency mismatches.
+- If you cannot inspect images, set `review.status` to `pending_manual`; do not
+  claim visual review passed.
+- This pilot treats visual evidence as a soft requirement. If it is genuinely
+  unavailable, record the attempted URL, blocker and missing files in
+  `build-notes.md`; do not silently omit it.
 
 Read local files from `../input`, `../out`, `work/` and the host skills
 directories; do not read project site records, other repositories, user
