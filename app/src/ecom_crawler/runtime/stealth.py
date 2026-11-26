@@ -284,7 +284,7 @@ class StealthFetcher:
             return self._fetch_page(url)
         response = request.get(
             url,
-            timeout=self.config.timeout_ms,
+            timeout=self._request_timeout_ms(),
             headers={"Accept": "*/*"},
         )
         body = response.body() or b""
@@ -346,7 +346,7 @@ class StealthFetcher:
 
     def _fetch_options(self) -> dict[str, Any]:
         options: dict[str, Any] = {
-            "timeout": self.config.timeout_ms,
+            "timeout": self._request_timeout_ms(),
             "network_idle": self.config.network_idle,
             "load_dom": self.config.wait_until in {"load", "networkidle"},
             "solve_cloudflare": self.config.solve_cloudflare,
@@ -358,6 +358,12 @@ class StealthFetcher:
         if self.config.wait_ms:
             options["wait"] = self.config.wait_ms
         return options
+
+    def _request_timeout_ms(self) -> int:
+        # The Scrapling solver can exceed its nominal timeout while a challenge
+        # is still running.  A larger challenge_wait_ms therefore also raises
+        # the per-request ceiling instead of being a dead option.
+        return max(self.config.timeout_ms, self.config.challenge_wait_ms + 60_000)
 
     def _sleep_backoff(self, attempt: int) -> None:
         if self.backoff > 0:

@@ -159,6 +159,15 @@ class StealthFetcherTests(unittest.TestCase):
         self.assertTrue(result.meta["challenge_suspected"])
         self.assertEqual(result.meta["challenge_title"], "Just a moment...")
 
+    def test_challenge_wait_raises_request_ceiling(self) -> None:
+        response = SimpleNamespace(status=200, url="", body=b"", headers={})
+        fetcher, _, _ = self._fetcher(response)
+        fetcher.config = StealthConfig(
+            timeout_ms=240_000, challenge_wait_ms=300_000
+        )
+        self.assertEqual(fetcher._request_timeout_ms(), 360_000)
+        self.assertEqual(fetcher._fetch_options()["timeout"], 360_000)
+
     def test_listing_actions_are_not_supported(self) -> None:
         response = SimpleNamespace(status=200, url="", body=b"", headers={})
         fetcher, _, _ = self._fetcher(response)

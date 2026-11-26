@@ -87,7 +87,7 @@ flowchart TD
 - 真实探测：`https://www.partsfornissans.com/` 冷启动 200，标题正常；`/sitemap.xml` 200，21 个子 sitemap，前 8 个为商品 sitemap；同一会话第二次请求 5.6 秒。证据在仓库外 `workbench/partsfornissans-2026-11-26/`。
 - partsfornissans target10：构建 `build-dc1bb4812cc0` 首轮 sitemap 冷启动返回挑战，自动修复改为入口页 + `/floor-mats` 列表后 6/6、USD 6、0 失败，`seconds_budget=600`，规则 `2026.11.26-1` 激活；执行 `web-7caf7a123279` 10/10、0 失败、0 质量异常、`COMPLETED / NATURAL_END`、约 612 秒，`runtime.fetch_engines=["stealth"]`。
 - 首轮失败暴露了文档 URL 的冷启动问题：`.xml.gz` 不能用 `page.goto`，而上下文 request 不跑挑战求解。现已改为首次请求走 page 导航、后续文档 URL 用同一上下文 request；冷探针 `sitemap.xml` 328.2 秒、商品子图 1.9 秒、4104 个商品 URL。当前激活规则使用列表路径，sitemap 修复由探针和单测覆盖，尚待下一次构建使用。
-- 后端全量 388 项、构建 130 项、runtime 104 项和 ruff 通过。
+- 后端全量 389 项、构建 130 项、runtime 105 项和 ruff 通过。
 
 ## 风险
 
