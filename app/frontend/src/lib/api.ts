@@ -21,6 +21,9 @@ export interface SystemAccess {
   auth_required: boolean;
   token_configured: boolean;
   token_updated_at: string | null;
+  dev_no_auth_setting: boolean;
+  dev_no_auth_active: boolean;
+  dev_no_auth_forced: boolean;
   session_ttl_seconds: number;
   allowed_hosts: string[];
   urls: string[];
@@ -1271,6 +1274,12 @@ export function setSystemBuildSlots(
 export function setSystemAccess(lanEnabled: boolean): Promise<SystemAccessResponse> {
   return sendJson<SystemAccessResponse>("/api/system/access", "PUT", {
     lan_enabled: lanEnabled,
+  });
+}
+
+export function setSystemDevNoAuth(enabled: boolean): Promise<SystemAccessResponse> {
+  return sendJson<SystemAccessResponse>("/api/system/access/dev-no-auth", "PUT", {
+    enabled,
   });
 }
 

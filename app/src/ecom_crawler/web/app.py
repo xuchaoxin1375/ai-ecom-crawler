@@ -129,6 +129,7 @@ from .access import (
     LOOPBACK_HOSTS,
     SESSION_COOKIE_NAME,
     SESSION_TTL_SECONDS,
+    SETTING_DEV_NO_AUTH,
     SETTING_LAN_ENABLED,
     SETTING_TOKEN,
     LoginRateLimiter,
@@ -574,6 +575,10 @@ class BuildDependencyRequest(BaseModel):
 
 class SystemAccessRequest(BaseModel):
     lan_enabled: bool
+
+
+class SystemDevNoAuthRequest(BaseModel):
+    enabled: bool
 
 
 class SystemCollectionSlotsRequest(BaseModel):
@@ -1067,6 +1072,13 @@ def _client_is_loopback(request: Request) -> bool:
     return address.is_loopback
 
 
+def _is_dev_loopback_request(request: Request) -> bool:
+    """Return True only for a loopback peer using a loopback Host header."""
+    return _client_is_loopback(request) and is_loopback_host(
+        request.headers.get("host", "")
+    )
+
+
 def _forbidden(message: str) -> JSONResponse:
     return JSONResponse(
         status_code=403,
@@ -1398,6 +1410,7 @@ def create_app(
     proxy: str | None = None,
     read_only: bool = False,
     access_token: str | None = None,
+    dev_no_auth: bool = False,
     allowed_hosts: Iterable[str] | None = None,
     serve_host: str = "127.0.0.1",
     serve_port: int = 8765,
@@ -1463,12 +1476,19 @@ def create_app(
         )
     stored_lan = store.get_setting(SETTING_LAN_ENABLED)
     lan_enabled = lan_capable and (stored_lan != "0" if stored_lan is not None else True)
+    stored_dev_no_auth = store.get_setting(SETTING_DEV_NO_AUTH)
+    dev_no_auth_setting = stored_dev_no_auth == "1"
+    dev_no_auth_forced = bool(dev_no_auth)
+    dev_no_auth_active = dev_no_auth_forced or dev_no_auth_setting
     access_lock = threading.Lock()
     access_state: dict[str, Any] = {
         "lan_enabled": lan_enabled,
         "token_salt": token_salt,
         "token_hash": token_hash,
         "token_updated_at": token_updated_at,
+        "dev_no_auth_setting": dev_no_auth_setting,
+        "dev_no_auth_active": dev_no_auth_active,
+        "dev_no_auth_forced": dev_no_auth_forced,
     }
     login_limiter = LoginRateLimiter()
     rate_policy_lock = threading.Lock()
@@ -1643,6 +1663,9 @@ def create_app(
     app.state.read_only = read_only
     app.state.auth_required = token_hash is not None
     app.state.token_configured = token_hash is not None
+    app.state.dev_no_auth_setting = dev_no_auth_setting
+    app.state.dev_no_auth_active = dev_no_auth_active
+    app.state.dev_no_auth_forced = dev_no_auth_forced
     app.state.lan_capable = lan_capable
     app.state.lan_enabled = lan_enabled
     app.state.serve_host = serve_host
@@ -2016,14 +2039,14 @@ def create_app(
             lan_enabled_now = bool(access_state["lan_enabled"])
             token_salt_now = access_state["token_salt"]
             token_hash_now = access_state["token_hash"]
+            dev_no_auth_now = bool(access_state["dev_no_auth_active"])
         if lan_capable and not lan_enabled_now and not is_loopback_host(host):
             return _forbidden("LAN access is disabled")
-        if (
-            token_hash_now is not None
-            and not auth_path
-            and not public_static
-            and not dev_identity
-        ):
+        protected = not auth_path and not public_static and not dev_identity
+        dev_bypass = (
+            protected and dev_no_auth_now and _is_dev_loopback_request(request)
+        )
+        if token_hash_now is not None and protected and not dev_bypass:
             session_value = request.cookies.get(SESSION_COOKIE_NAME)
             if not verify_session(session_value, token_hash_now):
                 password = _basic_password(request.headers.get("authorization"))
@@ -2884,6 +2907,9 @@ def create_app(
             "auth_required": token_configured,
             "token_configured": token_configured,
             "token_updated_at": state["token_updated_at"],
+            "dev_no_auth_setting": bool(state["dev_no_auth_setting"]),
+            "dev_no_auth_active": bool(state["dev_no_auth_active"]),
+            "dev_no_auth_forced": bool(state["dev_no_auth_forced"]),
             "session_ttl_seconds": SESSION_TTL_SECONDS,
             "allowed_hosts": sorted(allowed),
             "urls": list(urls),
@@ -3100,6 +3126,37 @@ def create_app(
         with access_lock:
             access_state["lan_enabled"] = payload.lan_enabled
         app.state.lan_enabled = payload.lan_enabled
+        return {"access": _access_payload()}
+
+    @app.put("/api/system/access/dev-no-auth")
+    def update_dev_no_auth(
+        request: Request, payload: SystemDevNoAuthRequest
+    ) -> dict[str, Any]:
+        if not _is_dev_loopback_request(request):
+            raise _error(
+                "DEV_MODE_LOOPBACK_ONLY",
+                "开发者模式只能从本机回环入口修改",
+                403,
+            )
+        if read_only:
+            raise _error("READ_ONLY", "read-only mode rejects write operations", 403)
+        with access_lock:
+            forced = bool(access_state["dev_no_auth_forced"])
+        if forced:
+            raise _error(
+                "DEV_MODE_FORCED",
+                "开发者模式由启动参数 --dev-no-auth 强制开启",
+                409,
+            )
+        store.set_setting(
+            SETTING_DEV_NO_AUTH,
+            "1" if payload.enabled else "0",
+        )
+        with access_lock:
+            access_state["dev_no_auth_setting"] = payload.enabled
+            access_state["dev_no_auth_active"] = payload.enabled
+        app.state.dev_no_auth_setting = payload.enabled
+        app.state.dev_no_auth_active = payload.enabled
         return {"access": _access_payload()}
 
     @app.post("/api/system/access/token")

@@ -17,6 +17,11 @@ from fastapi.testclient import TestClient
 from ecom_crawler.runtime.identity import frontend_info
 from ecom_crawler.runtime.models import Task, WorkItem
 from ecom_crawler.runtime.store import TaskStore
+from ecom_crawler.web.access import (
+    SETTING_DEV_NO_AUTH,
+    SETTING_LAN_ENABLED,
+    SETTING_TOKEN,
+)
 from ecom_crawler.web.app import (
     FRONTEND_DIST_DIR,
     Limits,
@@ -811,6 +816,141 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(logged_out.status_code, 200)
         self.assertEqual(client.get("/api/health").status_code, 401)
 
+    def test_dev_no_auth_bypasses_only_loopback_requests(self) -> None:
+        token = "0123456789abcdef"
+        lan_headers = {
+            "Host": "192.168.1.20:8765",
+            "Origin": "http://192.168.1.20:8765",
+            "X-Requested-With": "XMLHttpRequest",
+        }
+        app = create_app(
+            self.db_path,
+            self.out_root,
+            self.rules_dir,
+            access_token=token,
+            dev_no_auth=True,
+            allowed_hosts={"192.168.1.20"},
+            serve_host="0.0.0.0",
+        )
+        loopback = TestClient(
+            app,
+            headers=CLIENT_HEADERS,
+            client=("127.0.0.1", 50000),
+        )
+        self.assertEqual(loopback.get("/api/health").status_code, 200)
+        server = loopback.get("/api/system").json()["server"]
+        self.assertFalse(server["dev_no_auth_setting"])
+        self.assertTrue(server["dev_no_auth_active"])
+        self.assertTrue(server["dev_no_auth_forced"])
+
+        wrong_host = TestClient(
+            app,
+            headers={**lan_headers},
+            client=("127.0.0.1", 50000),
+        )
+        self.assertEqual(wrong_host.get("/api/health").status_code, 401)
+
+        remote = TestClient(
+            app,
+            headers=lan_headers,
+            client=("192.168.1.10", 50000),
+        )
+        self.assertEqual(remote.get("/api/health").status_code, 401)
+        self.assertEqual(
+            remote.get("/api/health", headers=basic_auth(token)).status_code,
+            200,
+        )
+
+        forced = loopback.put(
+            "/api/system/access/dev-no-auth",
+            json={"enabled": False},
+        )
+        self.assertEqual(forced.status_code, 409, forced.text)
+        self.assertEqual(forced.json()["error"]["code"], "DEV_MODE_FORCED")
+
+    def test_dev_no_auth_setting_persists_and_rejects_remote_toggle(self) -> None:
+        token = "0123456789abcdef"
+        lan_headers = {
+            "Host": "192.168.1.20:8765",
+            "Origin": "http://192.168.1.20:8765",
+            "X-Requested-With": "XMLHttpRequest",
+        }
+        app = create_app(
+            self.db_path,
+            self.out_root,
+            self.rules_dir,
+            access_token=token,
+            allowed_hosts={"192.168.1.20"},
+            serve_host="0.0.0.0",
+        )
+        store = TaskStore(self.db_path)
+        token_before = store.get_setting(SETTING_TOKEN)
+        lan_before = store.get_setting(SETTING_LAN_ENABLED)
+        loopback = TestClient(
+            app,
+            headers={**CLIENT_HEADERS, **basic_auth(token)},
+            client=("127.0.0.1", 50000),
+        )
+        self.assertEqual(loopback.get("/api/health").status_code, 200)
+
+        enabled = loopback.put(
+            "/api/system/access/dev-no-auth",
+            json={"enabled": True},
+        )
+        self.assertEqual(enabled.status_code, 200, enabled.text)
+        access = enabled.json()["access"]
+        self.assertTrue(access["dev_no_auth_setting"])
+        self.assertTrue(access["dev_no_auth_active"])
+        self.assertFalse(access["dev_no_auth_forced"])
+        self.assertEqual(store.get_setting(SETTING_DEV_NO_AUTH), "1")
+        self.assertEqual(store.get_setting(SETTING_TOKEN), token_before)
+        self.assertEqual(store.get_setting(SETTING_LAN_ENABLED), lan_before)
+
+        anonymous = TestClient(
+            app,
+            headers=CLIENT_HEADERS,
+            client=("127.0.0.1", 50000),
+        )
+        self.assertEqual(anonymous.get("/api/health").status_code, 200)
+        self.assertTrue(
+            anonymous.get("/api/system").json()["server"]["dev_no_auth_active"]
+        )
+
+        remote = TestClient(
+            app,
+            headers={**lan_headers, **basic_auth(token)},
+            client=("192.168.1.10", 50000),
+        )
+        rejected = remote.put(
+            "/api/system/access/dev-no-auth",
+            json={"enabled": False},
+        )
+        self.assertEqual(rejected.status_code, 403, rejected.text)
+        self.assertEqual(
+            rejected.json()["error"]["code"], "DEV_MODE_LOOPBACK_ONLY"
+        )
+
+        restored = create_app(
+            self.db_path,
+            self.out_root,
+            self.rules_dir,
+            allowed_hosts={"192.168.1.20"},
+            serve_host="0.0.0.0",
+        )
+        restored_loopback = TestClient(
+            restored,
+            headers=CLIENT_HEADERS,
+            client=("127.0.0.1", 50000),
+        )
+        self.assertEqual(restored_loopback.get("/api/health").status_code, 200)
+        disabled = restored_loopback.put(
+            "/api/system/access/dev-no-auth",
+            json={"enabled": False},
+        )
+        self.assertEqual(disabled.status_code, 200, disabled.text)
+        self.assertFalse(disabled.json()["access"]["dev_no_auth_active"])
+        self.assertEqual(restored_loopback.get("/api/health").status_code, 401)
+
     def test_login_rate_limit_locks_after_failures(self) -> None:
         token = "0123456789abcdef"
         headers = {
@@ -858,6 +998,12 @@ class WebApiTests(unittest.TestCase):
         changed = client.post("/api/system/access/token", json={"token": "a"})
         self.assertEqual(changed.status_code, 403)
         self.assertEqual(changed.json()["error"]["code"], "READ_ONLY")
+        dev_mode = client.put(
+            "/api/system/access/dev-no-auth",
+            json={"enabled": True},
+        )
+        self.assertEqual(dev_mode.status_code, 403)
+        self.assertEqual(dev_mode.json()["error"]["code"], "READ_ONLY")
 
     def test_spa_shell_is_public_but_api_requires_session(self) -> None:
         token = "0123456789abcdef"
@@ -944,6 +1090,9 @@ class WebApiTests(unittest.TestCase):
         self.assertTrue(body["server"]["lan_capable"])
         self.assertTrue(body["server"]["lan_enabled"])
         self.assertTrue(body["server"]["auth_required"])
+        self.assertFalse(body["server"]["dev_no_auth_setting"])
+        self.assertFalse(body["server"]["dev_no_auth_active"])
+        self.assertFalse(body["server"]["dev_no_auth_forced"])
         self.assertEqual(body["server"]["session_ttl_seconds"], 30 * 24 * 60 * 60)
         self.assertEqual(
             body["server"]["urls"],

@@ -11,6 +11,7 @@ import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   Cpu,
+  FlaskConical,
   Layers,
   ListTodo,
   ListTree,
@@ -181,6 +182,28 @@ function ServicePill() {
       <span className="hidden lg:inline">{text}</span>
       <span className="lg:hidden">{shortText}</span>
     </span>
+  );
+}
+
+function DevModePill() {
+  const system = useQuery({
+    queryKey: ["system"],
+    queryFn: ({ signal }) => getSystemInfo(signal),
+    refetchInterval: 15_000,
+    staleTime: 5_000,
+  });
+  if (!system.data?.server.dev_no_auth_active) return null;
+  if (!system.data.server.auth_required) return null;
+  return (
+    <Link
+      to="/settings"
+      className="hidden items-center gap-1.5 rounded-full border border-warning/20 bg-warning-soft px-2.5 py-1 text-[11px] whitespace-nowrap text-warning transition-colors hover:bg-warning-soft/80 md:inline-flex"
+      title="本机请求跳过访问密钥；局域网仍需登录。点击打开系统设置。"
+      aria-label="开发免登录：本机请求跳过访问密钥，局域网仍需登录；打开系统设置"
+    >
+      <FlaskConical size={12} aria-hidden="true" />
+      <span>开发免登录</span>
+    </Link>
   );
 }
 
@@ -535,6 +558,7 @@ export function AppShell() {
         ) : null}
 
         <div className="ml-auto flex shrink-0 items-center gap-2 pl-2">
+          <DevModePill />
           <ResourcePill />
           <ServicePill />
         </div>

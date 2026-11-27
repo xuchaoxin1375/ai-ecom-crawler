@@ -7,6 +7,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from ecom_crawler.cli import _resolve_serve_access, _serve_urls, main
@@ -116,6 +117,39 @@ class CliTests(unittest.TestCase):
                 )
             self.assertEqual(code, 2)
             self.assertIn("requires --access-token", stderr.getvalue())
+
+    def test_serve_passes_dev_no_auth_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            state = SimpleNamespace(
+                auth_required=True,
+                dev_no_auth_active=True,
+                dev_no_auth_forced=True,
+            )
+            stdout = io.StringIO()
+            with (
+                mock.patch(
+                    "ecom_crawler.web.app.create_app",
+                    return_value=SimpleNamespace(state=state),
+                ) as factory,
+                mock.patch("uvicorn.run") as run,
+                contextlib.redirect_stdout(stdout),
+            ):
+                code = main(
+                    [
+                        "serve",
+                        "--db",
+                        str(root / "tasks.db"),
+                        "--out-root",
+                        str(root / "tasks"),
+                        "--no-worker",
+                        "--dev-no-auth",
+                    ]
+                )
+            self.assertEqual(code, 0)
+            self.assertTrue(factory.call_args.kwargs["dev_no_auth"])
+            self.assertIn("developer mode", stdout.getvalue())
+            run.assert_called_once()
 
 
 class ServeAccessTests(unittest.TestCase):

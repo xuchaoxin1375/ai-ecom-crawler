@@ -289,6 +289,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     serve.add_argument(
+        "--dev-no-auth",
+        action="store_true",
+        help=(
+            "skip access-key checks for loopback requests; development only; "
+            "non-loopback clients still require the key"
+        ),
+    )
+    serve.add_argument(
         "--allow-host",
         action="append",
         default=[],
@@ -589,6 +597,7 @@ def _serve(args: argparse.Namespace) -> int:
         proxy=args.proxy,
         read_only=args.read_only,
         access_token=token,
+        dev_no_auth=bool(args.dev_no_auth),
         allowed_hosts=allowed_hosts,
         serve_host=host,
         serve_port=args.port,
@@ -611,6 +620,12 @@ def _serve(args: argparse.Namespace) -> int:
         print(
             "access: browser login page (username ecom); "
             "CLI HTTP Basic username any, password = access key"
+        )
+    if app.state.dev_no_auth_active and app.state.auth_required:
+        source = "startup flag" if app.state.dev_no_auth_forced else "saved setting"
+        print(
+            f"warning: developer mode ({source}) skips access-key checks for "
+            "loopback requests; LAN clients still require the key"
         )
     if host in WILDCARD_HOSTS and urls[0] == (
         f"http://{_format_url_host(host)}:{args.port}/"

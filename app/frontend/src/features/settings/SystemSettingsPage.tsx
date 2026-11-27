@@ -10,6 +10,7 @@ import {
   setSystemAccess,
   setSystemBuildSlots,
   setSystemCollectionSlots,
+  setSystemDevNoAuth,
   setSystemToken,
   type SystemAccess,
   type SystemInfo,
@@ -553,6 +554,7 @@ export function SystemSettingsPage() {
   const location = useLocation();
   const queryClient = useQueryClient();
   const [savingAccess, setSavingAccess] = useState(false);
+  const [savingDevMode, setSavingDevMode] = useState(false);
   const [rotating, setRotating] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -641,6 +643,34 @@ export function SystemSettingsPage() {
   else if (!access.lan_capable) switchDisabledReason = "当前仅监听回环地址，需重启。";
   else if (!access.token_configured) switchDisabledReason = "需要先设置访问密钥。";
   else if (savingAccess) switchDisabledReason = "正在保存访问设置。";
+
+  let devModeDisabledReason = "";
+  if (readOnly) devModeDisabledReason = "只读预览不能修改开发模式。";
+  else if (lanClient) devModeDisabledReason = "只有本机回环入口可以修改此开关。";
+  else if (access.dev_no_auth_forced)
+    devModeDisabledReason =
+      "由启动参数 --dev-no-auth 强制开启；去掉参数并重启后可在这里修改。";
+  else if (savingDevMode) devModeDisabledReason = "正在保存开发模式设置。";
+
+  function applyDevNoAuth(next: boolean) {
+    if (savingDevMode || access.dev_no_auth_forced) return;
+    setSavingDevMode(true);
+    setError("");
+    setNotice("");
+    void setSystemDevNoAuth(next)
+      .then((response) => {
+        queryClient.setQueryData<SystemInfo>(["system"], (current) =>
+          current ? { ...current, server: response.access } : current,
+        );
+        setNotice(
+          next
+            ? "本机开发免登录已开启；局域网设备仍需访问密钥。"
+            : "本机开发免登录已关闭；本机请求恢复访问密钥校验。",
+        );
+      })
+      .catch((exc) => setError(errorText(exc)))
+      .finally(() => setSavingDevMode(false));
+  }
 
   function applyAccess(next: boolean) {
     if (savingAccess) return;
@@ -821,10 +851,19 @@ export function SystemSettingsPage() {
           },
           {
             label: "认证",
-            value: access.auth_required ? "登录页已启用" : "未启用",
-            hint: access.token_configured
-              ? `上次轮换 ${formatTime(access.token_updated_at)}`
-              : "局域网需要访问密钥",
+            value: access.auth_required
+              ? access.dev_no_auth_active
+                ? "本机免登录"
+                : "登录页已启用"
+              : "未启用",
+            hint:
+              access.auth_required && access.dev_no_auth_active
+                ? access.dev_no_auth_forced
+                  ? "启动参数强制开启"
+                  : "开发模式；局域网仍需密钥"
+                : access.token_configured
+                  ? `上次轮换 ${formatTime(access.token_updated_at)}`
+                  : "局域网需要访问密钥",
           },
           {
             label: "活跃负载",
@@ -841,6 +880,11 @@ export function SystemSettingsPage() {
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-[17px] leading-6 font-semibold text-ink">访问与认证</h2>
             {modeBadge}
+            {access.auth_required && access.dev_no_auth_active ? (
+              <Badge tone="warning" dot>
+                开发免登录
+              </Badge>
+            ) : null}
             {access.auth_required ? (
               <Badge tone="info" dot={false}>
                 登录页认证
@@ -855,6 +899,53 @@ export function SystemSettingsPage() {
             局域网开关立即生效；访问密钥只保存哈希，页面不会再次显示旧密钥。
           </p>
         </header>
+
+        <div className="border-b border-line bg-warning-soft/30 px-4 py-4 sm:px-6">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-sm font-semibold text-ink">本机开发免登录</p>
+                {access.dev_no_auth_active ? (
+                  <Badge tone="warning" dot>
+                    已开启
+                  </Badge>
+                ) : null}
+              </div>
+              <p className="mt-1 max-w-3xl text-sm leading-6 text-ink-2">
+                仅 127.0.0.1／localhost／::1
+                的请求跳过访问密钥；局域网设备仍需密钥。开发验收后请关闭。
+              </p>
+            </div>
+            <Switch
+              checked={access.dev_no_auth_active}
+              disabled={Boolean(devModeDisabledReason)}
+              label="本机开发免登录"
+              describedBy="dev-no-auth-reason"
+              onChange={applyDevNoAuth}
+            />
+          </div>
+          {devModeDisabledReason ? (
+            <p id="dev-no-auth-reason" className="mt-2 text-xs leading-5 text-ink-3">
+              {devModeDisabledReason}
+            </p>
+          ) : null}
+          {access.dev_no_auth_active && access.auth_required ? (
+            <InlineNotice tone="warning" title="开发模式已开启">
+              <p>
+                本机请求不再校验访问密钥；局域网请求仍需登录。关闭开关或去掉
+                <code className="mx-1 rounded bg-surface/70 px-1 font-mono text-[11px]">
+                  --dev-no-auth
+                </code>
+                后重启即可恢复。
+              </p>
+            </InlineNotice>
+          ) : null}
+          {!access.token_configured ? (
+            <InlineNotice tone="info" title="尚未配置访问密钥">
+              当前登录本来未启用；设置访问密钥后，本机仍会保持免登录。
+            </InlineNotice>
+          ) : null}
+        </div>
 
         <div className="grid divide-y divide-line lg:grid-cols-2 lg:divide-x lg:divide-y-0">
           <div
@@ -1053,12 +1144,19 @@ export function SystemSettingsPage() {
             {access.token_configured ? (
               <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3">
                 <p className="text-xs leading-5 text-ink-3">
-                  退出只清除当前浏览器；其他设备需要重新登录时轮换密钥。
+                  {access.dev_no_auth_active && !lanClient
+                    ? "开发免登录开启时，本机退出登录不会生效；关闭开发模式后再退出。"
+                    : "退出只清除当前浏览器；其他设备需要重新登录时轮换密钥。"}
                 </p>
                 <Button
                   variant="ghost"
                   size="sm"
-                  disabled={loggingOut}
+                  disabled={loggingOut || (access.dev_no_auth_active && !lanClient)}
+                  title={
+                    access.dev_no_auth_active && !lanClient
+                      ? "关闭本机开发免登录后才能退出登录"
+                      : undefined
+                  }
                   onClick={handleLogout}
                 >
                   <LogOut size={14} aria-hidden="true" />

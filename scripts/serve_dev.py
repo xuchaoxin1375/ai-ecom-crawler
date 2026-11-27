@@ -370,7 +370,11 @@ def parse_serve_command(command: str) -> dict[str, Any] | None:
         "--max-tasks": "max_tasks",
         "--max-builds": "max_builds",
     }
-    flag_options = {"--no-worker": "no_worker", "--read-only": "read_only"}
+    flag_options = {
+        "--no-worker": "no_worker",
+        "--read-only": "read_only",
+        "--dev-no-auth": "dev_no_auth",
+    }
     parsed: dict[str, Any] = {"extra": []}
     cursor = 0
     while cursor < len(args):
@@ -393,6 +397,9 @@ def parse_serve_command(command: str) -> dict[str, Any] | None:
         elif item == "--access-token":
             cursor += 2
         elif item.startswith("--access-token="):
+            cursor += 1
+        elif item == "--no-dev-no-auth":
+            parsed["dev_no_auth"] = False
             cursor += 1
         elif item == "--":
             parsed["extra"].extend(args[cursor + 1 :])
@@ -707,6 +714,7 @@ def start_command(args: argparse.Namespace) -> int:
     host = resolve_value(args.host, state, "host", DEFAULT_HOST)
     no_worker = bool(resolve_value(args.no_worker, state, "no_worker", False))
     read_only = bool(resolve_value(args.read_only, state, "read_only", False))
+    dev_no_auth = bool(resolve_value(args.dev_no_auth, state, "dev_no_auth", False))
     proxy = resolve_value(args.proxy, state, "proxy")
     max_tasks = resolve_value(args.max_tasks, state, "max_tasks")
     max_builds = resolve_value(args.max_builds, state, "max_builds")
@@ -741,6 +749,8 @@ def start_command(args: argparse.Namespace) -> int:
         serve_args.append("--no-worker")
     if read_only:
         serve_args.append("--read-only")
+    if dev_no_auth:
+        serve_args.append("--dev-no-auth")
     if proxy:
         serve_args += ["--proxy", str(proxy)]
     if max_tasks is not None:
@@ -789,6 +799,7 @@ def start_command(args: argparse.Namespace) -> int:
             "rules_dir": rules_dir,
             "no_worker": no_worker,
             "read_only": read_only,
+            "dev_no_auth": dev_no_auth,
             "proxy": proxy,
             "max_tasks": max_tasks,
             "max_builds": max_builds,
@@ -805,6 +816,8 @@ def start_command(args: argparse.Namespace) -> int:
         if payload is not None:
             log_file.close()
             print(f"已启动 http://127.0.0.1:{port}/")
+            if dev_no_auth:
+                print("开发者模式：本机回环请求跳过访问密钥；局域网仍需密钥。")
             print(f"PID {process.pid}  日志 {log_path}")
             return 0
         time.sleep(0.25)
@@ -896,6 +909,18 @@ def add_start_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--port", type=int, default=CANONICAL_PORT, help=f"端口，默认 {CANONICAL_PORT}")
     parser.add_argument("--no-worker", action="store_true", default=None, help="只提供 API，不托管 worker")
     parser.add_argument("--read-only", action="store_true", default=None, help="只读预览")
+    parser.add_argument(
+        "--dev-no-auth",
+        action="store_true",
+        default=None,
+        help="开发模式：本机回环请求跳过访问密钥，局域网仍需密钥",
+    )
+    parser.add_argument(
+        "--no-dev-no-auth",
+        action="store_false",
+        dest="dev_no_auth",
+        help="清除已保存的开发模式启动参数",
+    )
     parser.add_argument("--proxy", help="出口代理 URL")
     parser.add_argument("--max-tasks", type=int, help="托管采集并发")
     parser.add_argument("--max-builds", type=int, help="规则分析并发")

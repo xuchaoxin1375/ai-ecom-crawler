@@ -25,6 +25,7 @@ AUTH_LOCKOUT_SECONDS = 30.0
 
 SETTING_LAN_ENABLED = "serve_lan_enabled"
 SETTING_TOKEN = "serve_token"
+SETTING_DEV_NO_AUTH = "serve_dev_no_auth"
 
 
 def hostname_only(host_header: str) -> str:

@@ -114,6 +114,8 @@ python -m uv run --project app ecom-crawler serve --db "$data\tasks.db" --out-ro
 
 打开 `http://127.0.0.1:8765/#/workbench`；任务入口是 `http://127.0.0.1:8765/#/tasks`，构建记录入口是 `http://127.0.0.1:8765/#/builds`。停止用 `Ctrl+C`；重启前先停旧实例并继续使用 8765。服务启动后才构建 `frontend/dist` 时，要重启服务才可用。
 
+开发期频繁登录不便时，可以给 `serve` 加 `--dev-no-auth`：仅从 `127.0.0.1`／`localhost`／`::1` 发起、且 Host 头也是回环名称的请求跳过访问密钥；局域网设备仍然需要登录。它不删除密钥，去掉参数或关闭设置页开关即可恢复。`scripts/serve_dev.py start|restart --dev-no-auth` 会保存该参数，`--no-dev-no-auth` 清除。
+
 ### 开发实例与前端热更新
 
 开发期用 `scripts/serve_dev.py` 管理 8765，避免每个 agent 另开端口并留下旧实例：
@@ -171,6 +173,7 @@ python -m uv run --project app ecom-crawler serve --db "$data\tasks.db" --out-ro
 
 - **局域网开关**：服务必须以非回环 `--host` 启动过，页面才能开关；关闭后非回环 Host 一律 403，绑定地址和端口仍需重启修改。
 - **访问密钥**：可在页面设置自定义密钥，或生成随机密钥；账本只保存随机 salt 和 SHA-256 哈希。自定义密钥不回显，随机密钥只显示一次；轮换后所有设备都要重新登录。
+- **本机开发免登录**：开发期可从本机回环入口跳过访问密钥，设置写入账本并立即生效；只对 `127.0.0.1`／`localhost`／`::1` 且 Host 为回环名称的请求生效，局域网仍需密钥。启动参数 `--dev-no-auth` 可强制开启；页眉和设置页会持续提示。
 - **退出登录**：清除当前浏览器的会话 Cookie；其他设备需要退出时轮换密钥。
 - **忘记密钥**：停止 serve 后运行 `python -m uv run --project app ecom-crawler reset-access-key --db <tasks.db>`；默认生成随机密钥并只打印一次，`--key` 可设置自定义密钥。该命令只改密钥哈希，保留局域网开关和其他数据，重启后生效。
 - **持久化**：局域网开关和密钥哈希写入本地 SQLite，重启后继续生效。以回环启动时，页面提供 `--host 0.0.0.0 --port <port>` 重启参数；如果还没有密钥，先生成再重启。
@@ -203,7 +206,7 @@ python -m uv run --project app ecom-crawler validate --task-result /path/to/task
 - `audit-content` 用渲染后的商品区文本和截图抽样核对规则提取覆盖：输出 `visual-audit.json`、未覆盖文本块和整页截图；这是人工审计工具，不替代批量提取。
 - `run` 的退出码表示任务是否实际执行；业务结论看 `task-result.json` 的 `outcome`。计划或用法错误返回 2。
 - `run` 是一次性入口，不提供可恢复的控制；需要暂停／恢复／取消时用 `submit` 入队，再在另一个 shell 运行 `worker`，用 `pause`／`resume`／`cancel` 控制。外部暂停 `run` 任务后，`run` 以 2 退出并提示用 `worker` 恢复。
-- `serve` 默认只绑定回环地址；`--host` 为非回环地址时必须提供 `--access-token`／`ECOM_SERVE_TOKEN`（长度 1–256），或使用系统设置页已保存的密钥哈希；浏览器使用登录页和会话 Cookie，命令行仍可用 HTTP Basic，Host 只接受回环、本机地址／主机名和 `--allow-host` 追加项。默认启动托管 worker（持有 worker 单实例锁）；`--no-worker` 只提供 API／页面，执行由独立 `worker` 进程负责，写接口仍然可用；`--read-only` 要求账本已存在，不启动 worker，不创建可写构建管理，所有非 `GET`／`HEAD`／`OPTIONS` 请求返回 403 `READ_ONLY`，SQLite 以 `mode=ro` 和 `PRAGMA query_only=ON` 打开。页面关闭不会停止后台。
+- `serve` 默认只绑定回环地址；`--host` 为非回环地址时必须提供 `--access-token`／`ECOM_SERVE_TOKEN`（长度 1–256），或使用系统设置页已保存的密钥哈希；浏览器使用登录页和会话 Cookie，命令行仍可用 HTTP Basic，Host 只接受回环、本机地址／主机名和 `--allow-host` 追加项。`--dev-no-auth` 只让本机回环请求跳过访问密钥，局域网仍需密钥，适合开发期使用。默认启动托管 worker（持有 worker 单实例锁）；`--no-worker` 只提供 API／页面，执行由独立 `worker` 进程负责，写接口仍然可用；`--read-only` 要求账本已存在，不启动 worker，不创建可写构建管理，所有非 `GET`／`HEAD`／`OPTIONS` 请求返回 403 `READ_ONLY`，SQLite 以 `mode=ro` 和 `PRAGMA query_only=ON` 打开。页面关闭不会停止后台。
 - 出口代理按任务或进程传入：`--proxy`、`ECOM_FETCH_PROXY`、`ECOM_BUILD_PROXY`。构建 API 的 `proxy` 会写入构建记录和站点，后续批次任务沿用。Worker 优先使用任务已记录的代理，未指定时使用进程默认代理。代理 URL 不接受凭据，API 展示会遮蔽 userinfo。
 - 构建 trace 默认不保存 reasoning；需要本地复盘时用 `ECOM_BUILD_CAPTURE_REASONING=1` 启动服务，或在构建 API 传 `capture_reasoning=true`。trace 会截断工具输出、消息和 reasoning，不保存原始导出或整页 HTML。
 - 站点详情的“模型输出”读取 `/api/builds/{id}/messages`：构建中显示流式时间线，结束后显示完整可见消息；`timeline` 按时间合并思考、工具调用和文本。reasoning 仅在显式保留时出现；未保留时页面会提示服务端开关和单次勾选条件。

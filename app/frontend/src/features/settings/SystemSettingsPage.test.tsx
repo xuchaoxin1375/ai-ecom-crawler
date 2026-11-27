@@ -26,6 +26,9 @@ function systemInfo(
       auth_required: true,
       token_configured: true,
       token_updated_at: "2026-11-25T00:00:00Z",
+      dev_no_auth_setting: false,
+      dev_no_auth_active: false,
+      dev_no_auth_forced: false,
       session_ttl_seconds: 30 * 24 * 60 * 60,
       allowed_hosts: ["192.168.1.20"],
       urls: ["http://192.168.1.20:8765/"],
@@ -87,6 +90,7 @@ function stubFetch(
   initial: SystemInfo,
   handlers: {
     onAccess?: (body: { lan_enabled: boolean }) => SystemAccess;
+    onDevNoAuth?: (body: { enabled: boolean }) => SystemAccess;
     onToken?: (body: { token?: string } | undefined) => SystemTokenResponse;
   } = {},
 ) {
@@ -118,6 +122,18 @@ function stubFetch(
       const access = handlers.onAccess
         ? handlers.onAccess(body)
         : { ...current.server, lan_enabled: body.lan_enabled };
+      current = { ...current, server: access };
+      return Response.json({ access });
+    }
+    if (path === "/api/system/access/dev-no-auth" && init?.method === "PUT") {
+      const body = JSON.parse(String(init.body)) as { enabled: boolean };
+      const access = handlers.onDevNoAuth
+        ? handlers.onDevNoAuth(body)
+        : {
+            ...current.server,
+            dev_no_auth_setting: body.enabled,
+            dev_no_auth_active: body.enabled,
+          };
       current = { ...current, server: access };
       return Response.json({ access });
     }
@@ -489,7 +505,63 @@ describe("system settings", () => {
     expect(
       await screen.findByRole("switch", { name: "允许局域网访问" }),
     ).toBeDisabled();
+    expect(screen.getByRole("switch", { name: "本机开发免登录" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "生成随机密钥" })).toBeDisabled();
     expect(screen.getAllByText("只读预览").length).toBeGreaterThan(0);
+  });
+
+  it("enables local developer login without changing LAN auth", async () => {
+    const fetchMock = stubFetch(systemInfo());
+    renderPage("/settings", "/settings", <SystemSettingsPage />);
+
+    const toggle = await screen.findByRole("switch", { name: "本机开发免登录" });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    fireEvent.click(toggle);
+
+    await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "true"));
+    expect(
+      await screen.findByText("本机开发免登录已开启；局域网设备仍需访问密钥。"),
+    ).toBeVisible();
+    expect(screen.getAllByText("开发免登录").length).toBeGreaterThan(0);
+    expect(screen.getByRole("switch", { name: "允许局域网访问" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    const put = fetchMock.mock.calls.find(
+      ([url, init]) =>
+        url === "/api/system/access/dev-no-auth" && init?.method === "PUT",
+    );
+    expect(JSON.parse(String(put?.[1]?.body))).toEqual({ enabled: true });
+  });
+
+  it("shows a startup-forced developer login switch as read-only", async () => {
+    const fetchMock = stubFetch(
+      systemInfo(
+        {},
+        {
+          dev_no_auth_setting: false,
+          dev_no_auth_active: true,
+          dev_no_auth_forced: true,
+        },
+      ),
+    );
+    renderPage("/settings", "/settings", <SystemSettingsPage />);
+
+    const toggle = await screen.findByRole("switch", { name: "本机开发免登录" });
+    expect(toggle).toBeChecked();
+    expect(toggle).toBeDisabled();
+    expect(screen.getByText(/启动参数 --dev-no-auth 强制开启/)).toBeVisible();
+    fireEvent.click(toggle);
+    expect(fetchMock.mock.calls.some(([url]) => url.endsWith("/dev-no-auth"))).toBe(
+      false,
+    );
+  });
+
+  it("disables logout while local developer login is active", async () => {
+    stubFetch(systemInfo({}, { dev_no_auth_setting: true, dev_no_auth_active: true }));
+    renderPage("/settings", "/settings", <SystemSettingsPage />);
+
+    expect(await screen.findByRole("button", { name: "退出登录" })).toBeDisabled();
+    expect(screen.getByText(/本机退出登录不会生效/)).toBeVisible();
   });
 });
