@@ -2,7 +2,7 @@
 title: 电商采集项目核心
 document_type: business-core
 status: active
-updated: 2026-11-27
+updated: 2026-11-28
 ---
 
 ## 用途与适用范围
@@ -94,6 +94,7 @@ updated: 2026-11-27
 | 按需 | [图片加载代理设计](52-图片加载代理设计.md) | 商品图片服务端取图、自动/指定/直连模式、任务代理优先、系统设置与表头预览设置弹窗、SSRF／大小／超时边界；Accepted，验证 partial，待项目方验收 |
 | 按需 | [运行配置与预算续采设计](53-运行配置与预算续采设计.md) | 工作台底部运行配置页签、按运行调整预算/速度/发现上限、预算耗尽原地续采、跨重启计时与工作台启动策略；Accepted，待项目方验收 |
 | 按需 | [开发模式本机免登录设计](54-开发模式本机免登录设计.md) | 开发期从本机回环入口跳过访问密钥；启动参数与设置页开关、局域网仍认证、持续提示、API 与回滚；Proposed，待设计确认 |
+| 按需 | [数据清理、规则变更与结果隔离设计](55-数据清理与规则变更设计.md) | 运行中记录意见、合并修复、`rebuild`、候选激活入口、结果有效性、归档与永久移除、引用检查和保留策略；Proposed，待设计确认 |
 | 按需 | [方案 manifest JSON Schema](schema/manifest.schema.json) | 规则包（`rule_*`）与方案包（`plan_*`）的机器可校验结构；跨字段约束仍由执行器校验 |
 | 按需 | [系统 v2 规则／反馈 DDL](schema/v2-rules-feedback.sql) | 质量反馈、规则版本、站点规则指针和激活审计的 SQLite 建表／加列参考；迁移由 `TaskStore._init_schema()` 条件执行 |
 | 按需 | [系统 v2 构建变更摘要 Schema](schema/v2-build-change-summary.schema.json) | 修复构建 `change_summary` 的机器可校验结构；主机验证后记录 |
