@@ -331,6 +331,11 @@ export function WorkbenchPage() {
     kind: "create" | "row";
     node: WorkbenchNode | null;
   } | null>(null);
+  const [recentMenu, setRecentMenu] = useState<{
+    x: number;
+    y: number;
+    item: WorkbenchRecentItem;
+  } | null>(null);
   const [renameNode, setRenameNode] = useState<WorkbenchNode | null>(null);
   const [moveNode, setMoveNode] = useState<WorkbenchNode | null>(null);
   const [dissolveNode, setDissolveNode] = useState<WorkbenchNode | null>(null);
@@ -490,6 +495,50 @@ export function WorkbenchPage() {
   function selectRecent(item: WorkbenchRecentItem) {
     if (item.node_id) setSelectedNodeId(item.node_id);
     setSelectedTaskId(item.task_id);
+  }
+
+  function toggleGroupCollapsed(nodeId: string) {
+    setCollapsed((current) => {
+      const next = new Set(current);
+      if (next.has(nodeId)) next.delete(nodeId);
+      else next.add(nodeId);
+      return next;
+    });
+  }
+
+  function openRecentMenu(event: ReactMouseEvent, item: WorkbenchRecentItem) {
+    event.preventDefault();
+    event.stopPropagation();
+    selectRecent(item);
+    setRecentMenu({ x: event.clientX, y: event.clientY, item });
+  }
+
+  function openNodeDetail(node: WorkbenchNode) {
+    selectNode(node);
+    if (node.node_type === "group") {
+      toggleGroupCollapsed(node.node_id);
+      return;
+    }
+    const taskId = node.current_run?.task_id;
+    if (!taskId) {
+      showToast(
+        "info",
+        `「${node.name}」尚未启动，暂无任务详情；请先启动任务，或右键编辑任务定义。`,
+      );
+      return;
+    }
+    navigate(`/tasks/${encodeURIComponent(taskId)}`);
+  }
+
+  function recentRowBusy(item: WorkbenchRecentItem): boolean {
+    return (
+      actionBusy === `pause:${item.task_id}` ||
+      actionBusy === `resume:${item.task_id}` ||
+      actionBusy === `cancel:${item.task_id}` ||
+      actionBusy === `dismiss:${item.task_id}` ||
+      actionBusy === `restore:${item.task_id}` ||
+      (item.node_id ? actionBusy === `start:${item.node_id}` : false)
+    );
   }
 
   function openPreview(item: TaskItem) {
@@ -1304,6 +1353,121 @@ export function WorkbenchPage() {
     }
   }
 
+  function recentMenuGroups(item: WorkbenchRecentItem): RowActionItem[][] {
+    const active = isActiveState(item.state);
+    const node = item.node_id ? nodesById.get(item.node_id) : undefined;
+    const first: RowActionItem[] = [];
+
+    if (item.state === "RUNNING") {
+      first.push({
+        key: "pause",
+        label: "暂停任务",
+        icon: <Pause size={14} />,
+        disabled: readOnly,
+        onSelect: () => void controlTask(item, "pause"),
+      });
+    }
+    if (item.state === "PAUSED") {
+      first.push({
+        key: "resume",
+        label: "继续任务",
+        icon: <Play size={14} />,
+        disabled: readOnly,
+        onSelect: () => void controlTask(item, "resume"),
+      });
+    }
+    if (active) {
+      first.push({
+        key: "cancel",
+        label: "取消任务",
+        icon: <X size={14} />,
+        disabled: readOnly,
+        onSelect: () => void controlTask(item, "cancel"),
+      });
+    }
+    if (node && !active) {
+      const retry = item.outcome === "FAILED";
+      first.push({
+        key: retry ? "retry" : "start",
+        label: retry ? "重试任务" : "启动任务",
+        hint: "新建运行",
+        icon: retry ? <RotateCcw size={14} /> : <Play size={14} />,
+        disabled: readOnly,
+        onSelect: () => void runNode(node),
+      });
+    }
+
+    return [
+      first,
+      [
+        {
+          key: "run-config",
+          label: "运行配置",
+          icon: <SlidersHorizontal size={14} />,
+          onSelect: () => {
+            selectRecent(item);
+            setBottomTab("config");
+            setBottomCollapsed(false);
+          },
+        },
+        ...(item.node_id
+          ? [
+              {
+                key: "edit-definition",
+                label: "编辑任务定义",
+                icon: <Pencil size={14} />,
+                disabled: readOnly,
+                onSelect: () => {
+                  const target = nodesById.get(item.node_id ?? "");
+                  if (target) openEditTask(target);
+                },
+              },
+            ]
+          : [
+              {
+                key: "attach-run",
+                label: "加入任务树",
+                icon: <GitBranchPlus size={14} />,
+                disabled: readOnly,
+                onSelect: () => openAttachRun(item),
+              },
+            ]),
+        {
+          key: "export",
+          label: "导出结果",
+          icon: <Download size={14} />,
+          onSelect: () => {
+            window.location.href = taskExportUrl(item.task_id);
+          },
+        },
+        {
+          key: "detail",
+          label: "打开任务详情",
+          icon: <ExternalLink size={14} />,
+          onSelect: () => navigate(`/tasks/${encodeURIComponent(item.task_id)}`),
+        },
+      ],
+      [
+        scope === "removed"
+          ? {
+              key: "restore",
+              label: "恢复到最近列表",
+              icon: <RotateCcw size={14} />,
+              disabled: readOnly,
+              onSelect: () => void restoreItem(item),
+            }
+          : {
+              key: "dismiss",
+              label: item.can_dismiss ? "从最近列表移除" : "结束后才能移除",
+              icon: <X size={14} />,
+              danger: item.can_dismiss,
+              disabled: readOnly || !item.can_dismiss,
+              onSelect: () => void dismissItem(item),
+            },
+      ],
+    ].filter((group) => group.length > 0);
+  }
+
   function renderNode(node: WorkbenchNode, depth: number): ReactNode {
     if (visibleNodeIds && !visibleNodeIds.has(node.node_id)) return null;
     const childNodes = children.get(node.node_id) ?? [];
@@ -1358,12 +1522,7 @@ export function WorkbenchPage() {
               aria-label={open ? "收起目录" : "展开目录"}
               aria-expanded={open}
               onClick={() => {
-                setCollapsed((current) => {
-                  const next = new Set(current);
-                  if (next.has(node.node_id)) next.delete(node.node_id);
-                  else next.add(node.node_id);
-                  return next;
-                });
+                toggleGroupCollapsed(node.node_id);
               }}
               disabled={childNodes.length === 0}
             >
@@ -1384,7 +1543,10 @@ export function WorkbenchPage() {
             type="button"
             className="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left"
             onClick={() => selectNode(node)}
-            title={paths.get(node.node_id) ?? node.name}
+            onDoubleClick={() => openNodeDetail(node)}
+            title={`${paths.get(node.node_id) ?? node.name} · ${
+              isGroup ? "双击展开或收起" : "双击打开任务详情"
+            }`}
           >
             {isGroup ? (
               <Folder
@@ -1529,7 +1691,12 @@ export function WorkbenchPage() {
             <div className="flex items-center justify-between gap-2 px-2 py-1.5">
               <div className="min-w-0">
                 <h2 className="text-xs font-semibold text-ink">任务目录</h2>
-                <p className="truncate text-[10.5px] text-ink-3">右键新建 · 拖拽归属</p>
+                <p
+                  className="truncate text-[10.5px] text-ink-3"
+                  title="右键打开操作菜单，双击任务打开详情，拖拽调整归属"
+                >
+                  右键操作 · 双击详情
+                </p>
               </div>
               <div className="flex shrink-0 items-center gap-0.5">
                 <Button
@@ -1900,7 +2067,7 @@ export function WorkbenchPage() {
                   ))}
                 </div>
                 <span className="hidden text-[10.5px] text-ink-3 sm:inline">
-                  仅已结束可移除
+                  右键或 ⋯ 操作 · 仅已结束可移除
                 </span>
                 <div className="ml-auto flex flex-wrap items-center gap-1.5">
                   <SearchInput
@@ -2073,146 +2240,13 @@ export function WorkbenchPage() {
                       <tbody className="divide-y divide-line">
                         {recentItems.map((item) => {
                           const progress = progressFor(item);
-                          const active = isActiveState(item.state);
                           const elapsedLive =
                             item.state === "RUNNING" ||
                             item.state === "PAUSING" ||
                             item.state === "CANCELLING";
                           const selected = selectedTaskId === item.task_id;
-                          const busy =
-                            actionBusy === `pause:${item.task_id}` ||
-                            actionBusy === `resume:${item.task_id}` ||
-                            actionBusy === `cancel:${item.task_id}` ||
-                            actionBusy === `dismiss:${item.task_id}` ||
-                            actionBusy === `restore:${item.task_id}` ||
-                            (item.node_id
-                              ? actionBusy === `start:${item.node_id}`
-                              : false);
-                          const rowMenuGroups: RowActionItem[][] = [
-                            [
-                              ...(item.state === "RUNNING"
-                                ? [
-                                    {
-                                      key: "pause",
-                                      label: "暂停任务",
-                                      icon: <Pause size={14} />,
-                                      disabled: readOnly,
-                                      onSelect: () => void controlTask(item, "pause"),
-                                    },
-                                  ]
-                                : []),
-                              ...(item.state === "PAUSED"
-                                ? [
-                                    {
-                                      key: "resume",
-                                      label: "继续任务",
-                                      icon: <Play size={14} />,
-                                      disabled: readOnly,
-                                      onSelect: () => void controlTask(item, "resume"),
-                                    },
-                                  ]
-                                : []),
-                              ...(active
-                                ? [
-                                    {
-                                      key: "cancel",
-                                      label: "取消任务",
-                                      icon: <X size={14} />,
-                                      disabled: readOnly,
-                                      onSelect: () => void controlTask(item, "cancel"),
-                                    },
-                                  ]
-                                : []),
-                              ...(item.node_id && !active
-                                ? [
-                                    {
-                                      key: "retry",
-                                      label: "重试任务",
-                                      icon: <RotateCcw size={14} />,
-                                      disabled: readOnly,
-                                      onSelect: () => {
-                                        const node = nodes.find(
-                                          (candidate) =>
-                                            candidate.node_id === item.node_id,
-                                        );
-                                        if (node) void runNode(node);
-                                      },
-                                    },
-                                  ]
-                                : []),
-                            ],
-                            [
-                              {
-                                key: "run-config",
-                                label: "运行配置",
-                                icon: <SlidersHorizontal size={14} />,
-                                onSelect: () => {
-                                  selectRecent(item);
-                                  setBottomTab("config");
-                                  setBottomCollapsed(false);
-                                },
-                              },
-                              ...(item.node_id
-                                ? [
-                                    {
-                                      key: "edit-definition",
-                                      label: "编辑任务定义",
-                                      icon: <Pencil size={14} />,
-                                      disabled: readOnly,
-                                      onSelect: () => {
-                                        const node = nodesById.get(item.node_id ?? "");
-                                        if (node) openEditTask(node);
-                                      },
-                                    },
-                                  ]
-                                : [
-                                    {
-                                      key: "attach-run",
-                                      label: "加入任务树",
-                                      icon: <GitBranchPlus size={14} />,
-                                      disabled: readOnly,
-                                      onSelect: () => openAttachRun(item),
-                                    },
-                                  ]),
-                              {
-                                key: "export",
-                                label: "导出结果",
-                                icon: <Download size={14} />,
-                                onSelect: () => {
-                                  window.location.href = taskExportUrl(item.task_id);
-                                },
-                              },
-                              {
-                                key: "detail",
-                                label: "打开任务详情",
-                                icon: <ExternalLink size={14} />,
-                                onSelect: () =>
-                                  navigate(
-                                    `/tasks/${encodeURIComponent(item.task_id)}`,
-                                  ),
-                              },
-                            ],
-                            [
-                              scope === "removed"
-                                ? {
-                                    key: "restore",
-                                    label: "恢复到最近列表",
-                                    icon: <RotateCcw size={14} />,
-                                    disabled: readOnly,
-                                    onSelect: () => void restoreItem(item),
-                                  }
-                                : {
-                                    key: "dismiss",
-                                    label: item.can_dismiss
-                                      ? "从最近列表移除"
-                                      : "结束后才能移除",
-                                    icon: <X size={14} />,
-                                    danger: item.can_dismiss,
-                                    disabled: readOnly || !item.can_dismiss,
-                                    onSelect: () => void dismissItem(item),
-                                  },
-                            ],
-                          ];
+                          const busy = recentRowBusy(item);
+                          const rowMenuGroups = recentMenuGroups(item);
                           return (
                             <tr
                               key={item.task_id}
@@ -2221,6 +2255,7 @@ export function WorkbenchPage() {
                                 selected ? "bg-accent-soft" : "hover:bg-surface-muted",
                               )}
                               onClick={() => selectRecent(item)}
+                              onContextMenu={(event) => openRecentMenu(event, item)}
                             >
                               <td
                                 className="py-2 pl-5 pr-2"
@@ -3061,6 +3096,25 @@ export function WorkbenchPage() {
                   })()
           }
           onClose={() => setTreeMenu(null)}
+        />
+      ) : null}
+
+      {recentMenu ? (
+        <WorkbenchContextMenu
+          open
+          position={{ x: recentMenu.x, y: recentMenu.y }}
+          label="最近任务操作"
+          header={`${
+            recentMenu.item.definition_name ||
+            recentMenu.item.site_key ||
+            recentMenu.item.task_id
+          } · ${recentMenu.item.task_id} · ${taskStatusLabel(
+            recentMenu.item.state,
+            recentMenu.item.outcome,
+          )}`}
+          busy={recentRowBusy(recentMenu.item)}
+          groups={recentMenuGroups(recentMenu.item)}
+          onClose={() => setRecentMenu(null)}
         />
       ) : null}
 

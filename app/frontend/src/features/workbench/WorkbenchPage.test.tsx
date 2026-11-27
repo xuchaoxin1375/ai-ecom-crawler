@@ -465,6 +465,9 @@ function stubFetch(
     if (path === "/api/tasks/web-1/pause" && init?.method === "POST") {
       return Response.json({ accepted: true });
     }
+    if (path === "/api/tasks/web-1/resume" && init?.method === "POST") {
+      return Response.json({ accepted: true });
+    }
     throw new Error(`Unexpected request: ${url}`);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -725,6 +728,91 @@ it("edits a task definition from the tree menu", async () => {
       ),
     ).toBe(true),
   );
+});
+
+it("continues a paused run from the recent task context menu", async () => {
+  const paused: WorkbenchRecentPage = {
+    ...recent,
+    counts: { ...recent.counts, running: 0 },
+    items: [{ ...recent.items[0], state: "PAUSED" }],
+  };
+  const fetchMock = stubFetch(false, paused);
+  renderPage("/workbench", { pathname: "/workbench" }, <WorkbenchPage />);
+
+  const recentPanel = await screen.findByLabelText("最近任务");
+  const row = (await within(recentPanel).findByText(/web-1/)).closest("tr");
+  expect(row).not.toBeNull();
+  fireEvent.contextMenu(row!);
+
+  const menu = await screen.findByRole("menu", { name: "最近任务操作" });
+  fireEvent.click(within(menu).getByRole("menuitem", { name: "继续任务" }));
+  await waitFor(() =>
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, init]) =>
+          String(url).includes("/api/tasks/web-1/resume") && init?.method === "POST",
+      ),
+    ).toBe(true),
+  );
+});
+
+it("starts a finished task from the recent task context menu", async () => {
+  const finished: WorkbenchRecentPage = {
+    ...recent,
+    counts: { ...recent.counts, running: 0 },
+    items: [
+      {
+        ...recent.items[0],
+        state: "FINISHED",
+        outcome: "COMPLETED",
+        can_dismiss: true,
+      },
+    ],
+  };
+  const fetchMock = stubFetch(false, finished);
+  renderPage("/workbench", { pathname: "/workbench" }, <WorkbenchPage />);
+
+  const recentPanel = await screen.findByLabelText("最近任务");
+  const row = (await within(recentPanel).findByText(/web-1/)).closest("tr");
+  expect(row).not.toBeNull();
+  fireEvent.contextMenu(row!);
+
+  const menu = await screen.findByRole("menu", { name: "最近任务操作" });
+  fireEvent.click(within(menu).getByRole("menuitem", { name: /启动任务/ }));
+  await waitFor(() =>
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, init]) =>
+          String(url).includes("/api/workbench/tasks/n-1/start") &&
+          init?.method === "POST",
+      ),
+    ).toBe(true),
+  );
+});
+
+it("opens task details by double-clicking a started tree task", async () => {
+  const treeWithRun: WorkbenchTreePayload = {
+    nodes: nodes.map((node) =>
+      node.node_id === "n-1" ? { ...node, current_run: task } : node,
+    ),
+  };
+  stubFetch(false, recent, treeWithRun);
+  renderPage("/workbench", { pathname: "/workbench" }, <WorkbenchPage />);
+
+  const treePanel = await screen.findByLabelText("任务目录");
+  fireEvent.doubleClick(await within(treePanel).findByText("fixture.example"));
+  await waitFor(() =>
+    expect(screen.queryByLabelText("任务目录")).not.toBeInTheDocument(),
+  );
+});
+
+it("explains that an unstarted tree task has no detail page", async () => {
+  stubFetch();
+  renderPage("/workbench", { pathname: "/workbench" }, <WorkbenchPage />);
+
+  const treePanel = await screen.findByLabelText("任务目录");
+  fireEvent.doubleClick(await within(treePanel).findByText("fixture.example"));
+  expect(await screen.findByText(/尚未启动，暂无任务详情/)).toBeInTheDocument();
 });
 
 it("attaches an unlinked run to the task tree", async () => {

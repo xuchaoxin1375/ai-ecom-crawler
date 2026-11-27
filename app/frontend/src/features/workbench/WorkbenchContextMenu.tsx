@@ -25,6 +25,7 @@ interface WorkbenchContextMenuProps {
   label: string;
   header?: string;
   groups: WorkbenchMenuItem[][];
+  busy?: boolean;
   onClose: () => void;
 }
 
@@ -38,6 +39,7 @@ export function WorkbenchContextMenu({
   label,
   header,
   groups,
+  busy = false,
   onClose,
 }: WorkbenchContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
@@ -81,8 +83,8 @@ export function WorkbenchContextMenu({
     const first = menuRef.current?.querySelector<HTMLButtonElement>(
       "button:not([disabled])",
     );
-    first?.focus({ preventScroll: true });
-  }, [open]);
+    (first ?? menuRef.current)?.focus({ preventScroll: true });
+  }, [open, busy]);
 
   if (!open || !position) return null;
 
@@ -117,6 +119,7 @@ export function WorkbenchContextMenu({
         ref={menuRef}
         role="menu"
         aria-label={label}
+        aria-busy={busy || undefined}
         tabIndex={-1}
         className="fixed min-w-[190px] rounded-panel border border-line bg-surface p-1 shadow-overlay"
         style={{ left: coords.x, top: coords.y }}
@@ -143,7 +146,7 @@ export function WorkbenchContextMenu({
                   key={item.key}
                   type="button"
                   role="menuitem"
-                  disabled={item.disabled}
+                  disabled={busy || item.disabled}
                   className={cn(
                     "flex h-[30px] w-full items-center gap-2 rounded-control px-2 text-left text-xs transition-colors",
                     "disabled:pointer-events-none disabled:opacity-45",
