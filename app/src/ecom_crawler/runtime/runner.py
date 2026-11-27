@@ -36,7 +36,7 @@ from ecom_crawler.robots import extract_sitemaps, robots_url_for
 
 from .archive import ArchiveMissError
 from .atomic import append_jsonl, write_json, write_text
-from .batch import within_target_navigation
+from .batch import target_entry_mode, within_target_navigation
 from .fetcher import UnsupportedAdvanceError
 from .models import Lease, Task, WorkItem, utc_now
 from .resources import register_path, register_process
@@ -110,6 +110,10 @@ class TaskRunner:
         self._started_monotonic = time.monotonic()
         self._stop_reason = "NATURAL_END"
         self._stop_detail = "entry-page sample exhausted"
+        target = task.input.get("target_entry")
+        self._target_product = target if target_entry_mode(rule, target) == "product" else None
+        if self._target_product:
+            self._stop_detail = "submitted product URL processed"
         self._final_outcome: str | None = None
         self._write_lock = threading.Lock()
         self._recovery: dict[str, Any] = {}
@@ -191,7 +195,7 @@ class TaskRunner:
         )
         control = "FINISHED"
         try:
-            if self.task.input.get("discover", True) is not False:
+            if not self._target_product and self.task.input.get("discover", True) is not False:
                 self._probe_robots_sitemaps()
             self._seed_sources()
             control = self._loop()
@@ -1154,6 +1158,9 @@ class TaskRunner:
         return min(base * (2 ** max(attempt - 1, 0)), 5.0)
 
     def _seed_sources(self) -> None:
+        if self._target_product:
+            self._add_product_item(self._target_product, parent="seed", source="seed")
+            return
         seeds = self.task.input.get("seed_urls")
         if isinstance(seeds, list):
             for raw in seeds:
@@ -1975,13 +1982,12 @@ class TaskRunner:
         finished_at: str,
     ) -> dict[str, Any]:
         counts = self._counts()
-        source_count = len(self.rule.sources)
         coverage_note = (
-            "All candidates declared by the rule's discovery sources were processed; "
-            "this is not proof of full-site inventory."
-            if source_count > 1
-            else "Bounded sample from one entry page; not full-site coverage."
+            "Coverage counts refer to candidates found within the declared discovery "
+            "sources and task limits."
         )
+        if self._target_product:
+            coverage_note = "The submitted product URL is the entire requested scope."
         if self.task.task_type == "discovery":
             coverage = _coverage(
                 counts["url_candidates"],
@@ -2085,6 +2091,13 @@ class TaskRunner:
                 "http_engine": _engine_summary(engine_info),
                 "fetch_engines": engine_info.get("engines_used", []),
                 "archive": engine_info.get("archive"),
+                "rate_limit": {
+                    "events": int(engine_info.get("rate_limit_events") or 0),
+                    "last_retry_after": engine_info.get("last_retry_after"),
+                    "current_rps": engine_info.get("current_rps"),
+                    "default_rps": engine_info.get("default_rps"),
+                    "delay_ms": engine_info.get("delay_ms"),
+                },
                 "browser": {
                     "launched": browser_launched,
                     "headless": engine_info.get("browser_headless"),
@@ -2123,7 +2136,11 @@ class TaskRunner:
                 "robots_status": self._robots_status,
                 "robots_sitemaps": self._robots_sitemaps,
                 "robots_policy": "sitemap_line_only",
-                "delay_ms": self.rule.fetch.get("delay_ms", 1000),
+                "delay_ms": self.task.limits.get(
+                    "fetch_delay_ms",
+                    self.rule.fetch.get("delay_ms", 1000),
+                ),
+                "concurrency": self.task.limits.get("concurrency"),
                 "max_products": self.task.limits.get("max_products"),
                 "max_urls": self.task.limits.get("max_urls"),
                 "max_seconds": self.task.limits.get("max_seconds"),

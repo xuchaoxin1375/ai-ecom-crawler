@@ -61,6 +61,7 @@ import {
   batchExportIsPartial,
   batchExportLabel,
   batchIsArchived,
+  batchNeedsLiveRefresh,
 } from "./actions";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { MetricStrip } from "../../components/ui/MetricStrip";
@@ -304,6 +305,8 @@ export function BatchesPage() {
         signal,
       ),
     placeholderData: keepPreviousData,
+    refetchInterval: (current) =>
+      (current.state.data?.items ?? []).some(batchNeedsLiveRefresh) ? 5000 : false,
   });
 
   const items = useMemo(() => query.data?.items ?? [], [query.data]);

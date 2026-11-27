@@ -6,6 +6,7 @@ import { formatNumber } from "../../lib/format";
 import { Button } from "../../components/ui/Button";
 import { Checkbox } from "../../components/ui/Input";
 import { ErrorNotice } from "../../components/ui/ErrorNotice";
+import { siteStartMode } from "./actions";
 import { batchRerunnableSites } from "./detail";
 
 interface StartBatchDialogProps {
@@ -30,7 +31,7 @@ export function StartBatchDialog({
   onCloseFocus,
 }: StartBatchDialogProps) {
   const [fullCatalog, setFullCatalog] = useState(false);
-  const [rerunFinished, setRerunFinished] = useState(initialRerun || promoteTrial);
+  const rerunFinished = initialRerun || promoteTrial;
   const [onboard, setOnboard] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -39,9 +40,7 @@ export function StartBatchDialog({
     ? batch.sites.filter((site) => selectedSites.includes(site.site_key))
     : batch.sites;
   const finishedOrCancelled = batchRerunnableSites({ ...batch, sites: targets });
-  const startable = targets.filter(
-    (site) => site.readiness === "ready" && !site.task_id,
-  ).length;
+  const startable = targets.filter((site) => siteStartMode(site) === "start").length;
   const pending =
     batch.collection_mode && batch.onboarding_available
       ? targets.filter((site) => site.readiness === "needs_onboarding" && !site.task_id)
@@ -103,8 +102,12 @@ export function StartBatchDialog({
                 {promoteTrial
                   ? "开始正式采集"
                   : initialRerun
-                    ? "重新采集已结束站点"
-                    : "启动可采站点"}
+                    ? startable > 0
+                      ? "启动／重新采集可采站点"
+                      : "重新采集已结束站点"
+                    : selectedSites
+                      ? "启动所选站点"
+                      : "启动可采站点"}
               </Dialog.Title>
               <Dialog.Description className="mt-1 text-sm text-ink-2">
                 确认后会创建新任务并加入队列；正在处理或已暂停的任务不受影响。
@@ -130,17 +133,19 @@ export function StartBatchDialog({
                   {formatNumber(startCount)} 个站点
                 </p>
               </div>
-              <p className="text-xs text-ink-3">
-                首次采集 {formatNumber(startable)} · 重新采集{" "}
-                {formatNumber(rerunFinished ? finishedOrCancelled : 0)}
-              </p>
+              {rerunFinished && startable > 0 && finishedOrCancelled > 0 ? (
+                <p className="text-xs text-ink-3">
+                  启动 {formatNumber(startable)} · 重新采集{" "}
+                  {formatNumber(finishedOrCancelled)}
+                </p>
+              ) : null}
             </div>
 
             {batch.collection_mode ? (
               <p className="text-sm text-ink-2">
                 {batch.collection_mode === "sample" && !promoteTrial
                   ? "按批次计划试采"
-                  : "按批次计划正式采集"}
+                  : "正式采集默认不设商品数或时长上限，由规则和目录自然结束。"}
               </p>
             ) : (
               <div className="flex items-start gap-3 rounded-control border border-line px-3 py-3">
@@ -185,7 +190,7 @@ export function StartBatchDialog({
                   <p className="mt-1 text-xs text-ink-3">
                     {pending > 10
                       ? "一次最多接入 10 个，请先在清单选择目标。"
-                      : "每目标的构建最多 10 分钟、20 万输入及 3 万输出 token。"}
+                      : "每个目标按模型配置里的批次接入预算执行。"}
                   </p>
                 </div>
               </div>
@@ -195,30 +200,7 @@ export function StartBatchDialog({
               <p className="text-xs text-ink-3">
                 已生成的试采结果仍可导出。正式采集成功后更新交付结果。
               </p>
-            ) : (
-              <div className="flex items-start gap-3 rounded-control border border-line px-3 py-3">
-                <Checkbox
-                  id="start-rerun-finished"
-                  className="mt-1"
-                  checked={rerunFinished}
-                  disabled={busy || finishedOrCancelled === 0}
-                  onChange={(event) => setRerunFinished(event.target.checked)}
-                />
-                <div>
-                  <label
-                    className="block text-sm font-medium text-ink"
-                    htmlFor="start-rerun-finished"
-                  >
-                    包含任务已结束的站点
-                  </label>
-                  <p className="mt-0.5 text-xs leading-5 text-ink-3">
-                    {finishedOrCancelled > 0
-                      ? "为可采且任务已结束（含取消）的站点创建新任务；尚未启动的可采站点也会加入队列，旧结果保留。"
-                      : "当前没有可重新采集的站点。"}
-                  </p>
-                </div>
-              </div>
-            )}
+            ) : null}
 
             {error ? <ErrorNotice title="启动失败" message={error} compact /> : null}
           </div>

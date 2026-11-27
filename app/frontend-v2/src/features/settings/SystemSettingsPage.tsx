@@ -1,5 +1,5 @@
 import * as Dialog from "@radix-ui/react-dialog";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState, type ReactNode } from "react";
 import { Check, Copy, KeyRound, LogOut, RefreshCw, ShieldCheck, X } from "lucide-react";
 import {
@@ -7,9 +7,12 @@ import {
   logout as logoutSession,
   rotateSystemToken,
   setSystemAccess,
+  setSystemBuildSlots,
+  setSystemCollectionSlots,
   setSystemToken,
   type SystemAccess,
   type SystemInfo,
+  type SystemRuntime,
 } from "../../lib/api";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
@@ -19,6 +22,7 @@ import { Input } from "../../components/ui/Input";
 import { MetricStrip } from "../../components/ui/MetricStrip";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { cn } from "../../lib/cn";
+import { CollectionPolicySettings } from "./CollectionPolicySettings";
 import {
   formatBytes,
   formatDuration,
@@ -331,6 +335,216 @@ function TokenDialog({
   );
 }
 
+type SlotKind = "collection" | "build";
+
+interface RestartNotice {
+  kind: SlotKind;
+  current: number;
+  next: number;
+}
+
+function RestartNoticeDialog({
+  notice,
+  onClose,
+}: {
+  notice: RestartNotice | null;
+  onClose: () => void;
+}) {
+  return (
+    <Dialog.Root
+      open={notice !== null}
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
+    >
+      <Dialog.Portal>
+        <Dialog.Overlay className="animate-overlay-in fixed inset-0 z-50 bg-ink/35" />
+        <Dialog.Content className="animate-dialog-in fixed left-1/2 top-1/2 z-50 w-[min(520px,calc(100vw-24px))] -translate-x-1/2 -translate-y-1/2 rounded-overlay border border-line bg-surface shadow-overlay">
+          <header className="flex items-start justify-between gap-4 border-b border-line px-4 py-4 sm:px-6">
+            <div>
+              <Dialog.Title className="text-lg leading-7 font-semibold text-ink">
+                并发设置已保存，需要重启服务
+              </Dialog.Title>
+              <Dialog.Description className="mt-1 text-sm leading-6 text-ink-2">
+                {notice
+                  ? `${notice.kind === "build" ? "规则分析" : "采集"}并发已保存为下次启动值 ${notice.next} 个；当前进程仍为 ${notice.current} 个。`
+                  : ""}
+              </Dialog.Description>
+            </div>
+            <Dialog.Close asChild>
+              <button
+                type="button"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-control text-ink-3 hover:bg-surface-muted hover:text-ink"
+                aria-label="关闭重启提醒"
+              >
+                <X size={17} aria-hidden="true" />
+              </button>
+            </Dialog.Close>
+          </header>
+          <div className="space-y-2 px-4 py-4 sm:px-6">
+            <p className="text-sm leading-6 text-ink-2">
+              保存不会中断当前任务；新并发值不会热更新。请沿用当前启动参数重启服务后生效。
+            </p>
+            <p className="text-xs leading-5 text-ink-3">
+              重启前先让在途任务结清，不要用强制结束代替正常关闭。
+            </p>
+          </div>
+          <div className="flex justify-end border-t border-line px-4 py-4 sm:px-6">
+            <Button variant="primary" onClick={onClose}>
+              知道了
+            </Button>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
+function RuntimeSlots({
+  runtime,
+  kind,
+  onRestartRequired,
+}: {
+  runtime: SystemRuntime;
+  kind: SlotKind;
+  onRestartRequired: (notice: RestartNotice) => void;
+}) {
+  const building = kind === "build";
+  const field = building ? "build_slots" : "collection_slots";
+  const inputId = `${kind}-slots`;
+  const launchOption = building ? "--max-builds" : "--max-tasks";
+  const queryClient = useQueryClient();
+  const [draft, setDraft] = useState<string | null>(null);
+  const slots = runtime[field];
+  const currentValue = building ? runtime.max_builds : runtime.max_tasks;
+  const current = currentValue ?? slots?.next_start ?? 1;
+  const nextStart = slots?.next_start ?? 1;
+  const input = slots ? (draft ?? String(slots.next_start)) : "";
+  const value = Number(input);
+  const valid = /^\d+$/.test(input) && Number.isSafeInteger(value) && value >= 1;
+  const pendingRestart = slots ? current !== slots.next_start : false;
+  const changed = valid && value !== nextStart;
+  const save = useMutation({
+    mutationFn: building ? setSystemBuildSlots : setSystemCollectionSlots,
+    onSuccess: async (saved) => {
+      await queryClient.cancelQueries({ queryKey: ["system"] });
+      queryClient.setQueryData<SystemInfo>(["system"], (previous) =>
+        previous
+          ? { ...previous, runtime: { ...previous.runtime, [field]: saved } }
+          : previous,
+      );
+      setDraft(null);
+      if (saved.next_start !== current) {
+        onRestartRequired({ kind, current, next: saved.next_start });
+      }
+    },
+  });
+  const {
+    mutate: saveSlots,
+    isPending,
+    isError,
+    error: saveError,
+    reset: resetSave,
+  } = save;
+
+  useEffect(() => {
+    if (
+      draft === null ||
+      !slots ||
+      !valid ||
+      value === nextStart ||
+      isPending ||
+      isError
+    ) {
+      return;
+    }
+    const timer = window.setTimeout(() => saveSlots(value), 700);
+    return () => window.clearTimeout(timer);
+  }, [draft, slots, valid, value, nextStart, isPending, isError, saveSlots]);
+
+  if (!slots) return null;
+
+  function saveNow() {
+    if (!changed || isPending) return;
+    saveSlots(value);
+  }
+
+  return (
+    <div className="space-y-2 border-t border-line px-4 py-4 sm:px-6">
+      <div className="flex flex-wrap items-center gap-2">
+        <label
+          htmlFor={slots.source === "cli" ? undefined : inputId}
+          className="text-sm font-medium text-ink"
+        >
+          {building ? "同时分析规则的任务数" : "同时采集任务数"}
+        </label>
+        {pendingRestart ? <Badge tone="warning">待重启</Badge> : null}
+      </div>
+      {slots.source === "cli" ? (
+        <p className="text-sm text-ink-2">
+          当前由启动参数{" "}
+          <code>
+            {launchOption} {current}
+          </code>{" "}
+          指定。
+        </p>
+      ) : (
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              id={inputId}
+              className="w-24"
+              inputMode="numeric"
+              aria-invalid={!valid}
+              aria-describedby={
+                valid ? `${inputId}-hint` : `${inputId}-error ${inputId}-hint`
+              }
+              disabled={isPending}
+              value={input}
+              onChange={(event) => {
+                resetSave();
+                setDraft(event.target.value);
+              }}
+              onBlur={saveNow}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  saveNow();
+                }
+              }}
+            />
+            {slots.source === "settings" ? (
+              <Button size="sm" disabled={isPending} onClick={() => saveSlots(null)}>
+                恢复默认
+              </Button>
+            ) : null}
+          </div>
+          {!valid ? (
+            <p id={`${inputId}-error`} className="text-sm text-danger">
+              请输入大于 0 且可精确表示的整数。
+            </p>
+          ) : null}
+          <p id={`${inputId}-hint`} className="text-xs leading-5 text-ink-3">
+            修改后自动保存；保存的是下次启动值，不会热更新当前进程。
+          </p>
+          <p className="text-sm text-ink-2" role="status">
+            {isPending
+              ? "正在自动保存…"
+              : pendingRestart
+                ? `已自动保存下次启动值 ${slots.next_start} 个；重启服务后生效。`
+                : `当前运行 ${current} 个；修改后自动保存。`}
+          </p>
+          {isError ? (
+            <p className="text-sm text-danger" role="alert">
+              {errorText(saveError)}
+            </p>
+          ) : null}
+        </>
+      )}
+    </div>
+  );
+}
+
 export function SystemSettingsPage() {
   const queryClient = useQueryClient();
   const [savingAccess, setSavingAccess] = useState(false);
@@ -342,6 +556,7 @@ export function SystemSettingsPage() {
   const [newToken, setNewToken] = useState<string | null>(null);
   const [tokenDialogOpen, setTokenDialogOpen] = useState(false);
   const [autoRefreshPaused, setAutoRefreshPaused] = useState(false);
+  const [restartNotice, setRestartNotice] = useState<RestartNotice | null>(null);
   const [disabledFromLan, setDisabledFromLan] = useState(false);
   const [customKey, setCustomKey] = useState("");
   const [savingKey, setSavingKey] = useState(false);
@@ -846,7 +1061,7 @@ export function SystemSettingsPage() {
             value={workerLabel(data.runtime.worker)}
             hint={`任务槽位 ${data.runtime.max_tasks ?? "—"} · 浏览器 ${
               data.runtime.max_browser_tasks ?? "—"
-            }`}
+            }${data.runtime.per_domain_rps == null ? "" : ` · 每域 ${data.runtime.per_domain_rps} 请求/秒`}`}
           />
           <Stat
             label="活动任务"
@@ -886,6 +1101,16 @@ export function SystemSettingsPage() {
             hint={`${formatNumber(data.runtime.threads)} 个进程线程`}
           />
         </div>
+        <RuntimeSlots
+          runtime={data.runtime}
+          kind="collection"
+          onRestartRequired={setRestartNotice}
+        />
+        <RuntimeSlots
+          runtime={data.runtime}
+          kind="build"
+          onRestartRequired={setRestartNotice}
+        />
         <div className="border-t border-line px-4 py-4 sm:px-6">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-xs font-medium text-ink-3">磁盘占用</p>
@@ -911,6 +1136,8 @@ export function SystemSettingsPage() {
           </div>
         </div>
       </section>
+
+      <CollectionPolicySettings />
 
       <div className="grid gap-6 lg:grid-cols-2">
         <section className="rounded-panel border border-line bg-surface">
@@ -1045,6 +1272,11 @@ export function SystemSettingsPage() {
         token={newToken}
         onOpenChange={setTokenDialogOpen}
         onReload={reloadPage}
+      />
+
+      <RestartNoticeDialog
+        notice={restartNotice}
+        onClose={() => setRestartNotice(null)}
       />
     </div>
   );

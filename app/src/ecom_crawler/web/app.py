@@ -36,25 +36,43 @@ from fastapi.responses import (
     StreamingResponse,
 )
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .. import __version__
 from ..build_models import ModelPoolError, discover_models, known_models
 from ..builds import ACTIVE_BUILD_STATES, BuildError, BuildManager
+from ..collection_policy import (
+    COLLECTION_POLICY_SETTING,
+    CollectionPolicyError,
+    default_rate_overrides,
+    dump_collection_policy,
+    formal_collection_limits,
+    load_collection_policy,
+    validate_collection_policy,
+)
 from ..execution import build_task
 from ..executor.runner import CSV_COLUMNS
 from ..harness.adapter import HarnessStateError
 from ..harness.dependencies import DependencyPolicy
 from ..model import ContractError
+from ..rate_policy import (
+    SITE_RATE_POLICIES_SETTING,
+    RatePolicyError,
+    dump_policies,
+    effective_policy,
+    load_policies,
+    normalize_domain,
+    validate_policy,
+)
 from ..runtime.batch import (
     BATCH_COLLECTION_LIMITS,
     normalize_site,
     parse_site_text,
     parse_sites,
-    rule_covers_entry,
     rule_domains,
     rule_has_catalog_discovery,
     target_entry,
+    target_entry_mode,
     target_key,
 )
 from ..runtime.models import (
@@ -377,8 +395,28 @@ class BatchImportRequest(BaseModel):
     sites_text: str = Field(default="", max_length=500000)
 
 
+class CollectionPolicyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    formal_unlimited: bool = True
+    formal_max_products: int | None = Field(default=None, ge=1, le=100000)
+    formal_max_seconds: int | None = Field(default=None, ge=60, le=86400)
+    default_per_domain_rps: float | None = Field(default=None, ge=0.1, le=10)
+    default_concurrency: int | None = Field(default=None, ge=1, le=8)
+
+
+class SiteRatePolicyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    per_domain_rps: float | None = Field(default=None, ge=0.1, le=10)
+    concurrency: int | None = Field(default=None, ge=1, le=8)
+    delay_ms: int | None = Field(default=None, ge=0, le=10000)
+    max_attempts: int | None = Field(default=None, ge=1, le=5)
+    backoff_ms: int | None = Field(default=None, ge=0, le=60000)
+
+
 class BatchStartRequest(BaseModel):
-    limits: Limits = Field(default_factory=Limits)
+    limits: Limits | None = None
     site_keys: list[str] = Field(default_factory=list, max_length=200)
     proxy: str | None = Field(default=None, max_length=500)
     archive_mode: Literal["off", "sample", "full"] = "off"
@@ -425,6 +463,12 @@ class BuildModelPoolRequest(BaseModel):
     default_ref: str | None = Field(default=None, max_length=200)
 
 
+class OnboardingBudgetRequest(BaseModel):
+    max_seconds: int = Field(ge=60, le=7200, strict=True)
+    max_input_tokens: int = Field(ge=1000, le=100_000_000, strict=True)
+    max_output_tokens: int = Field(ge=1000, le=10_000_000, strict=True)
+
+
 class BuildPermissionRequest(BaseModel):
     decision: Literal["once", "always", "reject"] = "once"
     message: str | None = Field(default=None, max_length=2000)
@@ -442,6 +486,29 @@ class BuildDependencyRequest(BaseModel):
 
 class SystemAccessRequest(BaseModel):
     lan_enabled: bool
+
+
+class SystemCollectionSlotsRequest(BaseModel):
+    # The settings page must be able to round-trip every saved integer.
+    max_tasks: int | None = Field(ge=1, le=2**53 - 1, strict=True)
+
+
+COLLECTION_SLOTS_SETTING = "worker_max_tasks"
+DEFAULT_COLLECTION_SLOTS = 1
+
+
+BUILD_SLOTS_SETTING = "max_concurrent_builds"
+
+
+def _saved_slots(store: TaskStore, setting: str) -> int | None:
+    raw = store.get_setting(setting)
+    if raw is None:
+        return None
+    try:
+        return SystemCollectionSlotsRequest.model_validate_json(raw).max_tasks
+    except ValidationError:
+        logger.warning("Invalid saved value for %s, using application default", setting)
+        return None
 
 
 class SystemTokenRequest(BaseModel):
@@ -923,7 +990,8 @@ def create_app(
     rules_dir: str | Path | None = None,
     *,
     manage_worker: bool = False,
-    max_tasks: int = 1,
+    max_tasks: int | None = None,
+    max_builds: int | None = None,
     max_browser_tasks: int = 1,
     per_domain_rps: float = 1.0,
     lease_ttl_seconds: float = 30.0,
@@ -956,6 +1024,17 @@ def create_app(
         name for name in (normalize_host_name(item) for item in raw_hosts) if name
     )
     store = TaskStore(db_path, read_only=read_only)
+    slots_override = max_tasks is not None
+    if slots_override:
+        max_tasks = max(1, max_tasks or 1)
+    else:
+        max_tasks = _saved_slots(store, COLLECTION_SLOTS_SETTING) or DEFAULT_COLLECTION_SLOTS
+    build_slots_override = max_builds is not None or build_manager is not None
+    max_builds = (
+        build_manager.max_concurrent if build_manager is not None
+        else max(1, max_builds) if max_builds is not None
+        else _saved_slots(store, BUILD_SLOTS_SETTING) or 1
+    )
     root = Path(out_root)
     if not read_only:
         root.mkdir(parents=True, exist_ok=True)
@@ -997,6 +1076,70 @@ def create_app(
         "token_updated_at": token_updated_at,
     }
     login_limiter = LoginRateLimiter()
+    rate_policy_lock = threading.Lock()
+    collection_policy_lock = threading.Lock()
+
+    def _collection_policy_payload() -> dict[str, Any]:
+        policy = load_collection_policy(store)
+        return {
+            "policy": policy,
+            "formal_limits": formal_collection_limits(policy),
+            "default_rate": default_rate_overrides(policy),
+            "site_policies": [
+                {"domain": domain, **fields}
+                for domain, fields in sorted(load_policies(store).items())
+            ],
+        }
+
+    def _site_rate_policy_payload(site: BatchSite) -> dict[str, Any]:
+        domain = normalize_domain(site.domain)
+        policy = load_policies(store).get(domain, {})
+        rule_fetch: dict[str, Any] = {}
+        rule_path = getattr(site, "rule_path", None)
+        if rules is not None and rule_path:
+            try:
+                rule_fetch = dict(load_rule(rules / str(rule_path)).fetch)
+            except (OSError, ValueError):
+                rule_fetch = {}
+        defaults = effective_policy(
+            None,
+            default_rps=per_domain_rps,
+            rule_fetch=rule_fetch,
+        )
+        return {
+            "domain": domain,
+            "policy": policy,
+            "defaults": defaults,
+            "effective": effective_policy(
+                policy,
+                default_rps=per_domain_rps,
+                rule_fetch=rule_fetch,
+            ),
+        }
+
+    def _save_site_rate_policy(
+        site: BatchSite, payload: SiteRatePolicyRequest
+    ) -> dict[str, Any]:
+        domain = normalize_domain(site.domain)
+        try:
+            policy = validate_policy(payload.model_dump(exclude_none=True))
+        except RatePolicyError as exc:
+            raise _error("VALIDATION_ERROR", str(exc), 422) from exc
+        with rate_policy_lock:
+            policies = load_policies(store)
+            if policy:
+                policies[domain] = policy
+            else:
+                policies.pop(domain, None)
+            if policies:
+                store.set_setting(
+                    SITE_RATE_POLICIES_SETTING,
+                    dump_policies(policies),
+                )
+            else:
+                store.delete_setting(SITE_RATE_POLICIES_SETTING)
+        return _site_rate_policy_payload(site)
+
     urls = [str(url) for url in (access_urls or ()) if str(url).strip()]
     if not urls:
         display = f"[{serve_host}]" if ":" in serve_host else serve_host
@@ -1012,6 +1155,7 @@ def create_app(
             extra_permissions=build_extra_permissions,
             dependency_policy=build_dependency_policy,
             read_only=read_only,
+            max_concurrent=max_builds,
         )
 
     @asynccontextmanager
@@ -1580,7 +1724,7 @@ def create_app(
         if rules is None:
             return False
         try:
-            return rule_covers_entry(load_rule(rules / str(rule["path"])), entry)
+            return target_entry_mode(load_rule(rules / str(rule["path"])), entry) is not None
         except (OSError, RuleError):
             return False
 
@@ -1856,6 +2000,7 @@ def create_app(
         batch: Batch,
         sites: list[BatchSite],
         summaries: dict[str, dict[str, Any]],
+        startable: int,
     ) -> str:
         if batch.archived_at:
             return "ARCHIVED"
@@ -1882,7 +2027,6 @@ def create_app(
             if ready and (needs or invalid):
                 return "PARTIAL_READY"
             return "DRAFT"
-        unfinished = [site for site in ready if not site.task_id]
         complete = (
             len(summaries) == len(started)
             and all(
@@ -1890,10 +2034,17 @@ def create_app(
                 and summary["outcome"] == "COMPLETED"
                 for summary in summaries.values()
             )
-            and not unfinished
+            and not startable
             and not needs
         )
         return "FINISHED" if complete else "PARTIAL"
+
+    def awaits_formal_collection(mode: str | None, task: Task | None) -> bool:
+        return (
+            mode == "formal" and task is not None
+            and task.state in {"FINISHED", "CANCELLED"}
+            and task.input.get("collection_mode") == "sample"
+        )
 
     def build_summary(build_id: str | None) -> dict[str, Any] | None:
         if not build_id:
@@ -1911,6 +2062,11 @@ def create_app(
             "build_id": record.build_id,
             "state": record.state,
             "outcome": record.outcome,
+            "cancellable_onboarding": bool(
+                record.state in ACTIVE_BUILD_STATES
+                and record.request.get("auto_collect")
+                and not record.request.get("batch_cancel_requested")
+            ),
             "approval_required": approval_required,
             "proxy": _mask_proxy(record.proxy),
             "error": record.error,
@@ -2025,6 +2181,24 @@ def create_app(
             return current
         return None
 
+    def task_export_files(task_id: str) -> list[tuple[str, Path]]:
+        run_dir = (root / task_id).resolve()
+        files = []
+        for name in EXPORT_FILES:
+            path = (run_dir / name).resolve()
+            if path.is_relative_to(run_dir) and path.is_file():
+                files.append((name, path))
+        return files
+
+    def exportable_delivery(task: Task | None) -> bool:
+        return task is not None and task.state in {"FINISHED", "CANCELLED"}
+
+    def site_export_task_id(site: BatchSite, tasks: dict[str, Task]) -> str | None:
+        task = delivery_task(site, tasks)
+        if task and exportable_delivery(task) and task_export_files(task.task_id):
+            return task.task_id
+        return None
+
     def summarize_batch(
         batch: Batch,
         sites: list[BatchSite],
@@ -2058,6 +2232,11 @@ def create_app(
             if summary["state"] == "FINISHED"
             and summary["outcome"] == "PARTIAL"
         )
+        pending_formal = {
+            site.site_key for site in sites
+            if site.readiness == "ready"
+            and awaits_formal_collection(batch.collection_mode, tasks.get(site.task_id or ""))
+        }
         counts = {
             "sites": len(sites),
             "ready": readiness.get("ready", 0),
@@ -2068,7 +2247,9 @@ def create_app(
             "startable": sum(
                 1
                 for site in sites
-                if site.readiness == "ready" and not site.task_id
+                if site.readiness == "ready" and (
+                    not site.task_id or site.site_key in pending_formal
+                )
             ),
             "tasks": len(current_summaries),
             "task_runs": len(summaries),
@@ -2094,7 +2275,9 @@ def create_app(
             "category": batch.category,
             "note": batch.note,
             "folder_id": batch.folder_id,
-            "status": batch_status(batch, sites, current_summaries),
+            "status": batch_status(
+                batch, sites, current_summaries, counts["startable"]
+            ),
             "archived_at": batch.archived_at,
             "created_at": batch.created_at,
             "updated_at": batch.updated_at,
@@ -2138,8 +2321,10 @@ def create_app(
                     ),
                     "task_id": site.task_id,
                     "task": summaries.get(site.task_id) if site.task_id else None,
+                    "formal_pending": site.site_key in pending_formal,
                     "delivery_task_id": site.delivery_task_id,
                     "delivery_task": summaries.get(site.delivery_task_id) if site.delivery_task_id else None,
+                    "export_task_id": site_export_task_id(site, tasks),
                     "feedback_action": actionable.get(site.site_key),
                     "build_id": site.build_id,
                     "build": build_summary(site.build_id),
@@ -2158,6 +2343,9 @@ def create_app(
             raise _error("INVALID_STATE", "batch is archived", 409)
         accepted: list[dict[str, Any]] = []
         skipped: list[dict[str, Any]] = []
+        cancelled_onboarding = (
+            store.request_cancel_batch_onboarding(batch_id) if action == "cancel" else []
+        )
         for site in store.list_batch_sites(batch_id):
             if not site.task_id:
                 continue
@@ -2218,6 +2406,7 @@ def create_app(
         return {
             "accepted": accepted,
             "skipped": skipped,
+            "cancelled_onboarding": cancelled_onboarding,
             "batch": batch_payload(batch, detail=True),
         }
 
@@ -2313,6 +2502,10 @@ def create_app(
                 "worker": worker,
                 "max_tasks": max_tasks if manage_worker else None,
                 "max_browser_tasks": max_browser_tasks if manage_worker else None,
+                "per_domain_rps": per_domain_rps if manage_worker else None,
+                "collection_slots": _collection_slots_payload() if manage_worker else None,
+                "max_builds": max_builds if builds_available else None,
+                "build_slots": _slots_payload(BUILD_SLOTS_SETTING, max_builds, build_slots_override) if builds_available else None,
                 "read_only": read_only,
                 "builds_available": builds_available,
                 "builds_disabled": builds_disabled,
@@ -2390,6 +2583,59 @@ def create_app(
     @app.get("/api/system")
     def system_status() -> dict[str, Any]:
         return _system_payload()
+
+    @app.get("/api/system/collection-policy")
+    def get_collection_policy() -> dict[str, Any]:
+        return _collection_policy_payload()
+
+    @app.put("/api/system/collection-policy")
+    def put_collection_policy(payload: CollectionPolicyRequest) -> dict[str, Any]:
+        try:
+            policy = validate_collection_policy(payload.model_dump())
+        except CollectionPolicyError as exc:
+            raise _error("VALIDATION_ERROR", str(exc), 422) from exc
+        with collection_policy_lock:
+            store.set_setting(
+                COLLECTION_POLICY_SETTING,
+                dump_collection_policy(policy),
+            )
+        return _collection_policy_payload()
+
+    def _slots_payload(setting: str, current: int, override: bool) -> dict[str, Any]:
+        if override:
+            return {"next_start": current, "source": "cli"}
+        saved = _saved_slots(store, setting)
+        return {
+            "next_start": saved if saved is not None else DEFAULT_COLLECTION_SLOTS,
+            "source": "settings" if saved is not None else "default",
+        }
+
+    def _collection_slots_payload() -> dict[str, Any]:
+        return _slots_payload(COLLECTION_SLOTS_SETTING, max_tasks, slots_override)
+
+    def _save_slots(setting: str, payload: SystemCollectionSlotsRequest) -> None:
+        if payload.max_tasks is None:
+            store.delete_setting(setting)
+        else:
+            store.set_setting(setting, payload.model_dump_json())
+
+    @app.put("/api/system/collection-slots")
+    def update_collection_slots(payload: SystemCollectionSlotsRequest) -> dict[str, Any]:
+        if not manage_worker:
+            raise _error("WORKER_NOT_MANAGED", "当前服务未托管采集 worker", 409)
+        if slots_override:
+            raise _error("WORKER_SLOTS_OVERRIDDEN", "任务数由启动参数 --max-tasks 决定", 409)
+        _save_slots(COLLECTION_SLOTS_SETTING, payload)
+        return _collection_slots_payload()
+
+    @app.put("/api/system/build-slots")
+    def update_build_slots(payload: SystemCollectionSlotsRequest) -> dict[str, Any]:
+        if build_manager is None or builds_disabled:
+            raise _error("BUILDS_UNAVAILABLE", "当前服务未启用规则分析", 409)
+        if build_slots_override:
+            raise _error("BUILD_SLOTS_OVERRIDDEN", "分析并发由服务启动配置决定", 409)
+        _save_slots(BUILD_SLOTS_SETTING, payload)
+        return _slots_payload(BUILD_SLOTS_SETTING, max_builds, build_slots_override)
 
     @app.put("/api/system/access")
     def update_system_access(payload: SystemAccessRequest) -> dict[str, Any]:
@@ -2550,6 +2796,15 @@ def create_app(
                 400,
             )
         try:
+            rule = load_rule(rules / str(entry["path"]))
+            collection_policy = load_collection_policy(store)
+            rate_policy = {
+                **default_rate_overrides(collection_policy),
+                **load_policies(store).get(
+                    normalize_domain(rule.entry_url),
+                    {},
+                ),
+            }
             task = build_task(
                 rule_path=rules / str(entry["path"]),
                 task_id=f"web-{uuid.uuid4().hex[:12]}",
@@ -2557,8 +2812,16 @@ def create_app(
                 max_urls=payload.limits.max_urls,
                 max_products=payload.limits.max_products,
                 max_seconds=payload.limits.max_seconds,
-                max_attempts=payload.limits.max_attempts,
+                max_attempts=(
+                    rate_policy["max_attempts"]
+                    if rate_policy.get("max_attempts") is not None
+                    else payload.limits.max_attempts
+                ),
                 proxy=payload.proxy,
+                concurrency=rate_policy.get("concurrency"),
+                delay_ms=rate_policy.get("delay_ms"),
+                retry_backoff_ms=rate_policy.get("backoff_ms"),
+                rate_policy=rate_policy,
             )
         except (RuleError, ContractError) as exc:
             raise _error("INVALID_RULE", str(exc), 400) from exc
@@ -2734,10 +2997,7 @@ def create_app(
         buffer = io.BytesIO()
         written = 0
         with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
-            for name in EXPORT_FILES:
-                path = (run_dir / name).resolve()
-                if not path.is_relative_to(run_dir) or not path.is_file():
-                    continue
+            for name, path in task_export_files(task_id):
                 archive.write(path, arcname=name)
                 written += 1
         if written == 0:
@@ -3079,7 +3339,7 @@ def create_app(
         if batch.collection_mode and source is not None:
             limits = {key: source.limits.get(key, value) for key, value in limits.items()}
             site = store.get_batch_site(feedback.batch_id, feedback.site_key)
-            if site is None or not rule_covers_entry(load_rule(rule_path), target_entry(site.input_value)):
+            if site is None or target_entry_mode(load_rule(rule_path), target_entry(site.input_value)) is None:
                 raise _error("INVALID_STATE", "active rule does not cover the requested entry", 409)
         task = build_task(
             rule_path=rule_path,
@@ -3625,6 +3885,24 @@ def create_app(
             "batch": batch_payload(require_batch(batch_id), detail=True),
         }
 
+    @app.get("/api/batches/{batch_id}/sites/{site_key}/rate-policy")
+    def get_site_rate_policy(batch_id: str, site_key: str) -> dict[str, Any]:
+        require_batch(batch_id)
+        site = store.get_batch_site(batch_id, site_key)
+        if site is None:
+            raise _error("NOT_FOUND", f"unknown batch site: {site_key}", 404)
+        return _site_rate_policy_payload(site)
+
+    @app.put("/api/batches/{batch_id}/sites/{site_key}/rate-policy")
+    def put_site_rate_policy(
+        batch_id: str, site_key: str, payload: SiteRatePolicyRequest
+    ) -> dict[str, Any]:
+        require_batch(batch_id)
+        site = store.get_batch_site(batch_id, site_key)
+        if site is None:
+            raise _error("NOT_FOUND", f"unknown batch site: {site_key}", 404)
+        return _save_site_rate_policy(site, payload)
+
     @app.post("/api/batches/{batch_id}/start", status_code=202)
     def start_batch(
         batch_id: str, payload: BatchStartRequest | None = None
@@ -3632,7 +3910,8 @@ def create_app(
         batch = require_batch(batch_id)
         if batch.archived_at is not None:
             raise _error("INVALID_STATE", "batch is archived", 409)
-        limits = payload.limits if payload is not None else Limits()
+        explicit_limits = payload.limits if payload is not None else None
+        limits = explicit_limits or Limits()
         proxy_override = payload.proxy if payload is not None else None
         if payload is not None and payload.offline and payload.archive_mode != "full":
             raise _error(
@@ -3671,6 +3950,7 @@ def create_app(
             return promotion_result(batch)
         if promote and batch.collection_mode != "sample":
             raise _error("INVALID_STATE", "只有试采批次可以转为正式采集", 409)
+        onboarding_budget = None
         if payload is not None and payload.onboard:
             if not batch.collection_mode or builds_disabled or build_manager is None:
                 raise _error("BUILD_UNAVAILABLE", "构建服务不可用或批次未设置采集计划", 409)
@@ -3680,13 +3960,25 @@ def create_app(
             )]
             if len(pending) > 10:
                 raise _error("VALIDATION_ERROR", "一次最多接入 10 个目标，请先选择要接入的站点", 422)
+            onboarding_budget, _ = build_manager.onboarding_budget()
         promotion_pending = promote
         collection_mode = "formal" if promote else batch.collection_mode
-        if collection_mode in BATCH_COLLECTION_LIMITS:
-            limits = Limits(**BATCH_COLLECTION_LIMITS[collection_mode])
+        collection_policy = load_collection_policy(store)
+        if collection_mode == "sample":
+            limits = Limits(**BATCH_COLLECTION_LIMITS["sample"])
+        elif explicit_limits is not None:
+            limits = explicit_limits
+        elif collection_mode == "formal":
+            limits = Limits(**formal_collection_limits(collection_policy))
+        rate_policies = load_policies(store)
+        default_rate = default_rate_overrides(collection_policy)
         for site in sites:
             if wanted and site.site_key not in wanted:
                 continue
+            rate_policy = {
+                **default_rate,
+                **rate_policies.get(normalize_domain(site.domain), {}),
+            }
             item = {
                 "site_key": site.site_key,
                 "domain": site.domain,
@@ -3695,7 +3987,7 @@ def create_app(
             rerun = promote or bool(payload is not None and payload.rerun_finished)
             if site.task_id:
                 existing = store.get_task(site.task_id)
-                if not rerun:
+                if not rerun and not awaits_formal_collection(collection_mode, existing):
                     skipped.append({**item, "reason": "站点已开始"})
                     continue
                 if existing is not None and existing.state in ACTIVE_TASK_STATES:
@@ -3727,14 +4019,16 @@ def create_app(
             )
             conflict = market_conflict(rule, batch.market) if rule else None
             if site.readiness != "ready":
-                if (payload is not None and payload.onboard and build_manager is not None
+                if (onboarding_budget is not None and build_manager is not None
                     and site.readiness == "needs_onboarding" and not site.task_id and not conflict):
                     try:
                         build = build_manager.start(
-                            batch, site, max_products=6, max_seconds=600, max_total_seconds=600,
-                            max_input_tokens=200000, max_output_tokens=30000, repair_rounds=1,
+                            batch, site, max_products=6,
+                            max_total_seconds=onboarding_budget["max_seconds"],
+                            repair_rounds=1,
                             proxy=proxy_override or site.proxy, auto_collect=True,
                             promote_trial=promotion_pending,
+                            **onboarding_budget,
                         )
                     except BatchTransitionError as exc:
                         current = require_batch(batch_id)
@@ -3774,10 +4068,14 @@ def create_app(
                         build is not None
                         and build.request.get("auto_collect")
                         and (build.request.get("catalog") or {}).get("catalog_scope") == "sample"
-                        and not rule_has_catalog_discovery(load_rule(rules / str(rule["path"])))
                     ):
-                        skipped.append({**item, "reason": "旧规则只验证了入口试采，请先补齐目录发现范围"})
-                        continue
+                        package = load_rule(rules / str(rule["path"]))
+                        if (
+                            target_entry_mode(package, target_entry(site.input_value)) != "product"
+                            and not rule_has_catalog_discovery(package)
+                        ):
+                            skipped.append({**item, "reason": "旧规则只验证了入口试采，请先补齐目录发现范围"})
+                            continue
                 task = build_task(
                     rule_path=rules / str(rule["path"]),
                     task_id=f"web-{uuid.uuid4().hex[:12]}",
@@ -3785,7 +4083,11 @@ def create_app(
                     max_urls=limits.max_urls,
                     max_products=limits.max_products,
                     max_seconds=limits.max_seconds,
-                    max_attempts=limits.max_attempts,
+                    max_attempts=(
+                        rate_policy["max_attempts"]
+                        if rate_policy.get("max_attempts") is not None
+                        else limits.max_attempts
+                    ),
                     proxy=proxy_override or site.proxy,
                     archive_mode=payload.archive_mode if payload is not None else "off",
                     archive_root=payload.archive_root if payload is not None else None,
@@ -3797,6 +4099,10 @@ def create_app(
                     ),
                     archive_reuse=payload.archive_reuse if payload is not None else False,
                     offline=payload.offline if payload is not None else False,
+                    concurrency=rate_policy.get("concurrency"),
+                    delay_ms=rate_policy.get("delay_ms"),
+                    retry_backoff_ms=rate_policy.get("backoff_ms"),
+                    rate_policy=rate_policy,
                 )
             except (RuleError, ContractError) as exc:
                 skipped.append({**item, "reason": f"规则包无法构建任务：{exc}"})
@@ -3820,7 +4126,7 @@ def create_app(
                 created = store.create_task_for_site(
                     task,
                     site_key=site.site_key,
-                    replace_existing=rerun,
+                    expected_task_id=site.task_id,
                     promote_trial=promotion_pending,
                 )
             except BatchTransitionError as exc:
@@ -3905,22 +4211,11 @@ def create_app(
                 task = delivery_task(site, tasks)
                 summary = summaries[task.task_id] if task else None
                 files: list[str] = []
-                if task is not None and task.state in {"FINISHED", "CANCELLED"}:
-                    run_dir = root / task.task_id
-                    if run_dir.is_dir():
-                        for name in EXPORT_FILES:
-                            path = (run_dir / name).resolve()
-                            if not path.is_relative_to(run_dir.resolve()):
-                                continue
-                            if not path.is_file():
-                                continue
-                            safe_site = re.sub(
-                                r"[^A-Za-z0-9_.-]+", "-", site.site_key
-                            )
-                            archive.write(
-                                path, arcname=f"sites/{safe_site}/{name}"
-                            )
-                            files.append(name)
+                if task and exportable_delivery(task):
+                    safe_site = re.sub(r"[^A-Za-z0-9_.-]+", "-", site.site_key)
+                    for name, path in task_export_files(task.task_id):
+                        archive.write(path, arcname=f"sites/{safe_site}/{name}")
+                        files.append(name)
                 if not site.task_id:
                     export_status = (
                         "not_started"
@@ -4201,6 +4496,7 @@ def create_app(
         unavailable_reason = (
             "read_only" if read_only else ("disabled" if builds_disabled else None)
         )
+        onboarding_budget, budget_override = build_manager.onboarding_budget()
         return {
             "available": not builds_disabled and not read_only,
             "unavailable_reason": unavailable_reason,
@@ -4212,10 +4508,26 @@ def create_app(
             "model_pool_editable": not builds_disabled and not read_only,
             "model_pool_override": build_manager.model_pool_override,
             "model_catalog": known_models(),
+            "onboarding_budget": onboarding_budget,
+            "onboarding_budget_override": budget_override,
         }
 
     @app.get("/api/builds/config")
     def get_build_config() -> dict[str, Any]:
+        return build_config_payload()
+
+    @app.put("/api/builds/config/onboarding-budget")
+    def update_onboarding_budget(payload: OnboardingBudgetRequest) -> dict[str, Any]:
+        if build_manager is None or builds_disabled:
+            raise _error("BUILD_UNAVAILABLE", "build service unavailable", 409)
+        build_manager.set_onboarding_budget(payload.model_dump())
+        return build_config_payload()
+
+    @app.delete("/api/builds/config/onboarding-budget")
+    def reset_onboarding_budget() -> dict[str, Any]:
+        if build_manager is None or builds_disabled:
+            raise _error("BUILD_UNAVAILABLE", "build service unavailable", 409)
+        build_manager.set_onboarding_budget(None)
         return build_config_payload()
 
     @app.put("/api/builds/config/models")

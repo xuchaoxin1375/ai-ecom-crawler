@@ -38,6 +38,7 @@ import {
   buildStateLabel,
   buildTone,
   buildOutcomeLabel,
+  formatNumber,
   formatTime,
 } from "../../lib/format";
 import { cn } from "../../lib/cn";
@@ -516,6 +517,33 @@ export function BuildDetailPage() {
           <dd className="min-w-0 text-ink-2">{validationLabel(build)}</dd>
         </div>
       </dl>
+      {build.onboarding_budget || build.token_usage ? (
+        <dl className="mt-3 grid gap-x-6 gap-y-2 border-t border-line pt-3 text-sm sm:grid-cols-3">
+          {build.onboarding_budget?.max_seconds ? (
+            <BuildFact label="模型会话时限">
+              {formatNumber(build.onboarding_budget.max_seconds)} 秒
+            </BuildFact>
+          ) : null}
+          <BuildFact label="输入 tokens">
+            {build.token_usage?.input === undefined
+              ? "—"
+              : formatNumber(build.token_usage.input)}
+            {build.onboarding_budget?.max_input_tokens
+              ? ` / ${formatNumber(build.onboarding_budget.max_input_tokens)}`
+              : ""}
+          </BuildFact>
+          <BuildFact label="输出 tokens（含推理）">
+            {build.token_usage
+              ? formatNumber(
+                  (build.token_usage.output ?? 0) + (build.token_usage.reasoning ?? 0),
+                )
+              : "—"}
+            {build.onboarding_budget?.max_output_tokens
+              ? ` / ${formatNumber(build.onboarding_budget.max_output_tokens)}`
+              : ""}
+          </BuildFact>
+        </dl>
+      ) : null}
     </section>
   );
 

@@ -15,6 +15,7 @@ from ecom_crawler.cli import main
 from ecom_crawler.execution import build_task, run_and_export, run_task
 from ecom_crawler.runtime.runner import UNLIMITED_ITEMS, TaskRunner
 from ecom_crawler.runtime.store import TaskStore
+from ecom_crawler.runtime.worker import Worker
 from ecom_crawler.validate import validate_run
 from tests.support import serve_http_fixture
 
@@ -177,7 +178,10 @@ def product_html(base: str, index: int) -> str:
 
 
 @contextmanager
-def fixture_server(*, products: int = 2, proxy_origin: str | None = None) -> Iterator[str]:
+def fixture_server(
+    *, products: int = 2, proxy_origin: str | None = None,
+    requests: list[str] | None = None,
+) -> Iterator[str]:
     # For batch tests, serve an exact synthetic origin in HTTP proxy form.
     # Requests are never forwarded, and other origins are never served.
     fixture_indices = range(1, max(products, 3) + 1)
@@ -208,6 +212,8 @@ def fixture_server(*, products: int = 2, proxy_origin: str | None = None) -> Ite
                 path = target.path
                 if target.query:
                     path += f"?{target.query}"
+            if requests is not None:
+                requests.append(path)
             if path in image_paths:
                 # One-pixel GIF; the fixture uses .jpg URLs for extraction tests.
                 body = bytes.fromhex("47494638396101000100800000000000ffffff21f90401000000002c00000000010001000002024401003b")
@@ -224,8 +230,9 @@ def fixture_server(*, products: int = 2, proxy_origin: str | None = None) -> Ite
                 self.end_headers()
                 self.wfile.write(listing)
                 return
-            if path in product_paths:
-                body = product_html(base, product_paths[path]).encode("utf-8")
+            product_path = urlsplit(path).path
+            if product_path in product_paths:
+                body = product_html(base, product_paths[product_path]).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
@@ -256,6 +263,37 @@ def fixture_server(*, products: int = 2, proxy_origin: str | None = None) -> Ite
 
 
 class ExecutionTests(unittest.TestCase):
+    def test_worker_uses_recorded_task_proxy_before_process_default(self) -> None:
+        origin = "http://task-proxy.test"
+        default_requests: list[str] = []
+        task_requests: list[str] = []
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            fixture_server(proxy_origin=origin, requests=default_requests) as default_proxy,
+            fixture_server(proxy_origin=origin, requests=task_requests) as task_proxy,
+        ):
+            root = Path(temporary)
+            rule = root / "rule.yaml"
+            rule.write_text(RULE_TEMPLATE.replace("__BASE__", origin), encoding="utf-8")
+            store = TaskStore(root / "tasks.db")
+            worker = Worker(store, out_root=root / "out", proxy=default_proxy, per_domain_rps=50)
+            for task_id, proxy in (("specific", task_proxy), ("fallback", None)):
+                task = build_task(
+                    rule_path=rule, task_id=task_id, task_type="product",
+                    max_urls=5, max_products=1, max_seconds=20, max_attempts=1,
+                    proxy=proxy, seed_urls=[f"{origin}/p1.html"], discover=False,
+                )
+                store.create_task(task)
+                store.request_start(task_id)
+                worker.run_once()
+                result = store.get_task(task_id)
+                assert result is not None
+                self.assertEqual(result.counters["valid_products"], 1)
+                if proxy:
+                    self.assertEqual(default_requests, [])
+            self.assertEqual(task_requests, ["/p1.html"])
+            self.assertEqual(default_requests, ["/p1.html"])
+
     def test_fixture_rule_runs_and_exports(self) -> None:
         with tempfile.TemporaryDirectory() as temporary, fixture_server() as base:
             root = Path(temporary)

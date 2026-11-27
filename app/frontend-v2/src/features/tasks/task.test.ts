@@ -11,6 +11,7 @@ import {
   taskMatchesQuery,
   taskNeedsAttention,
   taskRuleIsStale,
+  tasksNeedLiveRefresh,
 } from "./task";
 
 function task(overrides: Partial<TaskSummary> = {}): TaskSummary {
@@ -36,6 +37,17 @@ function task(overrides: Partial<TaskSummary> = {}): TaskSummary {
     ...overrides,
   };
 }
+
+describe("tasksNeedLiveRefresh", () => {
+  it("refreshes queued and running states, not paused or terminal ones", () => {
+    expect(tasksNeedLiveRefresh([task({ state: "QUEUED" })])).toBe(true);
+    expect(tasksNeedLiveRefresh([task({ state: "RUNNING" })])).toBe(true);
+    expect(tasksNeedLiveRefresh([task({ state: "PAUSING" })])).toBe(true);
+    expect(tasksNeedLiveRefresh([task({ state: "CANCELLING" })])).toBe(true);
+    expect(tasksNeedLiveRefresh([task({ state: "PAUSED" })])).toBe(false);
+    expect(tasksNeedLiveRefresh([task({ state: "FINISHED" })])).toBe(false);
+  });
+});
 
 function feedback(overrides: Partial<FeedbackRecord> = {}): FeedbackRecord {
   return {

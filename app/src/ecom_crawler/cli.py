@@ -318,8 +318,14 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument(
         "--max-tasks",
         type=int,
-        default=1,
-        help="managed worker task slots (default: 1)",
+        default=None,
+        help="override saved managed worker task slots (application default: 1)",
+    )
+    serve.add_argument(
+        "--max-builds",
+        type=int,
+        default=None,
+        help="override saved rule-analysis slots (application default: 1)",
     )
     serve.add_argument(
         "--max-browser-tasks",
@@ -575,6 +581,7 @@ def _serve(args: argparse.Namespace) -> int:
         args.rules_dir,
         manage_worker=not args.no_worker and not args.read_only,
         max_tasks=args.max_tasks,
+        max_builds=args.max_builds,
         max_browser_tasks=args.max_browser_tasks,
         per_domain_rps=args.per_domain_rps,
         lease_ttl_seconds=args.lease_ttl,

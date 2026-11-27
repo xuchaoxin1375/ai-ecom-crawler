@@ -73,6 +73,7 @@ import {
   taskMatchesQuery,
   taskNeedsAttention,
   taskTypeLabel,
+  tasksNeedLiveRefresh,
 } from "./task";
 
 const PAGE_SIZE = 30;
@@ -128,6 +129,7 @@ export function TasksPage() {
   const [batchDraft, setBatchDraft] = useState(batchId);
   const [siteDraft, setSiteDraft] = useState(siteKey);
   const [busy, setBusy] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [confirmCancel, setConfirmCancel] = useState<TaskSummary | null>(null);
@@ -192,9 +194,12 @@ export function TasksPage() {
         signal,
       ),
     placeholderData: keepPreviousData,
+    refetchInterval: (current) =>
+      tasksNeedLiveRefresh(current.state.data?.items ?? []) ? 3000 : false,
   });
 
   const items = useMemo(() => query.data?.items ?? [], [query.data]);
+  const liveRefresh = tasksNeedLiveRefresh(items);
   const total = query.data?.total ?? 0;
   const summary = summarizeTasks(items, total);
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -216,8 +221,13 @@ export function TasksPage() {
     state || taskType || batchId || siteKey || queryParam || includeArchived,
   );
 
-  function refresh() {
-    void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+  async function refresh() {
+    setRefreshing(true);
+    try {
+      await queryClient.invalidateQueries({ queryKey: ["tasks"] });
+    } finally {
+      setRefreshing(false);
+    }
   }
 
   async function runAction(
@@ -654,14 +664,21 @@ export function TasksPage() {
         title="全部任务"
         description="按站点和批次查看每一次采集运行；任务结果、反馈和导出都属于单个任务，不改变批次汇总口径。"
         actions={
-          <Button onClick={refresh} disabled={query.isFetching}>
-            <RefreshCw
-              className={query.isFetching ? "animate-spin" : undefined}
-              size={14}
-              aria-hidden="true"
-            />
-            刷新
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            {liveRefresh ? (
+              <span className="text-xs text-ink-3" role="status">
+                活动任务每 3 秒自动刷新
+              </span>
+            ) : null}
+            <Button onClick={() => void refresh()} disabled={refreshing}>
+              <RefreshCw
+                className={refreshing ? "animate-spin" : undefined}
+                size={14}
+                aria-hidden="true"
+              />
+              刷新
+            </Button>
+          </div>
         }
       />
 

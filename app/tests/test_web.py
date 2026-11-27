@@ -955,6 +955,74 @@ class WebApiTests(unittest.TestCase):
         self.assertGreater(body["storage"]["disk_total_bytes"], 0)
         self.assertIsInstance(body["runtime"]["threads"], int)
 
+    def test_collection_slots_apply_on_restart_and_cli_overrides_saved_value(self) -> None:
+        path = "/api/system/collection-slots"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            db_path, out_root = root / "tasks.db", root / "out"
+            with TestClient(create_app(db_path, out_root, manage_worker=True), headers=CLIENT_HEADERS) as client:
+                runtime = client.get("/api/system").json()["runtime"]
+                self.assertEqual(runtime["max_tasks"], 1)
+                self.assertEqual(runtime["collection_slots"], {"next_start": 1, "source": "default"})
+                for invalid in (0, -1, 2.5, True, "3", 2**53):
+                    with self.subTest(invalid=invalid):
+                        self.assertEqual(client.put(path, json={"max_tasks": invalid}).status_code, 422)
+                saved = client.put(path, json={"max_tasks": 3})
+                self.assertEqual(saved.status_code, 200, saved.text)
+                runtime = client.get("/api/system").json()["runtime"]
+                self.assertEqual(runtime["max_tasks"], 1)
+                self.assertEqual(runtime["collection_slots"], {"next_start": 3, "source": "settings"})
+
+            override = create_app(db_path, out_root, manage_worker=True, max_tasks=1)
+            with TestClient(override, headers=CLIENT_HEADERS) as client:
+                runtime = client.get("/api/system").json()["runtime"]
+                self.assertEqual(runtime["collection_slots"], {"next_start": 1, "source": "cli"})
+                self.assertEqual(client.put(path, json={"max_tasks": None}).status_code, 409)
+            with TestClient(create_app(db_path, out_root, manage_worker=True), headers=CLIENT_HEADERS) as client:
+                self.assertEqual(client.get("/api/health").json()["max_tasks"], 3)
+                reset = client.put(path, json={"max_tasks": None})
+                self.assertEqual(reset.json(), {"next_start": 1, "source": "default"})
+                self.assertEqual(client.get("/api/health").json()["max_tasks"], 3)
+            with TestClient(create_app(db_path, out_root, manage_worker=True), headers=CLIENT_HEADERS) as client:
+                self.assertEqual(client.get("/api/health").json()["max_tasks"], 1)
+            for read_only, status in ((False, 409), (True, 403)):
+                preview = create_app(db_path, out_root, read_only=read_only)
+                with TestClient(preview, headers=CLIENT_HEADERS) as client:
+                    self.assertIsNone(client.get("/api/system").json()["runtime"]["collection_slots"])
+                    self.assertEqual(client.put(path, json={"max_tasks": 2}).status_code, status)
+
+    def test_build_slots_are_persisted_independently_of_collection_slots(self) -> None:
+        path = "/api/system/build-slots"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            rules = root / "rules"
+            rules.mkdir()
+            db_path = root / "tasks.db"
+            app = create_app(db_path, root / "out", rules, manage_worker=True)
+            with TestClient(app, headers=CLIENT_HEADERS) as client:
+                self.assertEqual(client.get("/api/system").json()["runtime"]["max_builds"], 1)
+                self.assertEqual(client.put(path, json={"max_tasks": 0}).status_code, 422)
+                saved = client.put(path, json={"max_tasks": 2})
+                self.assertEqual(saved.json(), {"next_start": 2, "source": "settings"})
+                self.assertEqual(client.get("/api/system").json()["runtime"]["max_builds"], 1)
+            restarted = create_app(db_path, root / "out", rules, manage_worker=True)
+            with TestClient(restarted, headers=CLIENT_HEADERS) as client:
+                runtime = client.get("/api/system").json()["runtime"]
+                self.assertEqual((runtime["max_builds"], runtime["max_tasks"]), (2, 1))
+            override = create_app(db_path, root / "out", rules, max_builds=1)
+            with TestClient(override, headers=CLIENT_HEADERS) as client:
+                self.assertEqual(
+                    client.get("/api/system").json()["runtime"]["build_slots"],
+                    {"next_start": 1, "source": "cli"},
+                )
+                self.assertEqual(client.put(path, json={"max_tasks": None}).status_code, 409)
+            with TestClient(create_app(db_path, root / "out", rules), headers=CLIENT_HEADERS) as client:
+                self.assertEqual(client.put(path, json={"max_tasks": None}).json(),
+                                 {"next_start": 1, "source": "default"})
+            preview = create_app(db_path, root / "out", rules, read_only=True)
+            with TestClient(preview, headers=CLIENT_HEADERS) as client:
+                self.assertEqual(client.put(path, json={"max_tasks": 2}).status_code, 403)
+
     def test_system_lan_toggle_persists_and_blocks_lan(self) -> None:
         token = "0123456789abcdef"
         lan_headers = {

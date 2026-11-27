@@ -8,6 +8,7 @@ import sqlite3
 import tempfile
 import unittest
 import zipfile
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
@@ -19,6 +20,7 @@ from ecom_crawler.runtime.models import (
     Batch,
     BatchSite,
     BuildRecord,
+    QualityFeedback,
     RuleVersion,
     SiteRule,
     Task,
@@ -340,10 +342,57 @@ class BatchApiTests(unittest.TestCase):
         )
         self.assertEqual(ready["rule"]["rule_id"], "familidoo-fr-d03")
         self.assertEqual(batch["counts"]["startable"], 1)
-
         detail = self.client.get(f"/api/batches/{batch['batch_id']}")
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(len(detail.json()["sites"]), 6)
+
+    def test_site_rate_policy_is_saved_and_applied_to_new_tasks(self) -> None:
+        batch = self._create(
+            sites=["https://www.familidoo.fr/fr/"],
+        )["batch"]
+        site = batch["sites"][0]
+        path = (
+            f"/api/batches/{batch['batch_id']}/sites/"
+            f"{site['site_key']}/rate-policy"
+        )
+        defaults = self.client.get(path)
+        self.assertEqual(defaults.status_code, 200)
+        self.assertEqual(defaults.json()["policy"], {})
+        self.assertEqual(defaults.json()["effective"]["concurrency"], 1)
+
+        saved = self.client.put(
+            path,
+            json={
+                "per_domain_rps": 4,
+                "concurrency": 4,
+                "delay_ms": 250,
+                "max_attempts": 3,
+                "backoff_ms": 2000,
+            },
+        )
+        self.assertEqual(saved.status_code, 200)
+        self.assertEqual(saved.json()["policy"]["concurrency"], 4)
+        self.assertEqual(saved.json()["effective"]["per_domain_rps"], 4)
+
+        started = self.client.post(
+            f"/api/batches/{batch['batch_id']}/start",
+            json={"site_keys": [site["site_key"]]},
+        )
+        self.assertEqual(started.status_code, 202)
+        task_id = started.json()["accepted"][0]["task_id"]
+        task = self.store.get_task(task_id)
+        self.assertIsNotNone(task)
+        assert task is not None
+        self.assertEqual(task.limits["concurrency"]["product"], 4)
+        self.assertEqual(task.limits["fetch_delay_ms"], 250)
+        self.assertEqual(task.limits["max_attempts"], 3)
+        self.assertEqual(task.limits["retry_backoff_ms"], 2000)
+        self.assertEqual(task.input["rate_policy"]["per_domain_rps"], 4)
+
+        invalid = self.client.put(path, json={"concurrency": 99})
+        self.assertEqual(invalid.status_code, 422)
+        unknown = self.client.put(path, json={"rps": 2})
+        self.assertEqual(unknown.status_code, 422)
 
     def test_import_appends_sites_to_existing_batch(self) -> None:
         batch = self._create()["batch"]
@@ -427,8 +476,63 @@ class BatchApiTests(unittest.TestCase):
         task = self.store.get_task(result["accepted"][0]["task_id"])
         self.assertEqual(task.input["target_entry"], matched["input_value"])
         self.assertEqual(task.domain_key, "familidoo.fr")
-        self.assertEqual(task.limits["max_products"], 10000)
-        self.assertEqual(task.limits["max_seconds"], 3600)
+        self.assertEqual(task.limits["max_products"], 1)
+        self.assertEqual(task.limits["max_seconds"], 1)
+
+    def test_formal_default_has_no_service_product_or_duration_cap(self) -> None:
+        batch = self._create(
+            collection_mode="formal",
+            sites=["https://www.familidoo.fr/fr/"],
+        )["batch"]
+        site = batch["sites"][0]
+        started = self.client.post(
+            f"/api/batches/{batch['batch_id']}/start",
+            json={"site_keys": [site["site_key"]]},
+        )
+        self.assertEqual(started.status_code, 202, started.text)
+        task_id = started.json()["accepted"][0]["task_id"]
+        task = self.store.get_task(task_id)
+        assert task is not None
+        self.assertIsNone(task.limits["max_urls"])
+        self.assertIsNone(task.limits["max_products"])
+        self.assertIsNone(task.limits["max_seconds"])
+        self.assertEqual(task.limits["max_attempts"], 2)
+
+    def test_collection_policy_sets_formal_default_limits(self) -> None:
+        saved = self.client.put(
+            "/api/system/collection-policy",
+            json={
+                "formal_unlimited": False,
+                "formal_max_products": 250,
+                "formal_max_seconds": 900,
+                "default_per_domain_rps": 4,
+                "default_concurrency": 3,
+            },
+        )
+        self.assertEqual(saved.status_code, 200, saved.text)
+        self.assertEqual(saved.json()["formal_limits"]["max_products"], 250)
+        self.assertEqual(saved.json()["default_rate"], {
+            "per_domain_rps": 4.0,
+            "concurrency": 3,
+        })
+
+        batch = self._create(
+            collection_mode="formal",
+            sites=["https://www.familidoo.fr/fr/"],
+        )["batch"]
+        site = batch["sites"][0]
+        started = self.client.post(
+            f"/api/batches/{batch['batch_id']}/start",
+            json={"site_keys": [site["site_key"]]},
+        )
+        self.assertEqual(started.status_code, 202, started.text)
+        task_id = started.json()["accepted"][0]["task_id"]
+        task = self.store.get_task(task_id)
+        assert task is not None
+        self.assertEqual(task.limits["max_products"], 250)
+        self.assertEqual(task.limits["max_seconds"], 900)
+        self.assertEqual(task.limits["concurrency"]["product"], 3)
+        self.assertEqual(task.input["rate_policy"]["per_domain_rps"], 4.0)
 
     def test_two_targets_on_same_domain_export_their_own_products(self) -> None:
         origin = "http://batch-catalog.test"
@@ -520,6 +624,48 @@ class BatchApiTests(unittest.TestCase):
         self.assertEqual(self.store.get_site_rule(target).sha256, original.sha256)
         self.assertEqual(self.store.get_rule_version(original.rule_id, version).status, "superseded")
 
+    def test_batch_runs_one_submitted_product_alongside_a_directory(self) -> None:
+        origin = "http://mixed-catalog.test"
+        product = f"{origin}/p2.html?variant=blue"
+        directory = f"{origin}/list"
+        unavailable = f"{origin}/other"
+        rule = yaml.safe_load(RULE_TEMPLATE.replace("__BASE__", origin))
+        rule["rule_id"] = "mixed-catalog"
+        rule["discovery"]["sources"] = [{
+            "type": "listing", "url": directory, "product_link_selector": "a.product",
+        }]
+        filename = "mixed.yaml"
+        (self.rules_dir / filename).write_text(yaml.safe_dump(rule), encoding="utf-8")
+        self._activate_fixture_rule(filename, "mixed-catalog.test")
+
+        batch = self._create(
+            collection_mode="formal", market="GB", sites=[product, directory, unavailable],
+        )["batch"]
+        sites = {site["input_value"]: site for site in batch["sites"]}
+        self.assertEqual(sites[unavailable]["readiness"], "needs_onboarding")
+        path = f"/api/batches/{batch['batch_id']}"
+        requested: list[str] = []
+        with fixture_server(proxy_origin=origin, requests=requested) as proxy:
+            worker = Worker(self.store, out_root=self.out_root, per_domain_rps=50, proxy=proxy)
+            for entry in (product, directory):
+                response = self.client.post(
+                    f"{path}/start", json={"site_keys": [sites[entry]["site_key"]]},
+                )
+                self.assertEqual(len(response.json()["accepted"]), 1, response.text)
+                worker.run_once()
+                if entry == product:
+                    self.assertEqual(requested, ["/p2.html?variant=blue"])
+
+        response = self.client.get(f"{path}/export")
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            manifest = json.loads(archive.read("batch.json"))
+            rows = {row["input_value"]: row for row in manifest["sites"]}
+            for entry, expected in ((product, "Product 2"), (directory, "Product 1")):
+                row = rows[entry]
+                self.assertEqual((row["export_status"], row["counts"]["valid_products"]), ("complete", 1))
+                csv_data = archive.read(f"sites/{row['site_key']}/products.csv").decode("utf-8")
+                self.assertIn(expected, csv_data)
+
     def test_homepage_market_bindings_share_quota_and_keep_old_links(self) -> None:
         domain = "familidoo.fr"
         legacy = self._create(market="FR", sites=[domain])["batch"]
@@ -563,8 +709,11 @@ class BatchApiTests(unittest.TestCase):
         }]
         (self.rules_dir / "limited.yaml").write_text(yaml.safe_dump(rule), encoding="utf-8")
         self._activate_fixture_rule("limited.yaml", target_key("limited-catalog.test", entry, "GB"))
-        batch = self._create(collection_mode="sample", market="GB", sites=[entry])["batch"]
+        batch = self._create(
+            collection_mode="sample", market="GB", sites=[entry, "https://pending.example/"],
+        )["batch"]
         path = f"/api/batches/{batch['batch_id']}"
+        site_key = batch["sites"][0]["site_key"]
         with fixture_server(proxy_origin=origin) as proxy:
             worker = Worker(self.store, out_root=self.out_root, per_domain_rps=50, proxy=proxy)
             trial = self.client.post(f"{path}/start", json={}).json()["accepted"][0]["task_id"]
@@ -579,15 +728,57 @@ class BatchApiTests(unittest.TestCase):
         self.assertEqual((result.state, result.outcome, result.stop_reason), ("FINISHED", "PARTIAL", "BUDGET_EXHAUSTED"))
         result_json = json.loads((self.out_root / formal / "task-result.json").read_text(encoding="utf-8"))
         self.assertIn("max_pages", result_json["stop_detail"])
+        self.assertEqual((result_json["coverage"]["covered"], result_json["coverage"]["denominator"]), (2, 2))
+        self.assertIn("declared discovery sources", result_json["coverage"]["notes"])
         rows = (self.out_root / formal / "products.csv").read_text(encoding="utf-8")
         self.assertIn(f"{origin}/p2.html", rows)
         self.assertIn(f"{origin}/p3.html", rows)
         self.assertNotIn(f"{origin}/p1.html", rows)
         response = self.client.get(f"{path}/export")
         self.assertEqual(response.status_code, 200, response.text)
+        trial_csv = (self.out_root / trial / "products.csv").read_bytes()
         with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
             row = json.loads(archive.read("batch.json"))["sites"][0]
+            self.assertEqual(archive.read(f"sites/{site_key}/products.csv"), trial_csv)
         self.assertEqual((row["task_id"], row["current_task_id"], row["export_status"]), (trial, formal, "sample"))
+
+        rerun = self.client.post(f"{path}/start", json={"rerun_finished": True})
+        cancelled = rerun.json()["accepted"][0]["task_id"]
+        self.assertEqual(self.client.post(f"{path}/cancel").status_code, 202)
+        self.assertEqual(self.store.get_task(cancelled).state, "CANCELLED")
+        root = self.root / "restored"
+        root.mkdir()
+        with (
+            closing(sqlite3.connect(self.db_path)) as source,
+            closing(sqlite3.connect(root / "tasks.db")) as backup,
+        ):
+            source.backup(backup)
+        shutil.copytree(self.rules_dir, root / "rules")
+        shutil.copytree(self.out_root, root / "out")
+        with TestClient(
+            create_app(root / "tasks.db", root / "out", root / "rules", read_only=True),
+            headers=CLIENT_HEADERS,
+        ) as restored:
+            site, pending = restored.get(path).json()["sites"]
+            self.assertEqual(site["export_task_id"], trial)
+            self.assertEqual(pending["readiness"], "needs_onboarding")
+            response = restored.get(f"{path}/export")
+            self.assertEqual(response.status_code, 200, response.text)
+            with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+                row = json.loads(archive.read("batch.json"))["sites"][0]
+                self.assertEqual(archive.read(f"sites/{site_key}/products.csv"), trial_csv)
+            self.assertEqual(row["task_id"], trial)
+            self.assertEqual(row["current_task_id"], cancelled)
+            self.assertEqual(row["current_task_state"], "CANCELLED")
+            response = restored.get(f"/api/tasks/{site['export_task_id']}/export")
+            self.assertEqual(response.status_code, 200, response.text)
+            with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+                self.assertEqual(archive.read("products.csv"), trial_csv)
+        restored_rule = TaskStore(root / "tasks.db", read_only=True).get_site_rule(site_key)
+        self.assertEqual(
+            hashlib.sha256((root / "rules" / restored_rule.path).read_bytes()).hexdigest(),
+            restored_rule.sha256,
+        )
 
         rule["rule_version"] = "2026.11.26-1"
         rule["discovery"]["sources"][0]["advance"] = {
@@ -625,6 +816,58 @@ class BatchApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 202, response.text)
         self.assertEqual(response.json()["accepted"], [])
         self.assertEqual(response.json()["batch"]["collection_mode"], "sample")
+
+    def test_formal_start_recovers_trial_target_skipped_during_promotion(self) -> None:
+        origin = "http://resume-catalog.test"
+        entries = [f"{origin}/list?p={page}" for page in (2, 3)]
+        keys = [target_key("resume-catalog.test", entry, "GB") for entry in entries]
+        filenames = ["catalog-one.yaml", "catalog-two.yaml"]
+        for entry, key, filename in zip(entries, keys, filenames):
+            rule = yaml.safe_load(RULE_TEMPLATE.replace("__BASE__", origin))
+            rule["rule_id"] = Path(filename).stem
+            rule["site"]["entry_urls"] = [entry]
+            rule["discovery"]["entry_url"] = entry
+            (self.rules_dir / filename).write_text(yaml.safe_dump(rule), encoding="utf-8")
+            self._activate_fixture_rule(filename, key)
+
+        batch = self._create(collection_mode="sample", market="GB", sites=entries)["batch"]
+        path = f"/api/batches/{batch['batch_id']}"
+        suspended_rule = self.rules_dir / filenames[1]
+        parked_rule = self.root / filenames[1]
+        with fixture_server(proxy_origin=origin) as proxy:
+            worker = Worker(self.store, out_root=self.out_root, per_domain_rps=50, proxy=proxy)
+            trial_response = self.client.post(f"{path}/start", json={}).json()
+            trials = {item["site_key"]: item["task_id"] for item in trial_response["accepted"]}
+            self.assertEqual(set(trials), set(keys), trial_response)
+            worker.run_once()
+            worker.run_once()
+            suspended_rule.rename(parked_rule)
+            promotion = self.client.post(f"{path}/start", json={"promote_trial": True}).json()
+            self.assertEqual([item["site_key"] for item in promotion["accepted"]], keys[:1])
+            self.assertEqual([item["site_key"] for item in promotion["skipped"]], keys[1:])
+            worker.run_once()
+
+            parked_rule.rename(suspended_rule)
+            pending = self.client.get(path).json()
+            self.assertEqual((pending["status"], pending["counts"]["startable"]), ("PARTIAL", 1))
+            self.assertEqual([site["formal_pending"] for site in pending["sites"]], [False, True])
+            self.assertEqual(pending["sites"][1]["export_task_id"], trials[keys[1]])
+
+            started = self.client.post(f"{path}/start", json={}).json()
+            self.assertEqual([item["site_key"] for item in started["accepted"]], keys[1:])
+            formal = self.store.get_task(started["accepted"][0]["task_id"])
+            self.assertEqual(formal.input["collection_mode"], "formal")
+            self.assertEqual(started["batch"]["sites"][1]["export_task_id"], trials[keys[1]])
+            worker.run_once()
+
+        self.assertEqual(self.client.get(path).json()["status"], "FINISHED")
+        self.assertEqual(self.client.post(f"{path}/start", json={}).json()["accepted"], [])
+        # A request that read the trial before the new formal run must not replace it.
+        formal.task_id = "stale-start"
+        self.assertFalse(self.store.create_task_for_site(
+            formal, site_key=keys[1], expected_task_id=trials[keys[1]],
+        ))
+        self.assertEqual(len(self.store.list_batch_tasks(batch["batch_id"])), 4)
 
     def test_empty_formal_rerun_keeps_existing_delivery(self) -> None:
         origin = "http://quality-catalog.test"
@@ -888,6 +1131,51 @@ class BatchApiTests(unittest.TestCase):
         ).json()
         self.assertEqual(by_category["total"], 1)
 
+    def test_first_repair_result_is_downloadable_only_after_adoption(self) -> None:
+        batch = self._create(sites=["familidoo.fr"])["batch"]
+        path = f"/api/batches/{batch['batch_id']}"
+        initial = self.client.post(f"{path}/start").json()["accepted"][0]["task_id"]
+        self.store.update_task(initial, state="FINISHED", outcome="FAILED")
+        rerun = self.client.post(f"{path}/start", json={"rerun_finished": True})
+        task_id = rerun.json()["accepted"][0]["task_id"]
+        task = self.store.get_task(task_id)
+        assert task is not None
+        self.store.update_task(
+            task_id, input={**task.input, "feedback_id": "feedback-first-result"},
+            state="FINISHED", outcome="COMPLETED",
+        )
+        self.store.create_feedback(QualityFeedback(
+            feedback_id="feedback-first-result", request_id="test-first-result",
+            task_id=initial, batch_id=batch["batch_id"], site_key="familidoo.fr",
+            category="OTHER", expectation="A result that can be handed off",
+            status="RERUN_PENDING", rerun_task_id=task_id,
+        ))
+        run_dir = self.out_root / task_id
+        run_dir.mkdir(parents=True)
+        (run_dir / "products.csv").write_text("name\nTest product\n", encoding="utf-8")
+        (run_dir / "task-result.json").write_text('{"counts":{"valid_products":1}}', encoding="utf-8")
+
+        def result_source() -> tuple[str | None, dict]:
+            site = self.client.get(path).json()["sites"][0]
+            response = self.client.get(f"{path}/export")
+            self.assertEqual(response.status_code, 200, response.text)
+            with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+                row = json.loads(archive.read("batch.json"))["sites"][0]
+            return site["export_task_id"], row
+
+        before, row = result_source()
+        self.assertIsNone(before)
+        self.assertEqual((row["task_id"], row["export_status"], row["files"]), (None, "awaiting_review", []))
+        self.assertEqual(self.client.get(f"/api/tasks/{task_id}/export").status_code, 200)
+
+        adopted = self.client.post(
+            "/api/feedback/feedback-first-result/resolve",
+            json={"request_id": "adopt-first-result", "resolution": "RESOLVED"},
+        )
+        self.assertEqual(adopted.status_code, 200, adopted.text)
+        after, row = result_source()
+        self.assertEqual((after, row["task_id"], row["export_status"]), (task_id, task_id, "complete"))
+
     def test_export_manifest_and_site_files(self) -> None:
         batch = self._create()["batch"]
         batch_id = batch["batch_id"]
@@ -911,6 +1199,11 @@ class BatchApiTests(unittest.TestCase):
         running = next(item for item in manifest["sites"] if item["site_key"] == "familidoo.fr")
         self.assertIsNone(running["counts"])
         self.assertEqual(running["files"], [])
+        live_site = next(
+            item for item in self.client.get(f"/api/batches/{batch_id}").json()["sites"]
+            if item["site_key"] == "familidoo.fr"
+        )
+        self.assertIsNone(live_site["export_task_id"])
 
         self.store.update_task(
             task_id,
@@ -955,6 +1248,11 @@ class BatchApiTests(unittest.TestCase):
                 run_dir / "diagnostics" / "excluded.jsonl"
             ).read_bytes(),
         }
+        completed_site = next(
+            item for item in self.client.get(f"/api/batches/{batch_id}").json()["sites"]
+            if item["site_key"] == "familidoo.fr"
+        )
+        self.assertEqual(completed_site["export_task_id"], task_id)
 
         write_file = zipfile.ZipFile.write
 

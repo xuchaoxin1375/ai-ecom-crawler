@@ -28,7 +28,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
-from collections import Counter
+from collections import Counter, deque
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -38,6 +38,11 @@ from urllib.parse import urlsplit, urlunsplit
 import yaml
 
 from .build_models import BuildModelPool, ModelPoolError
+from .collection_policy import (
+    default_rate_overrides,
+    formal_collection_limits,
+    load_collection_policy,
+)
 from .execution import build_task, run_task
 from .executor.preflight import check_rule_selectors, format_selector_errors
 from .harness import (
@@ -48,14 +53,16 @@ from .harness import (
     OpenCodeHttpAdapter,
     OpenCodeServer,
 )
-from .harness.adapter import BuildSession
+from .harness.adapter import BuildSession, HarnessStateError
 from .harness.dependencies import (
     DependencyPolicy,
     install_with_pip,
     install_with_uv,
     verify_with_python,
 )
+from .harness.opencode import OpenCodeError
 from .harness.trace import build_trace, render_trace_markdown
+from .rate_policy import load_policies, normalize_domain
 from .robots import extract_sitemaps, robots_url_for
 from .rule_diff import (
     build_change_summary,
@@ -67,10 +74,10 @@ from .runtime.archive import prefetch_rule_samples
 from .runtime.batch import (
     BATCH_COLLECTION_LIMITS,
     normalize_site,
-    rule_covers_entry,
     rule_domains,
     rule_has_catalog_discovery,
     target_entry,
+    target_entry_mode,
 )
 from .runtime.models import (
     Batch,
@@ -81,7 +88,7 @@ from .runtime.models import (
     utc_now,
 )
 from .runtime.rule import RuleError, load_rule
-from .runtime.store import BatchNotFoundError, TaskStore
+from .runtime.store import BatchNotFoundError, RuleVersionError, TaskStore
 
 ACTIVE_TASK_STATES = {"DRAFT", "QUEUED", "RUNNING", "PAUSING", "PAUSED"}
 
@@ -129,6 +136,7 @@ ROBOTS_USER_AGENT = "ecom-crawler-build/0.1"
 ROBOTS_TIMEOUT_SECONDS = 10.0
 MODEL_POOL_SETTING = "build_model_pool"
 MODEL_DEFAULT_SETTING = "build_model_default"
+ONBOARDING_BUDGET_SETTING = "build_onboarding_budget"
 logger = logging.getLogger(__name__)
 
 
@@ -429,6 +437,7 @@ def default_validator(
     archive_reuse: bool = False,
     seed_urls: list[str] | None = None,
     discover: bool = True,
+    target_entry: str | None = None,
 ) -> dict[str, Any]:
     """Run the bounded validation task in an isolated ledger/output tree."""
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -452,6 +461,7 @@ def default_validator(
         archive_reuse=archive_reuse,
         seed_urls=seed_urls,
         discover=discover,
+        target_entry=target_entry,
     )
     result["failure_samples"] = _validation_failure_samples(work_dir, task_id)
     currencies: dict[str, int] = {}
@@ -1016,15 +1026,34 @@ def _live_timeline(
         elif event_type == "tool_started":
             flush_text()
             flush_reasoning()
-            entries.append(
-                {
-                    "kind": "tool",
-                    "created_at": getattr(event, "created_at", None),
-                    "name": str(data.get("tool") or "unknown"),
-                    "status": "running",
-                    "call_id": data.get("call_id"),
-                }
-            )
+            entry = {
+                "kind": "tool",
+                "created_at": getattr(event, "created_at", None),
+                "name": str(data.get("tool") or "unknown"),
+                "status": "running",
+                "call_id": data.get("call_id"),
+            }
+            if data.get("input") is not None:
+                entry["input"] = data["input"]
+            entries.append(entry)
+        elif event_type == "tool_input":
+            call_id = data.get("call_id")
+            target = None
+            for entry in reversed(entries):
+                if entry.get("kind") != "tool" or entry.get("status") != "running":
+                    continue
+                if call_id and entry.get("call_id") not in {None, call_id}:
+                    continue
+                target = entry
+                break
+            if target is not None:
+                if data.get("input") is not None:
+                    target["input"] = data["input"]
+                name = str(data.get("tool") or "")
+                if name and not name.startswith("call_") and str(
+                    target.get("name") or ""
+                ).startswith("call_"):
+                    target["name"] = name
         elif event_type == "tool_finished":
             flush_text()
             flush_reasoning()
@@ -1045,6 +1074,15 @@ def _live_timeline(
                 }
                 entries.append(target)
             target["status"] = str(data.get("status") or "finished")
+            if data.get("output"):
+                target["output"] = data["output"]
+            if data.get("input") is not None and target.get("input") is None:
+                target["input"] = data["input"]
+            name = str(data.get("tool") or "")
+            if name and not name.startswith("call_") and str(
+                target.get("name") or ""
+            ).startswith("call_"):
+                target["name"] = name
     flush_text()
     flush_reasoning()
     truncated = len(entries) > limit
@@ -1081,6 +1119,8 @@ class BuildManager:
         rules_dir: str | Path,
         *,
         adapter: Any | None = None,
+        adapter_factory: Callable[[], Any] | None = None,
+        max_concurrent: int = 1,
         model: dict[str, Any] | None = None,
         validator: Validator | None = None,
         max_seconds: int | None = None,
@@ -1273,8 +1313,11 @@ class BuildManager:
             if max_products is not None
             else os.environ.get("ECOM_BUILD_MAX_PRODUCTS", "6")
         )
-        if adapter is None:
-            adapter = OpenCodeHttpAdapter(
+        if adapter is not None and (adapter_factory is not None or max_concurrent != 1):
+            raise ValueError("a shared adapter requires a single build slot")
+
+        def default_adapter() -> OpenCodeHttpAdapter:
+            return OpenCodeHttpAdapter(
                 self.workspace_root,
                 model=self.model,
                 permissions=default_permissions(),
@@ -1291,14 +1334,51 @@ class BuildManager:
                 ),
             )
         self.adapter = adapter
-        self.service = BuildService(adapter)
+        self._shared_service = BuildService(adapter) if adapter is not None else None
+        self._adapter_factory = adapter_factory or default_adapter
+        self.max_concurrent = max(1, max_concurrent)
         self._lock = threading.RLock()
+        self._install_lock = threading.RLock()
         self._watchers: dict[str, threading.Thread] = {}
         self._finalizing: set[str] = set()
-        self._slot_build_id: str | None = None
+        self._active: dict[str, tuple[BuildRecord, BuildService]] = {}
+        self._pending_recovery: deque[BuildRecord] = deque()
         self._dispatching: str | None = None
         self._handled_permissions: dict[str, set[str]] = {}
         self._stopping = threading.Event()
+
+    def _service_for(self, build_id: str) -> BuildService:
+        with self._lock:
+            active = self._active.get(build_id)
+            if active is not None:
+                return active[1]
+            if self._shared_service is not None:
+                return self._shared_service
+        raise KeyError(f"unknown build session: {build_id}")
+
+    def _reserve_slot(self, record: BuildRecord) -> None:
+        service = self._shared_service or BuildService(self._adapter_factory())
+        self._active[record.build_id] = (record, service)
+
+    @staticmethod
+    def _shutdown_adapter(service: BuildService) -> None:
+        shutdown = getattr(service.adapter, "shutdown", None)
+        if callable(shutdown):
+            try:
+                shutdown()
+            except Exception:
+                logger.debug("harness shutdown failed", exc_info=True)
+
+    def _release_slot(self, build_id: str, *, watched: bool = False) -> None:
+        with self._lock:
+            active = self._active.get(build_id)
+        if active is not None and self._shared_service is None:
+            self._shutdown_adapter(active[1])
+        with self._lock:
+            if self._active.get(build_id) is active:
+                self._active.pop(build_id, None)
+            if watched:
+                self._watchers.pop(build_id, None)
 
     @property
     def model_pool_source(self) -> str:
@@ -1307,6 +1387,32 @@ class BuildManager:
     @property
     def model_pool_override(self) -> bool:
         return self._model_pool_override
+
+    def onboarding_budget(self) -> tuple[dict[str, int], bool]:
+        defaults = {
+            "max_seconds": self.max_total_seconds or 900,
+            "max_input_tokens": self.max_input_tokens or 400_000,
+            "max_output_tokens": self.max_output_tokens or 80_000,
+        }
+        raw = self.store.get_setting(ONBOARDING_BUDGET_SETTING)
+        if raw is not None:
+            try:
+                saved = json.loads(raw)
+                if (
+                    isinstance(saved, dict) and saved.keys() == defaults.keys()
+                    and all(type(value) is int and value > 0 for value in saved.values())
+                ):
+                    return saved, True
+            except ValueError:
+                pass
+            logger.warning("invalid stored onboarding budget; using defaults")
+        return defaults, False
+
+    def set_onboarding_budget(self, budget: dict[str, int] | None) -> None:
+        if budget is None:
+            self.store.delete_setting(ONBOARDING_BUDGET_SETTING)
+        else:
+            self.store.set_setting(ONBOARDING_BUDGET_SETTING, json.dumps(budget))
 
     def update_model_pool(
         self, refs: list[str], default_ref: str | None = None,
@@ -1470,9 +1576,11 @@ class BuildManager:
             robots_note = f"robots.txt probe failed: {type(exc).__name__}: {exc}"
             robots_sitemaps = []
         with self._lock:
-            latest = self.store.latest_build_for_site(batch.batch_id, site.site_key)
-            if latest is not None and latest.state in ACTIVE_BUILD_STATES:
-                raise BuildError(f"site already has an active build: {latest.build_id}")
+            active = self.store.list_builds(
+                site_key=site.site_key, states=ACTIVE_BUILD_STATES, limit=1,
+            )
+            if active:
+                raise BuildError(f"site already has an active build: {active[0].build_id}")
 
             selected_model = self.model
             selection = "default"
@@ -1586,19 +1694,14 @@ class BuildManager:
                 source_rule_version=site.rule_version if repair else None,
                 source_rule_sha256=source_rule_sha256,
             )
-            self.store.create_build(record, promote_trial=promote_trial)
-            self.store.update_batch_site(
-                batch.batch_id,
-                site.site_key,
-                readiness="building",
-                build_id=build_id,
-                proxy=resolved_proxy,
-                note=(
-                    f"规则修复排队中：{build_id}"
-                    if repair
-                    else f"构建排队中：{build_id}"
-                ),
-            )
+            try:
+                self.store.create_build(
+                    record,
+                    promote_trial=promote_trial,
+                    queued_site_note=f"{'规则修复' if repair else '构建'}排队中：{build_id}",
+                )
+            except BatchNotFoundError as exc:
+                raise BuildError(str(exc)) from exc
         self._drain_queue()
         return self.store.get_build(build_id) or record
 
@@ -1651,7 +1754,7 @@ class BuildManager:
     # ----------------------------------------------------------------- queue
     def _next_queued(self) -> BuildRecord | None:
         queued = self.store.list_builds(
-            states={"QUEUED"}, limit=500, oldest_first=True
+            states={"QUEUED"}, limit=1, oldest_first=True
         )
         return queued[0] if queued else None
 
@@ -1766,8 +1869,8 @@ class BuildManager:
         )
 
     def _launch_queued(self, build_id: str) -> bool:
-        record = self.store.get_build(build_id)
-        if record is None or record.state != "QUEUED":
+        record = self.store.claim_queued_build(build_id)
+        if record is None:
             return False
         batch = self.store.get_batch(record.batch_id)
         site = self.store.get_batch_site(record.batch_id, record.site_key)
@@ -1787,10 +1890,17 @@ class BuildManager:
             )
             self._record_failure(build_id, precondition)
             return False
+        current = self.store.get_build(build_id)
+        if current and current.request.get("batch_cancel_requested"):
+            self.store.update_build(
+                build_id, state="CANCELLED", outcome="cancelled", finished_at=utc_now(),
+            )
+            self._release_site(record.batch_id, record.site_key, build_id, "接入已取消，可重新开始")
+            return False
         session: BuildSession | None = None
         try:
             task = self._build_task(record, batch, site, request)
-            session = self.service.start_build(task)
+            session = self._service_for(build_id).start_build(task)
             self._write_inputs(session, batch, site, task)
             if record.mode == "repair":
                 self._write_repair_inputs(
@@ -1801,32 +1911,37 @@ class BuildManager:
                     str(request.get("repair_reason") or ""),
                     previous_readiness=str(request.get("previous_readiness") or ""),
                 )
-            self.store.update_build(
-                build_id,
-                workspace=str(session.workspace.root),
-                session_id=session.session_id,
-                state=session.state,
-                started_at=utc_now(),
-            )
-            self.store.update_batch_site(
-                record.batch_id,
-                record.site_key,
-                readiness="building",
-                build_id=build_id,
-                note=(
-                    f"规则修复中：{build_id}"
-                    if record.mode == "repair"
-                    else f"构建中：{build_id}"
-                ),
-            )
             prompt = (
-                self._repair_run_prompt(site, task)
+                self._repair_run_prompt(site)
                 if record.mode == "repair"
-                else self._prompt(site, batch, task)
+                else self._prompt(site)
             )
-            self.service.send_prompt(build_id, prompt)
-            self.store.update_build(build_id, state="RUNNING")
-            self._start_watcher(build_id)
+            with self._install_lock:
+                current = self.store.get_build(build_id)
+                if current is None or current.state in TERMINAL_BUILD_STATES:
+                    self._close_session(build_id)
+                    return False
+                self.store.update_build(
+                    build_id,
+                    workspace=str(session.workspace.root),
+                    session_id=session.session_id,
+                    state=session.state,
+                    started_at=utc_now(),
+                )
+                self.store.update_batch_site(
+                    record.batch_id,
+                    record.site_key,
+                    readiness="building",
+                    build_id=build_id,
+                    note=(
+                        f"规则修复中：{build_id}"
+                        if record.mode == "repair"
+                        else f"构建中：{build_id}"
+                    ),
+                )
+                self._service_for(build_id).send_prompt(build_id, prompt)
+                self.store.update_build(build_id, state="RUNNING")
+                self._start_watcher(build_id)
             return True
         except Exception as exc:  # noqa: BLE001 - queued start boundary
             message = f"{type(exc).__name__}: {exc}"
@@ -1840,7 +1955,7 @@ class BuildManager:
             self._record_failure(build_id, message)
             if session is not None:
                 try:
-                    self.service.close(build_id)
+                    self._service_for(build_id).close(build_id)
                 except Exception:
                     logger.debug(
                         "queued build start cleanup failed", exc_info=True
@@ -1848,27 +1963,31 @@ class BuildManager:
             return False
 
     def _drain_queue(self) -> None:
-        """Start the oldest queued build when the single slot is free."""
+        """Fill free slots, finishing recovered validation before new work."""
         if self.read_only:
             return
         if os.environ.get("ECOM_BUILD_DISABLED") == "1":
             return
         while not self._stopping.is_set():
             with self._lock:
-                if self._dispatching is not None:
+                if self._dispatching is not None or len(self._active) >= self.max_concurrent:
                     return
-                if self._slot_build_id is not None:
-                    return
-                if self.service.active_build_id is not None:
-                    return
-                record = self._next_queued()
+                recovering = bool(self._pending_recovery)
+                record = self._pending_recovery[0] if recovering else self._next_queued()
                 if record is None:
                     return
+                if any(active.site_key == record.site_key for active, _ in self._active.values()):
+                    return
+                if recovering:
+                    self._pending_recovery.popleft()
+                self._reserve_slot(record)
                 self._dispatching = record.build_id
-                self._slot_build_id = record.build_id
             launched = False
             try:
-                launched = self._launch_queued(record.build_id)
+                if recovering:
+                    launched = self._resume_validation(record)
+                else:
+                    launched = self._launch_queued(record.build_id)
             except Exception as exc:
                 logger.exception("queue dispatch failed for %s", record.build_id)
                 self._release_site(
@@ -1882,20 +2001,10 @@ class BuildManager:
                     f"队列调度失败：{type(exc).__name__}: {exc}",
                 )
             finally:
+                if not launched:
+                    self._release_slot(record.build_id)
                 with self._lock:
                     self._dispatching = None
-                    if not launched and self._slot_build_id == record.build_id:
-                        self._slot_build_id = None
-            if launched:
-                with self._lock:
-                    if self._slot_build_id is not None:
-                        return
-                if self._stopping.is_set():
-                    return
-                # The launched build finished before the dispatch returned;
-                # continue with the next queued item instead of waiting for
-                # another API call or watcher to nudge the queue.
-                continue
 
     def _skill_roots(self) -> list[Path]:
         candidates: list[Path] = []
@@ -2145,6 +2254,7 @@ class BuildManager:
             "\n".join(f"- {url}" for url in robots_sitemaps)
             or "- No Sitemap lines found."
         )
+        proxy = task.extra.get("proxy") or "direct"
         return f"""# Rule repair brief: {site.site_key}
 
 You are repairing an **installed declarative rule**, not building a new site
@@ -2157,6 +2267,9 @@ from scratch. The previous rule is available at
 - Site key: `{site.site_key}`
 - Entry URL: `{task.site["entry_urls"][0]}`
 - Market / locale: `{batch.market or "unknown"}` / `{batch.language or "unknown"}`
+- Egress: `{proxy}`
+- Model time budget: `{task.limits.get("max_seconds")}` seconds
+- Request budget: `{task.limits.get("max_requests")}`
 - Previous rule: `{site.rule_id or "?"}@{site.rule_version or "?"}`
 - Existing managed versions: {version_text}
 - Host validation sample: `{task.limits.get("max_products")}` products
@@ -2171,13 +2284,8 @@ from scratch. The previous rule is available at
 - Keep the existing discovery sources, scope, market, locale, currency and
   five core fields unless the evidence shows a clear bug.
 - Do not enumerate the whole catalog again.
-- Read local files from `../input`, `../out`, `work/` and the host skills
-  directories; do not scan other repositories, user directories or prior run
-  output.
-- Host skills are available read-only, including `product-crawl-workflow`,
-  `resilient-browser-fetch`, `browser-automation`, `network-access`, `htmlmini`
-  and `scrapling-official`; use the relevant ones. The `browse` and `htmlmini`
-  MCP tools are available. Do not read project site records or probes.
+- The host validates the repair. A passing repair normally remains a candidate
+  for operator activation; legacy activation mode can activate it automatically.
 - Inspect 3–5 representative product pages, including at least one page whose
   description is split into a narrative block and a specification/feature list.
 - If descriptions are split, use a `compose` fallback to merge the real blocks
@@ -2202,10 +2310,7 @@ from scratch. The previous rule is available at
 - `../out/plan/rule.yaml`
 - `../out/evidence/build-notes.md`
 
-Do not write outside the workspace. Do not install packages. Respect the
-request budget.
-
-## Site access and robots
+## Host discovery hints
 
 The host already probed `/robots.txt`; result: {robots_note}.
 
@@ -2213,24 +2318,15 @@ Sitemap URLs from robots.txt:
 
 {robots_lines}
 
-Use these Sitemap URLs if they help discovery. Do not fetch or read robots.txt
-yourself, and do not analyze `Disallow`, `Allow`, `Crawl-delay` or user-agent
-groups. robots.txt is not a stop signal. Keep the fixed conservative request
-rate. Do not use archive.org or caches as a substitute for the live target.
+Use these URLs only if relevant to the repair.
 """
 
-    def _repair_run_prompt(self, site: BatchSite, task: BuildTask) -> str:
+    def _repair_run_prompt(self, site: BatchSite) -> str:
         return (
             "Read AGENTS.md, ../input/repair-brief.md and "
             "../input/existing-rule.yaml, then "
             f"repair the existing rule for {site.site_key}. "
-            f"Entry: {task.site['entry_urls'][0]}. "
-            "Use the available host skills as needed; do not read project site "
-            "records or prior probes. "
-            "Focus on the reported content gap and merge any description blocks "
-            "that are currently missing. Keep discovery and scope unchanged. "
-            "Write ../out/plan/rule.yaml and ../out/evidence/build-notes.md, "
-            "then reply briefly."
+            "Follow the repair scope and write the outputs specified in the brief."
         )
 
     def _agent_rules(self) -> str:
@@ -2248,9 +2344,11 @@ Read first, in this order:
 - Read local files from `../input`, `../out`, `work/` and the host skills
   directories. Do not read project site records, other repositories, user
   directories, prior run output or credentials.
+- Write only inside the workspace. Do not install packages.
 - Host skills are available read-only. Before planning discovery, load
   `product-crawl-workflow`; before any challenge probe, load
-  `resilient-browser-fetch`. Do not skip these two because the brief is short.
+  `resilient-browser-fetch`. Use the brief's entry, scope, allowed evidence and
+  sample budget in place of generic skill defaults.
   Read their references or scripts as needed, but do not write into the skills
   directories. Other installed skills (`browser-automation`, `network-access`,
   `htmlmini`, `scrapling-official`, ...) are available when relevant.
@@ -2258,9 +2356,8 @@ Read first, in this order:
   discovery, field and challenge rules you applied.
 - The `browse` and `htmlmini` MCP tools are available. Other MCP servers are
   disabled.
-- Prefer the target origin and path prefixes in the brief; network and search
-  tools may use their normal endpoints within the request budget. Do not use an
-  archive or cache as a substitute for the live target.
+- Fetch target content only from the allowed origin and paths. Network and
+  search tools may use their service endpoints within the request budget.
 - This workspace is headless. If a global instruction asks for interactive
   confirmation or host file access outside the skills and workspace roots,
   follow this file and the brief instead.
@@ -2275,9 +2372,10 @@ Read first, in this order:
   exclude paths or change the request rate.
 - Use the brief's Sitemap URLs when they help discovery; otherwise discover
   from the entry page.
-- Never fetch a URL outside the allowed origin or path prefix. Keep the fixed
-  conservative rate from the brief; do not raise concurrency because robots.txt
-  looks permissive.
+- Use the recorded exit for target requests, host validation and collection.
+  Keep proxy settings out of the candidate rule.
+  On 429, honor Retry-After within budget. If access stays limited, report it
+  so the operator can retry with a different recorded exit.
 - Do not use archive.org, caches, search snippets, or a different origin as a
   substitute for the live target.
 - Logins, payments and personal-data submission are outside this build unless
@@ -2286,8 +2384,8 @@ Read first, in this order:
 
 ## Visual evidence
 
-- Before you finish the rule, pick one representative product page. Capture a
-  viewport screenshot that shows the product name, current price, currency and
+- When the brief asks for visual evidence, pick one representative product
+  page. Capture a viewport screenshot that shows the name, price, currency and
   main image. Save one product image locally; prefer the original image bytes,
   and use the same browser or stealth session that passed any challenge. If the
   image request is blocked, capture the rendered image element and record
@@ -2297,6 +2395,9 @@ Read first, in this order:
   screenshot path, image path and source URL, capture method, viewport,
   expected name, price, currency, image URL and description fragment, and
   review status.
+- Compare the extracted or expected fields with the visual baseline, including
+  source URL. Flag wrong products or images, repeated names or images, and
+  material price or currency mismatches.
 - If a screenshot tool only writes inside its own file root, save there and
   copy the file into `../out/evidence/visual/` with the shell; do not leave
   evidence only in a temporary directory.
@@ -2316,14 +2417,6 @@ candidate; the host validates and installs it.
         entry = task.site["entry_urls"][0]
         origin = task.site["allowed_origins"][0]
         proxy = str(task.extra.get("proxy") or "").strip()
-        proxy_line = (
-            f"- Egress proxy: `{proxy}`. Use `curl --proxy {proxy}` (or the "
-            "equivalent fetch option) for every static price/currency check; "
-            "the host validation uses the same proxy. Do not put the proxy URL "
-            "into the rule package.\n"
-            if proxy
-            else "- Egress proxy: direct; no proxy is configured for this build.\n"
-        )
         catalog_scope = str(task.extra.get("catalog_scope") or "sample").strip().lower()
         catalog_products = int(
             task.extra.get("catalog_products") or task.limits.get("max_products") or 1
@@ -2334,18 +2427,31 @@ candidate; the host validates and installs it.
                 "- Plan discovery for the requested range. The host only tests a small sample.\n"
             )
             discovery_instruction = (
-                "For a homepage, identify the catalog discovery routes and how they end. "
-                "For an explicit path or query, start discovery at that exact URL, "
-                "preserve its filters, and stay inside that range. Use a listing or "
-                "HTML index from that entry; use the actual next-page or load-more "
-                "mechanism if the site has one. A single-page listing is valid when "
+                "Fetch the submitted URL first and classify it using that response. "
+                "If it is an individual product, inspect that one product only. "
+                "Set scope.max_products to 1, discovery.strategies to [entry_links], "
+                "and discovery.entry_url to the exact submitted URL. Match its path in "
+                "product_url_patterns. Omit discovery.sources and product_source. "
+                "Ignore related and recommended products. Set evidence.sample_urls to "
+                "just the submitted URL. The host fetches it directly. "
+                "Skip catalog discovery and sitemap requests. "
+                "For a homepage identify its catalog routes. For a listing start at "
+                "the exact submitted URL and preserve its filters. Use one listing "
+                "source with that exact URL. When the page exposes a next link, use "
+                "`advance: {type: next_link, selector: 'link[rel=next]'}` with the "
+                "observed selector, even if the href uses a page number. The missing "
+                "next link signals the last page. Use `advance: {type: page_param, "
+                "param: page}` for numbered paging without a next link. Inspect one "
+                "next page to confirm it yields new products. Do not enumerate "
+                "pages as separate sources. Use HTML index "
+                "or load-more only when the site uses that structure. "
+                "A single-page listing is valid when "
                 "it really ends there. Do not limit the rule to the products sampled "
                 "during validation or invent a minimum catalog size."
             )
         elif catalog_scope == "full":
             catalog_lines = (
                 f"- Catalog scope: **full site** (target at least {catalog_products} products)\n"
-                f"- Host validation sample: {task.limits.get('max_products')} products\n"
                 "- The rule's `scope.max_products` must be at least the catalog target; "
                 "the host validates only a small sample.\n"
             )
@@ -2368,7 +2474,6 @@ candidate; the host validates and installs it.
         elif catalog_scope == "target":
             catalog_lines = (
                 f"- Catalog scope: **bounded target** (at least {catalog_products} products)\n"
-                f"- Host validation sample: {task.limits.get('max_products')} products\n"
                 "- The rule's `scope.max_products` and discovery sources must cover at "
                 "least the target; the host validates only a sample.\n"
             )
@@ -2384,11 +2489,7 @@ candidate; the host validates and installs it.
                 "product URLs in `evidence.sample_urls`.\n"
             )
         else:
-            catalog_lines = (
-                f"- Product budget: `{task.limits.get('max_products')}`\n"
-                f"- Wall-clock budget: `{task.limits.get('max_seconds')}` seconds\n"
-                f"- Request budget: `{task.limits.get('max_requests')}`\n"
-            )
+            catalog_lines = "- Catalog scope: bounded entry sample.\n"
             discovery_instruction = (
                 "Use the entry page first. If it has product links, a bounded "
                 "`entry_links` sample is enough; do not crawl the whole site. If it has "
@@ -2396,21 +2497,9 @@ candidate; the host validates and installs it.
                 "`html_index` or `sitemap`.\n"
             )
         catalog_lines += (
-            f"- Host validation budget: {task.limits.get('max_products')} products, "
+            f"- Host validation budget: up to {task.limits.get('max_products')} products, "
             f"{self.validation_seconds}s; browser rules get at least "
             f"{self.browser_validation_seconds}s.\n"
-        )
-        shopify_instruction = (
-            "For Shopify storefronts, prefer public JSON (`/products.json`) for "
-            "name, price, currency, variants and description before parsing HTML. "
-            "Declare a `product_source` section and keep `discovery` as the HTML "
-            "fallback. The runtime seeds product work items from `/products.json`, "
-            "commits complete descriptions directly, and fetches HTML/browser only "
-            "for descriptions shorter than `description.min_chars` or when the JSON "
-            "endpoint is blocked. Keep fallback concurrency at 1–2. Availability is "
-            "optional; price and currency must match and the currency must remain "
-            "the batch currency. Per-product `.js`/`.json` extraction is not "
-            "implemented yet; do not claim it in the rule.\n"
         )
         stealth_instruction = (
             "If static and Patchright samples both hit a Cloudflare-style challenge, "
@@ -2432,7 +2521,7 @@ candidate; the host validates and installs it.
             "set `fetch.default_engine: stealth`, `fetch.timeout_ms: 240000`, "
             "`fetch.browser.challenge_wait_ms: 180000` and a stable "
             "`fetch.browser.wait_selector`. The host validation uses the same stealth "
-            "engine and gets at least 600 seconds. If the stealth sample still shows "
+            "engine. If the stealth sample still shows "
             "a challenge, record `ACCESS` and stop; do not declare a browser rule "
             "from a challenge page.\n\n"
             "Keep the entry page or a listing source first in `discovery.sources`; "
@@ -2466,13 +2555,12 @@ candidate; the host validates and installs it.
             "\n".join(f"- {url}" for url in robots_sitemaps)
             or "- No Sitemap lines found."
         )
-        product_source_currency = expected_currency or "EUR"
+        product_source_currency = expected_currency or "<verified ISO currency>"
         return f"""# Build brief: {site.site_key}
 
-You are building a **declarative** rule package for one public e-commerce site.
-The host will validate your rule and install it only if it produces at least one
-valid product. You cannot mark a rule `verified`; the host stores it as
-`candidate` until a human signs it off.
+Write a **declarative** candidate rule for this public e-commerce target.
+The host validates and installs the rule. A passing initial build is activated
+by the host and can automatically queue collection for the batch.
 
 ## Target
 
@@ -2485,12 +2573,20 @@ valid product. You cannot mark a rule `verified`; the host stores it as
   do not spend budget verifying it or reject a product only because it is out
   of stock. Price and currency must match; minor price differences between
   requests are acceptable.
-{catalog_lines}{proxy_line}
+{catalog_lines}- Egress: `{proxy or "direct"}`
+- Model time budget: `{task.limits.get("max_seconds")}` seconds
+- Request budget: `{task.limits.get("max_requests")}`
 Budget checkpoint: write a minimal valid rule by about 50% of the wall-clock
-budget, stop discovery by about 70%, and leave the remainder for host
-validation and repair. Do not wait until the budget is exhausted to write the
-first rule.
-{discovery_instruction}{shopify_instruction}{stealth_instruction}
+budget and stop discovery by about 70%. Leave time for repair. The host runs
+its own bounded validation.
+
+Reuse the first successful static response for field, selector and currency
+checks. Start with the reference manifest. Read schema or skill sections only
+when a field or access problem calls for them. Once the core fields are proven,
+write the candidate and notes, collect one set of visual evidence, and return.
+The host runs the validation; do not run a second catalog or repeat checks
+that the recorded sample already answers.
+{discovery_instruction}
 ## Required output
 
 Write these files from the workspace (`work/` is your current directory):
@@ -2498,62 +2594,15 @@ Write these files from the workspace (`work/` is your current directory):
 - `../out/plan/rule.yaml` — the complete rule manifest.
 - `../out/evidence/build-notes.md` — what you inspected, sample URLs, selectors,
   limitations and anything you could not verify.
-- `../out/evidence/visual/` — at least one product page screenshot, one local
-  product image, `baseline.json` and `compare.md`.
+- `../out/evidence/visual/` — follow the visual evidence instructions in `AGENTS.md`.
 
-Visual evidence:
-
-- Screenshot one representative product page with the name, current price,
-  currency and main image visible. Save one product image locally; prefer the
-  original bytes from the same browser or stealth session that passed any
-  challenge. If the image request is blocked, save a rendered image-element
-  screenshot and mark `capture_method: rendered`.
-- `baseline.json` records product URL, screenshot path, image path and source
-  URL, capture method, viewport, expected name, price, currency, image URL and
-  description fragment, and `review.status`.
-- `compare.md` compares the planned or sampled product fields with the visual
-  baseline. Check name, price, currency, image, description and URL; call out
-  all-same names or images, placeholders, review-widget images and material
-  price or currency mismatches.
-- If you cannot inspect images, set `review.status` to `pending_manual`; do not
-  claim visual review passed.
-- This pilot treats visual evidence as a soft requirement. If it is genuinely
-  unavailable, record the attempted URL, blocker and missing files in
-  `build-notes.md`; do not silently omit it.
-
-Read local files from `../input`, `../out`, `work/` and the host skills
-directories; do not read project site records, other repositories, user
-directories or prior run output.
-Do not write outside the workspace. Do not install packages. Respect the
-request budget. Logins, payments and personal-data submission are outside this
-build unless the operator explicitly includes them.
-
-## Site access and robots
+## Host discovery hints
 
 The host already probed `/robots.txt`; result: {robots_note}.
 
 Sitemap URLs from robots.txt:
 
 {robots_lines}
-
-Use these Sitemap URLs if they help discovery. Do not fetch or read robots.txt
-yourself, and do not analyze `Disallow`, `Allow`, `Crawl-delay` or user-agent
-groups. robots.txt is not a stop signal. Keep the fixed conservative request
-rate in this brief. Do not use archive.org or caches as a substitute for the
-live target.
-
-If two responses from the same client are a challenge page (for example titles
-such as "Verify your browser" or "Verifying your connection"), stop retrying
-that path. Switch to a browser or stealth sample only when the final rule will
-use that engine and the host can validate it; otherwise stop and record `ACCESS`
-in `../out/evidence/build-notes.md`. Do not spend the remaining wall-clock
-budget on repeated challenge retries.
-
-Keep one exit for the rest of the build and host validation. If static product
-pages return 429 on that exit, you may test at most two alternate same-market
-exits or switch to the browser/stealth engine, record the chosen exit, and stop
-rotating; do not change exit per request. Minor price differences are
-acceptable, but the currency must remain the batch currency.
 
 A generic reference rule is at `../input/reference-rule.yaml`; adapt it, do not
 copy its site or selectors blindly.
@@ -2592,8 +2641,10 @@ Required top-level keys: `schema_version`, `rule_id`, `rule_version`, `kind`,
   ```
 
 - `product_source` (optional, Shopify only, requires `schema_version: "1.3"`):
-  prefer this when the store exposes public `/products.json`. Keep `discovery`
-  as the fallback; `product_source` does not replace it. Example:
+  for a whole-shop catalog, prefer the public `/products.json` when a sample
+  confirms the market, price, and fields. Keep `discovery` as the fallback.
+  An explicit category or filtered entry uses discovery scoped to that entry.
+  Example:
 
   ```yaml
   product_source:
@@ -2612,7 +2663,7 @@ Required top-level keys: `schema_version`, `rule_id`, `rule_version`, `kind`,
 
   `page_size` is capped at 250. `variants.price` accepts `min_positive`,
   `first` or `product_price`. `description.fallback_concurrency` is 1 or 2.
-  `currency` must equal `site.currency`. If `/products.json` returns 401/403,
+   Short descriptions use the HTML fallback. `currency` must equal `site.currency`. If `/products.json` returns 401/403,
   429, a challenge or invalid JSON, the runtime records
   `shopify_json_unavailable` and continues with `discovery`; do not invent a
   second JSON endpoint. Product `.js`/`.json` per-product extraction is not
@@ -2635,21 +2686,7 @@ Required top-level keys: `schema_version`, `rule_id`, `rule_version`, `kind`,
     challenge_wait_ms: 15000
   ```
 
-  For a page where the static and Patchright samples hit a challenge and the
-  stealth sample returns the product content:
-
-  ```yaml
-  default_engine: stealth
-  timeout_ms: 240000
-  browser:
-    headless: true
-    wait_selector: "h1"
-    challenge_wait_ms: 180000
-  ```
-
-  The host validation uses the same engine. A stealth rule gets at least 600
-  seconds. If the stealth sample also hits a challenge, stop and record `ACCESS`
-  instead of declaring the rule. Use `schema_version: "1.1"` by default, `"1.2"`
+  Use `schema_version: "1.1"` by default, `"1.2"`
   only for `load_more`/`infinite_scroll`, and `"1.3"` when `product_source` is
   present.
 - `extract.fields` must cover `name`, `price.amount`, `price.currency`,
@@ -2683,63 +2720,28 @@ Required top-level keys: `schema_version`, `rule_id`, `rule_version`, `kind`,
 - `output`: `url_list.enabled: true`, `product_csv.enabled: true`,
   `product_csv.columns: 9`, `task_result: true`.
 
-A single product page must be inspected to confirm selectors; include at least
-three sample product URLs in `evidence.sample_urls` when possible. Record
-`limitations` for anything sampled or unavailable.
+Inspect a product page to confirm selectors. For catalog scope, include
+representative sample URLs up to the host sample budget. For a single-product
+target, record just the submitted URL. Record any sample limitations.
 
 ## Market and currency check
 
-The host fetches with the static engine declared in `fetch`; it does not reuse
-your browser cookies or locale. A browser sample can be geo-localized. Before
-finishing, fetch at least one product page with the same static path and check
-the price currency in the response. The rule's `site.market` must match the
-batch market (`{batch.market or "unknown"}`), and `site.currency` must match the
-currency the host validation actually sees. Common market expectations are
-US→USD, GB→GBP, FR/DE/ES/IT/NL/BE/AT→EUR, JP→JPY, CA→CAD, AU→AUD and CN→CNY.
+The host uses the engine declared in `fetch` with a separate session. Use the
+declared engine and market-localized URL to check currency. Match the batch
+market and the currency the host sees.
 If they differ, use a market-localized URL (country/locale path or query) or
 correct the rule; a currency or market mismatch fails host validation.
 
-When you are done, write the two files and reply with a short summary. The host
-will run the bounded validation and may reject the rule if it is missing,
-domain-mismatched, or produces no valid product.
+## If the declared engine needs challenge handling
+
+{stealth_instruction}
 """
 
-    def _prompt(self, site: BatchSite, batch: Batch, task: BuildTask) -> str:
-        catalog = str(task.extra.get("catalog_scope") or "sample").lower()
-        catalog_products = int(
-            task.extra.get("catalog_products") or task.limits.get("max_products") or 1
-        )
-        if catalog == "batch":
-            scope_note = (
-                " Build discovery for the submitted range, including any observed "
-                "pagination. The host validates only a small sample."
-            )
-        elif catalog == "full":
-            scope_note = (
-                " This is a full-catalog build: enumerate the top-level product "
-                "categories and their pagination, and set scope.max_products to the "
-                "catalog target. The host validation uses only a small sample."
-            )
-        elif catalog == "target":
-            scope_note = (
-                " This is a bounded-target build: cover at least "
-                f"{catalog_products} products and set scope.max_products to the "
-                "target. The host validation uses only a small sample."
-            )
-        else:
-            scope_note = ""
+    def _prompt(self, site: BatchSite) -> str:
         return (
-            "Read AGENTS.md, ../input/build-brief.md and "
-            "../input/reference-rule.yaml, "
-            f"then build the rule package for {site.site_key}. "
-            f"Entry: {task.site['entry_urls'][0]}.{scope_note} "
-            "Use the available host skills (for example "
-            "`product-crawl-workflow`, `resilient-browser-fetch`, "
-            "`browser-automation`, `network-access`) as needed; do not read "
-            "project site records or prior probes. "
-            "Write ../out/plan/rule.yaml and ../out/evidence/build-notes.md, "
-            "inspect at least one real product page, and keep within the brief's "
-            "request and time budget. Reply briefly when the files are written."
+            "Read AGENTS.md and ../input/build-brief.md, "
+            f"then build the rule package for {site.site_key} using the brief's "
+            "scope, reference rule and output paths."
         )
 
     # ------------------------------------------------------------------ watch
@@ -2785,6 +2787,13 @@ domain-mismatched, or produces no valid product.
                 if session is None:
                     self._finalize(build_id, error="build session is no longer available")
                     return
+                if record.request.get("batch_cancel_requested") and record.state != "VALIDATING":
+                    try:
+                        self.cancel(build_id)
+                    except (HarnessStateError, OpenCodeError, OSError):
+                        logger.warning("could not stop cancelled onboarding %s", build_id, exc_info=True)
+                    else:
+                        return
                 now = time.monotonic()
                 if total_deadline is not None and now >= total_deadline:
                     self._cancel_for_budget(
@@ -2802,8 +2811,11 @@ domain-mismatched, or produces no valid product.
                         self._cancel_for_budget(build_id, usage_error)
                         return
                 if session.state in TERMINAL_BUILD_STATES:
-                    if session.state == "FINISHED" and record.state not in TERMINAL_BUILD_STATES:
-                        self.store.update_build(build_id, state="VALIDATING")
+                    if session.state == "FINISHED" and record.state != "VALIDATING":
+                        if record.state in TERMINAL_BUILD_STATES:
+                            return
+                        if not self.store.claim_build_validation(build_id):
+                            continue
                     result = self._finalize(build_id)
                     if result == "repairing":
                         deadline = time.monotonic() + self.repair_seconds
@@ -2812,7 +2824,7 @@ domain-mismatched, or produces no valid product.
                     return
                 if time.monotonic() >= deadline:
                     try:
-                        self.service.cancel(build_id)
+                        self._service_for(build_id).cancel(build_id)
                     except Exception as exc:  # noqa: BLE001 - timeout boundary
                         self._finalize(
                             build_id,
@@ -2833,16 +2845,13 @@ domain-mismatched, or produces no valid product.
         except Exception:
             logger.exception("build watcher failed for %s", build_id)
         finally:
-            with self._lock:
-                self._watchers.pop(build_id, None)
-                if self._slot_build_id == build_id:
-                    self._slot_build_id = None
+            self._release_slot(build_id, watched=True)
             if not self._stopping.is_set():
                 self._drain_queue()
 
     def _usage(self, build_id: str) -> dict[str, Any] | None:
         try:
-            usage = self.service.usage(build_id)
+            usage = self._service_for(build_id).usage(build_id)
         except Exception:
             logger.debug("build usage check failed for %s", build_id, exc_info=True)
             return None
@@ -2880,7 +2889,7 @@ domain-mismatched, or produces no valid product.
 
     def _cancel_for_budget(self, build_id: str, error: str) -> None:
         try:
-            self.service.cancel(build_id)
+            self._service_for(build_id).cancel(build_id)
         except Exception as exc:
             logger.warning(
                 "budget cancel failed for %s: %s", build_id, exc, exc_info=True
@@ -2889,7 +2898,7 @@ domain-mismatched, or produces no valid product.
 
     def _session(self, build_id: str) -> BuildSession | None:
         try:
-            return self.service.status(build_id)
+            return self._service_for(build_id).status(build_id)
         except KeyError:
             return None
 
@@ -2927,10 +2936,10 @@ domain-mismatched, or produces no valid product.
             outcome=outcome,
             error=record.error,
         )
-        sessions = getattr(self.service.adapter, "sessions", None)
+        sessions = getattr(self._service_for(record.build_id).adapter, "sessions", None)
         if isinstance(sessions, dict):
             sessions[record.build_id] = session
-        self.service.adopt(session, events=_workspace_events(workspace))
+        self._service_for(record.build_id).adopt(session, events=_workspace_events(workspace))
         return session
 
     def _ensure_build_session(self, record: BuildRecord) -> BuildSession:
@@ -2948,7 +2957,7 @@ domain-mismatched, or produces no valid product.
                 "build session is no longer available: build workspace is missing"
             )
         workspace = BuildWorkspace(root=root, build_id=record.build_id)
-        adopt = getattr(self.service.adapter, "adopt_build", None)
+        adopt = getattr(self._service_for(record.build_id).adapter, "adopt_build", None)
         if not callable(adopt):
             raise BuildError(
                 "build session is no longer available; start a new build instead"
@@ -2969,14 +2978,14 @@ domain-mismatched, or produces no valid product.
         # A user-requested continuation clears a pause marker that was
         # persisted before the restart.
         session.workspace.set_paused(False)
-        self.service.adopt(session, events=_workspace_events(workspace))
+        self._service_for(record.build_id).adopt(session, events=_workspace_events(workspace))
         return session
 
     def _auto_approve(self, build_id: str, session: BuildSession) -> None:
         if session.state in {"PAUSING", "PAUSED", "CANCELLING", "CANCELLED"}:
             return
         try:
-            permissions = self.service.list_permissions(build_id)
+            permissions = self._service_for(build_id).list_permissions(build_id)
         except Exception:
             logger.debug("permission probe failed", exc_info=True)
             return
@@ -2987,7 +2996,7 @@ domain-mismatched, or produces no valid product.
             if not request_id or request_id in handled or action not in SAFE_PERMISSIONS:
                 continue
             try:
-                self.service.reply_permission(build_id, request_id, "once")
+                self._service_for(build_id).reply_permission(build_id, request_id, "once")
                 handled.add(request_id)
             except Exception:
                 logger.debug("permission reply failed", exc_info=True)
@@ -3051,6 +3060,13 @@ domain-mismatched, or produces no valid product.
                 # manual continue; manager shutdown closes it.
                 return None
 
+            if record.state == "VALIDATING" and record.validation.get("rule_path"):
+                with self._install_lock:
+                    current = self.store.get_build(build_id)
+                    if current is not None and not self._stopping.is_set():
+                        self._complete_validated_build(current, session)
+                return None
+
             validation: dict[str, Any] | None = None
             archive_stats: dict[str, Any] | None = None
             visual_evidence = _visual_evidence_status(Path(session.workspace.root))
@@ -3086,16 +3102,7 @@ domain-mismatched, or produces no valid product.
                 selector_errors = check_rule_selectors(rule.raw)
                 if selector_errors:
                     raise BuildError(format_selector_errors(selector_errors))
-                self._assert_catalog_rule(build_id, rule)
                 archive = self._archive_configs.get(build_id, {})
-                if str(archive.get("mode") or "off") != "off":
-                    archive_stats = prefetch_rule_samples(
-                        rule,
-                        archive.get("root") or self.out_root / "archive",
-                        proxy=record.proxy,
-                        limit=int(archive.get("sample_limit") or 20),
-                    )
-                    self._archive_stats[build_id] = archive_stats
                 domains = rule_domains(rule.site)
                 target = self.store.get_batch_site(record.batch_id, record.site_key)
                 if target is None or normalize_site(target.input_value).site_key not in domains:
@@ -3104,10 +3111,20 @@ domain-mismatched, or produces no valid product.
                         f"{sorted(domains)}"
                     )
                 batch = self.store.get_batch(record.batch_id)
-                if batch is not None and batch.collection_mode and not rule_covers_entry(
-                    rule, target_entry(target.input_value)
-                ):
-                    raise BuildError("rule discovery sources must start at the requested entry URL")
+                entry = target_entry(target.input_value) if batch and batch.collection_mode else None
+                entry_mode = target_entry_mode(rule, entry)
+                if entry_mode is None:
+                    raise BuildError("rule must cover the requested product or directory entry")
+                if entry_mode != "product":
+                    self._assert_catalog_rule(build_id, rule)
+                    if str(archive.get("mode") or "off") != "off":
+                        archive_stats = prefetch_rule_samples(
+                            rule,
+                            archive.get("root") or self.out_root / "archive",
+                            proxy=record.proxy,
+                            limit=int(archive.get("sample_limit") or 20),
+                        )
+                        self._archive_stats[build_id] = archive_stats
                 self.store.update_build(build_id, state="VALIDATING")
                 validating_site = self.store.get_batch_site(
                     record.batch_id, record.site_key
@@ -3153,7 +3170,7 @@ domain-mismatched, or produces no valid product.
                     archive_max_bytes=archive.get("max_bytes"),
                     archive_reuse=True,
                     seed_urls=feedback_samples or None,
-                    discover=True,
+                    target_entry=entry,
                 )
                 counts = task_result.get("counts") if isinstance(task_result, dict) else {}
                 counts = counts if isinstance(counts, dict) else {}
@@ -3255,8 +3272,14 @@ domain-mismatched, or produces no valid product.
                     )
                 site = self.store.get_batch_site(record.batch_id, record.site_key)
                 parent_rule = self.store.get_site_rule(record.site_key)
+                activation = self.store.get_activation_by_request(f"{build_id}-activate")
+                # An interrupted build from before validation was checkpointed
+                # may already have activated its rule. Compare to its original source.
+                if activation is not None:
+                    record.source_rule_version = activation.from_version
+                    record.source_rule_sha256 = activation.from_sha256
                 has_parent = record.mode == "repair" or bool(
-                    parent_rule and parent_rule.rule_version
+                    activation.from_version if activation else parent_rule
                 )
                 issue_checks = feedback_issue_checks(
                     feedback,
@@ -3290,15 +3313,20 @@ domain-mismatched, or produces no valid product.
                 validation["feedback_samples"] = (
                     feedback_samples if issue_checks else []
                 )
-                rule_id, rule_version, rule_name, rule_sha256, change_summary = (
-                    self._install_rule(
+                with self._install_lock:
+                    current = self.store.get_build(build_id)
+                    if current is None or current.state != "VALIDATING" or self._stopping.is_set():
+                        return None
+                    rule_id, rule_version, rule_name, rule_sha256, change_summary = self._install_rule(
                         rule_path,
                         record,
                         counts,
                         task_result,
                     )
-                )
             except Exception as exc:  # noqa: BLE001 - rule/validation boundary
+                current = self.store.get_build(build_id)
+                if current is None or current.state != "VALIDATING" or self._stopping.is_set():
+                    return None
                 message = f"{type(exc).__name__}: {exc}"
                 if self._start_repair(build_id, message, validation):
                     return "repairing"
@@ -3335,92 +3363,108 @@ domain-mismatched, or produces no valid product.
             )
             validation = normalize_validation(validation, change_summary)
             validation["visual_evidence"] = visual_evidence
-            validation_status = str(validation.get("status") or "FAILED")
-            auto_activate = (
-                record.mode == "build" or self.activation_mode == "legacy"
-            ) and validation_status == "PASSED"
-            note_prefix = "已激活方案" if auto_activate else "候选方案"
-            reasons = [
-                str(reason)
-                for reason in (validation.get("status_reasons") or [])
-                if str(reason).strip()
-            ]
-            note = (
-                f"{note_prefix}：{rule_id}@{rule_version}，"
-                f"有界验证 {valid} 条有效、{failed} 失败"
-            )
-            if not auto_activate:
-                if validation_status == "PASSED":
-                    note += "；待人工激活"
-                else:
-                    note += f"；验证{validation_status}"
-                    if reasons:
-                        note += "：" + "；".join(reasons[:2])
-            if visual_evidence["status"] != "complete":
-                missing = "、".join(visual_evidence["missing"][:4])
-                note += f"；视觉证据缺失：{missing}"
-            if auto_activate:
-                current = self.store.get_site_rule(record.site_key)
-                self.store.activate_rule(
-                    site_key=record.site_key,
-                    rule_id=rule_id,
-                    rule_version=rule_version,
-                    sha256=rule_sha256,
-                    expected_active_version=(
-                        current.rule_version if current else None
-                    ),
-                    expected_active_sha256=current.sha256 if current else None,
-                    feedback_id=record.feedback_id,
-                    request_id=f"{build_id}-activate",
-                    reason="host validation passed",
-                    actor="build" if record.mode == "build" else "legacy-build",
-                    action="activate",
-                )
-                if site is not None and site.build_id == build_id:
-                    self.store.update_batch_site(
-                        record.batch_id,
-                        record.site_key,
-                        readiness="ready",
-                        build_id=build_id,
-                        proxy=record.proxy,
+            with self._install_lock:
+                current = self.store.get_build(build_id)
+                if current is not None and current.state == "VALIDATING" and not self._stopping.is_set():
+                    record = self.store.update_build(
+                        build_id, validation=validation, change_summary=change_summary,
+                    )
+                    self._complete_validated_build(record, session)
+            return None
+        finally:
+            with self._lock:
+                self._finalizing.discard(build_id)
+                self._recovered_finalize.discard(build_id)
+                self._handled_permissions.pop(build_id, None)
+
+    def _complete_validated_build(self, record: BuildRecord, session: BuildSession) -> None:
+        """Complete a matching validation checkpoint, including on service restart."""
+        if record.state != "VALIDATING":
+            return
+        build_id = record.build_id
+        validation = record.validation
+        rule_id = validation["rule_id"]
+        rule_version = validation["rule_version"]
+        rule_name = validation["rule_path"]
+        rule_sha256 = validation["rule_sha256"]
+        installed = self.store.get_rule_version(rule_id, rule_version)
+        rule_path = self.rules_dir / rule_name
+        try:
+            file_hash = hashlib.sha256(rule_path.read_bytes()).hexdigest()
+        except OSError:
+            file_hash = None
+        if (
+            installed is None or installed.source_build_id != build_id
+            or installed.path != rule_name or installed.sha256 != rule_sha256
+            or file_hash != rule_sha256
+        ):
+            message = f"已验证规则文件缺失或哈希不匹配：{rule_name}"
+            self._write_trace(build_id, session, validation=validation, error=message)
+            self._release_site(record.batch_id, record.site_key, build_id, message)
+            self._record_failure(build_id, message, error_class="rule_integrity")
+            return
+
+        batch = self.store.get_batch(record.batch_id)
+        site = self.store.get_batch_site(record.batch_id, record.site_key)
+        visual_evidence = validation["visual_evidence"]
+        valid = validation["valid_products"]
+        failed = validation["failed_products"]
+        validation_status = str(validation.get("status") or "FAILED")
+        auto_activate = (
+            record.mode == "build" or self.activation_mode == "legacy"
+        ) and validation_status == "PASSED"
+        note_prefix = "已激活方案" if auto_activate else "候选方案"
+        reasons = [
+            str(reason)
+            for reason in (validation.get("status_reasons") or [])
+            if str(reason).strip()
+        ]
+        note = (
+            f"{note_prefix}：{rule_id}@{rule_version}，"
+            f"有界验证 {valid} 条有效、{failed} 失败"
+        )
+        if not auto_activate:
+            if validation_status == "PASSED":
+                note += "；待人工激活"
+            else:
+                note += f"；验证{validation_status}"
+                if reasons:
+                    note += "：" + "；".join(reasons[:2])
+        if visual_evidence["status"] != "complete":
+            missing = "、".join(visual_evidence["missing"][:4])
+            note += f"；视觉证据缺失：{missing}"
+        activation = self.store.get_activation_by_request(f"{build_id}-activate") if auto_activate else None
+        current = self.store.get_site_rule(record.site_key) if auto_activate else None
+        activation_matches = activation is None or (
+            current is not None
+            and (current.rule_id, current.rule_version, current.sha256)
+            == (rule_id, rule_version, rule_sha256)
+            and (activation.site_key, activation.rule_id, activation.to_version, activation.to_sha256)
+            == (record.site_key, rule_id, rule_version, rule_sha256)
+        )
+        if auto_activate and activation_matches:
+            if activation is None:
+                try:
+                    self.store.activate_rule(
+                        site_key=record.site_key,
                         rule_id=rule_id,
                         rule_version=rule_version,
-                        rule_path=rule_name,
-                        note=note,
+                        sha256=rule_sha256,
+                        expected_active_version=current.rule_version if current else None,
+                        expected_active_sha256=current.sha256 if current else None,
+                        feedback_id=record.feedback_id,
+                        request_id=f"{build_id}-activate",
+                        reason="host validation passed",
+                        actor="build" if record.mode == "build" else "legacy-build",
+                        action="activate",
                     )
-                if record.feedback_id:
-                    feedback = self.store.get_feedback(record.feedback_id)
-                    if feedback and feedback.status == "REPAIRING":
-                        self.store.update_feedback(
-                            record.feedback_id,
-                            status="AWAITING_RERUN",
-                            repair_build_id=build_id,
-                        )
-                if record.request.get("auto_collect") and batch is not None and site is not None:
-                    mode = batch.collection_mode
-                    if mode in BATCH_COLLECTION_LIMITS and site.build_id == build_id:
-                        task = build_task(
-                            rule_path=self.rules_dir / rule_name,
-                            task_id=f"web-{uuid.uuid4().hex[:12]}",
-                            task_type="product",
-                            max_attempts=2,
-                            proxy=record.proxy,
-                            **BATCH_COLLECTION_LIMITS[mode],
-                        )
-                        task.batch_id = batch.batch_id
-                        task.site_key = site.site_key
-                        task.domain_key = normalize_site(site.input_value).site_key or site.domain
-                        task.market = batch.market or task.market
-                        task.rule_sha256 = rule_sha256
-                        task.input["collection_mode"] = mode
-                        if entry := target_entry(site.input_value):
-                            task.input["target_entry"] = entry
-                        task.state = "QUEUED"
-                        try:
-                            self.store.create_task_for_site(task, site_key=site.site_key)
-                        except BatchNotFoundError:
-                            logger.info("skipping automatic collection for unavailable batch target %s", site.site_key)
-            elif site is not None and site.build_id == build_id:
+                except RuleVersionError as exc:
+                    message = f"无法激活已验证规则：{exc}"
+                    self._write_trace(build_id, session, validation=validation, error=message)
+                    self._release_site(record.batch_id, record.site_key, build_id, message)
+                    self._record_failure(build_id, message, error_class="rule_activation")
+                    return
+            if site is not None and site.build_id == build_id:
                 self.store.update_batch_site(
                     record.batch_id,
                     record.site_key,
@@ -3428,54 +3472,108 @@ domain-mismatched, or produces no valid product.
                     proxy=record.proxy,
                     note=note,
                 )
-                if record.feedback_id:
-                    if validation_status == "PASSED":
-                        self.store.update_feedback(
-                            record.feedback_id,
-                            status="AWAITING_ACTIVATION",
-                            repair_build_id=build_id,
+            if record.feedback_id:
+                feedback = self.store.get_feedback(record.feedback_id)
+                if feedback and feedback.status == "REPAIRING":
+                    self.store.update_feedback(
+                        record.feedback_id,
+                        status="AWAITING_RERUN",
+                        repair_build_id=build_id,
+                    )
+            if record.request.get("auto_collect") and batch is not None and site is not None:
+                mode = batch.collection_mode
+                if mode in BATCH_COLLECTION_LIMITS and site.build_id == build_id:
+                    collection_policy = load_collection_policy(self.store)
+                    limits = (
+                        formal_collection_limits(collection_policy)
+                        if mode == "formal"
+                        else BATCH_COLLECTION_LIMITS[mode]
+                    )
+                    rate_policy = {
+                        **default_rate_overrides(collection_policy),
+                        **load_policies(self.store).get(
+                            normalize_domain(site.domain),
+                            {},
+                        ),
+                    }
+                    task = build_task(
+                        rule_path=self.rules_dir / rule_name,
+                        task_id=f"web-{uuid.uuid4().hex[:12]}",
+                        task_type="product",
+                        max_attempts=(
+                            rate_policy["max_attempts"]
+                            if rate_policy.get("max_attempts") is not None
+                            else 2
+                        ),
+                        proxy=record.proxy,
+                        target_entry=target_entry(site.input_value),
+                        concurrency=rate_policy.get("concurrency"),
+                        delay_ms=rate_policy.get("delay_ms"),
+                        retry_backoff_ms=rate_policy.get("backoff_ms"),
+                        rate_policy=rate_policy,
+                        **limits,
+                    )
+                    task.batch_id = batch.batch_id
+                    task.site_key = site.site_key
+                    task.domain_key = normalize_site(site.input_value).site_key or site.domain
+                    task.market = batch.market or task.market
+                    task.rule_sha256 = rule_sha256
+                    task.input["collection_mode"] = mode
+                    task.state = "QUEUED"
+                    try:
+                        self.store.create_task_for_site(
+                            task, site_key=site.site_key, onboarding_build_id=build_id,
                         )
-                    else:
-                        self.store.update_feedback(
-                            record.feedback_id,
-                            status="TRIAGED",
-                            repair_build_id=build_id,
-                            triage_note=(
-                                f"候选验证{validation_status}，未进入待激活："
-                                + ("；".join(reasons[:2]) or "缺少验证证据")
-                            )[:2000],
-                        )
-            self._mark_repair_finished(
-                build_id, resolved=validation_status == "PASSED"
+                    except BatchNotFoundError:
+                        logger.info("skipping automatic collection for unavailable batch target %s", site.site_key)
+        elif not auto_activate and site is not None and site.build_id == build_id:
+            self.store.update_batch_site(
+                record.batch_id,
+                record.site_key,
+                readiness="ready",
+                proxy=record.proxy,
+                note=note,
             )
-            self._write_trace(
-                build_id,
-                session,
-                validation=validation,
-            )
-            self.store.update_build(
-                build_id,
-                state="FINISHED",
-                outcome="succeeded",
-                rule_id=rule_id,
-                rule_version=rule_version,
-                rule_path=rule_name,
-                target_rule_version=rule_version,
-                target_rule_sha256=rule_sha256,
-                change_summary=change_summary,
-                validation=validation,
-                evidence_sha256=str(validation.get("evidence_sha256") or "") or None,
-                finished_at=utc_now(),
-                error=None,
-                error_class=None,
-            )
-            self._close_session(build_id)
-            return None
-        finally:
-            with self._lock:
-                self._finalizing.discard(build_id)
-                self._recovered_finalize.discard(build_id)
-                self._handled_permissions.pop(build_id, None)
+            if record.feedback_id:
+                if validation_status == "PASSED":
+                    self.store.update_feedback(
+                        record.feedback_id,
+                        status="AWAITING_ACTIVATION",
+                        repair_build_id=build_id,
+                    )
+                else:
+                    self.store.update_feedback(
+                        record.feedback_id,
+                        status="TRIAGED",
+                        repair_build_id=build_id,
+                        triage_note=(
+                            f"候选验证{validation_status}，未进入待激活："
+                            + ("；".join(reasons[:2]) or "缺少验证证据")
+                        )[:2000],
+                    )
+        self._mark_repair_finished(
+            build_id, resolved=validation_status == "PASSED"
+        )
+        self._write_trace(
+            build_id,
+            session,
+            validation=validation,
+        )
+        self.store.update_build(
+            build_id,
+            state="FINISHED",
+            outcome="succeeded",
+            rule_id=rule_id,
+            rule_version=rule_version,
+            rule_path=rule_name,
+            target_rule_version=rule_version,
+            target_rule_sha256=rule_sha256,
+            evidence_sha256=str(validation.get("evidence_sha256") or "") or None,
+            finished_at=utc_now(),
+            error=None,
+            error_class=None,
+        )
+        self._close_session(build_id)
 
     def _source_rule_path(
         self,
@@ -3669,6 +3767,9 @@ domain-mismatched, or produces no valid product.
             # Restart recovery re-runs host validation only.  Starting a new
             # model turn is an explicit user decision after that.
             return False
+        record = self.store.get_build(build_id)
+        if record and record.request.get("batch_cancel_requested"):
+            return False
         rounds = self._repairs.setdefault(build_id, [])
         limit = self._repair_limits.get(build_id, 0)
         if len(rounds) >= limit:
@@ -3687,7 +3788,7 @@ domain-mismatched, or produces no valid product.
         prompt = self._repair_prompt(round_number, limit, message, validation)
         self._repair_pending.add(build_id)
         try:
-            self.service.continue_after_finish(build_id, prompt)
+            self._service_for(build_id).continue_after_finish(build_id, prompt)
         except Exception as exc:  # noqa: BLE001 - continuation boundary
             self._repair_pending.discard(build_id)
             entry.update(
@@ -3784,6 +3885,7 @@ domain-mismatched, or produces no valid product.
                     trace = json.loads(path.read_text(encoding="utf-8"))
                     meta = {
                         "repairs": trace.get("repairs") or [],
+                        "tokens": trace.get("tokens") or None,
                         "repair_limit": int(trace.get("repair_limit") or 0),
                         "reasoning_retained": bool(
                             trace.get("reasoning_retained")
@@ -3804,7 +3906,10 @@ domain-mismatched, or produces no valid product.
     ) -> None:
         self._trace_meta_cache.pop(build_id, None)
         export: dict[str, Any] | None = None
-        client = getattr(self.service.adapter, "client", None)
+        try:
+            client = getattr(self._service_for(build_id).adapter, "client", None)
+        except KeyError:
+            client = None
         if client is not None and session.session_id:
             try:
                 export = client.export_session(session.session_id, sanitize=False)
@@ -3812,7 +3917,7 @@ domain-mismatched, or produces no valid product.
                 logger.debug("session export failed", exc_info=True)
         events: list[dict[str, Any]] = []
         try:
-            events = [event.to_dict() for event in self.service.event_log(build_id)]
+            events = [event.to_dict() for event in self._service_for(build_id).event_log(build_id)]
         except KeyError:
             events = []
         capture_trace_reasoning = (
@@ -3960,13 +4065,16 @@ domain-mismatched, or produces no valid product.
         if not rule_id or not rule_version:
             raise BuildError("rule_id and rule_version are required")
         previous = self.store.get_batch_site(record.batch_id, record.site_key)
+        existing = self.store.get_rule_version(rule_id, rule_version)
         if record.mode == "repair" and previous is not None and previous.rule_id:
             if rule_id != previous.rule_id:
                 raise BuildError(
                     "repair must keep the same rule_id: "
                     f"{previous.rule_id} != {rule_id}"
                 )
-            if rule_version == previous.rule_version:
+            if rule_version == previous.rule_version and (
+                existing is None or existing.source_build_id != record.build_id
+            ):
                 raise BuildError(
                     "repair must bump rule_version: "
                     f"{rule_id}@{rule_version} is already installed"
@@ -3982,6 +4090,10 @@ domain-mismatched, or produces no valid product.
             if parent_rule is not None
             else (previous.rule_path if previous else None)
         )
+        if existing is not None and existing.source_build_id == record.build_id:
+            parent_version = existing.parent_version
+            parent = self.store.get_rule_version(rule_id, parent_version) if parent_version else None
+            parent_path_name = parent.path if parent else None
         parent_payload: Any = None
         if parent_path_name:
             parent_path = self.rules_dir / parent_path_name
@@ -4002,7 +4114,6 @@ domain-mismatched, or produces no valid product.
             rule_version=rule_version,
             parent_version=parent_version,
         )
-        existing = self.store.get_rule_version(rule_id, rule_version)
         if existing is not None:
             if existing.source_build_id == record.build_id:
                 existing_path = self.rules_dir / existing.path
@@ -4144,7 +4255,7 @@ domain-mismatched, or produces no valid product.
 
     def _close_session(self, build_id: str) -> None:
         try:
-            self.service.close(build_id)
+            self._service_for(build_id).close(build_id)
         except Exception:
             logger.debug("build session close failed", exc_info=True)
 
@@ -4189,24 +4300,24 @@ domain-mismatched, or produces no valid product.
             try:
                 events = [
                     event.to_dict()
-                    for event in self.service.event_log(build_id)
+                    for event in self._service_for(build_id).event_log(build_id)
                     if event.type != "reasoning_event"
                 ][-max(1, event_limit) :]
             except KeyError:
                 events = []
             try:
-                pending_permissions = self.service.list_permissions(build_id)
+                pending_permissions = self._service_for(build_id).list_permissions(build_id)
             except Exception:
                 logger.debug("permission read failed", exc_info=True)
                 pending_permissions = []
             try:
-                pending_dependencies = self.service.pending_dependency_ids(build_id)
+                pending_dependencies = self._service_for(build_id).pending_dependency_ids(build_id)
             except Exception:
                 logger.debug("dependency read failed", exc_info=True)
                 pending_dependencies = []
             try:
                 pending_dependency_requests = (
-                    self.service.pending_dependency_requests(build_id)
+                    self._service_for(build_id).pending_dependency_requests(build_id)
                 )
             except Exception:
                 logger.debug("dependency detail read failed", exc_info=True)
@@ -4242,6 +4353,16 @@ domain-mismatched, or produces no valid product.
                 and Path(record.workspace).is_dir()
             ),
             "model": record.model,
+            "onboarding_budget": (
+                {key: request.get(key) for key in (
+                    "max_seconds", "max_input_tokens", "max_output_tokens",
+                )}
+                if request.get("auto_collect") else None
+            ),
+            "token_usage": (
+                self._trace_meta(build_id, record.workspace).get("tokens")
+                if record.state in TERMINAL_BUILD_STATES else None
+            ),
             "proxy": _mask_proxy(record.proxy),
             "proxy_configured": bool(record.proxy),
             "error": record.error,
@@ -4345,7 +4466,7 @@ domain-mismatched, or produces no valid product.
             timeline, timeline_truncated = _trace_timeline(trace)
             if not trace.get("reasoning_retained"):
                 try:
-                    live_events = self.service.event_log(build_id)
+                    live_events = self._service_for(build_id).event_log(build_id)
                 except KeyError:
                     live_events = []
                 if live_events:
@@ -4391,7 +4512,7 @@ domain-mismatched, or produces no valid product.
             }
         events: list[Any] = []
         try:
-            events = self.service.event_log(build_id)
+            events = self._service_for(build_id).event_log(build_id)
         except KeyError:
             events = []
         if not events and record.workspace:
@@ -4463,16 +4584,16 @@ domain-mismatched, or produces no valid product.
         if record.request:
             self._hydrate_request(record)
         with self._lock:
-            if build_id in self._watchers:
+            if build_id in self._active:
                 raise BuildError(f"build {build_id} already has an active watcher")
-            active = self.service.active_build_id
-            if active is not None and active != build_id:
-                raise BuildError(f"another build is still active: {active}")
-            if self._slot_build_id is not None and self._slot_build_id != build_id:
-                raise BuildError(
-                    f"another build is still active: {self._slot_build_id}"
-                )
-            self._slot_build_id = build_id
+            if len(self._active) >= self.max_concurrent:
+                raise BuildError(f"another build is still active: {next(iter(self._active))}")
+            active = self.store.list_builds(
+                site_key=record.site_key, states=ACTIVE_BUILD_STATES, limit=1,
+            )
+            if active:
+                raise BuildError(f"site already has an active build: {active[0].build_id}")
+            self._reserve_slot(record)
         # Manual continuation is outside the automatic repair budget. If the
         # last auto-repair round failed, keep it visibly unresolved and let the
         # continuation record explain how the build eventually succeeded.
@@ -4485,11 +4606,10 @@ domain-mismatched, or produces no valid product.
         try:
             session = self._ensure_build_session(record)
             session.workspace.set_paused(False)
-            self.service.continue_after_finish(build_id, message)
+            self._service_for(build_id).continue_after_finish(build_id, message)
         except Exception as exc:
-            with self._lock:
-                if self._slot_build_id == build_id:
-                    self._slot_build_id = None
+            self._release_slot(build_id)
+            self._drain_queue()
             raise BuildError(
                 "build session is no longer available; start a new build "
                 f"instead ({type(exc).__name__}: {exc})"
@@ -4501,6 +4621,8 @@ domain-mismatched, or produces no valid product.
             error=None,
             error_class=None,
             finished_at=None,
+            validation={},
+            change_summary={},
         )
         self._repair_limits.setdefault(build_id, self.max_repair_rounds)
         self._start_watcher(build_id)
@@ -4514,7 +4636,7 @@ domain-mismatched, or produces no valid product.
             raise BuildError(
                 "queued build has not started; cancel it or wait for the slot"
             )
-        session = self.service.pause(build_id)
+        session = self._service_for(build_id).pause(build_id)
         self.store.update_build(build_id, state=session.state)
         return self.describe(build_id)
 
@@ -4526,46 +4648,24 @@ domain-mismatched, or produces no valid product.
             raise BuildError(
                 "queued build has not started; cancel it or wait for the slot"
             )
-        session = self.service.resume(build_id)
+        session = self._service_for(build_id).resume(build_id)
         self.store.update_build(build_id, state=session.state)
         return self.describe(build_id)
 
     def cancel(self, build_id: str) -> dict[str, Any]:
-        record = self.store.get_build(build_id)
-        if record is None:
-            raise KeyError(f"unknown build: {build_id}")
-        if record.state == "QUEUED":
-            self.store.update_build(
-                build_id,
-                state="CANCELLED",
-                outcome="cancelled",
-                finished_at=utc_now(),
-            )
-            self._release_site(
-                record.batch_id,
-                record.site_key,
-                build_id,
-                "构建已取消：可重新开始",
-            )
-            self._release_feedback(build_id, "构建已取消：未安装候选规则")
-            self._drain_queue()
-            return self.describe(build_id)
-        session = self.service.cancel(build_id)
-        self._write_trace(build_id, session, error="build was cancelled")
-        self._release_site(
-            record.batch_id,
-            record.site_key,
-            build_id,
-            "构建已取消：可重新开始",
-        )
-        self._release_feedback(build_id, "构建已取消：未安装候选规则")
-        self.store.update_build(
-            build_id,
-            state=session.state,
-            outcome="cancelled",
-            finished_at=utc_now(),
-        )
-        self._close_session(build_id)
+        with self._install_lock:
+            record = self.store.get_build(build_id)
+            if record is None:
+                raise KeyError(f"unknown build: {build_id}")
+            if record.state in TERMINAL_BUILD_STATES:
+                return self.describe(build_id)
+            session = self._session(build_id)
+            if session is not None:
+                session = self._service_for(build_id).cancel(build_id)
+            self._cancel_record(record)
+            if session is not None:
+                self._write_trace(build_id, session, error="build was cancelled")
+                self._close_session(build_id)
         self._drain_queue()
         return self.describe(build_id)
 
@@ -4577,7 +4677,7 @@ domain-mismatched, or produces no valid product.
         *,
         message: str | None = None,
     ) -> dict[str, Any]:
-        self.service.reply_permission(
+        self._service_for(build_id).reply_permission(
             build_id,
             request_id,
             decision,
@@ -4593,7 +4693,7 @@ domain-mismatched, or produces no valid product.
         *,
         message: str | None = None,
     ) -> dict[str, Any]:
-        self.service.reply_dependency(
+        self._service_for(build_id).reply_dependency(
             build_id,
             request_id,
             decision,
@@ -4624,25 +4724,9 @@ domain-mismatched, or produces no valid product.
         if self.read_only:
             return []
         interrupted: list[str] = []
-        for record in self.store.list_builds(states=RUNNING_BUILD_STATES, limit=500):
-            if record.state == "CANCELLING":
-                message = "服务重启，取消操作已完成"
-                self.store.update_build(
-                    record.build_id,
-                    state="CANCELLED",
-                    outcome="cancelled",
-                    error=None,
-                    finished_at=utc_now(),
-                )
-                self._release_site(
-                    record.batch_id,
-                    record.site_key,
-                    record.build_id,
-                    "构建已取消：可重新开始",
-                )
-                self._release_feedback(
-                    record.build_id, "构建已取消：未安装候选规则"
-                )
+        for record in self.store.list_builds(states=RUNNING_BUILD_STATES, limit=None, oldest_first=True):
+            if record.state == "CANCELLING" or record.request.get("batch_cancel_requested"):
+                self._cancel_record(record)
                 interrupted.append(record.build_id)
                 continue
             result = self._read_workspace_result(record)
@@ -4651,27 +4735,12 @@ domain-mismatched, or produces no valid product.
             agent_finished = record.state == "VALIDATING" or (
                 result_state == "FINISHED" and result_outcome == "succeeded"
             )
-            if agent_finished:
-                restored = self._restore_local_session(record)
-                if restored is not None:
-                    with self._lock:
-                        slot_free = self._slot_build_id is None
-                        if slot_free:
-                            self._slot_build_id = record.build_id
-                    if slot_free:
-                        self._hydrate_request(record)
-                        self._recovered_finalize.add(record.build_id)
-                        self.store.update_build(
-                            record.build_id,
-                            state="VALIDATING",
-                            error=None,
-                            error_class="service_restart",
-                        )
-                        logger.info(
-                            "recovering host validation for %s", record.build_id
-                        )
-                        self._start_watcher(record.build_id)
-                        continue
+            if (
+                agent_finished and record.session_id and record.workspace
+                and (Path(record.workspace) / "out").is_dir()
+            ):
+                self._pending_recovery.append(record)
+                continue
             if result_state == "FINISHED" and result_outcome in {"failed", "closed"}:
                 outcome = "failed"
                 message = str(
@@ -4729,6 +4798,35 @@ domain-mismatched, or produces no valid product.
         self._drain_queue()
         return interrupted
 
+    def _resume_validation(self, record: BuildRecord) -> bool:
+        build_id = record.build_id
+        current = self.store.get_build(build_id)
+        if current is None or current.state in TERMINAL_BUILD_STATES:
+            return False
+        if current.request.get("batch_cancel_requested"):
+            self._cancel_record(current)
+            return False
+        if self._restore_local_session(current) is None:
+            raise BuildError("构建工作区不可用，无法恢复验证")
+        self._hydrate_request(current)
+        self._recovered_finalize.add(build_id)
+        self.store.update_build(
+            build_id, state="VALIDATING", error=None, error_class="service_restart",
+        )
+        logger.info("recovering host validation for %s", build_id)
+        self._start_watcher(build_id)
+        return True
+
+    def _cancel_record(self, record: BuildRecord) -> None:
+        self.store.update_build(
+            record.build_id, state="CANCELLED", outcome="cancelled",
+            error=None, finished_at=utc_now(),
+        )
+        self._release_site(
+            record.batch_id, record.site_key, record.build_id, "构建已取消：可重新开始",
+        )
+        self._release_feedback(record.build_id, "构建已取消：未安装候选规则")
+
     def shutdown(self) -> None:
         self._stopping.set()
         if self.read_only:
@@ -4736,14 +4834,18 @@ domain-mismatched, or produces no valid product.
         records = {
             record.build_id: record
             for record in self.store.list_builds(
-                states=RUNNING_BUILD_STATES, limit=500
+                states=RUNNING_BUILD_STATES, limit=None
             )
         }
         message = "服务停止，构建会话已中断；会话已保留，可在构建详情继续"
         for build_id, record in sorted(records.items()):
+            if record.state == "VALIDATING":
+                # Startup reconciliation owns unfinished host validation and
+                # its persisted checkpoint. It does not need a live agent.
+                continue
             if record.state == "CANCELLING":
                 try:
-                    self.service.cancel(build_id)
+                    self._service_for(build_id).cancel(build_id)
                 except Exception:
                     logger.debug("build cancel on shutdown failed", exc_info=True)
                 self._release_site(
@@ -4764,7 +4866,7 @@ domain-mismatched, or produces no valid product.
                 )
                 continue
             try:
-                self.service.detach(build_id)
+                self._service_for(build_id).detach(build_id)
             except Exception:
                 logger.debug("build detach on shutdown failed", exc_info=True)
             self._release_site(
@@ -4788,12 +4890,9 @@ domain-mismatched, or produces no valid product.
             thread.join(timeout=2)
         # Stop adapter-owned processes but keep persisted conversations for a
         # later "continue" action.
-        shutdown = getattr(self.service.adapter, "shutdown", None)
-        if callable(shutdown):
-            try:
-                shutdown()
-            except Exception:
-                logger.debug("harness shutdown failed", exc_info=True)
         with self._lock:
-            self._slot_build_id = None
-            self._dispatching = None
+            remaining = list(self._active)
+        for build_id in remaining:
+            self._release_slot(build_id)
+        if self._shared_service is not None:
+            self._shutdown_adapter(self._shared_service)

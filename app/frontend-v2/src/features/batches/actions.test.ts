@@ -8,14 +8,14 @@ import {
   batchExportIsPartial,
   batchExportLabel,
   batchIsArchived,
+  batchNeedsLiveRefresh,
   siteCanCancelTask,
   siteCanExport,
   siteCanPauseTask,
   siteCanResumeTask,
-  siteExportIsPartial,
   siteExportLabel,
+  siteExportTaskId,
   sitePrimaryControl,
-  siteResultTask,
   siteStartMode,
   taskExportLabel,
 } from "./actions";
@@ -39,6 +39,26 @@ const COUNTS: BatchCounts = {
   failed: 0,
   partial_tasks: 0,
 };
+
+describe("batchNeedsLiveRefresh", () => {
+  it("refreshes batches with queued, running, paused or building work", () => {
+    expect(batchNeedsLiveRefresh(batch())).toBe(true);
+    expect(
+      batchNeedsLiveRefresh(
+        batch({
+          counts: {
+            ...COUNTS,
+            draft: 0,
+            queued: 0,
+            running: 0,
+            paused: 0,
+            building: 0,
+          },
+        }),
+      ),
+    ).toBe(false);
+  });
+});
 
 function batch(overrides: Partial<BatchSummary> = {}): BatchSummary {
   return {
@@ -245,23 +265,42 @@ describe("site action availability", () => {
       sitePrimaryControl(site({ task_id: "t-1", task: task({ state: "DRAFT" }) })),
     ).toBeNull();
     expect(
-      sitePrimaryControl(site({ readiness: "needs_onboarding", task_id: "t-1" })),
+      sitePrimaryControl(
+        site({
+          readiness: "needs_onboarding",
+          task_id: "t-1",
+          task: task({ state: "FINISHED", outcome: "COMPLETED" }),
+        }),
+      ),
     ).toBeNull();
+    expect(
+      sitePrimaryControl(
+        site({
+          task_id: "t-1",
+          formal_pending: true,
+          task: task({ state: "FINISHED" }),
+        }),
+      ),
+    ).toBe("start");
   });
 
-  it("only exports sites that have a task and marks live tasks partial", () => {
+  it("uses the server-selected result and keeps unapproved runs out of site exports", () => {
     expect(siteCanExport(site())).toBe(false);
     const running = site({ task_id: "t-1", task: task({ state: "RUNNING" }) });
-    expect(siteCanExport(running)).toBe(true);
-    expect(siteExportIsPartial(running)).toBe(true);
+    expect(siteCanExport(running)).toBe(false);
 
     const finished = site({ task_id: "t-1", task: task({ state: "FINISHED" }) });
-    expect(siteExportIsPartial(finished)).toBe(false);
+    expect(siteCanExport({ ...finished, export_task_id: null })).toBe(false);
+    expect(siteExportTaskId({ ...finished, export_task_id: "t-1" })).toBe("t-1");
 
     const delivered = task({ task_id: "t-previous", state: "FINISHED" });
-    const rerunning = { ...running, delivery_task: delivered };
-    expect(siteResultTask(rerunning)).toBe(delivered);
-    expect(siteExportIsPartial(rerunning)).toBe(false);
+    const rerunning = {
+      ...running,
+      delivery_task: delivered,
+      export_task_id: delivered.task_id,
+    };
+    expect(siteExportTaskId(rerunning)).toBe("t-previous");
+    expect(siteExportTaskId({ ...rerunning, export_task_id: null })).toBeNull();
     expect(siteExportLabel(rerunning)).toBe("导出已采用结果 ZIP");
   });
 });

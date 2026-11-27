@@ -28,7 +28,7 @@ export function siteMatches(site: BatchSite, filter: SiteFilter): boolean {
     case "all":
       return true;
     case "startable":
-      return site.readiness === "ready" && !site.task_id;
+      return siteStartMode(site) === "start";
     case "ready":
       return site.readiness === "ready";
     case "needs":
@@ -40,7 +40,7 @@ export function siteMatches(site: BatchSite, filter: SiteFilter): boolean {
     case "queued":
       return state === "QUEUED";
     case "finished":
-      return state === "FINISHED" && outcome === "COMPLETED";
+      return !site.formal_pending && state === "FINISHED" && outcome === "COMPLETED";
     case "failed":
       return state === "FINISHED" && (outcome === "FAILED" || outcome === "PARTIAL");
     case "cancelled":
@@ -110,9 +110,10 @@ export function batchPrimaryAction(batch: BatchDetail): BatchPrimaryAction {
 export function canCancelBatch(batch: BatchDetail): boolean {
   return batch.sites.some(
     (site) =>
-      site.task &&
-      TASK_LIVE_STATES.has(site.task.state) &&
-      site.task.state !== "CANCELLING",
+      site.build?.cancellable_onboarding ||
+      (site.task &&
+        TASK_LIVE_STATES.has(site.task.state) &&
+        site.task.state !== "CANCELLING"),
   );
 }
 

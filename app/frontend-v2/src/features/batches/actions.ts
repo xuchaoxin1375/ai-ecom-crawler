@@ -1,4 +1,4 @@
-import type { BatchSite, BatchSummary, TaskSummary } from "../../lib/api";
+import type { BatchSite, BatchSummary } from "../../lib/api";
 import { taskPrimaryControl, type TaskPrimaryControl } from "../../lib/taskControl";
 
 /** States that still have work to settle or can be controlled. */
@@ -16,6 +16,11 @@ export const TASK_TERMINAL_STATES = new Set(["FINISHED", "CANCELLED"]);
 
 export function batchIsArchived(batch: BatchSummary): boolean {
   return batch.status === "ARCHIVED" || Boolean(batch.archived_at);
+}
+
+export function batchNeedsLiveRefresh(batch: BatchSummary): boolean {
+  const counts = batch.counts;
+  return counts.queued + counts.running + counts.building > 0;
 }
 
 export function batchCanStart(batch: BatchSummary): boolean {
@@ -50,17 +55,13 @@ export function taskExportLabel(partial: boolean): string {
 }
 
 /**
- * Only a ready site without an active link can start. A finished or cancelled
- * task is replaced (rerun); other linked states are skipped by the API.
+ * A ready target can start its first run under the batch plan. Other terminal
+ * runs are replaced only when the user chooses to rerun.
  */
 export function siteStartMode(site: BatchSite): "start" | "rerun" | null {
   if (site.readiness !== "ready") return null;
-  if (!site.task) return "start";
-  return TASK_TERMINAL_STATES.has(site.task.state) ? "rerun" : null;
-}
-
-export function siteTaskIsLive(task: TaskSummary | null | undefined): boolean {
-  return Boolean(task && TASK_LIVE_STATES.has(task.state));
+  if (!site.task_id || site.formal_pending) return "start";
+  return site.task && TASK_TERMINAL_STATES.has(site.task.state) ? "rerun" : null;
 }
 
 export function siteCanPauseTask(site: BatchSite): boolean {
@@ -86,19 +87,14 @@ export function siteCanCancelTask(site: BatchSite): boolean {
 }
 
 export function siteCanExport(site: BatchSite): boolean {
-  return Boolean(siteResultTask(site));
+  return Boolean(siteExportTaskId(site));
 }
 
-export function siteResultTask(site: BatchSite): TaskSummary | null | undefined {
-  return site.delivery_task ?? site.task;
-}
-
-export function siteExportIsPartial(site: BatchSite): boolean {
-  return siteTaskIsLive(siteResultTask(site));
+export function siteExportTaskId(site: BatchSite): string | null {
+  if (site.export_task_id !== undefined) return site.export_task_id;
+  return site.delivery_task?.task_id ?? null;
 }
 
 export function siteExportLabel(site: BatchSite): string {
-  return site.delivery_task
-    ? "导出已采用结果 ZIP"
-    : taskExportLabel(siteExportIsPartial(site));
+  return site.delivery_task ? "导出已采用结果 ZIP" : "导出站点结果 ZIP";
 }

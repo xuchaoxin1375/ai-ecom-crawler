@@ -12,7 +12,7 @@ import threading
 import time
 import unittest
 import zipfile
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -32,6 +32,7 @@ from ecom_crawler.builds import (
     _seconds_since,
     _trace_timeline,
     default_permissions,
+    default_validator,
     dependency_policy_from_env,
     normalize_permission_rules,
 )
@@ -502,8 +503,10 @@ class BuildWorkflowTests(unittest.TestCase):
 
     def _manager(
         self,
-        adapter: FakeBuildAdapter,
+        adapter: FakeBuildAdapter | None,
         *,
+        adapter_factory: Callable[[], FakeBuildAdapter] | None = None,
+        max_concurrent: int = 1,
         currencies: dict[str, int] | None = None,
         validator: Any | None = None,
         max_repair_rounds: int = 0,
@@ -556,6 +559,8 @@ class BuildWorkflowTests(unittest.TestCase):
             self.root / "out",
             self.rules,
             adapter=adapter,
+            adapter_factory=adapter_factory,
+            max_concurrent=max_concurrent,
             validator=validator,
             max_seconds=max_seconds,
             validation_seconds=5,
@@ -573,7 +578,10 @@ class BuildWorkflowTests(unittest.TestCase):
             extra_permissions=extra_permissions,
             dependency_policy=dependency_policy,
         )
-        self.addCleanup(self._stop_manager, manager, adapter)
+        if adapter is None:
+            self.addCleanup(manager.shutdown)
+        else:
+            self.addCleanup(self._stop_manager, manager, adapter)
         return manager
 
     def _client(self, manager: BuildManager) -> TestClient:
@@ -620,7 +628,11 @@ class BuildWorkflowTests(unittest.TestCase):
 
     def test_batch_onboarding_queues_collection_only_after_validation(self) -> None:
         adapter = FakeBuildAdapter(self.root, rule_payloads=[listing_rule_payload()])
-        manager = self._manager(adapter, activation_mode="manual")
+        with mock.patch.dict(os.environ, {
+            "ECOM_BUILD_MAX_INPUT_TOKENS": "230000",
+            "ECOM_BUILD_MAX_OUTPUT_TOKENS": "45000",
+        }):
+            manager = self._manager(adapter, activation_mode="manual")
         with self._client(manager) as client:
             created = client.post("/api/batches", json={
                 "name": "Onboarding", "market": "FR", "collection_mode": "sample",
@@ -639,13 +651,59 @@ class BuildWorkflowTests(unittest.TestCase):
             result = self._wait_ready(client, build_id)
             self.assertEqual(result["outcome"], "succeeded", result.get("error"))
             self.assertEqual(result["catalog"]["catalog_scope"], "batch")
+            request = self.store.get_build(build_id).request
+            self.assertEqual(request["max_input_tokens"], 230000)
+            self.assertEqual(request["max_output_tokens"], 45000)
             site_key = started.json()["onboarding"][0]["site_key"]
             site = self.store.get_batch_site(batch_id, site_key)
             task = self.store.get_task(site.task_id)
             self.assertEqual(task.state, "QUEUED")
             self.assertEqual(task.input["collection_mode"], "formal")
-            self.assertEqual(task.limits["max_products"], 10000)
+            self.assertIsNone(task.limits["max_products"])
+            self.assertIsNone(task.limits["max_seconds"])
             self.assertEqual(len(self.store.list_batch_tasks(batch_id)), 1)
+            cancelled = client.post(f"/api/batches/{batch_id}/cancel").json()
+            self.assertEqual(cancelled["cancelled_onboarding"], [])
+            self.assertEqual(self.store.get_task(task.task_id).state, "CANCELLED")
+
+    def test_onboarding_budget_settings_apply_only_to_new_builds(self) -> None:
+        manager = self._manager(FakeBuildAdapter(self.root, hang=True))
+        endpoint = "/api/builds/config/onboarding-budget"
+        first = {"max_seconds": 1200, "max_input_tokens": 750_000, "max_output_tokens": 100_000}
+        second = {**first, "max_output_tokens": 150_000}
+        with self._client(manager) as client:
+            default = client.get("/api/builds/config").json()["onboarding_budget"]
+            saved = client.put(endpoint, json=first)
+            self.assertEqual(saved.status_code, 200, saved.text)
+            self.assertTrue(saved.json()["onboarding_budget_override"])
+            self.assertEqual(client.put(endpoint, json={**first, "max_seconds": 1}).status_code, 422)
+            self.assertEqual(client.get("/api/builds/config").json()["onboarding_budget"], first)
+            batch = client.post("/api/batches", json={
+                "name": "Budget", "market": "FR", "collection_mode": "sample",
+                "sites": ["https://budget-first.test/", "https://budget-second.test/"],
+            }).json()["batch"]
+            path = f"/api/batches/{batch['batch_id']}/start"
+            build_ids = []
+            for index, site in enumerate(batch["sites"]):
+                if index:
+                    self.assertEqual(client.put(endpoint, json=second).status_code, 200)
+                result = client.post(path, json={"onboard": True, "site_keys": [site["site_key"]]})
+                self.assertEqual(result.status_code, 202, result.text)
+                build_ids.append(result.json()["onboarding"][0]["build_id"])
+            for build_id, expected in zip(build_ids, (first, second)):
+                response = client.get(f"/api/builds/{build_id}").json()["build"]
+                self.assertEqual(response["onboarding_budget"], expected)
+                self.assertEqual(self.store.get_build(build_id).request["max_total_seconds"], 1200)
+            self.assertEqual(self.store.get_build(build_ids[1]).state, "QUEUED")
+            with TestClient(
+                create_app(self.root / "tasks.db", self.root / "out", self.rules, read_only=True),
+                headers=CLIENT_HEADERS,
+            ) as preview:
+                self.assertEqual(preview.get("/api/builds/config").json()["onboarding_budget"], second)
+                self.assertEqual(preview.delete(endpoint).status_code, 403)
+            restored = client.delete(endpoint).json()
+            self.assertEqual(restored["onboarding_budget"], default)
+            self.assertFalse(restored["onboarding_budget_override"])
 
     def test_formal_batch_onboarding_rejects_sample_only_rule(self) -> None:
         manager = self._manager(FakeBuildAdapter(self.root))
@@ -661,6 +719,166 @@ class BuildWorkflowTests(unittest.TestCase):
             self.assertEqual(result["outcome"], "failed")
             self.assertIn("entry_links alone", result["error"])
             self.assertEqual(self.store.list_batch_tasks(batch["batch_id"]), [])
+
+    def test_batch_cancel_stops_running_and_queued_automatic_onboarding(self) -> None:
+        adapter = FakeBuildAdapter(self.root, hang=True)
+        manager = self._manager(adapter)
+        with self._client(manager) as client:
+            batch = client.post("/api/batches", json={
+                "name": "Cancelable", "market": "FR", "collection_mode": "formal",
+                "sites": ["https://first.example/", "https://second.example/", "https://manual.example/"],
+            }).json()["batch"]
+            path = f"/api/batches/{batch['batch_id']}"
+            first, second, manual = [site["site_key"] for site in batch["sites"]]
+            response = client.post(f"{path}/start", json={
+                "site_keys": [first, second], "onboard": True,
+            })
+            self.assertEqual(response.status_code, 202, response.text)
+            running, queued = [entry["build_id"] for entry in response.json()["onboarding"]]
+            unrelated = client.post(f"{path}/sites/{manual}/build")
+            self.assertEqual(unrelated.status_code, 202, unrelated.text)
+            separate_build = unrelated.json()["build"]["build_id"]
+            self.assertEqual(self.store.get_build(queued).state, "QUEUED")
+            self.assertEqual(adapter.started, [running])
+            current = client.get(path).json()["sites"]
+            self.assertEqual([site["build"]["cancellable_onboarding"] for site in current], [True, True, False])
+
+            cancelled = client.post(f"{path}/cancel").json()
+            self.assertCountEqual(cancelled["cancelled_onboarding"], [running, queued])
+            self.assertEqual(self.store.get_build(queued).state, "CANCELLED")
+            self.assertEqual(self._wait_ready(client, running)["state"], "CANCELLED")
+            self._wait_for_build_state(client, separate_build, "RUNNING")
+            self.assertEqual(adapter.started, [running, separate_build])
+            self.assertEqual(adapter.canceled, [running])
+            replay = client.post(f"{path}/cancel").json()
+            self.assertEqual(replay["cancelled_onboarding"], [])
+            self.assertEqual(self.store.list_batch_tasks(batch["batch_id"]), [])
+
+    def test_batch_cancel_during_validation_blocks_the_automatic_task(self) -> None:
+        origin = "http://validating-catalog.test"
+        rule = yaml.safe_load(RULE_TEMPLATE.replace("__BASE__", origin))
+        rule["discovery"]["sources"] = [{
+            "type": "listing", "url": f"{origin}/list", "product_link_selector": "a.product",
+        }]
+        validation_started = threading.Event()
+        finish_validation = threading.Event()
+
+        def validator(*args: Any, **kwargs: Any) -> dict[str, Any]:
+            validation_started.set()
+            if not finish_validation.wait(10):
+                raise TimeoutError("validation fixture was not released")
+            return default_validator(*args, **kwargs)
+
+        adapter = FakeBuildAdapter(self.root, rule_payloads=[rule])
+        manager = self._manager(adapter, validator=validator)
+        with fixture_server(proxy_origin=origin) as proxy, self._client(manager) as client:
+            batch = client.post("/api/batches", json={
+                "name": "Cancel during validation", "market": "GB",
+                "collection_mode": "formal", "sites": [origin],
+            }).json()["batch"]
+            path = f"/api/batches/{batch['batch_id']}"
+            started = client.post(f"{path}/start", json={"onboard": True, "proxy": proxy})
+            build_id = started.json()["onboarding"][0]["build_id"]
+            try:
+                self.assertTrue(validation_started.wait(5))
+                self.assertEqual(self.store.get_build(build_id).state, "VALIDATING")
+                self.assertEqual(client.post(f"{path}/cancel").json()["cancelled_onboarding"], [build_id])
+            finally:
+                finish_validation.set()
+            result = self._wait_ready(client, build_id)
+            self.assertEqual(result["outcome"], "succeeded", result["error"])
+            self.assertEqual(self.store.list_batch_tasks(batch["batch_id"]), [])
+            started_manually = client.post(f"{path}/start")
+            self.assertEqual(len(started_manually.json()["accepted"]), 1)
+
+    def test_batch_cancel_before_validation_prevents_validation(self) -> None:
+        validator = mock.Mock(side_effect=AssertionError("cancelled build entered validation"))
+        adapter = FakeBuildAdapter(self.root, rule_payloads=[listing_rule_payload()])
+        manager = self._manager(adapter, validator=validator)
+        about_to_validate = threading.Event()
+        proceed = threading.Event()
+        claim = self.store.claim_build_validation
+
+        def claim_after_cancel(build_id: str) -> bool:
+            about_to_validate.set()
+            if not proceed.wait(10):
+                raise TimeoutError("validation claim fixture was not released")
+            return claim(build_id)
+
+        with mock.patch.object(self.store, "claim_build_validation", claim_after_cancel), self._client(manager) as client:
+            batch = client.post("/api/batches", json={
+                "name": "Cancel before validation", "market": "FR",
+                "collection_mode": "formal", "sites": ["https://example.fr/"],
+            }).json()["batch"]
+            path = f"/api/batches/{batch['batch_id']}"
+            started = client.post(f"{path}/start", json={"onboard": True})
+            build_id = started.json()["onboarding"][0]["build_id"]
+            try:
+                self.assertTrue(about_to_validate.wait(5))
+                self.assertEqual(client.post(f"{path}/cancel").json()["cancelled_onboarding"], [build_id])
+            finally:
+                proceed.set()
+            self.assertEqual(self._wait_ready(client, build_id)["state"], "CANCELLED")
+            validator.assert_not_called()
+            self.assertEqual(self.store.list_batch_tasks(batch["batch_id"]), [])
+
+    def test_formal_onboarding_validates_only_the_submitted_product(self) -> None:
+        origin = "http://new-product.test"
+        entry = f"{origin}/p2.html?variant=blue"
+        rule = yaml.safe_load(RULE_TEMPLATE.replace("__BASE__", origin))
+        rule["site"]["entry_urls"] = [entry]
+        rule["discovery"]["entry_url"] = entry
+        adapter = FakeBuildAdapter(self.root, rule_payloads=[rule])
+        manager = self._manager(adapter, validator=default_validator)
+        requested: list[str] = []
+        with fixture_server(proxy_origin=origin, requests=requested) as proxy, self._client(manager) as client:
+            batch = client.post("/api/batches", json={
+                "name": "Product", "market": "GB", "collection_mode": "formal",
+                "sites": [entry],
+            }).json()["batch"]
+            result = client.post(
+                f"/api/batches/{batch['batch_id']}/start", json={"onboard": True, "proxy": proxy},
+            ).json()
+            build = self._wait_ready(client, result["onboarding"][0]["build_id"])
+            self.assertEqual(build["outcome"], "succeeded", build["error"])
+            self.assertEqual(build["validation"]["candidate_smoke"]["valid_products"], 1)
+            brief = (Path(build["workspace"]) / "input" / "build-brief.md").read_text(encoding="utf-8")
+            self.assertIn("inspect that one product only", brief)
+            self.assertIn("Reuse the first successful static response", brief)
+            self.assertEqual(requested, ["/p2.html?variant=blue"])
+            task, = self.store.list_batch_tasks(batch["batch_id"])
+            self.assertEqual(task.input["target_entry"], entry)
+
+    def test_formal_onboarding_validates_from_the_submitted_directory_page(self) -> None:
+        origin = "http://new-catalog.test"
+        entry = f"{origin}/list?brand=one&brand=two&p=2"
+        rule = yaml.safe_load(RULE_TEMPLATE.replace("__BASE__", origin))
+        rule["site"]["entry_urls"] = [entry]
+        rule["discovery"]["sources"] = [{
+            "type": "listing", "url": entry, "product_link_selector": "a.product",
+            "advance": {"type": "page_param", "param": "p", "max_pages": 3},
+        }]
+        adapter = FakeBuildAdapter(self.root, rule_payloads=[rule])
+        manager = self._manager(adapter, validator=default_validator)
+        requested: list[str] = []
+        with fixture_server(proxy_origin=origin, requests=requested) as proxy, self._client(manager) as client:
+            batch = client.post("/api/batches", json={
+                "name": "Filtered catalog", "market": "GB", "collection_mode": "formal",
+                "sites": [entry],
+            }).json()["batch"]
+            response = client.post(
+                f"/api/batches/{batch['batch_id']}/start", json={"onboard": True, "proxy": proxy},
+            )
+            self.assertEqual(response.status_code, 202, response.text)
+            build = self._wait_ready(client, response.json()["onboarding"][0]["build_id"])
+            self.assertEqual(build["outcome"], "succeeded", build["error"])
+            self.assertIn("/list?brand=one&brand=two&p=3", requested)
+            samples = build["validation"]["candidate_smoke"]["product_samples"]
+            self.assertEqual({sample["source_url"] for sample in samples}, {
+                f"{origin}/p2.html", f"{origin}/p3.html",
+            })
+            task, = self.store.list_batch_tasks(batch["batch_id"])
+            self.assertEqual(task.input["target_entry"], entry)
 
     def test_build_permissions_share_skills_and_keep_workspace_boundaries(self) -> None:
         workspace = self.root / "out" / "build-permissions"
@@ -901,12 +1119,17 @@ class BuildWorkflowTests(unittest.TestCase):
             self.assertIn("../out/evidence/visual/baseline.json", agents)
             self.assertIn("review.status", agents)
             self.assertIn("Read local files from", agents)
-            self.assertIn("Read local files from", brief)
+            self.assertIn("in place of generic skill defaults", agents)
+            self.assertIn("Use the recorded exit", agents)
+            self.assertIn("honor Retry-After", agents)
+            self.assertNotIn("Read local files from", brief)
             self.assertIn("../out/evidence/visual/", brief)
-            self.assertIn("baseline.json", brief)
-            self.assertIn("compare.md", brief)
-            self.assertIn("pending_manual", brief)
-            self.assertIn("capture_method: rendered", brief)
+            self.assertIn("follow the visual evidence instructions", brief)
+            self.assertIn("pending_manual", agents)
+            self.assertIn("capture_method: rendered", agents)
+            self.assertNotIn("pending_manual", brief)
+            self.assertNotIn("alternate same-market", brief)
+            self.assertIn("A passing initial build is activated", brief)
             self.assertIn("product_source", brief)
             self.assertIn("schema_version: \"1.3\"", brief)
             self.assertIn("shopify_json", brief)
@@ -1762,6 +1985,8 @@ class BuildWorkflowTests(unittest.TestCase):
                 encoding="utf-8"
             )
             self.assertIn("## Current task evidence", brief)
+            self.assertIn("for operator activation", brief)
+            self.assertIn("Egress:", brief)
             self.assertIn("Existing managed versions", brief)
             self.assertIn("2026.11.23-1", brief)
             self.assertIn("task-existing", brief)
@@ -2650,7 +2875,7 @@ class BuildWorkflowTests(unittest.TestCase):
         brief = (workspace / "input" / "build-brief.md").read_text(encoding="utf-8")
         agents = (workspace / "work" / "AGENTS.md").read_text(encoding="utf-8")
         self.assertIn("https://example.fr/sitemap.xml", brief)
-        self.assertIn("Do not fetch or read robots.txt", brief)
+        self.assertIn("Do not fetch, print or read robots.txt", agents)
         self.assertIn("Do not analyze", agents)
         self.assertNotIn("If it disallows", brief)
         manager.shutdown()
@@ -3275,6 +3500,43 @@ class BuildWorkflowTests(unittest.TestCase):
         self.assertEqual(timeline[1]["status"], "success")
         self.assertEqual(timeline[2]["text"], "done")
 
+    def test_build_timeline_merges_live_tool_input_and_output(self) -> None:
+        from types import SimpleNamespace
+
+        events = [
+            SimpleNamespace(
+                type="tool_started",
+                data={"tool": "call_1", "call_id": "call_1"},
+                created_at="2026-11-27T04:00:01Z",
+            ),
+            SimpleNamespace(
+                type="tool_input",
+                data={
+                    "tool": "read",
+                    "call_id": "call_1",
+                    "input": {"path": "work/AGENTS.md"},
+                },
+                created_at="2026-11-27T04:00:02Z",
+            ),
+            SimpleNamespace(
+                type="tool_finished",
+                data={
+                    "tool": "read",
+                    "call_id": "call_1",
+                    "status": "success",
+                    "output": "read ok",
+                },
+                created_at="2026-11-27T04:00:03Z",
+            ),
+        ]
+        timeline, truncated = _live_timeline(events)
+        self.assertFalse(truncated)
+        self.assertEqual(len(timeline), 1)
+        self.assertEqual(timeline[0]["name"], "read")
+        self.assertEqual(timeline[0]["input"], {"path": "work/AGENTS.md"})
+        self.assertEqual(timeline[0]["output"], "read ok")
+        self.assertEqual(timeline[0]["status"], "success")
+
     def test_build_timeline_deduplicates_final_reasoning_event(self) -> None:
         from types import SimpleNamespace
 
@@ -3304,6 +3566,46 @@ class BuildWorkflowTests(unittest.TestCase):
         self.assertFalse(truncated)
         self.assertEqual([item["kind"] for item in timeline], ["reasoning", "tool"])
         self.assertEqual(timeline[0]["text"], "first second")
+
+    def test_two_builds_run_independently_and_release_slots(self) -> None:
+        adapters: list[FakeBuildAdapter] = []
+
+        def new_adapter() -> FakeBuildAdapter:
+            adapter = FakeBuildAdapter(self.root, hang=True)
+            adapters.append(adapter)
+            return adapter
+
+        manager = self._manager(None, adapter_factory=new_adapter, max_concurrent=2)
+        targets = ["https://first.example.fr/", "https://second.example.fr/", "https://third.example.fr/"]
+        with self._client(manager) as client:
+            batch = client.post("/api/batches", json={
+                "name": "Independent builds", "market": "FR",
+                "collection_mode": "formal", "sites": targets,
+            }).json()["batch"]
+            prefix = f"/api/batches/{batch['batch_id']}/sites"
+            records = []
+            for site in batch["sites"]:
+                response = client.post(f"{prefix}/{site['site_key']}/build")
+                self.assertEqual(response.status_code, 202, response.text)
+                records.append(response.json()["build"])
+            first, second, third = [record["build_id"] for record in records]
+            self.assertEqual([record["state"] for record in records], ["RUNNING", "RUNNING", "QUEUED"])
+            self.assertEqual([adapter.started for adapter in adapters], [[first], [second]])
+            response = client.post(f"/api/builds/{first}/pause")
+            self.assertEqual(response.status_code, 202, response.text)
+            self.assertEqual(self.store.get_build(second).state, "RUNNING")
+            response = client.post(f"/api/builds/{first}/cancel")
+            self.assertEqual(response.status_code, 202, response.text)
+            self._wait_for_build_state(client, third, "RUNNING")
+            self.assertEqual(self.store.get_build(first).state, "CANCELLED")
+            self.assertEqual(self.store.get_build(second).state, "RUNNING")
+            self.assertEqual(adapters[0].canceled, [first])
+            self.assertTrue(adapters[0].shutdown_called)
+            self.assertEqual(adapters[1].canceled, [])
+            self.assertEqual(adapters[2].started, [third])
+        self.assertTrue(all(adapter.shutdown_called for adapter in adapters))
+        self.assertEqual(self.store.get_build(second).outcome, "interrupted")
+        self.assertEqual(self.store.get_build(third).outcome, "interrupted")
 
     def test_second_build_waits_in_queue_then_starts(self) -> None:
         gate = threading.Event()
@@ -3760,6 +4062,108 @@ class BuildWorkflowTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertEqual(adapter.prompts, [])
         self.assertTrue(list(self.rules.glob("*.yaml")))
+
+    def test_batch_onboarding_resumes_after_activation_or_enqueue(self) -> None:
+        for after_enqueue in (False, True):
+            with self.subTest(after_enqueue=after_enqueue):
+                suffix = "after" if after_enqueue else "before"
+                domain = f"{suffix}.example.fr"
+                rule = listing_rule_payload(domain)
+                rule["rule_id"] = f"{suffix}-build"
+                adapter = FakeBuildAdapter(self.root, rule_payloads=[rule])
+                manager = self._manager(adapter)
+                fault = threading.Event()
+                original_enqueue = self.store.create_task_for_site
+
+                def enqueue(
+                    *args: Any, commit: bool = after_enqueue,
+                    original: Any = original_enqueue, interrupted: threading.Event = fault,
+                    **kwargs: Any,
+                ) -> bool:
+                    if commit:
+                        original(*args, **kwargs)
+                    interrupted.set()
+                    raise RuntimeError("injected interruption at automatic enqueue")
+
+                with self._client(manager) as client:
+                    batch = client.post("/api/batches", json={
+                        "name": suffix, "market": "FR", "collection_mode": "formal",
+                        "sites": [f"https://{domain}/"],
+                    }).json()["batch"]
+                    path = f"/api/batches/{batch['batch_id']}"
+                    with (
+                        mock.patch.object(self.store, "create_task_for_site", enqueue),
+                        self.assertLogs("ecom_crawler.builds", level="ERROR") as messages,
+                    ):
+                        start = client.post(f"{path}/start", json={"onboard": True})
+                        self.assertEqual(start.status_code, 202, start.text)
+                        build_id = start.json()["onboarding"][0]["build_id"]
+                        self.assertTrue(fault.wait(10), self.store.get_build(build_id))
+                        # The watcher logs the fault before shutdown discards its thread.
+                        watcher = manager._watchers.get(build_id)
+                        if watcher is not None:
+                            watcher.join(timeout=5)
+                    self.assertTrue(any("build watcher failed" in item for item in messages.output))
+                    existing_tasks = self.store.list_batch_tasks(batch["batch_id"])
+                    self.assertEqual(len(existing_tasks), int(after_enqueue))
+                    activation = self.store.get_activation_by_request(f"{build_id}-activate")
+                    self.assertIsNotNone(activation)
+
+                validator = mock.Mock(side_effect=AssertionError("validation already completed"))
+                restarted_adapter = FakeBuildAdapter(self.root)
+                new_manager = self._manager(restarted_adapter, validator=validator)
+                with self._client(new_manager) as client:
+                    result = self._wait_ready(client, build_id)
+                    self.assertEqual(result["outcome"], "succeeded", result.get("error"))
+                    self.assertEqual(result["validation"]["status"], "PASSED")
+                    start = client.post(f"{path}/start", json={"onboard": True})
+                    self.assertEqual(start.json()["accepted"], [])
+                    tasks = self.store.list_batch_tasks(batch["batch_id"])
+                    self.assertEqual(len(tasks), 1)
+                    self.assertEqual(tasks[0].rule_sha256, activation.to_sha256)
+                    if after_enqueue:
+                        self.assertEqual(tasks[0].task_id, existing_tasks[0].task_id)
+                self.assertEqual(
+                    self.store.get_activation_by_request(f"{build_id}-activate"), activation
+                )
+                validator.assert_not_called()
+                self.assertEqual(restarted_adapter.prompts, [])
+
+    def test_reconcile_finishes_both_host_validations_after_lowering_capacity(self) -> None:
+        build_ids = []
+        for index in range(2):
+            domain = f"recovery-{index}.example.fr"
+            build_id = f"recover-{index}"
+            build_ids.append(build_id)
+            workspace = self.root / build_id
+            plan = workspace / "out" / "plan"
+            plan.mkdir(parents=True)
+            (plan / "rule.yaml").write_text(
+                yaml.safe_dump(rule_payload(domain, rule_id=build_id)), encoding="utf-8",
+            )
+            self.store.add_batch_sites([BatchSite(
+                batch_id="b-1", site_key=domain, domain=domain,
+                input_value=f"https://{domain}/", readiness="building", build_id=build_id,
+            )])
+            self.store.create_build(BuildRecord(
+                build_id=build_id, batch_id="b-1", site_key=domain,
+                state="VALIDATING", session_id=f"ses_{build_id}", workspace=str(workspace),
+            ))
+        adapters: list[FakeBuildAdapter] = []
+
+        def new_adapter() -> FakeBuildAdapter:
+            adapter = FakeBuildAdapter(self.root)
+            adapters.append(adapter)
+            return adapter
+
+        manager = self._manager(None, adapter_factory=new_adapter, max_concurrent=1)
+        with self._client(manager) as client:
+            for build_id in build_ids:
+                result = self._wait_ready(client, build_id)
+                self.assertEqual(result["outcome"], "succeeded", result.get("error"))
+                self.assertEqual(result["validation"]["status"], "PASSED")
+        self.assertEqual(len(adapters), 2)
+        self.assertTrue(all(adapter.shutdown_called and not adapter.prompts for adapter in adapters))
 
     def test_reconcile_marks_session_backed_build_interrupted(self) -> None:
         workspace = self.root / "out" / "builds" / "build-resumable"

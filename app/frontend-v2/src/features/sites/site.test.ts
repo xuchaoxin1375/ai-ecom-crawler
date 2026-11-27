@@ -256,16 +256,24 @@ describe("siteNextStep", () => {
     ).toBe("cancel-task");
   });
 
-  it("offers export for completed tasks and repair for partial tasks", () => {
+  it("offers export for eligible results and repair for partial tasks", () => {
+    const completed = task({ state: "FINISHED", outcome: "COMPLETED" });
     expect(
       siteNextStep(
         site({
-          task: task({ state: "FINISHED", outcome: "COMPLETED" }),
+          task: completed,
           task_id: "t-1",
+          export_task_id: "t-1",
         }),
         null,
       ).action,
     ).toBe("export");
+    expect(
+      siteNextStep(
+        site({ task: completed, task_id: "t-1", export_task_id: null }),
+        null,
+      ).action,
+    ).toBe("none");
     expect(
       siteNextStep(
         site({

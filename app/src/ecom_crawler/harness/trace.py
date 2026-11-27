@@ -94,6 +94,48 @@ def _tool_output(state: dict[str, Any]) -> str:
     return _truncate(_redact(raw), OUTPUT_LIMIT)
 
 
+def summarize_tool_input(value: Any) -> Any:
+    """Return a safe, bounded tool-input summary for live timeline events.
+
+    OpenCode streams the tool input as JSON text in ``session.tool.input.ended``;
+    completed builds expose the parsed input on the tool part.  Both shapes are
+    accepted here so the live timeline can show the same details as the trace.
+    """
+    if value is None or value == "":
+        return None
+    if isinstance(value, str):
+        text = value.strip()
+        if text[:1] in {"{", "["}:
+            try:
+                value = json.loads(text)
+            except (TypeError, ValueError):
+                return _truncate(_redact(text), COMMAND_LIMIT)
+        else:
+            return _truncate(_redact(text), COMMAND_LIMIT)
+    return _tool_input(value)
+
+
+def summarize_tool_output(value: Any) -> str:
+    """Return a safe, bounded tool-output summary for live timeline events."""
+    if value is None:
+        return ""
+    if isinstance(value, dict):
+        if "content" in value or "output" in value or "result" in value:
+            raw = value.get("content", value.get("output", value.get("result")))
+        else:
+            raw = value
+    else:
+        raw = value
+    if isinstance(raw, list):
+        return _tool_output({"content": raw})
+    if isinstance(raw, dict):
+        return _truncate(_redact(json.dumps(raw, ensure_ascii=False)), OUTPUT_LIMIT)
+    text = str(raw or "")
+    if _looks_like_html(text):
+        return f"[HTML output suppressed: {len(text)} chars]"
+    return _truncate(_redact(text), OUTPUT_LIMIT)
+
+
 def _tool_trace(part: dict[str, Any]) -> dict[str, Any]:
     state = part.get("state") if isinstance(part.get("state"), dict) else {}
     timing = part.get("time") if isinstance(part.get("time"), dict) else {}

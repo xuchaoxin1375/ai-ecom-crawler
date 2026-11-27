@@ -21,7 +21,6 @@ import {
   ArrowUpRight,
   Ban,
   Download,
-  Eye,
   FileUp,
   MoreHorizontal,
   Pause,
@@ -102,10 +101,9 @@ import {
   siteCanExport,
   siteCanPauseTask,
   siteCanResumeTask,
-  siteExportIsPartial,
   siteExportLabel,
+  siteExportTaskId,
   sitePrimaryControl,
-  siteResultTask,
   siteStartMode,
 } from "./actions";
 import {
@@ -160,6 +158,7 @@ function siteStartSkipReason(site: BatchSite): string {
 
 function actionNotice(prefix: string, response: BatchActionResponse): Notice {
   const accepted = response.accepted.length;
+  const onboarding = response.cancelled_onboarding?.length ?? 0;
   const skipped = response.skipped;
   const reasons = skipped
     .slice(0, 3)
@@ -167,7 +166,7 @@ function actionNotice(prefix: string, response: BatchActionResponse): Notice {
     .join("；");
   const more = skipped.length > 3 ? `；另有 ${skipped.length - 3} 个未展开` : "";
 
-  if (accepted === 0) {
+  if (accepted === 0 && onboarding === 0) {
     return {
       tone: "warning",
       text: `${prefix}：没有站点被受理${reasons ? `。${reasons}${more}。` : "。"}`,
@@ -176,7 +175,7 @@ function actionNotice(prefix: string, response: BatchActionResponse): Notice {
 
   return {
     tone: skipped.length ? "warning" : "success",
-    text: `${prefix}：受理 ${formatNumber(accepted)} 个，跳过 ${formatNumber(
+    text: `${prefix}：受理 ${formatNumber(accepted)} 个采集任务${onboarding ? `，停止 ${formatNumber(onboarding)} 个自动接入` : ""}，跳过 ${formatNumber(
       skipped.length,
     )} 个。${reasons ? ` ${reasons}${more}。` : ""}`,
   };
@@ -638,10 +637,10 @@ export function BatchDetailPage() {
   }
 
   function downloadSite(site: BatchSite) {
-    const result = siteResultTask(site);
-    if (!result) return;
+    const taskId = siteExportTaskId(site);
+    if (!taskId) return;
     const link = document.createElement("a");
-    link.href = taskExportUrl(result.task_id, siteExportIsPartial(site));
+    link.href = taskExportUrl(taskId, false);
     link.download = "";
     document.body.appendChild(link);
     link.click();
@@ -759,16 +758,7 @@ export function BatchDetailPage() {
   }
 
   function siteActions(site: BatchSite): RowActionItem[][] {
-    const groups: RowActionItem[][] = [
-      [
-        {
-          key: "open",
-          label: "查看站点详情",
-          icon: <Eye size={14} />,
-          onSelect: () => openSite(site),
-        },
-      ],
-    ];
+    const groups: RowActionItem[][] = [];
 
     if (batch && batch.status !== "ARCHIVED") {
       const mode = siteStartMode(site);
@@ -906,15 +896,16 @@ export function BatchDetailPage() {
   const primary = primaryActions[primaryKind];
   const moreActions: RowActionItem[][] = [[], []];
   if (!archived && primaryKind !== "import") moreActions[0].push(importAction);
-  if (canExport && primaryKind !== "export") moreActions[0].push(exportAction);
   if (!archived && primaryKind !== "pause" && sites.some(siteCanPauseTask))
     moreActions[0].push(pauseAction);
   if (!archived && primaryKind !== "resume" && batch.counts.paused > 0)
     moreActions[0].push(resumeAction);
-  if (!archived && batch.counts.startable === 0 && batchRerunnableSites(batch) > 0) {
+  if (!archived && batchRerunnableSites(batch) > 0) {
     moreActions[0].push({
       key: "rerun",
-      label: "重新采集已结束站点…",
+      label: batch.counts.startable
+        ? "启动／重新采集全部可采站点…"
+        : "重新采集已结束站点…",
       icon: <RotateCcw size={14} />,
       onSelect: () => openStart(true),
     });
@@ -932,7 +923,7 @@ export function BatchDetailPage() {
   if (canCancel)
     moreActions[1].push({
       key: "cancel",
-      label: "取消批次内未结束任务…",
+      label: "取消批次采集…",
       icon: <Ban size={14} />,
       danger: true,
       onSelect: () => {
@@ -1071,7 +1062,7 @@ export function BatchDetailPage() {
         return (
           <div>
             <Badge tone={readinessTone(site.readiness)} dot={false}>
-              {READINESS_LABELS[site.readiness]}
+              {site.formal_pending ? "待正式采集" : READINESS_LABELS[site.readiness]}
             </Badge>
             {!compact && statusText && !site.task ? (
               <p className="mt-1 text-[11px] text-ink-3">{statusText}</p>
@@ -1095,7 +1086,8 @@ export function BatchDetailPage() {
         if (!task) {
           return <span className="text-xs text-ink-3">—</span>;
         }
-        const statusLabel = taskStatusLabel(task.state, task.outcome);
+        const taskStatus = taskStatusLabel(task.state, task.outcome);
+        const statusLabel = site.formal_pending ? `试采 · ${taskStatus}` : taskStatus;
         return (
           <Link
             className="group inline-flex max-w-full items-center gap-1 rounded-full"
@@ -1339,12 +1331,16 @@ export function BatchDetailPage() {
               <span aria-hidden="true">{primary.icon}</span>
               {busy === "pause" && primaryKind === "pause"
                 ? "正在暂停…"
-                : busy === "resume" && primaryKind === "resume"
-                  ? "正在继续…"
-                  : busy === "restore" && primaryKind === "unarchive"
-                    ? "正在取消归档…"
-                    : primary.label}
+                : busy === "restore" && primaryKind === "unarchive"
+                  ? "正在取消归档…"
+                  : primary.label}
             </Button>
+            {canExport && primaryKind !== "export" ? (
+              <Button onClick={exportAction.onSelect} disabled={Boolean(busy)}>
+                <span aria-hidden="true">{exportAction.icon}</span>
+                {exportAction.label}
+              </Button>
+            ) : null}
             {batch.collection_mode === "sample" &&
             !archived &&
             !batchHasActiveTasks(batch) &&
@@ -1479,10 +1475,10 @@ export function BatchDetailPage() {
       {dialog === "cancel" ? (
         <ConfirmBatchActionDialog
           open
-          title="取消批次内未结束任务？"
-          description="将取消排队、运行和暂停中的任务；已经产生的部分结果保留，可继续导出。"
-          consequence="取消是批次级操作，不会删除批次和站点；未开始的可采站点仍保留在批次中。"
-          confirmLabel="确认取消这些任务"
+          title="取消批次采集？"
+          description="停止未结束的采集和本批次的自动接入。已开始的规则验证可收尾，之后不会自动采集。"
+          consequence="已产生的结果会保留，之后可从当前批次重新启动。"
+          confirmLabel="取消批次采集"
           tone="danger"
           busy={busy === "cancel"}
           error={confirmError}

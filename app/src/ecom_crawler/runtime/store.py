@@ -1934,15 +1934,15 @@ class TaskStore:
         task: Task,
         *,
         site_key: str,
-        replace_existing: bool = False,
+        expected_task_id: str | None = None,
         promote_trial: bool = False,
+        onboarding_build_id: str | None = None,
     ) -> bool:
         """Create a task and link it to a batch site in one transaction.
 
         Returns ``False`` when the site already has a task, which makes a
-        repeated batch start idempotent even with concurrent callers.  With
-        ``replace_existing=True`` a terminal task link may be replaced by a new
-        run; the caller is responsible for checking the old task is terminal.
+        repeated batch start idempotent even with concurrent callers. Pass
+        ``expected_task_id`` to replace that specific terminal task link.
         """
         if not task.batch_id:
             raise ValueError("task.batch_id is required for batch starts")
@@ -1965,27 +1965,31 @@ class TaskStore:
                 if row["collection_mode"] != task.input.get("collection_mode"):
                     connection.rollback()
                     return False
-                if row["task_id"] and (
-                    not replace_existing or row["state"] not in {"FINISHED", "CANCELLED", None}
-                ):
+                if row["task_id"] != expected_task_id or row["state"] not in {
+                    "FINISHED", "CANCELLED", None,
+                }:
+                    connection.rollback()
+                    return False
+                if onboarding_build_id and connection.execute(
+                    "SELECT 1 FROM batch_sites s JOIN builds b ON b.build_id = s.build_id "
+                    "AND b.batch_id = s.batch_id AND b.site_key = s.site_key "
+                    "JOIN site_rules r ON r.site_key = s.site_key "
+                    "WHERE s.batch_id = ? AND s.site_key = ? AND b.build_id = ? "
+                    "AND b.state = 'VALIDATING' "
+                    "AND r.rule_id = ? AND r.rule_version = ? AND r.sha256 = ? "
+                    "AND json_extract(b.request_json, '$.auto_collect') = 1 "
+                    "AND COALESCE(json_extract(b.request_json, '$.batch_cancel_requested'), 0) = 0",
+                    (task.batch_id, site_key, onboarding_build_id,
+                     task.plan_id, task.plan_version, task.rule_sha256),
+                ).fetchone() is None:
                     connection.rollback()
                     return False
                 self._insert_task(connection, task)
-                if replace_existing:
-                    cursor = connection.execute(
-                        "UPDATE batch_sites SET task_id = ?, updated_at = ? "
-                        "WHERE batch_id = ? AND site_key = ?",
-                        (task.task_id, utc_now(), task.batch_id, site_key),
-                    )
-                else:
-                    cursor = connection.execute(
-                        "UPDATE batch_sites SET task_id = ?, updated_at = ? "
-                        "WHERE batch_id = ? AND site_key = ? AND task_id IS NULL",
-                        (task.task_id, utc_now(), task.batch_id, site_key),
-                    )
-                if cursor.rowcount != 1:
-                    connection.rollback()
-                    return False
+                connection.execute(
+                    "UPDATE batch_sites SET task_id = ?, updated_at = ? "
+                    "WHERE batch_id = ? AND site_key = ?",
+                    (task.task_id, utc_now(), task.batch_id, site_key),
+                )
                 connection.execute(
                     "UPDATE batches SET updated_at = ? WHERE batch_id = ?",
                     (utc_now(), task.batch_id),
@@ -2022,11 +2026,71 @@ class TaskStore:
             ).fetchall()
         return _batch_from_row(batch), list(map(_batch_site_from_row, sites)), list(map(_task_from_row, tasks))
 
-    def create_build(self, build: BuildRecord, *, promote_trial: bool = False) -> None:
+    def request_cancel_batch_onboarding(self, batch_id: str) -> list[str]:
+        """Fence automatic collection and cancel all queued onboarding together."""
+        now = utc_now()
+        with self._connect() as connection, connection:
+            connection.execute("BEGIN IMMEDIATE")
+            builds = connection.execute(
+                """
+                UPDATE builds
+                SET request_json = json_set(request_json, '$.batch_cancel_requested', json('true')),
+                    outcome = CASE WHEN state = 'QUEUED' THEN 'cancelled' ELSE outcome END,
+                    finished_at = CASE WHEN state = 'QUEUED' THEN ? ELSE finished_at END,
+                    state = CASE WHEN state = 'QUEUED' THEN 'CANCELLED' ELSE state END,
+                    updated_at = ?
+                WHERE batch_id = ? AND state NOT IN ('FINISHED', 'CANCELLED')
+                    AND json_extract(request_json, '$.auto_collect') = 1
+                    AND COALESCE(json_extract(request_json, '$.batch_cancel_requested'), 0) = 0
+                    AND EXISTS (
+                        SELECT 1 FROM batches WHERE batch_id = builds.batch_id AND archived_at IS NULL
+                    )
+                RETURNING build_id, site_key, state
+                """,
+                (now, now, batch_id),
+            ).fetchall()
+            connection.executemany(
+                """
+                UPDATE batch_sites SET readiness = 'needs_onboarding', note = ?, updated_at = ?
+                WHERE batch_id = ? AND site_key = ? AND build_id = ? AND readiness = 'building'
+                """,
+                [
+                    ("接入已取消，可重新开始", now, batch_id, row["site_key"], row["build_id"])
+                    for row in builds if row["state"] == "CANCELLED"
+                ],
+            )
+        return [row["build_id"] for row in builds]
+
+    def claim_queued_build(self, build_id: str) -> BuildRecord | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "UPDATE builds SET state = 'CREATED', updated_at = ? "
+                "WHERE build_id = ? AND state = 'QUEUED' RETURNING *",
+                (utc_now(), build_id),
+            ).fetchone()
+        return _build_from_row(row) if row else None
+
+    def claim_build_validation(self, build_id: str) -> bool:
+        with self._connect() as connection:
+            updated = connection.execute(
+                """
+                UPDATE builds SET state = 'VALIDATING', updated_at = ?
+                WHERE build_id = ? AND state IN ('CREATED', 'RUNNING', 'PAUSING', 'PAUSED')
+                    AND COALESCE(json_extract(request_json, '$.batch_cancel_requested'), 0) = 0
+                """,
+                (utc_now(), build_id),
+            )
+        return updated.rowcount == 1
+
+    def create_build(
+        self, build: BuildRecord, *, promote_trial: bool = False,
+        queued_site_note: str | None = None,
+    ) -> None:
         with self._connect() as connection, connection:
             try:
-                if promote_trial:
+                if promote_trial or queued_site_note is not None:
                     connection.execute("BEGIN IMMEDIATE")
+                if promote_trial:
                     self._promote_batch_collection(connection, build.batch_id)
                 connection.execute(
                     """
@@ -2075,6 +2139,22 @@ class TaskStore:
                         build.finished_at,
                     ),
                 )
+                if queued_site_note is not None:
+                    linked = connection.execute(
+                        """
+                        UPDATE batch_sites SET readiness = 'building', build_id = ?,
+                            proxy = ?, note = ?, updated_at = ?
+                        WHERE batch_id = ? AND site_key = ?
+                            AND EXISTS (SELECT 1 FROM batches WHERE batch_id = ?
+                                AND archived_at IS NULL)
+                        """,
+                        (
+                            build.build_id, build.proxy, queued_site_note, utc_now(),
+                            build.batch_id, build.site_key, build.batch_id,
+                        ),
+                    )
+                    if linked.rowcount != 1:
+                        raise BatchNotFoundError(f"batch target is unavailable: {build.site_key}")
             except sqlite3.IntegrityError as exc:
                 raise ValueError(f"build already exists: {build.build_id}") from exc
 
@@ -2189,7 +2269,7 @@ class TaskStore:
         site_key: str | None = None,
         feedback_id: str | None = None,
         states: set[str] | None = None,
-        limit: int = 50,
+        limit: int | None = 50,
         oldest_first: bool = False,
     ) -> list[BuildRecord]:
         query = "SELECT * FROM builds"
@@ -2211,10 +2291,12 @@ class TaskStore:
         if clauses:
             query += " WHERE " + " AND ".join(clauses)
         if oldest_first:
-            query += " ORDER BY rowid ASC LIMIT ?"
+            query += " ORDER BY rowid ASC"
         else:
-            query += " ORDER BY created_at DESC, rowid DESC LIMIT ?"
-        values.append(max(1, int(limit)))
+            query += " ORDER BY created_at DESC, rowid DESC"
+        if limit is not None:
+            query += " LIMIT ?"
+            values.append(max(1, int(limit)))
         with self._connect() as connection:
             rows = connection.execute(query, values).fetchall()
         return [_build_from_row(row) for row in rows]

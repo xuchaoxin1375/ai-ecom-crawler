@@ -30,6 +30,10 @@ export interface SystemRuntime {
   worker: string;
   max_tasks: number | null;
   max_browser_tasks: number | null;
+  per_domain_rps: number | null;
+  collection_slots: SystemCollectionSlots | null;
+  max_builds: number | null;
+  build_slots: SystemCollectionSlots | null;
   read_only: boolean;
   builds_available: boolean;
   builds_disabled: boolean;
@@ -38,6 +42,11 @@ export interface SystemRuntime {
   python: string;
   platform: string;
   threads: number;
+}
+
+export interface SystemCollectionSlots {
+  next_start: number;
+  source: "cli" | "settings" | "default";
 }
 
 export interface SystemWork {
@@ -74,6 +83,32 @@ export interface SystemInfo {
   work: SystemWork;
   storage: SystemStorage;
   paths: SystemPaths;
+}
+
+export interface CollectionPolicy {
+  formal_unlimited: boolean;
+  formal_max_products: number;
+  formal_max_seconds: number;
+  default_per_domain_rps: number | null;
+  default_concurrency: number | null;
+}
+
+export interface CollectionPolicyResponse {
+  policy: CollectionPolicy;
+  formal_limits: {
+    max_urls: number | null;
+    max_products: number | null;
+    max_seconds: number | null;
+  };
+  default_rate: {
+    per_domain_rps?: number;
+    concurrency?: number;
+  };
+  site_policies: Array<
+    {
+      domain: string;
+    } & Partial<SiteRatePolicy>
+  >;
 }
 
 export interface SystemAccessResponse {
@@ -514,6 +549,7 @@ export interface BuildSummary {
   proxy: string | null;
   error: string | null;
   approval_required?: boolean;
+  cancellable_onboarding?: boolean;
   rule: RuleRef | null;
   updated_at: string;
 }
@@ -611,6 +647,8 @@ export interface BuildStatus {
   archive: BuildArchiveConfig | null;
   archive_stats: BuildArchiveStats | null;
   catalog: { catalog_scope?: string; catalog_products?: number } | null;
+  onboarding_budget?: Partial<OnboardingBudget> | null;
+  token_usage?: { input?: number; output?: number; reasoning?: number } | null;
 }
 
 export interface BuildResponse {
@@ -642,6 +680,14 @@ export interface BuildConfig {
   model_pool_editable?: boolean;
   model_pool_override?: boolean;
   model_catalog?: BuildModelCatalogEntry[];
+  onboarding_budget?: OnboardingBudget;
+  onboarding_budget_override?: boolean;
+}
+
+export interface OnboardingBudget {
+  max_seconds: number;
+  max_input_tokens: number;
+  max_output_tokens: number;
 }
 
 export interface BuildModelCapabilities {
@@ -748,7 +794,9 @@ export interface BatchSite {
   rule: RuleRef | null;
   task_id: string | null;
   task: TaskSummary | null;
+  formal_pending?: boolean;
   delivery_task?: TaskSummary | null;
+  export_task_id?: string | null;
   feedback_action?: {
     task_id: string;
     feedback_id: string;
@@ -765,6 +813,21 @@ export interface BatchSite {
 export interface BatchDetail extends BatchSummary {
   sites: BatchSite[];
   onboarding_available?: boolean;
+}
+
+export interface SiteRatePolicy {
+  per_domain_rps: number | null;
+  concurrency: number | null;
+  delay_ms: number | null;
+  max_attempts: number | null;
+  backoff_ms: number | null;
+}
+
+export interface SiteRatePolicyResponse {
+  domain: string;
+  policy: Partial<SiteRatePolicy>;
+  defaults: SiteRatePolicy;
+  effective: SiteRatePolicy;
 }
 
 export interface ImportItem {
@@ -853,6 +916,7 @@ export interface BatchActionResponse {
   accepted: BatchActionAccepted[];
   skipped: BatchActionSkipped[];
   onboarding?: { site_key: string; build_id: string }[];
+  cancelled_onboarding?: string[];
   batch: BatchDetail;
 }
 
@@ -949,6 +1013,7 @@ function redirectToLogin(): void {
 async function getJson<T>(url: string, signal?: AbortSignal): Promise<T> {
   const response = await fetch(url, {
     credentials: "same-origin",
+    cache: "no-store",
     headers: { Accept: "application/json" },
     signal,
   });
@@ -967,6 +1032,38 @@ export function getHealth(signal?: AbortSignal): Promise<Health> {
 
 export function getSystemInfo(signal?: AbortSignal): Promise<SystemInfo> {
   return getJson<SystemInfo>("/api/system", signal);
+}
+
+export function getCollectionPolicy(
+  signal?: AbortSignal,
+): Promise<CollectionPolicyResponse> {
+  return getJson<CollectionPolicyResponse>("/api/system/collection-policy", signal);
+}
+
+export function setCollectionPolicy(
+  policy: CollectionPolicy,
+): Promise<CollectionPolicyResponse> {
+  return sendJson<CollectionPolicyResponse>(
+    "/api/system/collection-policy",
+    "PUT",
+    policy,
+  );
+}
+
+export function setSystemCollectionSlots(
+  maxTasks: number | null,
+): Promise<SystemCollectionSlots> {
+  return sendJson<SystemCollectionSlots>("/api/system/collection-slots", "PUT", {
+    max_tasks: maxTasks,
+  });
+}
+
+export function setSystemBuildSlots(
+  maxTasks: number | null,
+): Promise<SystemCollectionSlots> {
+  return sendJson<SystemCollectionSlots>("/api/system/build-slots", "PUT", {
+    max_tasks: maxTasks,
+  });
 }
 
 export function setSystemAccess(lanEnabled: boolean): Promise<SystemAccessResponse> {
@@ -1065,6 +1162,29 @@ export function moveBatches(
     "/api/batches/move",
     "POST",
     body,
+  );
+}
+
+export function getSiteRatePolicy(
+  batchId: string,
+  siteKey: string,
+  signal?: AbortSignal,
+): Promise<SiteRatePolicyResponse> {
+  return getJson<SiteRatePolicyResponse>(
+    `/api/batches/${encodeURIComponent(batchId)}/sites/${encodeURIComponent(siteKey)}/rate-policy`,
+    signal,
+  );
+}
+
+export function setSiteRatePolicy(
+  batchId: string,
+  siteKey: string,
+  policy: Partial<SiteRatePolicy>,
+): Promise<SiteRatePolicyResponse> {
+  return sendJson<SiteRatePolicyResponse>(
+    `/api/batches/${encodeURIComponent(batchId)}/sites/${encodeURIComponent(siteKey)}/rate-policy`,
+    "PUT",
+    policy,
   );
 }
 
@@ -1501,6 +1621,14 @@ export function buildEventsUrl(buildId: string): string {
 
 export function getBuildConfig(signal?: AbortSignal): Promise<BuildConfig> {
   return getJson<BuildConfig>("/api/builds/config", signal);
+}
+
+export function saveOnboardingBudget(budget?: OnboardingBudget): Promise<BuildConfig> {
+  return sendJson<BuildConfig>(
+    "/api/builds/config/onboarding-budget",
+    budget ? "PUT" : "DELETE",
+    budget,
+  );
 }
 
 export function checkBuildModel(modelRef: string): Promise<BuildModelHealth> {

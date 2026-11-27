@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronLeft,
@@ -15,11 +16,13 @@ import {
   getAvailableBuildModels,
   getBuildConfig,
   resetBuildModels,
+  saveOnboardingBudget,
   updateBuildModels,
   type AvailableBuildModel,
   type BuildConfig,
   type BuildModelHealth,
   type BuildModelOption,
+  type OnboardingBudget,
 } from "../../lib/api";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
@@ -34,6 +37,117 @@ import { modelRef, probeErrorLabels } from "./modelHealth";
 interface DraftModel {
   id: string;
   variant: string;
+}
+
+const BUDGET_FIELDS = [
+  ["max_seconds", "模型会话时限（秒）", 60, 7200],
+  ["max_input_tokens", "累计输入 tokens", 1000, 100_000_000],
+  ["max_output_tokens", "累计输出 tokens（含推理）", 1000, 10_000_000],
+] as const;
+
+function OnboardingBudgetForm({ config }: { config: BuildConfig }) {
+  const queryClient = useQueryClient();
+  const [draft, setDraft] = useState<Partial<Record<keyof OnboardingBudget, string>>>(
+    {},
+  );
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const budget = config.onboarding_budget;
+  if (!budget) return null;
+
+  const editable = config.available && !busy;
+  const dirty = BUDGET_FIELDS.some(
+    ([key]) => draft[key] !== undefined && Number(draft[key]) !== budget[key],
+  );
+
+  async function apply(next?: OnboardingBudget) {
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const response = await saveOnboardingBudget(next);
+      queryClient.setQueryData<BuildConfig>(["build-config"], (current) => ({
+        ...(current ?? response),
+        onboarding_budget: response.onboarding_budget,
+        onboarding_budget_override: response.onboarding_budget_override,
+      }));
+      setDraft({});
+      setNotice(next ? "预算已保存。" : "已恢复服务默认预算。");
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : String(exc));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editable || !dirty) return;
+    const values = new FormData(event.currentTarget);
+    void apply({
+      max_seconds: Number(values.get("max_seconds")),
+      max_input_tokens: Number(values.get("max_input_tokens")),
+      max_output_tokens: Number(values.get("max_output_tokens")),
+    });
+  }
+
+  return (
+    <section
+      aria-labelledby="onboarding-budget-heading"
+      className="space-y-3 rounded-panel border border-line bg-surface px-4 py-4"
+    >
+      <h2 id="onboarding-budget-heading" className="text-[17px] font-semibold text-ink">
+        批次接入预算
+      </h2>
+      <p className="text-sm text-ink-2">
+        每个自动接入目标的限额。保存后从新任务起生效。
+        <Link className="text-accent underline" to="/builds">
+          查看构建记录
+        </Link>
+      </p>
+      <form onSubmit={submit} className="space-y-3">
+        <div className="grid gap-3 sm:grid-cols-3">
+          {BUDGET_FIELDS.map(([key, label, min, max]) => (
+            <label key={key} className="block min-w-0 space-y-1 text-sm text-ink">
+              <span>{label}</span>
+              <Input
+                name={key}
+                className="w-full"
+                type="number"
+                min={min}
+                max={max}
+                step={1}
+                required
+                disabled={!editable}
+                value={draft[key] ?? budget[key]}
+                onChange={(event) => {
+                  setDraft((current) => ({ ...current, [key]: event.target.value }));
+                  setNotice("");
+                }}
+              />
+            </label>
+          ))}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button type="submit" variant="primary" disabled={!editable || !dirty}>
+            保存预算
+          </Button>
+          {config.onboarding_budget_override ? (
+            <Button type="button" disabled={!editable} onClick={() => void apply()}>
+              恢复默认预算
+            </Button>
+          ) : null}
+        </div>
+      </form>
+      {error ? <InlineNotice tone="danger">{error}</InlineNotice> : null}
+      {notice ? (
+        <p role="status" className="text-sm text-success">
+          {notice}
+        </p>
+      ) : null}
+    </section>
+  );
 }
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -265,7 +379,12 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
   const pageModels = availableModels.slice(pageStart, pageStart + availablePageSize);
 
   function applyConfig(next: BuildConfig) {
-    queryClient.setQueryData(["build-config"], next);
+    queryClient.setQueryData<BuildConfig>(["build-config"], (current) => ({
+      ...next,
+      onboarding_budget: current?.onboarding_budget ?? next.onboarding_budget,
+      onboarding_budget_override:
+        current?.onboarding_budget_override ?? next.onboarding_budget_override,
+    }));
     setDraft(toDraft(next.models));
     setDefaultRef(next.default_model ?? "");
   }
@@ -534,6 +653,8 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
           服务以只读模式启动，或构建服务已停用；只能查看模型池，不能保存修改。
         </InlineNotice>
       ) : null}
+
+      <OnboardingBudgetForm config={config} />
 
       <section
         id="model-pool"

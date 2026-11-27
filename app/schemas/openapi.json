@@ -279,7 +279,14 @@
             "type": "integer"
           },
           "limits": {
-            "$ref": "#/components/schemas/Limits"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Limits"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "offline": {
             "default": false,
@@ -714,6 +721,70 @@
           }
         },
         "title": "BuildStartRequest",
+        "type": "object"
+      },
+      "CollectionPolicyRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "default_concurrency": {
+            "anyOf": [
+              {
+                "maximum": 8.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Concurrency"
+          },
+          "default_per_domain_rps": {
+            "anyOf": [
+              {
+                "maximum": 10.0,
+                "minimum": 0.1,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Per Domain Rps"
+          },
+          "formal_max_products": {
+            "anyOf": [
+              {
+                "maximum": 100000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Formal Max Products"
+          },
+          "formal_max_seconds": {
+            "anyOf": [
+              {
+                "maximum": 86400.0,
+                "minimum": 60.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Formal Max Seconds"
+          },
+          "formal_unlimited": {
+            "default": true,
+            "title": "Formal Unlimited",
+            "type": "boolean"
+          }
+        },
+        "title": "CollectionPolicyRequest",
         "type": "object"
       },
       "CreateTaskRequest": {
@@ -1557,6 +1628,35 @@
         "title": "LoginRequest",
         "type": "object"
       },
+      "OnboardingBudgetRequest": {
+        "properties": {
+          "max_input_tokens": {
+            "maximum": 100000000.0,
+            "minimum": 1000.0,
+            "title": "Max Input Tokens",
+            "type": "integer"
+          },
+          "max_output_tokens": {
+            "maximum": 10000000.0,
+            "minimum": 1000.0,
+            "title": "Max Output Tokens",
+            "type": "integer"
+          },
+          "max_seconds": {
+            "maximum": 7200.0,
+            "minimum": 60.0,
+            "title": "Max Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "max_seconds",
+          "max_input_tokens",
+          "max_output_tokens"
+        ],
+        "title": "OnboardingBudgetRequest",
+        "type": "object"
+      },
       "RuleActivateRequest": {
         "properties": {
           "actor": {
@@ -1951,6 +2051,78 @@
         "title": "RuleVersionRecord",
         "type": "object"
       },
+      "SiteRatePolicyRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "backoff_ms": {
+            "anyOf": [
+              {
+                "maximum": 60000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backoff Ms"
+          },
+          "concurrency": {
+            "anyOf": [
+              {
+                "maximum": 8.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Concurrency"
+          },
+          "delay_ms": {
+            "anyOf": [
+              {
+                "maximum": 10000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delay Ms"
+          },
+          "max_attempts": {
+            "anyOf": [
+              {
+                "maximum": 5.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Attempts"
+          },
+          "per_domain_rps": {
+            "anyOf": [
+              {
+                "maximum": 10.0,
+                "minimum": 0.1,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Per Domain Rps"
+          }
+        },
+        "title": "SiteRatePolicyRequest",
+        "type": "object"
+      },
       "SiteRuleActive": {
         "properties": {
           "activated_at": {
@@ -2116,6 +2288,28 @@
           "lan_enabled"
         ],
         "title": "SystemAccessRequest",
+        "type": "object"
+      },
+      "SystemCollectionSlotsRequest": {
+        "properties": {
+          "max_tasks": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Tasks"
+          }
+        },
+        "required": [
+          "max_tasks"
+        ],
+        "title": "SystemCollectionSlotsRequest",
         "type": "object"
       },
       "SystemTokenRequest": {
@@ -3085,6 +3279,114 @@
         "summary": "Start Site Build"
       }
     },
+    "/api/batches/{batch_id}/sites/{site_key}/rate-policy": {
+      "get": {
+        "operationId": "get_site_rate_policy_api_batches__batch_id__sites__site_key__rate_policy_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "title": "Batch Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "site_key",
+            "required": true,
+            "schema": {
+              "title": "Site Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Site Rate Policy Api Batches  Batch Id  Sites  Site Key  Rate Policy Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Site Rate Policy"
+      },
+      "put": {
+        "operationId": "put_site_rate_policy_api_batches__batch_id__sites__site_key__rate_policy_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "title": "Batch Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "site_key",
+            "required": true,
+            "schema": {
+              "title": "Site Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SiteRatePolicyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Put Site Rate Policy Api Batches  Batch Id  Sites  Site Key  Rate Policy Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Site Rate Policy"
+      }
+    },
     "/api/batches/{batch_id}/start": {
       "post": {
         "operationId": "start_batch_api_batches__batch_id__start_post",
@@ -3327,6 +3629,64 @@
           }
         },
         "summary": "Update Build Models"
+      }
+    },
+    "/api/builds/config/onboarding-budget": {
+      "delete": {
+        "operationId": "reset_onboarding_budget_api_builds_config_onboarding_budget_delete",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Reset Onboarding Budget Api Builds Config Onboarding Budget Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Reset Onboarding Budget"
+      },
+      "put": {
+        "operationId": "update_onboarding_budget_api_builds_config_onboarding_budget_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OnboardingBudgetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Update Onboarding Budget Api Builds Config Onboarding Budget Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Onboarding Budget"
       }
     },
     "/api/builds/models/available": {
@@ -4709,6 +5069,144 @@
           }
         },
         "summary": "Rotate System Token"
+      }
+    },
+    "/api/system/build-slots": {
+      "put": {
+        "operationId": "update_build_slots_api_system_build_slots_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SystemCollectionSlotsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Update Build Slots Api System Build Slots Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Build Slots"
+      }
+    },
+    "/api/system/collection-policy": {
+      "get": {
+        "operationId": "get_collection_policy_api_system_collection_policy_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Collection Policy Api System Collection Policy Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Collection Policy"
+      },
+      "put": {
+        "operationId": "put_collection_policy_api_system_collection_policy_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CollectionPolicyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Put Collection Policy Api System Collection Policy Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Collection Policy"
+      }
+    },
+    "/api/system/collection-slots": {
+      "put": {
+        "operationId": "update_collection_slots_api_system_collection_slots_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SystemCollectionSlotsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Update Collection Slots Api System Collection Slots Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Collection Slots"
       }
     },
     "/api/tasks": {

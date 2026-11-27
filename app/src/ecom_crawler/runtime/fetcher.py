@@ -18,25 +18,149 @@ class UnsupportedAdvanceError(RuntimeError):
     """The selected fetch engine cannot perform a browser-only advance."""
 
 
+RATE_LIMIT_MIN_RPS = 0.1
+RATE_LIMIT_MAX_RPS = 10.0
+RATE_LIMIT_MAX_RETRY_AFTER = 300.0
+RATE_LIMIT_RECOVERY_SUCCESSES = 20
+
+
+def retry_after_seconds(headers: Any) -> float | None:
+    """Read ``Retry-After`` as seconds or an HTTP date."""
+    if not headers:
+        return None
+    try:
+        raw = headers.get("retry-after") or headers.get("Retry-After")
+    except AttributeError:
+        return None
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    if not text:
+        return None
+    try:
+        return max(0.0, float(text))
+    except ValueError:
+        pass
+    try:
+        from email.utils import parsedate_to_datetime
+
+        parsed = parsedate_to_datetime(text)
+        if parsed is None:
+            return None
+        import datetime as _datetime
+
+        now = _datetime.datetime.now(_datetime.UTC)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=_datetime.UTC)
+        return max(0.0, (parsed - now).total_seconds())
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
 class DomainLimiter:
-    """Serialize requests per domain across tasks in the same worker process."""
+    """Serialize and adapt request rates per domain across tasks."""
 
     def __init__(self, per_domain_rps: float = 1.0) -> None:
-        self.interval = 1.0 / max(float(per_domain_rps), 0.001)
+        self.default_rps = max(
+            RATE_LIMIT_MIN_RPS,
+            min(float(per_domain_rps), RATE_LIMIT_MAX_RPS),
+        )
         self._lock = threading.Lock()
         self._next_at: dict[str, float] = {}
+        self._base_rps: dict[str, float] = {}
+        self._current_rps: dict[str, float] = {}
+        self._cooldown_until: dict[str, float] = {}
+        self._successes: dict[str, int] = {}
         self.waits = 0
+        self.rate_limit_events = 0
+        self.last_retry_after: float | None = None
+        self.last_reduced_rps: float | None = None
+
+    @staticmethod
+    def _domain(url: str) -> str:
+        return urlparse(url).netloc.lower()
+
+    def configure(self, domain: str, rps: float | None) -> None:
+        """Set a site policy rate, or reset the domain to the worker default."""
+        key = str(domain or "").strip().lower()
+        if not key:
+            return
+        value = (
+            self.default_rps
+            if rps is None
+            else max(RATE_LIMIT_MIN_RPS, min(float(rps), RATE_LIMIT_MAX_RPS))
+        )
+        with self._lock:
+            self._base_rps[key] = value
+            self._current_rps[key] = value
+            self._successes[key] = 0
+
+    def _rate(self, domain: str) -> float:
+        return self._current_rps.get(domain, self.default_rps)
 
     def wait(self, url: str) -> None:
-        domain = urlparse(url).netloc.lower()
+        domain = self._domain(url)
         with self._lock:
             now = time.monotonic()
-            wait_until = max(self._next_at.get(domain, now), now)
-            self._next_at[domain] = wait_until + self.interval
+            rate = self._current_rps.get(domain, self.default_rps)
+            interval = 1.0 / max(rate, RATE_LIMIT_MIN_RPS)
+            wait_until = max(
+                self._next_at.get(domain, now),
+                now,
+                self._cooldown_until.get(domain, 0.0),
+            )
+            self._next_at[domain] = wait_until + interval
         delay = wait_until - time.monotonic()
         if delay > 0:
             self.waits += 1
             time.sleep(delay)
+
+    def penalize(self, url: str, retry_after: float | None = None) -> None:
+        """Slow a domain after 429 and remember Retry-After for the next wait."""
+        domain = self._domain(url)
+        with self._lock:
+            base = self._base_rps.get(domain, self.default_rps)
+            current = self._current_rps.get(domain, base)
+            reduced = max(RATE_LIMIT_MIN_RPS, min(current, base) / 2)
+            self._current_rps[domain] = reduced
+            self.last_reduced_rps = reduced
+            self._successes[domain] = 0
+            self.rate_limit_events += 1
+            if retry_after is not None:
+                capped = min(
+                    max(float(retry_after), 0.0),
+                    RATE_LIMIT_MAX_RETRY_AFTER,
+                )
+                self.last_retry_after = capped
+                self._cooldown_until[domain] = max(
+                    self._cooldown_until.get(domain, 0.0),
+                    time.monotonic() + capped,
+                )
+
+    def success(self, url: str) -> None:
+        """Gradually restore a reduced domain after a run of successes."""
+        domain = self._domain(url)
+        with self._lock:
+            base = self._base_rps.get(domain, self.default_rps)
+            current = self._current_rps.get(domain, base)
+            if current >= base:
+                return
+            count = self._successes.get(domain, 0) + 1
+            if count >= RATE_LIMIT_RECOVERY_SUCCESSES:
+                self._current_rps[domain] = min(base, current * 1.25)
+                count = 0
+            self._successes[domain] = count
+
+    def metrics(self) -> dict[str, Any]:
+        with self._lock:
+            rates = dict(self._current_rps)
+        return {
+            "rate_limit_events": self.rate_limit_events,
+            "last_retry_after": self.last_retry_after,
+            "last_reduced_rps": self.last_reduced_rps,
+            "current_rps": rates,
+            "default_rps": self.default_rps,
+        }
 
 
 class ScraplingFetcher:
@@ -50,6 +174,7 @@ class ScraplingFetcher:
         timeout_ms: int = 45000,
         max_attempts: int = 2,
         backoff_ms: int = 1000,
+        delay_ms: int = 0,
         session_manager: Any | None = None,
     ) -> None:
         self.session = session
@@ -57,8 +182,11 @@ class ScraplingFetcher:
         self.timeout = max(timeout_ms, 1) / 1000
         self.max_attempts = max(max_attempts, 1)
         self.backoff = max(backoff_ms, 0) / 1000
+        self.delay = max(delay_ms, 0) / 1000
         self.requests = 0
         self.retries = 0
+        self.rate_limit_events = 0
+        self.last_retry_after: float | None = None
         self._session_manager = session_manager
 
     def get(self, url: str, *, item_type: str | None = None) -> FetchResult:
@@ -66,6 +194,8 @@ class ScraplingFetcher:
         for attempt in range(1, self.max_attempts + 1):
             if self.limiter is not None:
                 self.limiter.wait(url)
+            if self.delay > 0:
+                time.sleep(self.delay)
             self.requests += 1
             if attempt > 1:
                 self.retries += 1
@@ -98,9 +228,32 @@ class ScraplingFetcher:
                 )
             except AttributeError:
                 content_type = ""
-            if (status == 429 or 500 <= status < 600) and attempt < self.max_attempts:
+            if status == 429:
+                retry_after = retry_after_seconds(headers)
+                self.rate_limit_events += 1
+                if retry_after is not None:
+                    self.last_retry_after = retry_after
+                if self.limiter is not None:
+                    self.limiter.penalize(url, retry_after)
+                if attempt < self.max_attempts:
+                    if self.limiter is None:
+                        wait = min(
+                            max(
+                                retry_after or 0.0,
+                                self.backoff * (2 ** (attempt - 1)),
+                            ),
+                            30.0,
+                        )
+                        if wait > 0:
+                            time.sleep(wait)
+                    elif retry_after is None:
+                        self._sleep_backoff(attempt)
+                    continue
+            elif 500 <= status < 600 and attempt < self.max_attempts:
                 self._sleep_backoff(attempt)
                 continue
+            if self.limiter is not None and 200 <= status < 400:
+                self.limiter.success(url)
             return FetchResult(
                 status=status,
                 url=final_url,
@@ -122,12 +275,29 @@ class ScraplingFetcher:
         )
 
     def describe(self) -> dict[str, Any]:
-        return {
+        info: dict[str, Any] = {
             "engine": "static",
             "engines_used": ["static"] if self.requests else [],
             "thread_affine": False,
             "browser_launched": False,
+            "delay_ms": int(self.delay * 1000),
+            "rate_limit_events": self.rate_limit_events,
+            "last_retry_after": self.last_retry_after,
         }
+        if self.limiter is not None:
+            metrics = self.limiter.metrics()
+            info["rate_limit_events"] = max(
+                self.rate_limit_events,
+                int(metrics.get("rate_limit_events") or 0),
+            )
+            info["last_retry_after"] = (
+                self.last_retry_after
+                if self.last_retry_after is not None
+                else metrics.get("last_retry_after")
+            )
+            info["current_rps"] = metrics.get("current_rps")
+            info["default_rps"] = metrics.get("default_rps")
+        return info
 
     def close(self) -> None:
         if self._session_manager is not None:

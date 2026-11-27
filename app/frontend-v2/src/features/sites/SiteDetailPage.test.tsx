@@ -423,6 +423,7 @@ it("keeps a single export entry for a finished task", async () => {
         ...batch.sites[0],
         task_id: doneTask.task_id,
         task: doneTask,
+        export_task_id: doneTask.task_id,
       },
     ],
   };
@@ -448,8 +449,8 @@ it("keeps a single export entry for a finished task", async () => {
     <SiteDetailPage />,
   );
 
-  expect(await screen.findByRole("button", { name: "导出当前任务 ZIP" })).toBeVisible();
-  expect(screen.getAllByRole("button", { name: /导出当前任务/ })).toHaveLength(1);
+  expect(await screen.findByRole("button", { name: "导出站点结果 ZIP" })).toBeVisible();
+  expect(screen.getAllByRole("button", { name: /导出站点结果/ })).toHaveLength(1);
   expect(
     screen.queryByRole("button", { name: "更多站点操作" }),
   ).not.toBeInTheDocument();

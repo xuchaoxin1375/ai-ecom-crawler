@@ -14,6 +14,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -134,6 +135,7 @@ class DependencyPolicy:
         }
         self.build_python = Path(build_python) if build_python else None
         self.verifier = verifier
+        self._install_lock = threading.Lock()
         self.installers: dict[str, Installer] = dict(installers or {})
         if installer is not None:
             self.installers.setdefault("*", installer)
@@ -262,24 +264,81 @@ class DependencyPolicy:
                 version=version,
             )
 
-        try:
-            completed = installer(name, version, self.build_python)
-        except Exception as exc:  # noqa: BLE001 - installer boundary
-            return decision(
-                "failed",
-                f"{type(exc).__name__}: {exc}",
-                version=version,
-            )
-        stdout = str(getattr(completed, "stdout", "") or "")
-        stderr = str(getattr(completed, "stderr", "") or "")
-        command = list(getattr(completed, "args", []) or [])
-        if completed.returncode != 0:
+        with self._install_lock:
+            try:
+                completed = installer(name, version, self.build_python)
+            except Exception as exc:  # noqa: BLE001 - installer boundary
+                return decision(
+                    "failed",
+                    f"{type(exc).__name__}: {exc}",
+                    version=version,
+                )
+            stdout = str(getattr(completed, "stdout", "") or "")
+            stderr = str(getattr(completed, "stderr", "") or "")
+            command = list(getattr(completed, "args", []) or [])
+            if completed.returncode != 0:
+                return DependencyDecision(
+                    status="failed",
+                    name=name,
+                    version=version,
+                    license=license_name,
+                    detail="installer failed",
+                    command=command,
+                    stdout=stdout,
+                    stderr=stderr,
+                    scope=scope,
+                    source=request.source,
+                    reason=request.reason,
+                    fallback=request.fallback,
+                    approved=approved,
+                )
+
+            if self.verifier is not None:
+                try:
+                    checked = self.verifier(name, version, self.build_python)
+                except Exception as exc:  # noqa: BLE001 - verifier boundary
+                    return DependencyDecision(
+                        status="failed",
+                        name=name,
+                        version=version,
+                        license=license_name,
+                        detail=f"installed but verification raised {type(exc).__name__}: {exc}",
+                        command=command,
+                        stdout=stdout,
+                        stderr=stderr,
+                        scope=scope,
+                        source=request.source,
+                        reason=request.reason,
+                        fallback=request.fallback,
+                        approved=approved,
+                    )
+                check_stdout = str(getattr(checked, "stdout", "") or "")
+                check_stderr = str(getattr(checked, "stderr", "") or "")
+                stdout = "\n".join(part for part in (stdout, check_stdout) if part)
+                stderr = "\n".join(part for part in (stderr, check_stderr) if part)
+                if checked.returncode != 0:
+                    return DependencyDecision(
+                        status="failed",
+                        name=name,
+                        version=version,
+                        license=license_name,
+                        detail="installed but verification failed",
+                        command=command,
+                        stdout=stdout,
+                        stderr=stderr,
+                        scope=scope,
+                        source=request.source,
+                        reason=request.reason,
+                        fallback=request.fallback,
+                        approved=approved,
+                    )
+
             return DependencyDecision(
-                status="failed",
+                status="installed",
                 name=name,
                 version=version,
                 license=license_name,
-                detail="installer failed",
+                detail="installed and verified" if self.verifier else "installed",
                 command=command,
                 stdout=stdout,
                 stderr=stderr,
@@ -289,62 +348,6 @@ class DependencyPolicy:
                 fallback=request.fallback,
                 approved=approved,
             )
-
-        if self.verifier is not None:
-            try:
-                checked = self.verifier(name, version, self.build_python)
-            except Exception as exc:  # noqa: BLE001 - verifier boundary
-                return DependencyDecision(
-                    status="failed",
-                    name=name,
-                    version=version,
-                    license=license_name,
-                    detail=f"installed but verification raised {type(exc).__name__}: {exc}",
-                    command=command,
-                    stdout=stdout,
-                    stderr=stderr,
-                    scope=scope,
-                    source=request.source,
-                    reason=request.reason,
-                    fallback=request.fallback,
-                    approved=approved,
-                )
-            check_stdout = str(getattr(checked, "stdout", "") or "")
-            check_stderr = str(getattr(checked, "stderr", "") or "")
-            stdout = "\n".join(part for part in (stdout, check_stdout) if part)
-            stderr = "\n".join(part for part in (stderr, check_stderr) if part)
-            if checked.returncode != 0:
-                return DependencyDecision(
-                    status="failed",
-                    name=name,
-                    version=version,
-                    license=license_name,
-                    detail="installed but verification failed",
-                    command=command,
-                    stdout=stdout,
-                    stderr=stderr,
-                    scope=scope,
-                    source=request.source,
-                    reason=request.reason,
-                    fallback=request.fallback,
-                    approved=approved,
-                )
-
-        return DependencyDecision(
-            status="installed",
-            name=name,
-            version=version,
-            license=license_name,
-            detail="installed and verified" if self.verifier else "installed",
-            command=command,
-            stdout=stdout,
-            stderr=stderr,
-            scope=scope,
-            source=request.source,
-            reason=request.reason,
-            fallback=request.fallback,
-            approved=approved,
-        )
 
 
 def install_with_pip(

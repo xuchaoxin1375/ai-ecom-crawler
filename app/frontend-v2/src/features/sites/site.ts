@@ -15,7 +15,7 @@ import {
   formatAmount,
   taskStateLabel,
 } from "../../lib/format";
-import { siteExportLabel } from "../batches/actions";
+import { siteExportLabel, siteExportTaskId } from "../batches/actions";
 
 export type SiteActionKind =
   | "build"
@@ -250,6 +250,16 @@ export function siteNextStep(
     };
   }
 
+  if (site.formal_pending) {
+    return {
+      tone: "info",
+      title: "待正式采集",
+      description: "按批次计划启动当前站点，已有试采结果仍可导出。",
+      action: "start",
+      actionLabel: "启动正式采集",
+    };
+  }
+
   const task = site.task;
   if (task) {
     if (task.state === "RUNNING" || task.state === "PAUSING") {
@@ -290,12 +300,20 @@ export function siteNextStep(
     }
     if (task.state === "FINISHED") {
       if (task.outcome === "COMPLETED") {
+        if (!siteExportTaskId(site)) {
+          return {
+            tone: "warning",
+            title: "采集已结束，暂无可交付结果",
+            description: "任务详情可查看本次结果和验收状态。",
+            action: "none",
+          };
+        }
         return {
           tone: "success",
           title: "采集完成",
           description: site.delivery_task
             ? "导出已采用结果，或回批次详情复跑该站点。"
-            : "导出当前任务结果，或回批次详情复跑该站点。",
+            : "导出站点结果，或回批次详情复跑该站点。",
           action: "export",
           actionLabel: siteExportLabel(site),
         };
@@ -360,6 +378,7 @@ export function siteStatusSentence(
   site: BatchSite,
   build: BuildLike | null | undefined,
 ): string {
+  if (site.formal_pending) return "待正式采集";
   if (site.readiness === "invalid" || site.readiness === "duplicate") {
     return "不进入采集，不计为任务失败";
   }

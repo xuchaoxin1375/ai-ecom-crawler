@@ -149,8 +149,10 @@ export function TaskDetailPage() {
     enabled: Boolean(taskId),
     refetchInterval: (current) => {
       const task = current.state.data;
-      if (!task || !taskIsActive(task) || stream.connected) return false;
-      return 3000;
+      if (!task || !taskIsActive(task)) return false;
+      // Reconcile counts even when SSE is connected; a quiet stream must not
+      // leave the page showing an old progress snapshot indefinitely.
+      return stream.connected ? 15_000 : 3000;
     },
   });
 

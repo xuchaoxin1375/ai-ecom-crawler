@@ -76,13 +76,13 @@ import { RowActionsMenu, type RowActionItem } from "../../components/ui/Dropdown
 import { ConfirmBatchActionDialog } from "../batches/ConfirmBatchActionDialog";
 import {
   siteCanCancelTask,
-  siteExportIsPartial,
   siteExportLabel,
-  siteResultTask,
+  siteExportTaskId,
 } from "../batches/actions";
 import { ProductPreviewSection } from "../tasks/ProductPreviewSection";
 import { QualityExceptionsSection } from "../tasks/QualityExceptionsSection";
 import { BuildApprovals } from "./BuildApprovals";
+import { SiteRatePolicyPanel } from "./SiteRatePolicyPanel";
 import { BuildPanel } from "./BuildPanel";
 import { BuildStartDialog } from "./BuildStartDialog";
 import { StartSiteDialog } from "./StartSiteDialog";
@@ -399,10 +399,10 @@ export function SiteDetailPage() {
 
   function downloadTask() {
     if (!site) return;
-    const result = siteResultTask(site);
-    if (!result) return;
+    const taskId = siteExportTaskId(site);
+    if (!taskId) return;
     const link = document.createElement("a");
-    link.href = taskExportUrl(result.task_id, siteExportIsPartial(site));
+    link.href = taskExportUrl(taskId, false);
     link.download = "";
     document.body.appendChild(link);
     link.click();
@@ -851,7 +851,7 @@ export function SiteDetailPage() {
   };
 
   const moreActions: RowActionItem[][] = [];
-  if (siteResultTask(site) && step?.action !== "export") {
+  if (siteExportTaskId(site) && step?.action !== "export") {
     moreActions.push([
       {
         key: "export",
@@ -1232,90 +1232,95 @@ export function SiteDetailPage() {
   );
 
   const infoContent = (
-    <section className="rounded-panel border border-line bg-surface">
-      <div className="border-b border-line px-4 py-4 sm:px-5">
-        <h2 className="text-[17px] leading-6 font-semibold text-ink">站点资料</h2>
-        <p className="mt-0.5 text-xs leading-5 text-ink-3">
-          批次、市场、规则路径和技术标识；低频信息集中在这里，不占结果首屏。
-        </p>
-      </div>
-      <dl className="grid grid-cols-1 gap-x-6 px-4 py-2 sm:grid-cols-2 sm:px-5">
-        <Fact label="批次">
-          <Link
-            className="text-accent hover:underline"
-            to={`/batches/${encodeURIComponent(batch.batch_id)}`}
-          >
-            {batch.name}
-          </Link>
-        </Fact>
-        <Fact label="站点 ID">
-          <code className="break-all font-mono text-[11px]">{site.site_key}</code>
-        </Fact>
-        <Fact label="国家／市场">
-          {batch.country || "—"} / {batch.market || "—"}
-        </Fact>
-        <Fact label="语言">{batch.language || "—"}</Fact>
-        <Fact label="品类">{batch.category || "—"}</Fact>
-        <Fact label="规则">
-          {site.rule ? (
-            <span className="font-mono text-[11px]">
-              {site.rule.rule_id}@{site.rule.rule_version}
-            </span>
-          ) : (
-            "—"
-          )}
-        </Fact>
-        <Fact label="规则路径">
-          <code className="break-all font-mono text-[11px]">
-            {site.rule?.path || "—"}
-          </code>
-        </Fact>
-        <Fact label="任务 ID">
-          {task ? <code className="font-mono text-[11px]">{task.task_id}</code> : "—"}
-        </Fact>
-        <Fact label="计划">
-          {task ? (
-            <code className="font-mono text-[11px]">
-              {task.plan_id}@{task.plan_version}
+    <div className="space-y-6">
+      <section className="rounded-panel border border-line bg-surface">
+        <div className="border-b border-line px-4 py-4 sm:px-5">
+          <h2 className="text-[17px] leading-6 font-semibold text-ink">站点资料</h2>
+          <p className="mt-0.5 text-xs leading-5 text-ink-3">
+            批次、市场、规则路径和技术标识；低频信息集中在这里，不占结果首屏。
+          </p>
+        </div>
+        <dl className="grid grid-cols-1 gap-x-6 px-4 py-2 sm:grid-cols-2 sm:px-5">
+          <Fact label="批次">
+            <Link
+              className="text-accent hover:underline"
+              to={`/batches/${encodeURIComponent(batch.batch_id)}`}
+            >
+              {batch.name}
+            </Link>
+          </Fact>
+          <Fact label="站点 ID">
+            <code className="break-all font-mono text-[11px]">{site.site_key}</code>
+          </Fact>
+          <Fact label="国家／市场">
+            {batch.country || "—"} / {batch.market || "—"}
+          </Fact>
+          <Fact label="语言">{batch.language || "—"}</Fact>
+          <Fact label="品类">{batch.category || "—"}</Fact>
+          <Fact label="规则">
+            {site.rule ? (
+              <span className="font-mono text-[11px]">
+                {site.rule.rule_id}@{site.rule.rule_version}
+              </span>
+            ) : (
+              "—"
+            )}
+          </Fact>
+          <Fact label="规则路径">
+            <code className="break-all font-mono text-[11px]">
+              {site.rule?.path || "—"}
             </code>
-          ) : (
-            "—"
-          )}
-        </Fact>
-        <Fact label="构建 ID">
-          {buildId ? <code className="font-mono text-[11px]">{buildId}</code> : "—"}
-        </Fact>
-        <Fact label="市场">{task?.market || batch.market || "—"}</Fact>
-        <Fact label="出口">
-          {site.proxy
-            ? site.proxy
-            : site.proxy_configured
-              ? "已配置"
-              : "服务默认／直连"}
-        </Fact>
-        <Fact label="创建">
-          <span className="tabular">{formatTime(site.created_at)}</span>
-        </Fact>
-        <Fact label="更新">
-          <span className="tabular">{formatTime(site.updated_at)}</span>
-        </Fact>
-        <Fact label="最近构建">
-          {build ? (
-            <span>
-              {buildStateLabel(build.state)}
-              {build.outcome ? ` · ${buildOutcomeLabel(build.outcome)}` : ""}
-            </span>
-          ) : site.build ? (
-            <span>
-              {buildStateLabel(site.build.state)}
-              {site.build.outcome ? ` · ${buildOutcomeLabel(site.build.outcome)}` : ""}
-            </span>
-          ) : (
-            "—"
-          )}
-        </Fact>
-      </dl>
-    </section>
+          </Fact>
+          <Fact label="任务 ID">
+            {task ? <code className="font-mono text-[11px]">{task.task_id}</code> : "—"}
+          </Fact>
+          <Fact label="计划">
+            {task ? (
+              <code className="font-mono text-[11px]">
+                {task.plan_id}@{task.plan_version}
+              </code>
+            ) : (
+              "—"
+            )}
+          </Fact>
+          <Fact label="构建 ID">
+            {buildId ? <code className="font-mono text-[11px]">{buildId}</code> : "—"}
+          </Fact>
+          <Fact label="市场">{task?.market || batch.market || "—"}</Fact>
+          <Fact label="出口">
+            {site.proxy
+              ? site.proxy
+              : site.proxy_configured
+                ? "已配置"
+                : "服务默认／直连"}
+          </Fact>
+          <Fact label="创建">
+            <span className="tabular">{formatTime(site.created_at)}</span>
+          </Fact>
+          <Fact label="更新">
+            <span className="tabular">{formatTime(site.updated_at)}</span>
+          </Fact>
+          <Fact label="最近构建">
+            {build ? (
+              <span>
+                {buildStateLabel(build.state)}
+                {build.outcome ? ` · ${buildOutcomeLabel(build.outcome)}` : ""}
+              </span>
+            ) : site.build ? (
+              <span>
+                {buildStateLabel(site.build.state)}
+                {site.build.outcome
+                  ? ` · ${buildOutcomeLabel(site.build.outcome)}`
+                  : ""}
+              </span>
+            ) : (
+              "—"
+            )}
+          </Fact>
+        </dl>
+      </section>
+      <SiteRatePolicyPanel batchId={batch.batch_id} siteKey={site.site_key} />
+    </div>
   );
 
   const panels: Record<SiteView, ReactNode> = {

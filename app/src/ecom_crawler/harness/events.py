@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from .models import HarnessEvent, utc_now
+from .trace import summarize_tool_input, summarize_tool_output
 
 # OpenCode event names are experimental; keep the mapping in one place so an
 # upstream rename fails tests instead of leaking into the build UI.
@@ -19,6 +20,8 @@ EVENT_MAP: dict[str, tuple[str, dict[str, Any]]] = {
     "session.step.ended": ("progress", {"phase": "step_ended"}),
     "session.step.failed": ("error", {"phase": "step_failed"}),
     "session.tool.called": ("tool_started", {}),
+    "session.tool.input.started": ("tool_input", {}),
+    "session.tool.input.ended": ("tool_input", {}),
     "session.tool.success": ("tool_finished", {"status": "success"}),
     "session.tool.failed": ("tool_finished", {"status": "failed"}),
     "permission.asked": ("permission_requested", {}),
@@ -84,10 +87,37 @@ def _summary(raw_type: str, data: dict[str, Any]) -> dict[str, Any]:
             if isinstance(value, str) and value:
                 summary[key] = value
         return summary
-    if raw_type == "session.tool.called":
+    if raw_type in {"session.tool.called", "session.tool.input.started"}:
         summary: dict[str, Any] = {"tool": _tool_name(data)}
         if "id" in data:
             summary["call_id"] = data["id"]
+        tool_input = summarize_tool_input(data.get("input"))
+        if tool_input is not None:
+            summary["input"] = tool_input
+        return summary
+    if raw_type == "session.tool.input.ended":
+        summary = {"tool": _tool_name(data)}
+        if "id" in data:
+            summary["call_id"] = data["id"]
+        tool_input = summarize_tool_input(
+            data.get("text") or data.get("input") or data.get("args")
+        )
+        if tool_input is not None:
+            summary["input"] = tool_input
+        return summary
+    if raw_type in {"session.tool.success", "session.tool.failed"}:
+        summary = {"tool": _tool_name(data)}
+        if "id" in data:
+            summary["call_id"] = data["id"]
+        output = summarize_tool_output(
+            data.get("content")
+            if "content" in data
+            else data.get("output")
+            if "output" in data
+            else data.get("result")
+        )
+        if output:
+            summary["output"] = output
         return summary
     if raw_type == "session.text.delta":
         delta = str(data.get("delta") or "")

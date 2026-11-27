@@ -1,6 +1,11 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { SystemAccess, SystemInfo, SystemTokenResponse } from "../../lib/api";
+import type {
+  CollectionPolicy,
+  SystemAccess,
+  SystemInfo,
+  SystemTokenResponse,
+} from "../../lib/api";
 import { renderPage } from "../../test/renderPage";
 import { SystemSettingsPage } from "./SystemSettingsPage";
 
@@ -30,6 +35,10 @@ function systemInfo(
       worker: "managed",
       max_tasks: 1,
       max_browser_tasks: 1,
+      per_domain_rps: 1,
+      collection_slots: { next_start: 1, source: "default" },
+      max_builds: null,
+      build_slots: null,
       read_only: false,
       builds_available: true,
       builds_disabled: false,
@@ -77,6 +86,23 @@ function stubFetch(
     if (path === "/api/system" && (!init?.method || init.method === "GET")) {
       return Response.json(current);
     }
+    if (path === "/api/system/collection-slots" && init?.method === "PUT") {
+      const { max_tasks } = JSON.parse(String(init.body)) as {
+        max_tasks: number | null;
+      };
+      const collection_slots = {
+        next_start: max_tasks ?? 1,
+        source: max_tasks === null ? ("default" as const) : ("settings" as const),
+      };
+      current = { ...current, runtime: { ...current.runtime, collection_slots } };
+      return Response.json(collection_slots);
+    }
+    if (path === "/api/system/build-slots" && init?.method === "PUT") {
+      const { max_tasks } = JSON.parse(String(init.body)) as { max_tasks: number };
+      const build_slots = { next_start: max_tasks, source: "settings" as const };
+      current = { ...current, runtime: { ...current.runtime, build_slots } };
+      return Response.json(build_slots);
+    }
     if (path === "/api/system/access" && init?.method === "PUT") {
       const body = JSON.parse(String(init.body)) as { lan_enabled: boolean };
       const access = handlers.onAccess
@@ -111,6 +137,54 @@ function stubFetch(
       current = { ...current, server: result.access };
       return Response.json(result);
     }
+    if (path === "/api/system/collection-policy" && init?.method === "PUT") {
+      const body = JSON.parse(String(init.body)) as CollectionPolicy;
+      const policy = {
+        formal_unlimited: body.formal_unlimited,
+        formal_max_products: body.formal_max_products,
+        formal_max_seconds: body.formal_max_seconds,
+        default_per_domain_rps: body.default_per_domain_rps,
+        default_concurrency: body.default_concurrency,
+      };
+      return Response.json({
+        policy,
+        formal_limits: {
+          max_urls: null,
+          max_products: policy.formal_unlimited ? null : policy.formal_max_products,
+          max_seconds: policy.formal_unlimited ? null : policy.formal_max_seconds,
+        },
+        default_rate: {
+          ...(policy.default_per_domain_rps === null
+            ? {}
+            : { per_domain_rps: policy.default_per_domain_rps }),
+          ...(policy.default_concurrency === null
+            ? {}
+            : { concurrency: policy.default_concurrency }),
+        },
+        site_policies: [],
+      });
+    }
+    if (
+      path === "/api/system/collection-policy" &&
+      (!init?.method || init.method === "GET")
+    ) {
+      return Response.json({
+        policy: {
+          formal_unlimited: true,
+          formal_max_products: 10000,
+          formal_max_seconds: 3600,
+          default_per_domain_rps: null,
+          default_concurrency: null,
+        },
+        formal_limits: {
+          max_urls: null,
+          max_products: null,
+          max_seconds: null,
+        },
+        default_rate: {},
+        site_policies: [],
+      });
+    }
     if (path === "/api/auth/logout" && init?.method === "POST") {
       return Response.json({ ok: true });
     }
@@ -123,6 +197,106 @@ function stubFetch(
 afterEach(() => vi.unstubAllGlobals());
 
 describe("system settings", () => {
+  it("auto-saves next-start collection slots and asks for a restart", async () => {
+    const fetchMock = stubFetch(systemInfo());
+    renderPage("/settings", "/settings", <SystemSettingsPage />);
+    const slots = await screen.findByRole("textbox", { name: "同时采集任务数" });
+    expect(slots).toHaveValue("1");
+    for (const value of ["", "0", "1.5", "1e2", "9007199254740992"]) {
+      fireEvent.change(slots, { target: { value } });
+      expect(slots).toHaveAttribute("aria-invalid", "true");
+    }
+    expect(
+      fetchMock.mock.calls.filter(([url]) => url.endsWith("/collection-slots")),
+    ).toHaveLength(0);
+    fireEvent.change(slots, { target: { value: "3" } });
+    fireEvent.blur(slots);
+    expect(
+      await screen.findByText(/已自动保存下次启动值 3 个；重启服务后生效/),
+    ).toBeVisible();
+    expect(
+      await screen.findByRole("dialog", { name: "并发设置已保存，需要重启服务" }),
+    ).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "知道了" }));
+    fireEvent.click(screen.getByRole("button", { name: "恢复默认" }));
+    await waitFor(() => expect(slots).toHaveValue("1"));
+    expect(
+      screen.queryByRole("dialog", { name: "并发设置已保存，需要重启服务" }),
+    ).toBeNull();
+  });
+
+  it("auto-saves after the input settles without a manual save button", async () => {
+    const fetchMock = stubFetch(systemInfo());
+    renderPage("/settings", "/settings", <SystemSettingsPage />);
+    const slots = await screen.findByRole("textbox", { name: "同时采集任务数" });
+    expect(screen.queryByRole("button", { name: /^保存$/ })).toBeNull();
+    fireEvent.change(slots, { target: { value: "4" } });
+    expect(
+      await screen.findByText(/已自动保存下次启动值 4 个；重启服务后生效/, undefined, {
+        timeout: 2500,
+      }),
+    ).toBeVisible();
+    expect(
+      fetchMock.mock.calls.filter(([url]) => url.endsWith("/collection-slots")),
+    ).toHaveLength(1);
+  });
+
+  it("shows the CLI source and does not render an editor for it", async () => {
+    const config = systemInfo();
+    config.runtime.collection_slots = { next_start: 1, source: "cli" };
+    stubFetch(config);
+    renderPage("/settings", "/settings", <SystemSettingsPage />);
+    expect(await screen.findByText("--max-tasks 1")).toBeVisible();
+    expect(screen.queryByRole("textbox", { name: "同时采集任务数" })).toBeNull();
+  });
+
+  it("auto-saves analysis slots without changing the collection setting", async () => {
+    const config = systemInfo();
+    config.runtime.max_builds = 1;
+    config.runtime.build_slots = { next_start: 1, source: "default" };
+    const fetchMock = stubFetch(config);
+    renderPage("/settings", "/settings", <SystemSettingsPage />);
+    const build = await screen.findByRole("textbox", { name: "同时分析规则的任务数" });
+    fireEvent.change(build, { target: { value: "2" } });
+    fireEvent.blur(build);
+    expect(
+      await screen.findByText(/已自动保存下次启动值 2 个；重启服务后生效/),
+    ).toBeVisible();
+    expect(
+      await screen.findByRole("dialog", { name: "并发设置已保存，需要重启服务" }),
+    ).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "知道了" }));
+    expect(screen.getByRole("textbox", { name: "同时采集任务数" })).toHaveValue("1");
+    expect(
+      fetchMock.mock.calls.filter(([url]) => url.endsWith("/build-slots")),
+    ).toHaveLength(1);
+  });
+
+  it("saves the formal collection policy without a restart", async () => {
+    const fetchMock = stubFetch(systemInfo());
+    renderPage("/settings", "/settings", <SystemSettingsPage />);
+    const unlimited = await screen.findByRole("checkbox", {
+      name: /正式采集默认不设商品数或时长上限/,
+    });
+    expect(unlimited).toBeChecked();
+    expect(screen.getByRole("textbox", { name: "商品上限" })).toBeDisabled();
+    fireEvent.click(unlimited);
+    expect(screen.getByRole("textbox", { name: "商品上限" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "保存采集计划" }));
+    expect(await screen.findByText(/已保存；对之后创建的任务生效/)).toBeVisible();
+    const put = fetchMock.mock.calls.find(
+      ([url, init]) =>
+        url === "/api/system/collection-policy" && init?.method === "PUT",
+    );
+    expect(JSON.parse(String(put?.[1]?.body))).toEqual({
+      formal_unlimited: false,
+      formal_max_products: 10000,
+      formal_max_seconds: 3600,
+      default_per_domain_rps: null,
+      default_concurrency: null,
+    });
+  });
+
   it("renders access, resources and paths", async () => {
     stubFetch(systemInfo());
     renderPage("/settings", "/settings", <SystemSettingsPage />);

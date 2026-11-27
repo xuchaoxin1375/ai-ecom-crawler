@@ -318,6 +318,75 @@ class HarnessTests(unittest.TestCase):
         self.assertEqual(normalized[6].data["outcome"], "succeeded")
         self.assertEqual(normalized[7].data["phase"], "idle")
 
+    def test_tool_input_and_output_are_normalized(self) -> None:
+        started = normalize_event(
+            {
+                "type": "session.tool.called",
+                "data": {
+                    "sessionID": SESSION_ID,
+                    "id": "call_1",
+                    "native": {"name": "read"},
+                },
+            }
+        )
+        self.assertEqual(started.type, "tool_started")
+        self.assertEqual(started.data["tool"], "read")
+        self.assertEqual(started.data["call_id"], "call_1")
+
+        named = normalize_event(
+            {
+                "type": "session.tool.input.started",
+                "data": {
+                    "sessionID": SESSION_ID,
+                    "id": "call_1",
+                    "name": "read",
+                },
+            }
+        )
+        self.assertEqual(named.type, "tool_input")
+        self.assertEqual(named.data["tool"], "read")
+
+        input_event = normalize_event(
+            {
+                "type": "session.tool.input.ended",
+                "data": {
+                    "sessionID": SESSION_ID,
+                    "id": "call_1",
+                    "name": "read",
+                    "text": '{"path": "work/AGENTS.md"}',
+                },
+            }
+        )
+        self.assertEqual(input_event.type, "tool_input")
+        self.assertEqual(input_event.data["input"], {"path": "work/AGENTS.md"})
+
+        output_event = normalize_event(
+            {
+                "type": "session.tool.success",
+                "data": {
+                    "sessionID": SESSION_ID,
+                    "id": "call_1",
+                    "name": "read",
+                    "content": [{"type": "text", "text": "read ok"}],
+                    "metadata": {"exit": 0},
+                },
+            }
+        )
+        self.assertEqual(output_event.type, "tool_finished")
+        self.assertEqual(output_event.data["output"], "read ok")
+
+        secret = normalize_event(
+            {
+                "type": "session.tool.input.ended",
+                "data": {
+                    "sessionID": SESSION_ID,
+                    "id": "call_2",
+                    "text": "api_key=supersecret",
+                },
+            }
+        )
+        self.assertNotIn("supersecret", json.dumps(secret.to_dict()))
+
     def test_adapter_build_lifecycle(self) -> None:
         adapter = OpenCodeHttpAdapter(
             self.root / "sessions",

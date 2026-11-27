@@ -19,7 +19,7 @@ from scrapling.fetchers import FetcherSession
 
 from .archive import ArchiveFetcher, ArchiveStore, normalize_archive_mode
 from .atomic import write_json
-from .batch import rule_covers_entry
+from .batch import target_entry_mode
 from .browser import BrowserConfig, BrowserFetcher
 from .fetcher import DomainLimiter, HybridFetcher, ScraplingFetcher, normalize_engine
 from .models import Lease, Task, utc_now
@@ -69,6 +69,22 @@ def _retry_values(rule: RulePackage) -> tuple[int, int]:
     )
 
 
+def _policy_values(context: FetcherContext) -> dict[str, object]:
+    policy = context.task.input.get("rate_policy")
+    return dict(policy) if isinstance(policy, dict) else {}
+
+
+def _retry_override(
+    context: FetcherContext, max_attempts: int, backoff_ms: int
+) -> tuple[int, int]:
+    policy = _policy_values(context)
+    if policy.get("max_attempts") is not None:
+        max_attempts = max(1, int(policy["max_attempts"]))
+    if policy.get("backoff_ms") is not None:
+        backoff_ms = max(0, int(policy["backoff_ms"]))
+    return max_attempts, backoff_ms
+
+
 def _make_static(context: FetcherContext) -> ScraplingFetcher:
     fetch = context.rule.fetch
     manager = FetcherSession(
@@ -79,18 +95,30 @@ def _make_static(context: FetcherContext) -> ScraplingFetcher:
     )
     session = manager.__enter__()
     max_attempts, backoff_ms = _retry_values(context.rule)
+    max_attempts, backoff_ms = _retry_override(
+        context, max_attempts, backoff_ms
+    )
+    policy = _policy_values(context)
+    if policy.get("delay_ms") is not None:
+        delay_ms = int(policy["delay_ms"])
+    else:
+        delay_ms = int(context.task.limits.get("fetch_delay_ms") or 0)
     return ScraplingFetcher(
         session,
         limiter=context.limiter,
         timeout_ms=int(fetch.get("timeout_ms", 45000)),
         max_attempts=max_attempts,
         backoff_ms=backoff_ms,
+        delay_ms=delay_ms,
         session_manager=manager,
     )
 
 
 def _make_browser(context: FetcherContext) -> BrowserFetcher:
     max_attempts, backoff_ms = _retry_values(context.rule)
+    max_attempts, backoff_ms = _retry_override(
+        context, max_attempts, backoff_ms
+    )
     config = BrowserConfig.from_fetch(context.rule.fetch)
     if context.proxy and not config.launch.proxy:
         config = replace(
@@ -111,6 +139,9 @@ def _make_browser(context: FetcherContext) -> BrowserFetcher:
 
 def _make_stealth(context: FetcherContext) -> StealthFetcher:
     max_attempts, backoff_ms = _retry_values(context.rule)
+    max_attempts, backoff_ms = _retry_override(
+        context, max_attempts, backoff_ms
+    )
     config = StealthConfig.from_fetch(context.rule.fetch)
     if context.proxy and not config.proxy:
         config = replace(config, proxy=context.proxy)
@@ -407,15 +438,8 @@ class Worker:
     def _needs_browser(rule: RulePackage) -> bool:
         if rule.kind == "hybrid":
             return True
-        fetch = rule.fetch
-        if fetch.get("default_engine") == "browser":
-            return True
-        per_type = fetch.get("per_url_type")
-        if isinstance(per_type, dict):
-            for settings in per_type.values():
-                if isinstance(settings, dict) and settings.get("engine") == "browser":
-                    return True
-        return False
+        default, overrides = engine_plan(rule)
+        return bool({"browser", "stealth"} & {default, *overrides.values()})
 
     def _acquire_browser_slot(self, task_id: str, lease: Lease) -> str | None:
         if self.max_browser_tasks <= 0:
@@ -449,8 +473,8 @@ class Worker:
             try:
                 rule = load_rule(rule_path)
                 rule.validate_task_type(task.task_type)
-                if not rule_covers_entry(rule, task.input.get("target_entry")):
-                    raise RuleError("rule discovery sources no longer cover the requested entry")
+                if target_entry_mode(rule, task.input.get("target_entry")) is None:
+                    raise RuleError("rule no longer covers the requested entry")
             except Exception as exc:  # noqa: BLE001 - task boundary
                 self._fail(task, lease, "PLAN_ERROR", f"{type(exc).__name__}: {exc}")
                 return
@@ -493,6 +517,14 @@ class Worker:
                 browser_slot = True
                 self._acquire_browser_slot(task.task_id, lease)
             try:
+                if "rate_policy" in task.input and task.domain_key:
+                    policy = task.input.get("rate_policy")
+                    policy = policy if isinstance(policy, dict) else {}
+                    self.limiter.configure(
+                        task.domain_key,
+                        policy.get("per_domain_rps"),
+                    )
+                task_proxy = task.input.get("proxy")
                 context = FetcherContext(
                     rule=rule,
                     limiter=self.limiter,
@@ -500,8 +532,7 @@ class Worker:
                     task=task,
                     lease=lease,
                     out_root=self.out_root,
-                    proxy=self.proxy
-                    or (str(task.input.get("proxy")) if task.input.get("proxy") else None),
+                    proxy=str(task_proxy) if task_proxy else self.proxy,
                 )
                 with self.fetcher_factory(context) as fetcher:
                     archive_config = task.input.get("archive")

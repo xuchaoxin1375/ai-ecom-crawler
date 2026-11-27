@@ -103,6 +103,38 @@ it("splits the task status and stop reason into separate aligned columns", async
   expect(within(table).queryByText("任务详情")).not.toBeInTheDocument();
 });
 
+it("keeps the batch download visible and identifies a finished trial awaiting formal collection", async () => {
+  const pending: BatchDetail = {
+    ...batch,
+    collection_mode: "formal",
+    counts: { ...batch.counts, startable: 1, finished: 1, cancelled: 0 },
+    sites: [
+      {
+        ...site,
+        formal_pending: true,
+        task: { ...cancelledTask, state: "FINISHED", outcome: "COMPLETED" },
+      },
+    ],
+  };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      if (url.split("?")[0] === "/api/batches/b-fixture") return Response.json(pending);
+      throw new Error(`Unexpected request: ${url}`);
+    }),
+  );
+  renderPage("/batches/:batchId", "/batches/b-fixture", <BatchDetailPage />);
+
+  expect(
+    await screen.findByRole("button", { name: "启动 1 个可采站点" }),
+  ).toBeVisible();
+  expect(screen.getByRole("button", { name: "导出批次 ZIP" })).toBeVisible();
+  expect(screen.getByText("待正式采集", { exact: true })).toBeVisible();
+  expect(
+    screen.getByRole("link", { name: "试采 · 完成：查看任务 web-1 详情" }),
+  ).toBeVisible();
+});
+
 it("pauses a running site from the row control", async () => {
   const runningTask: TaskSummary = {
     ...cancelledTask,
@@ -182,6 +214,6 @@ it("lists live tasks in the control panel and resumes the batch", async () => {
   expect(within(panel).getByText("运行中 0 · 排队中 0 · 已暂停 1")).toBeVisible();
   fireEvent.click(within(panel).getByRole("button", { name: "继续全部" }));
 
-  expect(await screen.findByText(/继续请求已受理：受理 1 个/)).toBeVisible();
+  expect(await screen.findByText(/继续请求已受理：受理 1 个采集任务/)).toBeVisible();
   expect(calls).toContain("POST /api/batches/b-fixture/resume");
 });

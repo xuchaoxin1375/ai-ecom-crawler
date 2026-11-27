@@ -92,6 +92,16 @@ function batch(overrides: Partial<BatchDetail> = {}): BatchDetail {
 }
 
 describe("batch detail filters", () => {
+  it("shows a trial awaiting formal collection among startable sites", () => {
+    const pending = site({
+      task_id: "t-1",
+      task: task({ state: "FINISHED", outcome: "COMPLETED" }),
+      formal_pending: true,
+    });
+    expect(filterSites([pending], "startable")).toEqual([pending]);
+    expect(filterSites([pending], "finished")).toEqual([]);
+  });
+
   it("separates startable, running, failed and invalid sites", () => {
     const sites = [
       site({ site_key: "a", domain: "a.fr" }),

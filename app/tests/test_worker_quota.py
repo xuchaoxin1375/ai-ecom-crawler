@@ -4,6 +4,7 @@ import tempfile
 import threading
 import time
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 from ecom_crawler.runtime.models import Lease
@@ -26,6 +27,17 @@ class WorkerBrowserQuotaTests(unittest.TestCase):
 
         static = load_rule(ROOT / "experiments/d07/ecolaines-url/rule.yaml")
         self.assertFalse(Worker._needs_browser(static))
+
+        stealth_fetch = {**static.fetch, "default_engine": "stealth"}
+        self.assertTrue(Worker._needs_browser(replace(
+            static, raw={**static.raw, "fetch": stealth_fetch},
+        )))
+        for engine in ("browser", "stealth"):
+            with self.subTest(engine=engine):
+                mixed_fetch = {**static.fetch, "per_url_type": {"product": {"engine": engine}}}
+                self.assertTrue(Worker._needs_browser(replace(
+                    static, raw={**static.raw, "fetch": mixed_fetch},
+                )))
 
     def test_browser_slot_claim_is_atomic_across_task_stores(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

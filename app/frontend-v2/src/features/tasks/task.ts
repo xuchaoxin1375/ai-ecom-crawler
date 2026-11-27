@@ -19,6 +19,17 @@ export const TASK_STATE_OPTIONS = [
   { value: "CANCELLED", label: "已取消" },
 ] as const;
 
+export const TASK_LIVE_REFRESH_STATES = new Set([
+  "QUEUED",
+  "RUNNING",
+  "PAUSING",
+  "CANCELLING",
+]);
+
+export function tasksNeedLiveRefresh(tasks: TaskSummary[]): boolean {
+  return tasks.some((task) => TASK_LIVE_REFRESH_STATES.has(task.state));
+}
+
 export const TASK_TYPE_OPTIONS = [
   { value: "", label: "全部类型" },
   { value: "product", label: "商品采集" },

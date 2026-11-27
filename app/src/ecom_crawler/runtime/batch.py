@@ -22,7 +22,10 @@ _HEADER_CELLS = {"url", "site", "domain", "website", "网址", "站点", "域名
 _LABEL = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 BATCH_COLLECTION_LIMITS = {
     "sample": {"max_urls": 100, "max_products": 20, "max_seconds": 180},
-    "formal": {"max_urls": None, "max_products": 10000, "max_seconds": 3600},
+    # Formal collection defaults to the rule's declared catalog and natural
+    # end: no service-level product, URL or duration cap.  Operators can still
+    # send explicit limits for a bounded formal run.
+    "formal": {"max_urls": None, "max_products": None, "max_seconds": None},
 }
 
 
@@ -128,11 +131,11 @@ def rule_has_catalog_discovery(rule: RulePackage) -> bool:
     )
 
 
-def rule_covers_entry(rule: RulePackage, entry: str | None) -> bool:
+def target_entry_mode(rule: RulePackage, entry: str | None) -> str | None:
     if entry is None:
-        return True
+        return "catalog"
     sources = rule.sources
-    return (
+    exact_sources = (
         not rule.product_source
         and bool(sources)
         and all(
@@ -142,6 +145,24 @@ def rule_covers_entry(rule: RulePackage, entry: str | None) -> bool:
             for source in sources
         )
     )
+    if exact_sources and any(source.get("type") != "entry_links" for source in sources):
+        return "catalog"
+
+    url = urlsplit(entry)
+    origin = f"{url.scheme.lower()}://{url.netloc.lower()}"
+    if (
+        url.scheme in {"http", "https"}
+        and origin in {allowed.rstrip("/") for allowed in rule.site["allowed_origins"]}
+        and any(url.path.startswith(prefix) for prefix in rule.site["allowed_path_prefixes"])
+        and all(not re.search(pattern, entry) for pattern in rule.scope.get("exclude", []))
+        and (
+            not rule.scope.get("include")
+            or any(re.search(pattern, url.path) for pattern in rule.scope["include"])
+        )
+        and any(re.search(pattern, url.path) for pattern in rule.discovery["product_url_patterns"])
+    ):
+        return "product"
+    return "catalog" if exact_sources else None
 
 
 def within_target_navigation(url: str, entry: str, *, page_param: str | None = None) -> bool:

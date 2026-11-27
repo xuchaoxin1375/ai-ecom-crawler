@@ -115,6 +115,15 @@ python -m uv run --project app ecom-crawler serve --db "$data\tasks.db" --out-ro
 
 打开 `http://127.0.0.1:8765/next/#/batches`；任务入口是 `http://127.0.0.1:8765/next/#/tasks`，构建记录入口是 `http://127.0.0.1:8765/next/#/builds`。根路径 `/` 在 v2 构建产物存在时 307 跳到 `/next/`；旧 Vue 与旧原生控制台默认下线，`/batch`、`/legacy` 都 307 到 `/next/`，只有设置 `ECOM_LEGACY_UI=on` 时才恢复直访回退。停止用 `Ctrl+C`；重启前先停旧实例并继续使用 8765。服务启动后才构建 `frontend-v2/dist` 时，`/next/` 要重启服务才可用。
 
+### 备份与恢复批次交付
+
+1. 记录当前应用版本及 `--db`、`--rules-dir`、`--out-root`。先让在途任务结清，停止 `serve` 和同账本的独立 worker。
+2. 将账本、规则目录和输出目录备到同一批次的私有备份。用 SQLite Backup API 生成独立账本，目录保留原结构和历史版本。数据库记录采用哪次交付，CSV 和结果清单在输出目录。
+3. 先在空目录还原一套，使用原启动命令替换三个路径并追加 `--read-only`。打开[原批次入口](http://127.0.0.1:8765/next/#/batches)，从站点和批次各下载一次，核对 ZIP 内 `batch.json` 的任务编号、CSV 内容和规则哈希。ZIP 生成时间会变化，以内容为准。
+4. 要恢复运行中的任务，先恢复到记录中的原路径，再用原启动参数启动。任务规则路径、构建工作区及自定义归档路径可为绝对路径。OpenCode 未结束会话还依赖原 harness 会话存储。另一路径的只读下载演练只验证历史交付。
+
+备份位置含运行数据和配置，只保存在有权限的仓库外目录。恢复实现及边界见[批次中断与交付恢复](../docs/45-批次采集与交付改进计划.md#批次中断与交付恢复)。
+
 ### 局域网访问
 
 默认只绑定回环地址。需要从同一可信局域网的另一台电脑操作批次、任务或构建时，显式绑定 `0.0.0.0` 并提供访问密钥：
@@ -138,6 +147,8 @@ python -m uv run --project app ecom-crawler serve --db "$data\tasks.db" --out-ro
 ### 系统设置
 
 入口是 `http://127.0.0.1:8765/next/#/settings`（侧栏“规则与设置 → 系统设置”）。页面集中展示服务状态、访问范围、认证、worker 槽位、任务／构建队列、数据库大小、磁盘剩余、路径和版本。
+
+「资源与运行」分别设置同时采集任务数和同时分析规则的任务数。两个字段均接受正整数，默认各 1，应用重启后生效。恢复默认清除相应页面配置。显式 `serve --max-tasks` 或 `--max-builds` 优先于相应保存值。独立采集 worker 按自己的启动参数配置。规则分析覆盖首次接入、规则修复和主机验证，适用边界见[规则分析并发](../docs/37-构建Agent-Harness集成与使用说明.md#规则分析并发提案)。
 
 - **局域网开关**：服务必须以非回环 `--host` 启动过，页面才能开关；关闭后非回环 Host 一律 403，绑定地址和端口仍需重启修改。
 - **访问密钥**：可在页面设置自定义密钥，或生成随机密钥；账本只保存随机 salt 和 SHA-256 哈希。自定义密钥不回显，随机密钥只显示一次；轮换后所有设备都要重新登录。
@@ -174,7 +185,7 @@ python -m uv run --project app ecom-crawler validate --task-result /path/to/task
 - `run` 的退出码表示任务是否实际执行；业务结论看 `task-result.json` 的 `outcome`。计划或用法错误返回 2。
 - `run` 是一次性入口，不提供可恢复的控制；需要暂停／恢复／取消时用 `submit` 入队，再在另一个 shell 运行 `worker`，用 `pause`／`resume`／`cancel` 控制。外部暂停 `run` 任务后，`run` 以 2 退出并提示用 `worker` 恢复。
 - `serve` 默认只绑定回环地址；`--host` 为非回环地址时必须提供 `--access-token`／`ECOM_SERVE_TOKEN`（长度 1–256），或使用系统设置页已保存的密钥哈希；浏览器使用登录页和会话 Cookie，命令行仍可用 HTTP Basic，Host 只接受回环、本机地址／主机名和 `--allow-host` 追加项。默认启动托管 worker（持有 worker 单实例锁）；`--no-worker` 只提供 API／页面，执行由独立 `worker` 进程负责，写接口仍然可用；`--read-only` 要求账本已存在，不启动 worker，不创建可写构建管理，所有非 `GET`／`HEAD`／`OPTIONS` 请求返回 403 `READ_ONLY`，SQLite 以 `mode=ro` 和 `PRAGMA query_only=ON` 打开。页面关闭不会停止后台。
-- 出口代理按任务或进程传入：`--proxy`、`ECOM_FETCH_PROXY`、`ECOM_BUILD_PROXY`；构建 API 的 `proxy` 会写入构建记录和站点，后续批次任务沿用。代理 URL 不接受凭据，API 展示会遮蔽 userinfo。
+- 出口代理按任务或进程传入：`--proxy`、`ECOM_FETCH_PROXY`、`ECOM_BUILD_PROXY`。构建 API 的 `proxy` 会写入构建记录和站点，后续批次任务沿用。Worker 优先使用任务已记录的代理，未指定时使用进程默认代理。代理 URL 不接受凭据，API 展示会遮蔽 userinfo。
 - 构建 trace 默认不保存 reasoning；需要本地复盘时用 `ECOM_BUILD_CAPTURE_REASONING=1` 启动服务，或在构建 API 传 `capture_reasoning=true`。trace 会截断工具输出、消息和 reasoning，不保存原始导出或整页 HTML。
 - 站点详情的“模型输出”读取 `/api/builds/{id}/messages`：构建中显示流式时间线，结束后显示完整可见消息；`timeline` 按时间合并思考、工具调用和文本。reasoning 仅在显式保留时出现；未保留时页面会提示服务端开关和单次勾选条件。
 - 规则激活：`ECOM_RULE_ACTIVATION_MODE=manual`（默认）下定向修复只产生候选，需在站点详情人工激活；`legacy` 恢复修复后自动激活。初始构建仍自动激活。`ECOM_BUILD_DISABLED=1` 在只读预览中保留构建读接口和历史，只拒绝新的构建／修复；候选规则详情和站点候选卡返回主机生成的字段级 `change_summary` 与规范化 `validation`（问题样本、回归计数、内容审计、证据哈希），不采用 Agent 自报的摘要。
@@ -322,7 +333,7 @@ runtime:
 ## Web 服务（serve）
 
 - `serve` 用 FastAPI 托管 `/api/*` 和 `static/`，默认 `127.0.0.1:8765`；非回环 `--host` 必须同时配置访问密钥或已有密钥哈希，浏览器使用登录页和会话 Cookie，命令行 Basic 兼容，并按回环、本机地址／主机名和 `--allow-host` 校验 Host。`--rules-dir` 指向受管规则包目录。
-- 默认启动托管 worker（`--max-tasks` 默认 1），持有 `<db>.worker.lock`；`--no-worker` 只跳过托管 worker，写接口仍可用，便于另跑 `worker`。
+- 默认启动托管 worker，持有 `<db>.worker.lock`。任务槽位取显式 `--max-tasks`、账本保存值或应用默认 1；`--no-worker` 只跳过托管 worker，写接口仍可用，便于另跑 `worker`。
 - `--read-only` 用于只读预览：要求账本已存在，不启动 worker，不运行构建启动对账／关闭调度，拒绝所有写请求（403 `READ_ONLY`），并以 SQLite `mode=ro` 加 `PRAGMA query_only=ON` 打开账本。`/api/health` 返回 `read_only=true`、`worker=read-only`、`builds_readable=true`、`builds_available=false`；构建历史可读，构建写操作为 403。
 - 只读 API：`GET /api/health`、`GET /api/system`、`GET /api/rules`、`GET /api/tasks`（支持 `state`、`task_type`、`batch_id`、`site_key`、`include_archived`、`sort`、`order`）、`GET /api/tasks/{id}`、`GET /api/tasks/{id}/items?kind=url|product`、`GET /api/tasks/{id}/export`；质量反馈：`GET /api/tasks/{id}/feedback`、`GET /api/feedback`、`GET /api/feedback/{id}`；批次与构建：`GET /api/batches`、`/api/batches/{id}`、`/api/builds`、`/api/builds/config`、`/api/builds/{id}`、`/api/builds/{id}/messages`、`/api/builds/{id}/events`、`/api/builds/{id}/trace`；模型池：`PUT`／`DELETE /api/builds/config/models`、`POST /api/builds/models/check`。
 - 写 API：`PUT /api/system/access`、`POST /api/system/access/token`；`POST /api/tasks`（`DRAFT` + `request_id` 幂等）、`start`、`pause`、`resume`、`cancel`、`archive`、`restore`；质量反馈：`POST /api/tasks/{id}/feedback`、`POST /api/feedback/{id}/triage`；批次与构建：`POST /api/batches`、`/api/batches/{id}/import|start|pause|cancel|archive|restore`、`/api/batches/{id}/sites/{site_key}/build`、`/api/builds/{id}/pause|resume|cancel|continue`、`/api/builds/{id}/permissions|dependencies/{request_id}`。

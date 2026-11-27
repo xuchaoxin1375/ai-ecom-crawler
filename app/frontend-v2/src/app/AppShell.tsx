@@ -707,7 +707,7 @@ export function AppShell() {
         id="main"
         ref={mainRef}
         className={cn(
-          "min-h-screen pt-14 transition-[margin-left] lg:ml-[var(--sidebar-slot)]",
+          "min-h-screen pt-14 transition-none lg:ml-[var(--sidebar-slot)] lg:transition-[margin-left]",
           SIDEBAR_DURATION,
           SIDEBAR_EASE,
         )}

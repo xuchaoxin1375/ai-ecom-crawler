@@ -229,7 +229,8 @@ def exercise(page: Page, origin: str, fixture: str, root: Path) -> None:
                       "Site menu moved when the table was scrolled horizontally")
                 scroller.evaluate("el => { el.scrollLeft = 0; }")
             menu.click()
-            expect(page.get_by_role("menuitem", name="查看站点详情")).to_be_visible()
+            expect(page.get_by_role("menuitem", name="启动此站点采集…")).to_be_visible()
+            expect(page.get_by_role("menuitem", name="查看站点详情")).to_have_count(0)
             page.keyboard.press("Escape")
             expect(menu).to_be_focused()
     page.set_viewport_size({"width": 1280, "height": 900})
@@ -467,6 +468,66 @@ def browser_check(origin: str, fixture: str, root: Path) -> None:
                 context.tracing.start(screenshots=True, snapshots=True)
                 try:
                     exercise(page, origin, fixture, root)
+                    page.get_by_role("link", name="模型配置", exact=True).click()
+                    budget = page.get_by_role("region", name="批次接入预算")
+                    output_limit = budget.get_by_label("累计输出 tokens（含推理）")
+                    expect(output_limit).to_have_value("80000")
+                    output_limit.fill("120000")
+                    budget.get_by_role("button", name="保存预算").click()
+                    expect(budget.get_by_role("status")).to_have_text("预算已保存。")
+                    page.reload(wait_until="domcontentloaded")
+                    expect(output_limit).to_have_value("120000")
+                    page.set_viewport_size({"width": 390, "height": 900})
+                    expect(output_limit).to_be_visible()
+                    check(budget.evaluate("el => el.scrollWidth <= el.clientWidth + 1"),
+                          "Budget form overflows at 390px")
+                    if evidence := os.environ.get("ECOM_SMOKE_SCREENSHOT_DIR"):
+                        budget.screenshot(path=str(Path(evidence) / "onboarding-budget-390.png"))
+                    page.set_viewport_size({"width": 1280, "height": 900})
+                    cancellable = page.request.post(
+                        f"{origin}/api/batches",
+                        data={
+                            "name": "取消自动接入", "collection_mode": "formal",
+                            "market": "GB", "sites": ["https://cancel-fixture.test/"],
+                        },
+                        headers={"Origin": origin, "X-Requested-With": "XMLHttpRequest"},
+                    )
+                    check(cancellable.status == 201, f"Could not create cancel fixture: {cancellable.text()}")
+                    cancel_batch = cancellable.json()["batch"]["batch_id"]
+                    page.goto(f"{origin}/next/#/batches/{cancel_batch}")
+                    page.get_by_role("button", name="接入待采目标", exact=True).click()
+                    start_dialog = page.get_by_role("dialog", name="启动可采站点")
+                    start_dialog.get_by_role("checkbox", name=re.compile("接入 1 个待接入目标")).check()
+                    started_onboarding = post(
+                        page, start_dialog.get_by_role("button", name=re.compile("接入 1 个")),
+                        origin, f"/api/batches/{cancel_batch}/start", 202,
+                    )
+                    build_to_cancel = started_onboarding["onboarding"][0]["build_id"]
+                    build_data = page.request.get(f"{origin}/api/builds/{build_to_cancel}").json()["build"]
+                    check(build_data["onboarding_budget"]["max_output_tokens"] == 120000,
+                          "New onboarding did not use the saved budget")
+                    page.get_by_role("button", name="更多批次操作").click()
+                    page.get_by_role("menuitem", name="取消批次采集…").click()
+                    cancel_dialog = page.get_by_role("dialog", name="取消批次采集？")
+                    cancelled = post(
+                        page, cancel_dialog.get_by_role("button", name="取消批次采集", exact=True),
+                        origin, f"/api/batches/{cancel_batch}/cancel", 202,
+                    )
+                    check(cancelled["cancelled_onboarding"] == [build_to_cancel], "Onboarding was not cancelled")
+                    expect(page.get_by_role("button", name="接入待采目标", exact=True)).to_be_visible(
+                        timeout=12_000
+                    )
+                    print("Verified automatic onboarding can be cancelled from its batch.", flush=True)
+
+                    page.goto(f"{origin}/next/#/builds/{build_to_cancel}")
+                    overview = page.get_by_role("region", name="构建概览")
+                    expect(overview.get_by_text("输出 tokens（含推理）")).to_be_visible()
+                    expect(overview.get_by_text(re.compile("120,000"))).to_be_visible()
+                    page.get_by_role("link", name="模型配置", exact=True).click()
+                    budget.get_by_role("button", name="恢复默认预算").click()
+                    expect(output_limit).to_have_value("80000")
+                    print("Verified onboarding budget save, reload, new build and reset.", flush=True)
+
                     seeded = page.request.post(
                         f"{origin}/api/batches", data={"name": "模型池测试", "sites": [BUILD_SITE]},
                         headers={"Origin": origin, "X-Requested-With": "XMLHttpRequest"},
@@ -508,6 +569,19 @@ def browser_check(origin: str, fixture: str, root: Path) -> None:
                     }, f"Wrong selected model: {started['build']['model']}")
                     expect(dialog).to_be_hidden()
                     print("Verified default allocation, variant selection, explicit mock probe, and model pinning.", flush=True)
+                    page.goto(f"{origin}/next/#/settings", wait_until="domcontentloaded")
+                    slots = page.get_by_role("textbox", name="同时采集任务数")
+                    expect(slots).to_have_value("1")
+                    slots.fill("3")
+                    with page.expect_response(lambda res: res.url.endswith("/api/system/collection-slots")) as saved:
+                        page.get_by_role("button", name="保存", exact=True).click()
+                    check(saved.value.ok, f"Saving collection slots failed: {saved.value.status}")
+                    page.reload(wait_until="domcontentloaded")
+                    expect(slots).to_have_value("3")
+                    expect(page.get_by_text("当前运行 1 个。已保存下次启动值 3 个。")).to_be_visible()
+                    page.get_by_role("button", name="恢复默认", exact=True).click()
+                    expect(slots).to_have_value("1")
+                    print("Verified collection slots save, reload, and reset in the workbench.", flush=True)
                     check(not problems, "Unexpected browser errors:\n" + "\n".join(problems))
                 except Exception:
                     print(f"Failed at {page.url}; browser errors: {problems}", file=sys.stderr)
@@ -536,6 +610,7 @@ def run_scenario(root: Path) -> None:
         fixture_server() as fixture,
         socket.socket() as listener,
         patch("ecom_crawler.build_models.probe_chat", return_value=6),
+        patch("ecom_crawler.web.app.discover_models", return_value=[]),
     ):
         listener.bind(("127.0.0.1", 0))
         origin = f"http://127.0.0.1:{listener.getsockname()[1]}"

@@ -74,6 +74,11 @@ def build_task(
     offline: bool = False,
     seed_urls: list[str] | None = None,
     discover: bool = True,
+    target_entry: str | None = None,
+    concurrency: int | None = None,
+    delay_ms: int | None = None,
+    retry_backoff_ms: int | None = None,
+    rate_policy: dict[str, Any] | None = None,
 ) -> Task:
     rule_path = Path(rule_path).resolve()
     if not rule_path.is_file():
@@ -82,7 +87,14 @@ def build_task(
     rule.validate_task_type(task_type)
     if task_type not in {"product", "discovery"}:
         raise ContractError(f"unsupported task_type: {task_type}")
+    effective_concurrency = max(
+        1,
+        int(concurrency if concurrency is not None else rule.fetch.get("concurrency", 1)),
+    )
+    effective_delay_ms = max(0, int(delay_ms)) if delay_ms is not None else 0
     task_input = {"rule_path": str(rule_path)}
+    if target_entry:
+        task_input["target_entry"] = target_entry
     if seed_urls:
         cleaned = [str(url).strip() for url in seed_urls if str(url).strip()]
         if cleaned:
@@ -91,6 +103,8 @@ def build_task(
         task_input["discover"] = False
     if proxy:
         task_input["proxy"] = proxy
+    if rate_policy is not None:
+        task_input["rate_policy"] = dict(rate_policy)
     archive = _archive_input(
         mode=archive_mode,
         root=archive_root,
@@ -113,8 +127,14 @@ def build_task(
             "max_products": max_products,
             "max_seconds": max_seconds,
             "max_attempts": max_attempts,
-            "retry_backoff_ms": 1000,
-            "concurrency": {"navigation": 1, "product": 1},
+            "retry_backoff_ms": (
+                1000 if retry_backoff_ms is None else retry_backoff_ms
+            ),
+            "concurrency": {
+                "navigation": effective_concurrency,
+                "product": effective_concurrency,
+            },
+            "fetch_delay_ms": effective_delay_ms,
         },
         output={
             "url_list": True,
@@ -193,6 +213,7 @@ def run_task(
     offline: bool = False,
     seed_urls: list[str] | None = None,
     discover: bool = True,
+    target_entry: str | None = None,
 ) -> tuple[dict[str, Any], Path]:
     """Create and run one task, returning its result and task directory."""
     task = build_task(
@@ -212,6 +233,7 @@ def run_task(
         offline=offline,
         seed_urls=seed_urls,
         discover=discover,
+        target_entry=target_entry,
     )
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
