@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>工作台三窗格 · 布局草稿</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231f5c4a'/%3E%3Cpath d='M16 7l9 5-9 5-9-5 9-5z' fill='none' stroke='white' stroke-width='2'/%3E%3Cpath d='M7 17l9 5 9-5' fill='none' stroke='white' stroke-width='2'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="draft.css?v=20261127-6">
+</head>
+<body class="index-page">
+  <div class="shell">
+    <div class="main">
+      <header class="topbar">
+        <div class="crumbs">
+          <strong>工作台三窗格 · 布局草稿</strong>
+          <span class="draft-chip">示例数据 · 非生产</span>
+        </div>
+        <div class="spacer"></div>
+        <a class="btn ghost sm" href="../README.md">experiments/README</a>
+        <span class="service-pill"><span class="dot"></span><span class="label">本地原型</span></span>
+      </header>
+
+      <main class="index-wrap">
+        <section class="index-hero">
+          <div class="intro">
+            <h1>把「看进度、操作、日志」放回同一屏</h1>
+            <p>
+              参考火车头采集器的固定三窗格：左侧任务/批次树，右上运行任务与进度，右下运行日志。
+              第四版 D 按补充调整：左侧是可拖拽的无限层级任务树，右侧是最近添加/启动的任务列表。
+              A/B/C 保留作对照。所有草稿使用同一套示例数据，支持桌面与窄屏、可切换窗格、可拖动上下分隔条。
+            </p>
+            <div class="meta">
+              <span class="tag">4 个方向</span>
+              <span class="tag">桌面 + 窄屏</span>
+              <span class="tag">示例数据每 2.8 秒更新</span>
+              <span class="tag">不写入真实账本</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="draft-grid" aria-label="四版草稿">
+          <article class="draft-card recommended">
+            <div class="head">
+              <h2><span class="letter">D</span>任务树 + 最近任务</h2>
+              <span class="tagline">按补充调整</span>
+            </div>
+            <p>布局原型：左侧无限层级任务树，树头「+」或右键目录可新建目录/任务/批次；右侧最近任务列表，仅已结束任务可移除并撤销。</p>
+            <ul>
+              <li><span class="pro">优点</span>：左侧直接到任务，归属和层级自由；右键在目标目录就地新建，右侧从最近任务进入，管理动作集中。</li>
+              <li><span class="pro">优点</span>：移除只影响最近列表，任务仍在树中；运行/排队/暂停中不可移除；拖动之外还有「移动到…」对话框，键盘可用。</li>
+              <li><span class="con">代价</span>：长期任务定义、运行映射和批次批量添加需要新的数据模型；当前原型只验证布局与交互骨架。</li>
+            </ul>
+            <a class="open" href="draft-d.html">打开草稿 D →</a>
+          </article>
+
+          <article class="draft-card">
+            <div class="head">
+              <h2><span class="letter">A</span>批次工作台</h2>
+              <span class="tagline">平衡版</span>
+            </div>
+            <p>左批次树 + 右上当前批次的站点任务表 + 右下日志。顶部可切到跨批次的运行中、排队中、需关注视图。</p>
+            <ul>
+              <li><span class="pro">优点</span>：保留现有批次上下文，改动集中在批次页；日志跟随选中行，站点操作不用跳页。</li>
+              <li><span class="pro">优点</span>：跨批次运行视图作为次级筛选，兼顾“盯运行”和“按批次干活”。</li>
+              <li><span class="con">代价</span>：左侧树不直接放站点操作，站点级操作仍在右上表。</li>
+            </ul>
+            <a class="open secondary" href="draft-a.html">打开草稿 A →</a>
+          </article>
+
+          <article class="draft-card">
+            <div class="head">
+              <h2><span class="letter">B</span>站点操作树</h2>
+            </div>
+            <p>左树展开到站点，每行直接启停/导出；右上当前任务、历史与站点资料，右下日志。</p>
+            <ul>
+              <li><span class="pro">优点</span>：站点操作路径最短，适合站点多、要逐站排障的场景。</li>
+              <li><span class="pro">优点</span>：树内直接看有效数量和状态点，密度最高。</li>
+              <li><span class="con">代价</span>：站点上百后树会很长，依赖搜索和折叠；层级固定，不能自由调整归属。</li>
+            </ul>
+            <a class="open secondary" href="draft-b.html">打开草稿 B →</a>
+          </article>
+
+          <article class="draft-card">
+            <div class="head">
+              <h2><span class="letter">C</span>运行驾驶舱</h2>
+            </div>
+            <p>左侧只做运行筛选和批次过滤，右上跨批次任务表（进度、批量控制），右下日志与详情。</p>
+            <ul>
+              <li><span class="pro">优点</span>：盯运行最强，运行中/排队/暂停/需关注一屏切换，支持批量暂停与继续。</li>
+              <li><span class="pro">优点</span>：任务表信息最全，适合同时跑多个批次。</li>
+              <li><span class="con">代价</span>：站点操作要下钻；与现有「全部任务」页职责有重叠，需合并或明确边界。</li>
+            </ul>
+            <a class="open secondary" href="draft-c.html">打开草稿 C →</a>
+          </article>
+        </section>
+
+        <section class="compare" aria-label="四版对比">
+          <h2>并排比较</h2>
+          <div class="scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>维度</th>
+                  <th class="rec">D · 任务树 + 最近任务（推荐）</th>
+                  <th>A · 批次工作台</th>
+                  <th>B · 站点操作树</th>
+                  <th>C · 运行驾驶舱</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>主焦点</td>
+                  <td class="rec">任务树归属 + 最近启动任务</td>
+                  <td>当前批次：站点进度、操作、日志</td>
+                  <td>当前站点：当前任务/历史/资料</td>
+                  <td>全部运行中任务：进度与批量控制</td>
+                </tr>
+                <tr>
+                  <td>左栏</td>
+                  <td class="rec">可拖拽任务树：分组/站点任务，任意深度</td>
+                  <td>批次目录（分组、批次、状态计数）</td>
+                  <td>批次 → 站点两级树，站点行带启停/导出</td>
+                  <td>运行筛选（运行/排队/暂停/关注）+ 批次过滤</td>
+                </tr>
+                <tr>
+                  <td>右上</td>
+                  <td class="rec">最近任务表：位置、进度、移除/恢复、行控制</td>
+                  <td>站点任务表：状态、进度、有效/失败、行操作</td>
+                  <td>站点详情：当前任务进度、历史任务表、站点资料</td>
+                  <td>跨批次任务表：状态、进度、已处理、有效/失败、批量</td>
+                </tr>
+                <tr>
+                  <td>右下</td>
+                  <td>运行日志 / 实时数据 / 任务详情 / 文件下载</td>
+                  <td>运行日志 / 实时数据 / 任务详情 / 文件下载</td>
+                  <td>运行日志 / 实时数据 / 文件下载</td>
+                  <td>运行日志 / 实时数据 / 任务详情 / 文件下载</td>
+                </tr>
+                <tr>
+                  <td>调整归属</td>
+                  <td class="rec">拖拽或「移动到…」，任意分组/深度；批次与规则不变</td>
+                  <td>批次级移动分组，站点归属随批次</td>
+                  <td>固定批次→站点层级</td>
+                  <td>只筛选，不调整归属</td>
+                </tr>
+                <tr>
+                  <td>移除最近任务</td>
+                  <td class="rec">仅已结束任务可移除；运行/排队/暂停中禁用，可撤销</td>
+                  <td>不适用</td>
+                  <td>不适用</td>
+                  <td>不适用</td>
+                </tr>
+                <tr>
+                  <td>站点级操作</td>
+                  <td class="rec">树内启停/导出 + 最近任务行操作</td>
+                  <td>表内行操作 + 「⋯」菜单</td>
+                  <td class="rec">树内直接启停/导出，路径最短</td>
+                  <td>行操作 + 下钻任务详情</td>
+                </tr>
+                <tr>
+                  <td>跨批次运行</td>
+                  <td class="rec">最近任务默认跨批次，按启动时间</td>
+                  <td>顶部筛选切换，可盯住全部运行中</td>
+                  <td>需切批次或搜索</td>
+                  <td class="rec">默认视图，最强</td>
+                </tr>
+                <tr>
+                  <td>窄屏</td>
+                  <td>任务树抽屉 + 最近任务/日志二选一</td>
+                  <td>目录抽屉 + 任务/日志二选一</td>
+                  <td>目录抽屉 + 站点/日志二选一</td>
+                  <td>筛选抽屉 + 任务/日志二选一</td>
+                </tr>
+                <tr>
+                  <td>改动风险</td>
+                  <td class="rec">中高：需要任务树归属模型或现有批次层级的映射</td>
+                  <td>中：批次页重排，保留现有路由与批次详情</td>
+                  <td>中高：站点操作下沉到树，需处理大树性能</td>
+                  <td>高：与全部任务页合并，导航职责需重划</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <p class="footnote">
+          说明：四页均为静态原型，示例数据来自当前仓库已有的真实批次/站点命名与量级，但不会调用 API、不会写入账本。
+          “实时更新”是前端定时演示；窄屏可缩到 390px 查看任务树抽屉与最近任务/日志切换。
+          D 当前只验证布局与交互骨架：任务定义属性、运行映射、批次批量添加和新建批次以设计稿为准；
+          移除最近任务只允许 `FINISHED`／`CANCELLED`，运行/排队/暂停中禁用。设计见
+          [任务树与最近任务工作台设计](../../docs/49-任务树与最近任务工作台设计.md)，决策见
+          [ADR 0025](../../docs/adr/0025-任务树与最近任务工作台.md)。
+        </p>
+      </main>
+    </div>
+  </div>
+
+  <script src="draft-icons.js?v=20261127-6"></script>
+</body>
+</html>

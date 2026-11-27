@@ -18,7 +18,14 @@ GROUPS = {
         "test_rule_diff",
         "test_batches",
     ),
-    "api": ("test_web", "test_batches", "test_feedback", "test_migrate_rules"),
+    "api": (
+        "test_web",
+        "test_batches",
+        "test_feedback",
+        "test_migrate_rules",
+        "test_workbench",
+        "test_system_metrics",
+    ),
     "build": (
         "test_builds",
         "test_dependencies",

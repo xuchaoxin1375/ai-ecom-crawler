@@ -30,12 +30,12 @@
 
 ## 开发服务与预览地址
 
-- 启动或更换开发服务后，主动在交付说明中给出完整可点击地址，不把地址只留在终端日志或后台输出里让用户自己找；默认入口 `http://127.0.0.1:8765/next/#/batches`，站点详情按 `/next/#/batches/<batch_id>/sites/<site_key>` 给出。
+- 启动或更换开发服务后，主动在交付说明中给出完整可点击地址，不把地址只留在终端日志或后台输出里让用户自己找；默认入口 `http://127.0.0.1:8765/#/batches`，站点详情按 `/#/batches/<batch_id>/sites/<site_key>` 给出。
 - 同一时间只保留一个面向用户的入口。端口固定使用 `8765`，启动、重启都沿用上次端口，不为了绕开占用而换端口；端口被占用时先停掉旧实例，再在原端口重启。确需换端口时先说明原因并对齐；旧地址失效时明确说明新地址和旧地址状态，不让用户继续看旧页面。
 - 开发期用 `python scripts/serve_dev.py status`、`start`、`restart`、`stop` 管理 8765；不要为面向用户的面板直接另起一个端口。临时验证实例必须登记端口并在交付前停止，用 `status --scan` 或 `prune` 复核遗留实例。
-- 前端改动优先用 Vite `5175` 的 HMR（代理默认指向 8765）；构建产物用 `npm run build` 后刷新 8765。只有后端代码、启动参数或启动时缺少 `dist` 导致 `/next/` 未挂载时才 `restart`，不要把前端改动当作重启理由。
-- 有前端构建产物时 `/` 跳 `/next/`，旧 Vue 工作台在 `/batch/`（已弃用），旧原生控制台在 `/legacy`；服务启动后才构建 `frontend-v2/dist` 时需要重启服务。验收说明写清端口、入口和启动命令，截图或证据附当前地址。
-- 只改 `app/frontend-v2/`；`app/frontend/` 和 `/legacy` 已弃用，只作 `ECOM_LEGACY_UI=on` 的短期回退；除非任务明确要求，不在旧前端加功能。
+- 前端改动优先用 Vite `5175` 的 HMR（代理默认指向 8765）；构建产物用 `npm run build` 后刷新 8765。只有后端代码、启动参数或启动时缺少 `dist` 导致前端未挂载时才 `restart`，不要把前端改动当作重启理由。
+- 有前端构建产物时 `/` 直接返回面板；服务启动后才构建 `frontend/dist` 时需要重启服务。验收说明写清端口、入口和启动命令，截图或证据附当前地址。
+- 只改 `app/frontend/`；旧 Vue 和旧原生控制台已删除，不再保留回退入口。
 - 端口或入口变化后同步更新 `app/README.md`、交接页和本次交付说明；不要把测试端口当作长期地址。
 
 ## 记录与交付
@@ -57,5 +57,5 @@
 ## App 校验
 
 - 后端：日常从[后端测试分组](docs/23-测试策略.md#后端测试怎么跑)选 `quick` 或受影响分组；合并前运行不带筛选的 `all`。静态检查 `python -m uv run --project app --extra dev --frozen ruff check app`。
-- 前端：`cd app/frontend-v2` 后运行 `npm run lint`、`npm run typecheck`、`npm test`、`npm run format:check`、`npm run build`；首次或依赖变化后先 `npm install`。
+- 前端：`cd app/frontend` 后运行 `npm run lint`、`npm run typecheck`、`npm test`、`npm run format:check`、`npm run build`；首次或依赖变化后先 `npm install`。
 - 细节见[应用环境与测试](app/README.md#环境与测试)；缺 Chromium 时按该页安装，跳过不计通过。持续集成(Continuous Integration, CI)仍由[应用工作流](.github/workflows/app.yml)运行完整发现。

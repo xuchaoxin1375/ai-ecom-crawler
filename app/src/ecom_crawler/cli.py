@@ -556,7 +556,7 @@ def _serve_urls(host: str, port: int, allowed_hosts: frozenset[str]) -> list[str
         names.sort(key=lambda name: (name != primary, name))
     if not names:
         names = [host]
-    return [f"http://{_format_url_host(name)}:{port}/next/" for name in names]
+    return [f"http://{_format_url_host(name)}:{port}/" for name in names]
 
 
 def _serve(args: argparse.Namespace) -> int:
@@ -613,7 +613,7 @@ def _serve(args: argparse.Namespace) -> int:
             "CLI HTTP Basic username any, password = access key"
         )
     if host in WILDCARD_HOSTS and urls[0] == (
-        f"http://{_format_url_host(host)}:{args.port}/next/"
+        f"http://{_format_url_host(host)}:{args.port}/"
     ):
         print("warning: no LAN address detected; pass --allow-host or use a detected address")
     lock = (

@@ -18,10 +18,8 @@ from ecom_crawler.runtime.identity import frontend_info
 from ecom_crawler.runtime.models import Task, WorkItem
 from ecom_crawler.runtime.store import TaskStore
 from ecom_crawler.web.app import (
-    BATCH_DIST_DIR,
-    V2_DIST_DIR,
+    FRONTEND_DIST_DIR,
     Limits,
-    _legacy_ui_enabled,
     create_app,
 )
 
@@ -123,9 +121,6 @@ class WebApiTests(unittest.TestCase):
             / "familidoo-d03.yaml"
         )
         shutil.copy(self.rule_source, self.rules_dir / "familidoo.yaml")
-        self.legacy_env = mock.patch.dict(os.environ, {"ECOM_LEGACY_UI": "off"})
-        self.legacy_env.start()
-        self.addCleanup(self.legacy_env.stop)
         self.client = TestClient(
             create_app(self.db_path, self.out_root, self.rules_dir),
             headers=CLIENT_HEADERS,
@@ -145,7 +140,6 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(health.status_code, 200)
         body = health.json()
         self.assertEqual(body["status"], "ok")
-        self.assertEqual(body["legacy_ui"], "disabled")
         self.assertIsInstance(body["pid"], int)
         self.assertEqual(body["port"], 8765)
         self.assertTrue(body["started_at"].endswith("Z"))
@@ -154,30 +148,31 @@ class WebApiTests(unittest.TestCase):
         commit = body["git"]["commit"]
         self.assertTrue(commit is None or len(commit) == 40)
         self.assertIn(body["git"]["dirty"], (True, False, None))
-        self.assertIn(body["frontend"]["kind"], {"v2", "legacy", "none"})
-        self.assertIsInstance(body["frontend"]["next_mounted"], bool)
-        if (V2_DIST_DIR / "index.html").is_file():
-            legacy = self.client.get("/legacy", follow_redirects=False)
-            self.assertEqual(legacy.status_code, 307)
-            self.assertEqual(legacy.headers["location"], "/next/")
-            batch = self.client.get("/batch/", follow_redirects=False)
-            self.assertEqual(batch.status_code, 307, batch.text)
-            self.assertEqual(batch.headers["location"], "/next/")
-            nested = self.client.get("/batch/tasks/web-1", follow_redirects=False)
-            self.assertEqual(nested.status_code, 307, nested.text)
-            static_index = self.client.get("/static/index.html", follow_redirects=False)
-            self.assertEqual(static_index.status_code, 307, static_index.text)
-            self.assertEqual(static_index.headers["location"], "/next/")
-            index = self.client.get("/", follow_redirects=False)
-            self.assertEqual(index.status_code, 307)
-            self.assertEqual(index.headers["location"], "/next/")
-            next_ui = self.client.get("/next/")
-            self.assertEqual(next_ui.status_code, 200)
-            self.assertIn("采集", next_ui.text)
+        self.assertIn(body["frontend"]["kind"], {"react", "none"})
+        self.assertIsInstance(body["frontend"]["mounted"], bool)
+        self.assertNotIn("legacy_ui", body)
+        self.assertEqual(self.client.get("/legacy").status_code, 404)
+        self.assertEqual(self.client.get("/batch/").status_code, 404)
+        self.assertEqual(self.client.get("/static/index.html").status_code, 404)
+        if (FRONTEND_DIST_DIR / "index.html").is_file():
+            index = self.client.get("/")
+            self.assertEqual(index.status_code, 200)
+            self.assertIn("采集", index.text)
+            next_ui = self.client.get("/next/", follow_redirects=False)
+            self.assertEqual(next_ui.status_code, 308)
+            self.assertEqual(next_ui.headers["location"], "/")
+            next_favicon = self.client.get(
+                "/next/favicon.svg", follow_redirects=False
+            )
+            self.assertEqual(next_favicon.status_code, 308)
+            self.assertEqual(next_favicon.headers["location"], "/favicon.svg")
+            favicon = self.client.get("/favicon.svg")
+            self.assertEqual(favicon.status_code, 200)
+            assets = sorted((FRONTEND_DIST_DIR / "assets").glob("*.js"))
+            if assets:
+                asset = self.client.get(f"/assets/{assets[0].name}")
+                self.assertEqual(asset.status_code, 200, asset.text)
         else:
-            self.assertEqual(self.client.get("/legacy").status_code, 404)
-            self.assertEqual(self.client.get("/batch/").status_code, 404)
-            self.assertEqual(self.client.get("/static/index.html").status_code, 404)
             index = self.client.get("/", follow_redirects=False)
             self.assertEqual(index.status_code, 503)
             self.assertEqual(index.json()["error"]["code"], "UI_NOT_BUILT")
@@ -187,13 +182,13 @@ class WebApiTests(unittest.TestCase):
         dist.mkdir()
         index = dist / "index.html"
         index.write_text("<html>old</html>", encoding="utf-8")
-        with mock.patch("ecom_crawler.web.app.V2_DIST_DIR", dist), TestClient(
+        with mock.patch("ecom_crawler.web.app.FRONTEND_DIST_DIR", dist), TestClient(
             create_app(self.db_path, self.out_root, self.rules_dir),
             headers=CLIENT_HEADERS,
         ) as client:
             first = client.get("/api/health").json()["frontend"]
-            self.assertEqual(first["kind"], "v2")
-            self.assertTrue(first["next_mounted"])
+            self.assertEqual(first["kind"], "react")
+            self.assertTrue(first["mounted"])
             self.assertEqual(len(first["index_sha256"]), 16)
             index.write_text("<html>new</html>", encoding="utf-8")
             second = client.get("/api/health").json()["frontend"]
@@ -269,32 +264,9 @@ class WebApiTests(unittest.TestCase):
                 read_only=True,
             )
 
-    def test_legacy_ui_can_be_reenabled_by_env(self) -> None:
-        with mock.patch.dict(os.environ, {"ECOM_LEGACY_UI": "on"}):
-            app = create_app(self.db_path, self.out_root, self.rules_dir)
-            client = TestClient(app, headers=CLIENT_HEADERS)
-            health = client.get("/api/health")
-            self.assertEqual(health.status_code, 200)
-            self.assertEqual(health.json()["legacy_ui"], "enabled")
-            legacy = client.get("/legacy")
-            self.assertEqual(legacy.status_code, 200)
-            self.assertIn("采集", legacy.text)
-            static_index = client.get("/static/index.html")
-            self.assertEqual(static_index.status_code, 200)
-            self.assertIn("采集", static_index.text)
-            batch = client.get("/batch/", follow_redirects=False)
-            if (BATCH_DIST_DIR / "index.html").is_file():
-                self.assertEqual(batch.status_code, 200, batch.text)
-                self.assertIn("采集", batch.text)
-            else:
-                self.assertEqual(batch.status_code, 404)
-
-    def test_root_does_not_fall_back_to_legacy_console_by_default(self) -> None:
+    def test_root_requires_frontend_build(self) -> None:
         missing = self.root / "missing-dist"
-        with (
-            mock.patch("ecom_crawler.web.app.V2_DIST_DIR", missing),
-            mock.patch("ecom_crawler.web.app.BATCH_DIST_DIR", missing),
-        ):
+        with mock.patch("ecom_crawler.web.app.FRONTEND_DIST_DIR", missing):
             client = TestClient(
                 create_app(self.db_path, self.out_root, self.rules_dir),
                 headers=CLIENT_HEADERS,
@@ -302,28 +274,6 @@ class WebApiTests(unittest.TestCase):
             index = client.get("/", follow_redirects=False)
             self.assertEqual(index.status_code, 503)
             self.assertEqual(index.json()["error"]["code"], "UI_NOT_BUILT")
-        with (
-            mock.patch.dict(os.environ, {"ECOM_LEGACY_UI": "on"}),
-            mock.patch("ecom_crawler.web.app.V2_DIST_DIR", missing),
-            mock.patch("ecom_crawler.web.app.BATCH_DIST_DIR", missing),
-        ):
-            client = TestClient(
-                create_app(self.db_path, self.out_root, self.rules_dir),
-                headers=CLIENT_HEADERS,
-            )
-            index = client.get("/", follow_redirects=False)
-            self.assertEqual(index.status_code, 200)
-            self.assertIn("采集", index.text)
-
-    def test_legacy_ui_env_is_off_by_default(self) -> None:
-        with mock.patch.dict(os.environ, {}, clear=True):
-            self.assertFalse(_legacy_ui_enabled())
-        for value in ("1", "on", "true", "yes", "enabled", " ON "):
-            with mock.patch.dict(os.environ, {"ECOM_LEGACY_UI": value}):
-                self.assertTrue(_legacy_ui_enabled(), value)
-        for value in ("0", "off", "false", "no", "disabled", ""):
-            with mock.patch.dict(os.environ, {"ECOM_LEGACY_UI": value}):
-                self.assertFalse(_legacy_ui_enabled(), value)
 
     def test_limits_accept_unbounded_full_catalog(self) -> None:
         limits = Limits(
@@ -1003,6 +953,17 @@ class WebApiTests(unittest.TestCase):
         self.assertGreaterEqual(body["work"]["tasks_total"], 1)
         self.assertGreater(body["storage"]["disk_total_bytes"], 0)
         self.assertIsInstance(body["runtime"]["threads"], int)
+        resources = body["resources"]
+        self.assertTrue(resources["available"])
+        self.assertGreater(resources["memory_total_bytes"], 0)
+        self.assertGreaterEqual(resources["memory_percent"], 0)
+        self.assertLessEqual(resources["memory_percent"], 100)
+        self.assertGreaterEqual(resources["process_rss_bytes"], 0)
+        self.assertTrue(resources["sampled_at"].endswith("Z"))
+        if resources["cpu_percent"] is not None:
+            self.assertGreaterEqual(resources["cpu_percent"], 0)
+            self.assertLessEqual(resources["cpu_percent"], 100)
+            self.assertGreater(resources["cpu_window_ms"], 0)
 
     def test_collection_slots_apply_on_restart_and_cli_overrides_saved_value(self) -> None:
         path = "/api/system/collection-slots"

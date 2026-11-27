@@ -36,3 +36,4 @@
 - `build-agent/`：构建 Agent 的纵向切片脚本、规则和说明；trace 与任务结果在证据库。
 - `harness/`：构建 harness 的适配与依赖安装冒烟说明。
 - `bennytex-full-2026-11-23/`：bennytex 全量目录实验的规则、构建记录和结论；CSV 与结果在证据库。
+- `ui-workbench-drafts/`：工作台三窗格布局草稿（A–D），静态 HTML 原型与对比说明，不接后端。

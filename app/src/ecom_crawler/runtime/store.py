@@ -22,6 +22,9 @@ from .models import (
     RuleVersion,
     SiteRule,
     Task,
+    WorkbenchNode,
+    WorkbenchRun,
+    WorkbenchTaskDef,
     WorkItem,
     json_dumps,
     json_loads,
@@ -109,6 +112,60 @@ CREATE TABLE IF NOT EXISTS batch_sites (
 
 CREATE INDEX IF NOT EXISTS idx_batch_sites_task
     ON batch_sites(task_id);
+
+CREATE TABLE IF NOT EXISTS workbench_nodes (
+    node_id TEXT PRIMARY KEY,
+    node_type TEXT NOT NULL CHECK (node_type IN ('group', 'task')),
+    parent_id TEXT,
+    name TEXT NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_workbench_nodes_parent
+    ON workbench_nodes(parent_id, sort_order);
+
+CREATE TABLE IF NOT EXISTS workbench_task_defs (
+    node_id TEXT PRIMARY KEY,
+    input_url TEXT NOT NULL,
+    domain TEXT NOT NULL,
+    site_key TEXT NOT NULL,
+    batch_id TEXT,
+    country TEXT,
+    language TEXT,
+    market TEXT,
+    category TEXT,
+    task_type TEXT NOT NULL DEFAULT 'product',
+    collection_mode TEXT NOT NULL DEFAULT 'sample',
+    rule_id TEXT NOT NULL,
+    rule_version TEXT NOT NULL,
+    rule_path TEXT NOT NULL,
+    limits_json TEXT NOT NULL DEFAULT '{}',
+    proxy TEXT,
+    note TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_workbench_task_defs_batch
+    ON workbench_task_defs(batch_id, site_key);
+
+CREATE TABLE IF NOT EXISTS workbench_task_runs (
+    node_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (node_id, task_id),
+    UNIQUE (task_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_workbench_task_runs_node
+    ON workbench_task_runs(node_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS workbench_recent_dismissals (
+    task_id TEXT PRIMARY KEY,
+    dismissed_at TEXT NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS builds (
     build_id TEXT PRIMARY KEY,
@@ -1793,6 +1850,490 @@ class TaskStore:
                 raise
         return cursor.rowcount
 
+    def list_workbench_nodes(self) -> list[WorkbenchNode]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM workbench_nodes "
+                "ORDER BY parent_id, sort_order, name COLLATE NOCASE, node_id"
+            ).fetchall()
+        return [_workbench_node_from_row(row) for row in rows]
+
+    def get_workbench_node(self, node_id: str) -> WorkbenchNode | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM workbench_nodes WHERE node_id = ?", (node_id,)
+            ).fetchone()
+        return _workbench_node_from_row(row) if row else None
+
+    def create_workbench_group(self, node: WorkbenchNode) -> WorkbenchNode:
+        if node.node_type != "group":
+            raise ValueError("only group nodes can be created here")
+        with self._connect() as connection:
+            try:
+                connection.execute(
+                    "INSERT INTO workbench_nodes (node_id, node_type, parent_id, name, "
+                    "sort_order, created_at, updated_at) VALUES (?, 'group', ?, ?, ?, ?, ?)",
+                    (
+                        node.node_id,
+                        node.parent_id,
+                        node.name,
+                        node.sort_order,
+                        node.created_at,
+                        node.updated_at,
+                    ),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise ValueError(f"workbench node already exists: {node.node_id}") from exc
+        created = self.get_workbench_node(node.node_id)
+        if created is None:
+            raise ValueError(f"unknown workbench node: {node.node_id}")
+        return created
+
+    def create_workbench_task(
+        self, node: WorkbenchNode, definition: WorkbenchTaskDef
+    ) -> WorkbenchNode:
+        if node.node_type != "task":
+            raise ValueError("task nodes require node_type=task")
+        if definition.node_id != node.node_id:
+            raise ValueError("task definition node_id must match the node")
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                connection.execute(
+                    "INSERT INTO workbench_nodes (node_id, node_type, parent_id, name, "
+                    "sort_order, created_at, updated_at) VALUES (?, 'task', ?, ?, ?, ?, ?)",
+                    (
+                        node.node_id,
+                        node.parent_id,
+                        node.name,
+                        node.sort_order,
+                        node.created_at,
+                        node.updated_at,
+                    ),
+                )
+                connection.execute(
+                    """
+                    INSERT INTO workbench_task_defs (
+                        node_id, input_url, domain, site_key, batch_id,
+                        country, language, market, category, task_type,
+                        collection_mode, rule_id, rule_version, rule_path,
+                        limits_json, proxy, note, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        definition.node_id,
+                        definition.input_url,
+                        definition.domain,
+                        definition.site_key,
+                        definition.batch_id,
+                        definition.country,
+                        definition.language,
+                        definition.market,
+                        definition.category,
+                        definition.task_type,
+                        definition.collection_mode,
+                        definition.rule_id,
+                        definition.rule_version,
+                        definition.rule_path,
+                        json_dumps(definition.limits),
+                        definition.proxy,
+                        definition.note,
+                        definition.created_at,
+                        definition.updated_at,
+                    ),
+                )
+                connection.commit()
+            except sqlite3.IntegrityError as exc:
+                connection.rollback()
+                raise ValueError(f"workbench node already exists: {node.node_id}") from exc
+            except Exception:
+                connection.rollback()
+                raise
+        created = self.get_workbench_node(node.node_id)
+        if created is None:
+            raise ValueError(f"unknown workbench node: {node.node_id}")
+        return created
+
+    def rename_workbench_node(
+        self, node_id: str, name: str, updated_at: str
+    ) -> WorkbenchNode:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT node_id FROM workbench_nodes WHERE node_id = ?", (node_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"unknown workbench node: {node_id}")
+            connection.execute(
+                "UPDATE workbench_nodes SET name = ?, updated_at = ? WHERE node_id = ?",
+                (name, updated_at, node_id),
+            )
+        updated = self.get_workbench_node(node_id)
+        if updated is None:
+            raise KeyError(f"unknown workbench node: {node_id}")
+        return updated
+
+    def update_workbench_task(
+        self, node_id: str, updated_at: str, **fields: Any
+    ) -> WorkbenchTaskDef:
+        allowed = {
+            "country",
+            "language",
+            "market",
+            "category",
+            "task_type",
+            "collection_mode",
+            "rule_id",
+            "rule_version",
+            "rule_path",
+            "limits",
+            "proxy",
+            "note",
+        }
+        unknown = set(fields) - allowed
+        if unknown:
+            raise ValueError(f"unknown workbench task fields: {sorted(unknown)}")
+        assignments = [
+            f"{'limits_json' if key == 'limits' else key} = ?" for key in fields
+        ]
+        values: list[Any] = []
+        for key, value in fields.items():
+            values.append(json_dumps(value) if key == "limits" else value)
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT node_id FROM workbench_task_defs WHERE node_id = ?", (node_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"unknown workbench task: {node_id}")
+            if assignments:
+                connection.execute(
+                    f"UPDATE workbench_task_defs SET {', '.join(assignments)}, "
+                    "updated_at = ? WHERE node_id = ?",
+                    [*values, updated_at, node_id],
+                )
+                connection.execute(
+                    "UPDATE workbench_nodes SET updated_at = ? WHERE node_id = ?",
+                    (updated_at, node_id),
+                )
+        updated = self.get_workbench_task_def(node_id)
+        if updated is None:
+            raise KeyError(f"unknown workbench task: {node_id}")
+        return updated
+
+    def attach_workbench_run(
+        self, node_id: str, task_id: str, created_at: str
+    ) -> bool:
+        """Map an existing run to a definition, rejecting cross-definition reuse."""
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                node = connection.execute(
+                    "SELECT node_id FROM workbench_nodes WHERE node_id = ?", (node_id,)
+                ).fetchone()
+                definition = connection.execute(
+                    "SELECT node_id FROM workbench_task_defs WHERE node_id = ?",
+                    (node_id,),
+                ).fetchone()
+                if node is None or definition is None:
+                    raise KeyError(f"unknown workbench task: {node_id}")
+                task = connection.execute(
+                    "SELECT task_id FROM tasks WHERE task_id = ?", (task_id,)
+                ).fetchone()
+                if task is None:
+                    raise KeyError(f"unknown task: {task_id}")
+                existing = connection.execute(
+                    "SELECT node_id FROM workbench_task_runs WHERE task_id = ?",
+                    (task_id,),
+                ).fetchone()
+                if existing is not None:
+                    if str(existing["node_id"]) == node_id:
+                        connection.commit()
+                        return False
+                    raise ValueError(
+                        f"task is already attached to {existing['node_id']}"
+                    )
+                connection.execute(
+                    "INSERT INTO workbench_task_runs (node_id, task_id, created_at) "
+                    "VALUES (?, ?, ?)",
+                    (node_id, task_id, created_at),
+                )
+                connection.execute(
+                    "UPDATE workbench_nodes SET updated_at = ? WHERE node_id = ?",
+                    (created_at, node_id),
+                )
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+        return True
+
+    def move_workbench_node(
+        self,
+        node_id: str,
+        parent_id: str | None,
+        after_node_id: str | None,
+        updated_at: str,
+        before_node_id: str | None = None,
+    ) -> WorkbenchNode:
+        if after_node_id is not None and before_node_id is not None:
+            raise ValueError("after_node_id and before_node_id are mutually exclusive")
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                node = connection.execute(
+                    "SELECT node_id, node_type, parent_id FROM workbench_nodes "
+                    "WHERE node_id = ?",
+                    (node_id,),
+                ).fetchone()
+                if node is None:
+                    raise KeyError(f"unknown workbench node: {node_id}")
+                if parent_id == node_id:
+                    raise ValueError("a node cannot be moved into itself")
+                if parent_id is not None:
+                    parent = connection.execute(
+                        "SELECT node_id, node_type, parent_id FROM workbench_nodes "
+                        "WHERE node_id = ?",
+                        (parent_id,),
+                    ).fetchone()
+                    if parent is None:
+                        raise ValueError(f"unknown workbench parent: {parent_id}")
+                    if parent["node_type"] != "group":
+                        raise ValueError("workbench parent must be a group")
+                    cursor: str | None = parent_id
+                    seen: set[str] = set()
+                    while cursor is not None:
+                        if cursor == node_id:
+                            raise ValueError("a node cannot be moved into its descendant")
+                        if cursor in seen:
+                            break
+                        seen.add(cursor)
+                        row = connection.execute(
+                            "SELECT parent_id FROM workbench_nodes WHERE node_id = ?",
+                            (cursor,),
+                        ).fetchone()
+                        cursor = row["parent_id"] if row else None
+                sibling_rows = connection.execute(
+                    "SELECT node_id FROM workbench_nodes "
+                    "WHERE parent_id IS ? AND node_id != ? "
+                    "ORDER BY sort_order, name COLLATE NOCASE, node_id",
+                    (parent_id, node_id),
+                ).fetchall()
+                sibling_ids = [str(row["node_id"]) for row in sibling_rows]
+                if after_node_id is not None:
+                    if after_node_id == node_id:
+                        raise ValueError("after_node_id must not be the moved node")
+                    if after_node_id not in sibling_ids:
+                        raise ValueError(
+                            "after_node_id must be a child of the target parent"
+                        )
+                    index = sibling_ids.index(after_node_id) + 1
+                elif before_node_id is not None:
+                    if before_node_id == node_id:
+                        raise ValueError("before_node_id must not be the moved node")
+                    if before_node_id not in sibling_ids:
+                        raise ValueError(
+                            "before_node_id must be a child of the target parent"
+                        )
+                    index = sibling_ids.index(before_node_id)
+                else:
+                    index = len(sibling_ids)
+                sibling_ids.insert(index, node_id)
+                for order, sibling_id in enumerate(sibling_ids):
+                    connection.execute(
+                        "UPDATE workbench_nodes SET parent_id = ?, sort_order = ?, "
+                        "updated_at = ? WHERE node_id = ?",
+                        (parent_id, order, updated_at, sibling_id),
+                    )
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+        moved = self.get_workbench_node(node_id)
+        if moved is None:
+            raise KeyError(f"unknown workbench node: {node_id}")
+        return moved
+
+    def dissolve_workbench_group(self, node_id: str, updated_at: str) -> int:
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                group = connection.execute(
+                    "SELECT node_id, node_type, parent_id, sort_order FROM workbench_nodes "
+                    "WHERE node_id = ?",
+                    (node_id,),
+                ).fetchone()
+                if group is None:
+                    raise KeyError(f"unknown workbench node: {node_id}")
+                if group["node_type"] != "group":
+                    raise ValueError("only groups can be dissolved")
+                parent_id = group["parent_id"]
+                sibling_rows = connection.execute(
+                    "SELECT node_id FROM workbench_nodes WHERE parent_id IS ? "
+                    "ORDER BY sort_order, name COLLATE NOCASE, node_id",
+                    (parent_id,),
+                ).fetchall()
+                sibling_ids = [str(row["node_id"]) for row in sibling_rows]
+                group_index = sibling_ids.index(node_id)
+                child_rows = connection.execute(
+                    "SELECT node_id FROM workbench_nodes WHERE parent_id = ? "
+                    "ORDER BY sort_order, name COLLATE NOCASE, node_id",
+                    (node_id,),
+                ).fetchall()
+                child_ids = [str(row["node_id"]) for row in child_rows]
+                remaining = [item for item in sibling_ids if item != node_id]
+                combined = (
+                    remaining[:group_index] + child_ids + remaining[group_index:]
+                )
+                for order, item_id in enumerate(combined):
+                    if item_id in child_ids:
+                        connection.execute(
+                            "UPDATE workbench_nodes SET parent_id = ?, sort_order = ?, "
+                            "updated_at = ? WHERE node_id = ?",
+                            (parent_id, order, updated_at, item_id),
+                        )
+                    else:
+                        connection.execute(
+                            "UPDATE workbench_nodes SET sort_order = ? WHERE node_id = ?",
+                            (order, item_id),
+                        )
+                connection.execute(
+                    "DELETE FROM workbench_nodes WHERE node_id = ?", (node_id,)
+                )
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+        return len(child_ids)
+
+    def list_workbench_task_defs(self) -> list[WorkbenchTaskDef]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM workbench_task_defs ORDER BY created_at, node_id"
+            ).fetchall()
+        return [_workbench_task_def_from_row(row) for row in rows]
+
+    def get_workbench_task_def(self, node_id: str) -> WorkbenchTaskDef | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM workbench_task_defs WHERE node_id = ?", (node_id,)
+            ).fetchone()
+        return _workbench_task_def_from_row(row) if row else None
+
+    def list_workbench_task_runs(self) -> list[WorkbenchRun]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM workbench_task_runs ORDER BY created_at, task_id"
+            ).fetchall()
+        return [
+            WorkbenchRun(
+                node_id=row["node_id"],
+                task_id=row["task_id"],
+                created_at=row["created_at"],
+            )
+            for row in rows
+        ]
+
+    def create_workbench_run(
+        self,
+        task: Task,
+        *,
+        node_id: str,
+        request_id: str,
+        request_json: str,
+    ) -> tuple[Task, bool]:
+        """Insert a task run and its workbench definition mapping atomically."""
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                row = connection.execute(
+                    "SELECT task_id, request_json FROM task_requests WHERE request_id = ?",
+                    (request_id,),
+                ).fetchone()
+                if row is not None:
+                    if str(row["request_json"]) != request_json:
+                        raise RequestConflictError(
+                            f"request_id {request_id} was used with a different request"
+                        )
+                    connection.commit()
+                    existing = self.get_task(str(row["task_id"]))
+                    if existing is None:
+                        raise TaskNotFoundError(f"unknown task: {row['task_id']}")
+                    return existing, False
+                self._insert_task(connection, task)
+                connection.execute(
+                    "INSERT INTO task_requests (request_id, task_id, request_json, created_at) "
+                    "VALUES (?, ?, ?, ?)",
+                    (request_id, task.task_id, request_json, utc_now()),
+                )
+                connection.execute(
+                    "INSERT INTO workbench_task_runs (node_id, task_id, created_at) "
+                    "VALUES (?, ?, ?)",
+                    (node_id, task.task_id, utc_now()),
+                )
+                if task.batch_id and task.site_key:
+                    site = connection.execute(
+                        "SELECT 1 FROM batch_sites WHERE batch_id = ? AND site_key = ?",
+                        (task.batch_id, task.site_key),
+                    ).fetchone()
+                    if site is not None:
+                        linked = connection.execute(
+                            "UPDATE batch_sites SET task_id = ?, updated_at = ? "
+                            "WHERE batch_id = ? AND site_key = ? AND "
+                            "(task_id IS NULL OR task_id IN "
+                            "(SELECT task_id FROM tasks WHERE state IN ('FINISHED', 'CANCELLED')))",
+                            (task.task_id, utc_now(), task.batch_id, task.site_key),
+                        )
+                        if linked.rowcount != 1:
+                            raise BatchTransitionError(
+                                "batch target is unavailable or busy"
+                            )
+                connection.commit()
+            except sqlite3.IntegrityError as exc:
+                connection.rollback()
+                raise ValueError(f"task already exists: {task.task_id}") from exc
+            except Exception:
+                connection.rollback()
+                raise
+        return task, True
+
+    def list_workbench_dismissals(self) -> set[str]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT task_id FROM workbench_recent_dismissals"
+            ).fetchall()
+        return {str(row["task_id"]) for row in rows}
+
+    def dismiss_workbench_runs(self, task_ids: list[str]) -> int:
+        unique_ids = list(dict.fromkeys(str(task_id) for task_id in task_ids))
+        if not unique_ids:
+            return 0
+        now = utc_now()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                for task_id in unique_ids:
+                    connection.execute(
+                        "INSERT OR IGNORE INTO workbench_recent_dismissals "
+                        "(task_id, dismissed_at) VALUES (?, ?)",
+                        (task_id, now),
+                    )
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+        return len(unique_ids)
+
+    def restore_workbench_runs(self, task_ids: list[str]) -> int:
+        unique_ids = list(dict.fromkeys(str(task_id) for task_id in task_ids))
+        if not unique_ids:
+            return 0
+        placeholders = ", ".join("?" for _ in unique_ids)
+        with self._connect() as connection:
+            cursor = connection.execute(
+                f"DELETE FROM workbench_recent_dismissals WHERE task_id IN ({placeholders})",
+                unique_ids,
+            )
+        return cursor.rowcount
+
     def batch_tree_signals(self) -> dict[str, dict[str, int]]:
         """Return lightweight per-batch signals for the directory tree.
 
@@ -3395,6 +3936,42 @@ def _batch_folder_from_row(row: sqlite3.Row) -> BatchFolder:
         name=row["name"],
         parent_id=row["parent_id"],
         sort_order=row["sort_order"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+def _workbench_node_from_row(row: sqlite3.Row) -> WorkbenchNode:
+    return WorkbenchNode(
+        node_id=row["node_id"],
+        node_type=row["node_type"],
+        name=row["name"],
+        parent_id=row["parent_id"],
+        sort_order=int(row["sort_order"]),
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+def _workbench_task_def_from_row(row: sqlite3.Row) -> WorkbenchTaskDef:
+    return WorkbenchTaskDef(
+        node_id=row["node_id"],
+        input_url=row["input_url"],
+        domain=row["domain"],
+        site_key=row["site_key"],
+        batch_id=row["batch_id"],
+        country=row["country"],
+        language=row["language"],
+        market=row["market"],
+        category=row["category"],
+        task_type=row["task_type"],
+        collection_mode=row["collection_mode"],
+        rule_id=row["rule_id"],
+        rule_version=row["rule_version"],
+        rule_path=row["rule_path"],
+        limits=json_loads(row["limits_json"], {}),
+        proxy=row["proxy"],
+        note=row["note"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )

@@ -501,7 +501,7 @@ def stop_port(
 def current_identity() -> dict[str, Any]:
     return {
         "code_fingerprint": code_fingerprint(APP_SRC / "ecom_crawler"),
-        "frontend": frontend_info(APP_DIR / "frontend-v2" / "dist"),
+        "frontend": frontend_info(APP_DIR / "frontend" / "dist"),
         "git": git_info(REPO_ROOT),
     }
 
@@ -513,10 +513,10 @@ def stale_reasons(health_payload: dict[str, Any], current: dict[str, Any]) -> tu
         restart.append("后端代码已变化，需要重启")
     server_frontend = health_payload.get("frontend") or {}
     current_frontend = current["frontend"]
-    if not server_frontend.get("next_mounted") and current_frontend.get("exists"):
+    if not server_frontend.get("mounted") and current_frontend.get("exists"):
         restart.append("前端构建在服务启动后才出现，需要重启")
     elif (
-        server_frontend.get("next_mounted")
+        server_frontend.get("mounted")
         and current_frontend.get("exists")
         and server_frontend.get("index_sha256") != current_frontend.get("sha256")
     ):
@@ -590,7 +590,7 @@ def print_status(rows: list[dict[str, Any]], current: dict[str, Any]) -> None:
         git = payload.get("git") or {}
         commit = str(git.get("commit") or "-")[:8]
         dirty = " dirty" if git.get("dirty") else ""
-        mounted = "已挂载" if frontend.get("next_mounted") else "未挂载"
+        mounted = "已挂载" if frontend.get("mounted") else "未挂载"
         pids = row["listener_pids"]
         pid = payload.get("pid") or (pids[0] if pids else None)
         print(
@@ -600,7 +600,7 @@ def print_status(rows: list[dict[str, Any]], current: dict[str, Any]) -> None:
         print(f"   账本 {payload.get('db')}")
         print(
             f"   代码 {commit}{dirty}  指纹 {payload.get('code_fingerprint') or '-'}  "
-            f"前端 {frontend.get('kind') or '未知（旧版）'}（{mounted}）"
+            f"前端 {frontend.get('kind') or '未知'}（{mounted}）"
         )
         for reason in row["restart_reasons"]:
             print(f"   ⚠ {reason}")
@@ -612,7 +612,7 @@ def print_status(rows: list[dict[str, Any]], current: dict[str, Any]) -> None:
     if canonical is None:
         print(f"没有检查规范端口 {CANONICAL_PORT}")
     elif not canonical["running"]:
-        print(f"规范入口 {CANONICAL_PORT} 未运行；启动后使用 http://127.0.0.1:{CANONICAL_PORT}/next/")
+        print(f"规范入口 {CANONICAL_PORT} 未运行；启动后使用 http://127.0.0.1:{CANONICAL_PORT}/")
     current_git = current["git"]
     if current_git.get("commit"):
         print(f"当前仓库 {str(current_git['commit'])[:8]}{' dirty' if current_git.get('dirty') else ''}")
@@ -799,7 +799,7 @@ def start_command(args: argparse.Namespace) -> int:
         payload = health(port)
         if payload is not None:
             log_file.close()
-            print(f"已启动 http://127.0.0.1:{port}/next/")
+            print(f"已启动 http://127.0.0.1:{port}/")
             print(f"PID {process.pid}  日志 {log_path}")
             return 0
         time.sleep(0.25)

@@ -130,6 +130,58 @@ class BatchFolder:
     updated_at: str = field(default_factory=utc_now)
 
 
+@dataclass
+class WorkbenchNode:
+    """A directory or task-definition node in the task workbench tree."""
+
+    node_id: str
+    node_type: str
+    name: str
+    parent_id: str | None = None
+    sort_order: int = 0
+    created_at: str = field(default_factory=utc_now)
+    updated_at: str = field(default_factory=utc_now)
+
+
+@dataclass
+class WorkbenchTaskDef:
+    """Long-lived task definition owned by a workbench tree node.
+
+    The definition is distinct from a Task run: starting it creates a normal
+    Task and records the mapping in workbench_task_runs.  batch_id is only a
+    provenance hint and may be empty for standalone tasks.
+    """
+
+    node_id: str
+    input_url: str
+    domain: str
+    site_key: str
+    rule_id: str
+    rule_version: str
+    rule_path: str
+    task_type: str = "product"
+    collection_mode: str = "sample"
+    batch_id: str | None = None
+    country: str | None = None
+    language: str | None = None
+    market: str | None = None
+    category: str | None = None
+    limits: dict[str, Any] = field(default_factory=dict)
+    proxy: str | None = None
+    note: str | None = None
+    created_at: str = field(default_factory=utc_now)
+    updated_at: str = field(default_factory=utc_now)
+
+
+@dataclass
+class WorkbenchRun:
+    """Mapping from a workbench task definition to a Task run."""
+
+    node_id: str
+    task_id: str
+    created_at: str = field(default_factory=utc_now)
+
+
 BATCH_READINESS = {
     "ready",
     "needs_onboarding",

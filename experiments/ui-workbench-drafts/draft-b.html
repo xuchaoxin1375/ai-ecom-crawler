@@ -1,0 +1,968 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>草稿 B · 站点操作树</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231f5c4a'/%3E%3Cpath d='M16 7l9 5-9 5-9-5 9-5z' fill='none' stroke='white' stroke-width='2'/%3E%3Cpath d='M7 17l9 5 9-5' fill='none' stroke='white' stroke-width='2'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="draft.css?v=20261127-6">
+</head>
+<body>
+  <div class="shell">
+    <aside class="rail" aria-label="主导航">
+      <a class="brand" href="index.html" title="返回对比页" aria-label="返回对比页">
+        <svg class="icon lg"><use href="#i-layers"/></svg>
+      </a>
+      <nav>
+        <a class="rail-link active" href="draft-b.html" title="采集工作台" aria-current="page">
+          <svg class="icon"><use href="#i-list"/></svg>
+        </a>
+        <a class="rail-link" href="#/tasks" title="全部任务">
+          <svg class="icon"><use href="#i-tasks"/></svg>
+        </a>
+        <a class="rail-link" href="#/builds" title="构建记录">
+          <svg class="icon"><use href="#i-wrench"/></svg>
+        </a>
+        <a class="rail-link" href="#/models" title="模型配置">
+          <svg class="icon"><use href="#i-cpu"/></svg>
+        </a>
+        <div class="spacer"></div>
+        <a class="rail-link" href="index.html" title="返回对比页">
+          <svg class="icon"><use href="#i-settings"/></svg>
+        </a>
+      </nav>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <div class="crumbs">
+          <span class="hide-xs">采集工作台</span>
+          <span class="slash hide-xs">/</span>
+          <strong>站点操作树</strong>
+          <span class="draft-chip">草稿 B · 示例数据</span>
+        </div>
+        <div class="spacer"></div>
+        <a class="btn ghost sm" href="index.html">← 返回对比</a>
+        <span class="service-pill"><span class="dot"></span><span class="label">服务正常</span></span>
+      </header>
+
+      <div class="workspace" id="workspace" style="--tree-w: 330px">
+        <aside class="panel tree-pane" id="tree" aria-label="批次与站点目录">
+          <div class="pane-head">
+            <div class="title">
+              <h2>批次与站点</h2>
+              <p>树即操作台：展开批次，直接启停站点</p>
+            </div>
+            <button class="btn icon sm" type="button" title="新建分组" aria-label="新建分组" data-command="new-folder">
+              <svg class="icon sm"><use href="#i-plus"/></svg>
+            </button>
+          </div>
+          <div class="tree-tools">
+            <div class="search">
+              <svg class="icon sm"><use href="#i-search"/></svg>
+              <input id="treeSearch" type="search" placeholder="搜索批次或站点" aria-label="搜索批次或站点">
+            </div>
+          </div>
+          <div class="tree-quick" id="treeQuick"></div>
+          <div class="tree-scroll" id="treeScroll"></div>
+          <div class="pane-foot"><span id="treeFoot">选中：bennytex.com · bennytex 全量</span></div>
+        </aside>
+
+        <section class="content" id="content" aria-label="站点工作区">
+          <div class="narrow-bar">
+            <button class="btn sm tree-toggle" type="button" data-command="toggle-tree">
+              <svg class="icon sm"><use href="#i-menu"/></svg>
+              目录
+            </button>
+            <div class="views" aria-label="切换窗格">
+              <button type="button" class="seg-top active" data-pane="top">站点</button>
+              <button type="button" class="seg-log" data-pane="log">日志</button>
+            </div>
+            <div class="spacer"></div>
+            <span class="badge info" id="narrowState">运行中</span>
+          </div>
+
+          <section class="panel top-pane" id="topPane" aria-label="站点详情">
+            <div class="batch-head">
+              <div class="identity">
+                <h1><span class="name" id="siteName">bennytex.com</span> <span id="siteState"></span></h1>
+                <div class="sub" id="siteSub"></div>
+              </div>
+              <div class="actions" id="siteActions"></div>
+            </div>
+
+            <div class="summary" id="siteSummary"></div>
+
+            <div class="toolbar">
+              <div class="views" role="tablist" aria-label="站点视图">
+                <button type="button" class="active" data-view="current">当前任务</button>
+                <button type="button" data-view="history">任务历史 <span id="historyCount" class="tag" style="height:17px;padding:0 5px">5</span></button>
+                <button type="button" data-view="profile">站点资料</button>
+              </div>
+              <div class="spacer"></div>
+              <span class="tag" id="rateTag">4 RPS · 4 并发</span>
+              <button class="btn sm optional" type="button" data-command="rate-policy">
+                <svg class="icon sm"><use href="#i-settings"/></svg>
+                采集速率
+              </button>
+              <button class="btn icon" type="button" title="刷新" aria-label="刷新" data-command="refresh">
+                <svg class="icon sm"><use href="#i-refresh"/></svg>
+              </button>
+            </div>
+
+            <div class="pane-body" id="siteBody"></div>
+            <div class="pane-foot" id="siteFoot"></div>
+          </section>
+
+          <button class="splitter" id="splitter" type="button" role="separator" aria-orientation="horizontal" aria-label="调整上下窗格高度" aria-valuemin="230" aria-valuenow="360"></button>
+
+          <section class="panel bottom-pane" id="bottomPane" aria-label="运行日志">
+            <div class="tabs" role="tablist" aria-label="运行信息">
+              <button class="tab active" type="button" data-tab="log" role="tab" aria-selected="true">
+                运行日志 <span class="live-dot" aria-hidden="true"></span>
+              </button>
+              <button class="tab" type="button" data-tab="data" role="tab" aria-selected="false">
+                实时数据 <span class="count" id="dataCount">0</span>
+              </button>
+              <button class="tab" type="button" data-tab="files" role="tab" aria-selected="false">
+                文件下载 <span class="count">3</span>
+              </button>
+            </div>
+
+            <div class="tab-panel" id="tab-log" role="tabpanel">
+              <div class="log-toolbar">
+                <span class="tag" id="logSiteTag">bennytex.com</span>
+                <span class="tag mono" id="logTaskTag">web-62d05ef69afc</span>
+                <select class="select" id="logLevel" aria-label="筛选日志级别">
+                  <option value="ALL">全部级别</option>
+                  <option value="INFO">信息</option>
+                  <option value="WARN">警告</option>
+                  <option value="ERROR">错误</option>
+                </select>
+                <div class="search" style="width:170px">
+                  <svg class="icon sm"><use href="#i-search"/></svg>
+                  <input id="logSearch" type="search" placeholder="筛选日志内容" aria-label="筛选日志内容">
+                </div>
+                <div class="spacer"></div>
+                <label class="check-inline optional">
+                  <input type="checkbox" id="autoScroll" checked>
+                  自动滚动
+                </label>
+                <button class="btn sm" type="button" data-command="open-task">
+                  <svg class="icon sm"><use href="#i-external"/></svg>
+                  任务详情
+                </button>
+              </div>
+              <div class="log-list" id="logList" role="log" aria-label="运行日志"></div>
+              <div class="log-foot" id="logFoot"></div>
+            </div>
+
+            <div class="tab-panel" id="tab-data" role="tabpanel" hidden>
+              <div class="table-wrap">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>商品</th>
+                      <th class="num">价格</th>
+                      <th>币种</th>
+                      <th class="num">描述</th>
+                      <th>来源</th>
+                    </tr>
+                  </thead>
+                  <tbody id="dataBody"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="tab-panel" id="tab-files" role="tabpanel" hidden>
+              <div class="table-wrap">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>文件</th>
+                      <th class="num">大小</th>
+                      <th>更新时间</th>
+                      <th>说明</th>
+                      <th class="sticky-right">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody id="filesBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <div class="scrim" id="scrim"></div>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+
+  <script src="draft-icons.js?v=20261127-6"></script>
+  <script src="draft-data.js?v=20261127-6"></script>
+  <script>
+    (function () {
+      const { sites, batches, folders, batchById, batchTotals } = MOCK;
+      const { fmt, pct } = UI;
+      const $ = (selector, root = document) => root.querySelector(selector);
+      const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
+
+      let selectedSiteKey = "bennytex.com";
+      let treeFilter = "all";
+      let treeQuery = "";
+      let view = "current";
+      let logLevel = "ALL";
+      let logQuery = "";
+      let autoScroll = true;
+      let activeTab = "log";
+      let expandedFolders = new Set(["f-fr-textile"]);
+      let expandedBatches = new Set(["b-bennytex"]);
+      let lastUpdated = "08:42:16";
+      let tickCount = 0;
+
+      function allSites() {
+        return Object.values(sites);
+      }
+
+      function isAttention(site) {
+        return site.state === "PAUSED" || site.outcome === "FAILED" || site.outcome === "PARTIAL";
+      }
+
+      function selectedSite() {
+        return sites[selectedSiteKey];
+      }
+
+      function toast(message) {
+        const wrap = $("#toasts");
+        const node = document.createElement("div");
+        node.className = "toast";
+        node.textContent = message;
+        wrap.appendChild(node);
+        window.setTimeout(() => node.remove(), 3200);
+      }
+
+      function closeTree() {
+        document.body.classList.remove("tree-open");
+      }
+
+      function siteMatches(site) {
+        if (treeFilter === "running" && site.state !== "RUNNING") return false;
+        if (treeFilter === "attention" && !isAttention(site)) return false;
+        const needle = treeQuery.trim().toLowerCase();
+        if (!needle) return true;
+        const batch = batchById(site.batchId);
+        return `${site.domain} ${batch ? batch.name : ""} ${site.taskId || ""}`
+          .toLowerCase()
+          .includes(needle);
+      }
+
+      function renderTree() {
+        const list = allSites();
+        const running = list.filter((site) => site.state === "RUNNING").length;
+        const attention = list.filter(isAttention).length;
+
+        $("#treeQuick").innerHTML = `
+          <button class="chip ${treeFilter === "all" ? "active" : ""}" type="button" data-filter="all">全部站点 <span class="n">${list.length}</span></button>
+          <button class="chip ${treeFilter === "running" ? "active" : ""}" type="button" data-filter="running">运行中 <span class="n">${running}</span></button>
+          <button class="chip ${treeFilter === "attention" ? "active" : ""}" type="button" data-filter="attention">需关注 <span class="n">${attention}</span></button>
+        `;
+
+        const searchMode = Boolean(treeQuery.trim()) || treeFilter !== "all";
+
+        const siteRow = (site) => {
+          const active = site.key === selectedSiteKey;
+          const meta = site.state === "READY" ? "未开始" : fmt(site.valid);
+          const mainAction =
+            site.state === "RUNNING"
+              ? `<button class="mini" type="button" data-act="pause" data-key="${site.key}" title="暂停 ${site.domain}" aria-label="暂停 ${site.domain}"><svg class="icon sm"><use href="#i-pause"/></svg></button>`
+              : site.state === "PAUSED"
+                ? `<button class="mini" type="button" data-act="resume" data-key="${site.key}" title="继续 ${site.domain}" aria-label="继续 ${site.domain}"><svg class="icon sm"><use href="#i-play"/></svg></button>`
+                : site.state === "READY"
+                  ? `<button class="mini" type="button" data-act="start" data-key="${site.key}" title="启动 ${site.domain}" aria-label="启动 ${site.domain}"><svg class="icon sm"><use href="#i-play"/></svg></button>`
+                  : site.outcome === "FAILED"
+                    ? `<button class="mini" type="button" data-act="retry" data-key="${site.key}" title="重试 ${site.domain}" aria-label="重试 ${site.domain}"><svg class="icon sm"><use href="#i-rotate"/></svg></button>`
+                    : `<button class="mini" type="button" data-act="export" data-key="${site.key}" title="导出 ${site.domain}" aria-label="导出 ${site.domain}"><svg class="icon sm"><use href="#i-download"/></svg></button>`;
+          const dotClass =
+            site.state === "RUNNING"
+              ? "running"
+              : site.state === "FINISHED"
+                ? site.outcome === "PARTIAL"
+                  ? "warning"
+                  : site.outcome === "FAILED"
+                    ? "danger"
+                    : "done"
+                : site.state === "PAUSED" || site.state === "QUEUED"
+                  ? "warning"
+                  : "";
+          return `<div class="tree-row site-row tree-indent-2 ${active ? "selected" : ""}">
+            <span class="site-dot ${dotClass}" aria-hidden="true"></span>
+            <button class="row-main" type="button" data-site="${site.key}" title="${site.domain}">
+              <span class="name">${site.domain}</span>
+              <span class="meta" data-live-valid="${site.key}">${meta}</span>
+            </button>
+            <span class="quick">${mainAction}</span>
+          </div>`;
+        };
+
+        let html = "";
+        folders.forEach((folder) => {
+          const folderBatches = folder.batchIds.map(batchById).filter(Boolean);
+          const folderSites = folderBatches.flatMap((batch) =>
+            batch.siteKeys.map((key) => sites[key]).filter(siteMatches),
+          );
+          if (!folderSites.length) return;
+          const open = searchMode || expandedFolders.has(folder.id);
+          html += `<button class="tree-row" type="button" data-folder="${folder.id}" aria-expanded="${open}">
+            <span class="twist"><svg class="icon sm"><use href="#i-${open ? "chevron-down" : "chevron-right"}"/></svg></span>
+            <svg class="icon sm row-icon"><use href="#i-folder"/></svg>
+            <span class="name">${folder.name}</span>
+            <span class="meta">${folderSites.length} 站</span>
+          </button>`;
+          if (!open) return;
+          folderBatches.forEach((batch) => {
+            const batchSites = batch.siteKeys.map((key) => sites[key]);
+            const matched = batchSites.filter(siteMatches);
+            if (!matched.length) return;
+            const totals = batchTotals(batch);
+            const openBatch = searchMode || expandedBatches.has(batch.id);
+            const percent = totals.total ? Math.round((totals.processed / totals.total) * 100) : 0;
+            html += `<button class="tree-row tree-indent-1" type="button" data-batch="${batch.id}" aria-expanded="${openBatch}">
+              <span class="twist"><svg class="icon sm"><use href="#i-${openBatch ? "chevron-down" : "chevron-right"}"/></svg></span>
+              <svg class="icon sm row-icon"><use href="#i-file"/></svg>
+              <span class="name">${batch.name}</span>
+              <span class="mini-bar" title="批次进度 ${percent}%"><span style="width:${percent}%"></span></span>
+              <span class="meta">${totals.running ? totals.running + " 跑" : matched.length + " 站"}</span>
+            </button>`;
+            if (openBatch) html += matched.map(siteRow).join("");
+          });
+        });
+
+        const unfiledBatches = batches.filter((batch) => !batch.folderId);
+        const unfiledSites = unfiledBatches.flatMap((batch) =>
+          batch.siteKeys.map((key) => sites[key]).filter(siteMatches),
+        );
+        if (unfiledSites.length) {
+          html += `<div class="tree-section"><span class="line"></span><span>未分组</span><span class="line"></span></div>`;
+          unfiledBatches.forEach((batch) => {
+            const matched = batch.siteKeys.map((key) => sites[key]).filter(siteMatches);
+            if (!matched.length) return;
+            const totals = batchTotals(batch);
+            const percent = totals.total ? Math.round((totals.processed / totals.total) * 100) : 0;
+            const openBatch = searchMode || expandedBatches.has(batch.id);
+            html += `<button class="tree-row" type="button" data-batch="${batch.id}" aria-expanded="${openBatch}">
+              <span class="twist"><svg class="icon sm"><use href="#i-${openBatch ? "chevron-down" : "chevron-right"}"/></svg></span>
+              <svg class="icon sm row-icon"><use href="#i-file"/></svg>
+              <span class="name">${batch.name}</span>
+              <span class="mini-bar" title="批次进度 ${percent}%"><span style="width:${percent}%"></span></span>
+              <span class="meta">${matched.length} 站</span>
+            </button>`;
+            if (openBatch) html += matched.map(siteRow).join("");
+          });
+        }
+
+        $("#treeScroll").innerHTML = html;
+
+        const site = selectedSite();
+        const batch = site ? batchById(site.batchId) : null;
+        $("#treeFoot").textContent = site ? `选中：${site.domain} · ${batch ? batch.name : ""}` : "选择一个站点";
+        $("#narrowState").textContent = site ? UI.stateMeta(site).label : "—";
+      }
+
+      function siteActions(site) {
+        let primary = "";
+        if (site.state === "RUNNING") {
+          primary = `<button class="btn" type="button" data-command="pause"><svg class="icon sm"><use href="#i-pause"/></svg>暂停任务</button>`;
+        } else if (site.state === "PAUSED") {
+          primary = `<button class="btn primary" type="button" data-command="resume"><svg class="icon sm"><use href="#i-play"/></svg>继续任务</button>`;
+        } else if (site.state === "QUEUED") {
+          primary = `<button class="btn" type="button" data-command="pause"><svg class="icon sm"><use href="#i-pause"/></svg>暂停排队</button>`;
+        } else if (site.state === "READY") {
+          primary = `<button class="btn primary" type="button" data-command="start"><svg class="icon sm"><use href="#i-play"/></svg>启动试采</button>`;
+        } else if (site.outcome === "FAILED") {
+          primary = `<button class="btn primary" type="button" data-command="retry"><svg class="icon sm"><use href="#i-rotate"/></svg>重试任务</button>`;
+        } else {
+          primary = `<button class="btn primary" type="button" data-command="export"><svg class="icon sm"><use href="#i-download"/></svg>导出结果</button>`;
+        }
+        const exportButton =
+          site.state === "FINISHED"
+            ? ""
+            : `<button class="btn optional" type="button" data-command="export"><svg class="icon sm"><use href="#i-download"/></svg>导出</button>`;
+        return `${primary}${exportButton}
+          <button class="btn optional" type="button" data-command="open-site"><svg class="icon sm"><use href="#i-external"/></svg>站点详情</button>
+          <button class="btn icon" type="button" title="更多站点操作" aria-label="更多站点操作" data-command="more"><svg class="icon sm"><use href="#i-more"/></svg></button>`;
+      }
+
+      function renderSiteHead() {
+        const site = selectedSite();
+        if (!site) return;
+        const batch = batchById(site.batchId);
+        const meta = UI.stateMeta(site);
+        $("#siteName").textContent = site.domain;
+        $("#siteState").innerHTML = `<span class="badge ${meta.tone}"><span class="dot"></span>${meta.label}</span>`;
+        $("#siteSub").innerHTML = `<span class="kv">批次 <b>${batch ? batch.name : "—"}</b></span>
+          <span class="kv">${batch ? batch.country : "—"} · ${batch ? batch.category : "—"}</span>
+          <span class="kv">规则 <b>${site.rule}</b></span>
+          <span class="kv">更新 <b data-live-updated="${site.key}">${site.updated}</b></span>`;
+        $("#siteActions").innerHTML = siteActions(site);
+        $("#rateTag").textContent = "4 RPS · 4 并发";
+      }
+
+      function renderSummary() {
+        const site = selectedSite();
+        if (!site) return;
+        const items = [
+          ["已处理", fmt(site.processed), `共 ${fmt(site.total)} 个候选`],
+          ["有效商品", fmt(site.valid), "写入 products.csv"],
+          ["永久失败", fmt(site.failed), "不重试"],
+          ["队列", fmt(site.pending), `进行中 ${site.inFlight}`],
+          ["速度", site.speed, `运行 ${site.elapsed}`],
+        ];
+        $("#siteSummary").innerHTML = items
+          .map(
+            ([label, value, hint]) =>
+              `<div class="item"><div class="k">${label}</div><div class="v">${value}<span class="unit">${hint}</span></div></div>`,
+          )
+          .join("");
+      }
+
+      function historyFor(site) {
+        if (!site.taskId) return [];
+        const seed = site.key.split("").reduce((sum, ch) => sum + ch.charCodeAt(0), 0).toString(16);
+        const base = Math.max(1, site.valid);
+        return [
+          {
+            id: site.taskId,
+            type: "产品 · 正式",
+            state: site.state,
+            outcome: site.outcome,
+            valid: site.valid,
+            failed: site.failed,
+            started: "11-27 08:00",
+            elapsed: site.elapsed,
+            current: true,
+          },
+          {
+            id: `web-${seed}0a1`,
+            type: "产品 · 正式",
+            state: "FINISHED",
+            outcome: "COMPLETED",
+            valid: Math.max(1, base - 130),
+            failed: 1,
+            started: "11-26 14:20",
+            elapsed: "24:10",
+          },
+          {
+            id: `web-${seed}0b2`,
+            type: "产品 · 试采",
+            state: "FINISHED",
+            outcome: "COMPLETED",
+            valid: Math.min(20, base),
+            failed: 0,
+            started: "11-26 11:02",
+            elapsed: "00:18",
+          },
+          {
+            id: `web-${seed}0c3`,
+            type: "产品 · 正式",
+            state: "FINISHED",
+            outcome: site.outcome === "PARTIAL" ? "PARTIAL" : "COMPLETED",
+            valid: Math.max(1, base - 460),
+            failed: 2,
+            started: "11-25 09:40",
+            elapsed: "31:52",
+          },
+          {
+            id: `web-${seed}0d4`,
+            type: "构建验证",
+            state: "FINISHED",
+            outcome: "COMPLETED",
+            valid: 6,
+            failed: 0,
+            started: "11-25 08:10",
+            elapsed: "06:12",
+          },
+        ];
+      }
+
+      function renderCurrent(site) {
+        const badge = UI.badge(site);
+        const percent = pct(site);
+        return `<div class="task-overview">
+          <div class="task-line">
+            <span class="mono">任务 ${site.taskId || "尚未创建"}</span>
+            ${site.taskId ? badge : '<span class="badge neutral">未开始</span>'}
+            <span>产品 · 正式</span>
+            <span>规则 ${site.rule}</span>
+            <span>更新 ${site.updated}</span>
+          </div>
+          <div class="big-progress">
+            <div class="progress ${UI.progressTone(site)}" role="img" aria-label="进度 ${percent}%">
+              <span style="width:${percent}%" data-live-bar="${site.key}"></span>
+            </div>
+            <div class="meta">
+              <span><b data-live-processed="${site.key}">${fmt(site.processed)}</b> / ${fmt(site.total)} 已处理</span>
+              <span class="right"><b data-live-percent="${site.key}">${percent}%</b> · 队列 ${fmt(site.pending)}</span>
+            </div>
+          </div>
+          <ul class="detail-list">
+            <li><span class="k">有效商品</span><span class="v" data-live-valid="${site.key}">${fmt(site.valid)}</span></li>
+            <li><span class="k">永久失败</span><span class="v" data-live-failed="${site.key}">失败 ${fmt(site.failed)}</span></li>
+            <li><span class="k">并发 / 限速</span><span class="v">4 并发 · 4 RPS · 0ms 延迟</span></li>
+            <li><span class="k">运行时长</span><span class="v">${site.elapsed}</span></li>
+            <li><span class="k">429 退避</span><span class="v">0 次 · 域名 RPS 3.4</span></li>
+            <li><span class="k">停止原因</span><span class="v">${UI.stateMeta(site).label}</span></li>
+          </ul>
+          <div class="note">${site.note || "暂无站点备注"}。任务使用规则 ${site.rule}；当前站点或任务变更后，以新任务为准。</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button class="btn sm" type="button" data-command="open-task"><svg class="icon sm"><use href="#i-external"/></svg>打开任务详情</button>
+            <button class="btn sm" type="button" data-command="copy-task"><svg class="icon sm"><use href="#i-copy"/></svg>复制任务 ID</button>
+            <button class="btn sm" type="button" data-command="export"><svg class="icon sm"><use href="#i-download"/></svg>导出当前任务</button>
+          </div>
+        </div>`;
+      }
+
+      function renderHistory(site) {
+        const rows = historyFor(site);
+        if (!rows.length) {
+          return `<div class="empty"><svg class="icon lg"><use href="#i-clock"/></svg><strong>还没有任务</strong><span>启动试采后，任务会出现在这里。</span></div>`;
+        }
+        $("#historyCount").textContent = String(rows.length);
+        return `<div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>任务</th><th>类型</th><th>状态</th><th class="num">有效 / 失败</th><th>开始</th><th>耗时</th><th class="sticky-right">操作</th>
+              </tr>
+            </thead>
+            <tbody>${rows
+              .map(
+                (task) => `<tr>
+                  <td data-label="任务"><span class="mono">${task.id}</span>${task.current ? ' <span class="tag">当前</span>' : ""}</td>
+                  <td class="muted" data-label="类型">${task.type}</td>
+                  <td data-label="状态">${UI.badge({ state: task.state, outcome: task.outcome })}</td>
+                  <td class="num" data-label="有效 / 失败"><span class="strong">${fmt(task.valid)}</span><div class="muted">失败 ${fmt(task.failed)}</div></td>
+                  <td class="muted" data-label="开始">${task.started}</td>
+                  <td class="muted" data-label="耗时">${task.elapsed}</td>
+                  <td class="sticky-right" data-label="操作"><div class="actions"><button class="btn sm" type="button" data-command="open-task">打开</button><button class="btn sm icon" type="button" data-command="export" title="导出" aria-label="导出任务"><svg class="icon sm"><use href="#i-download"/></svg></button></div></td>
+                </tr>`,
+              )
+              .join("")}</tbody>
+          </table>
+        </div>`;
+      }
+
+      function renderProfile(site) {
+        const batch = batchById(site.batchId);
+        return `<div class="task-overview">
+          <ul class="detail-list">
+            <li><span class="k">站点 key</span><span class="v mono">${site.key}</span></li>
+            <li><span class="k">批次</span><span class="v">${batch ? batch.name : "—"}</span></li>
+            <li><span class="k">市场</span><span class="v">${batch ? `${batch.country} · ${batch.category}` : "—"}</span></li>
+            <li><span class="k">规则版本</span><span class="v">${site.rule}</span></li>
+            <li><span class="k">采集速率</span><span class="v">4 RPS · 4 并发 · 0ms 延迟 · 最多 3 次</span></li>
+            <li><span class="k">最近更新</span><span class="v">${site.updated}</span></li>
+            <li><span class="k">站点状态</span><span class="v">${UI.stateMeta(site).label}</span></li>
+            <li><span class="k">任务</span><span class="v">${site.taskId || "未创建"}</span></li>
+          </ul>
+          <div class="note">${site.note || "暂无站点备注"}</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button class="btn sm" type="button" data-command="rate-policy"><svg class="icon sm"><use href="#i-settings"/></svg>编辑采集速率</button>
+            <button class="btn sm" type="button" data-command="edit-note"><svg class="icon sm"><use href="#i-file"/></svg>编辑站点备注</button>
+            <button class="btn sm" type="button" data-command="open-site"><svg class="icon sm"><use href="#i-external"/></svg>打开站点详情</button>
+          </div>
+        </div>`;
+      }
+
+      function renderSiteBody() {
+        const site = selectedSite();
+        const body = $("#siteBody");
+        if (!site) {
+          body.innerHTML = `<div class="empty">从左侧选择一个站点</div>`;
+          return;
+        }
+        if (view === "history") body.innerHTML = renderHistory(site);
+        else if (view === "profile") body.innerHTML = renderProfile(site);
+        else body.innerHTML = renderCurrent(site);
+      }
+
+      function renderFoot() {
+        const site = selectedSite();
+        const tasks = site ? historyFor(site).length : 0;
+        $("#siteFoot").innerHTML = `<span>任务历史 ${tasks}</span>
+          <span>当前任务 ${site && site.taskId ? site.taskId : "—"}</span>
+          <span>规则 ${site ? site.rule : "—"}</span>
+          <span style="margin-left:auto">最后更新 ${lastUpdated}</span>`;
+      }
+
+      function logEntries() {
+        const site = selectedSite();
+        if (!site) return [];
+        const needle = logQuery.trim().toLowerCase();
+        return (site.logs || []).filter((entry) => {
+          if (logLevel !== "ALL" && entry[1] !== logLevel) return false;
+          if (needle && !`${entry[1]} ${entry[2]}`.toLowerCase().includes(needle)) return false;
+          return true;
+        });
+      }
+
+      function renderLog() {
+        const site = selectedSite();
+        const list = $("#logList");
+        const entries = logEntries();
+        $("#logSiteTag").textContent = site ? site.domain : "—";
+        $("#logTaskTag").textContent = site && site.taskId ? site.taskId : "未创建任务";
+        if (!site) {
+          list.innerHTML = `<div class="log-empty">选择一个站点查看运行日志</div>`;
+        } else if (!entries.length) {
+          list.innerHTML =
+            site.logs && site.logs.length
+              ? `<div class="log-empty">没有匹配的日志行</div>`
+              : `<div class="log-empty"><svg class="icon lg"><use href="#i-terminal"/></svg><span>该站点尚无任务，启动后可在这里查看运行日志</span></div>`;
+        } else {
+          list.innerHTML = entries.map(UI.logLine).join("");
+          if (autoScroll) list.scrollTop = list.scrollHeight;
+        }
+        $("#dataCount").textContent = site ? fmt(site.valid) : "0";
+        const total = site && site.logs ? site.logs.length : 0;
+        $("#logFoot").innerHTML = `<span>显示 ${entries.length} / ${total} 条</span>
+          <span>任务 ${site && site.taskId ? site.taskId : "—"}</span>
+          <span data-foot-updated>更新 ${site ? site.updated : "—"}</span>
+          <span style="margin-left:auto">${site && site.state === "RUNNING" ? '<span class="live"><span class="dot"></span>实时追加</span>' : "已停止追加"}</span>`;
+      }
+
+      function renderData() {
+        const site = selectedSite();
+        const body = $("#dataBody");
+        if (!site || !site.taskId) {
+          body.innerHTML = `<tr><td colspan="5"><div class="empty">该站点尚无有效商品数据</div></td></tr>`;
+          return;
+        }
+        const names = [
+          "Lin brut lavé 140 cm",
+          "Coton bio écru 150 cm",
+          "Tissu nid d'abeille coton",
+          "Velours côtelé fin",
+          "Lin mélangé viscose",
+          "Coton double gaze",
+          "Toile de lin naturelle",
+          "Tissu éponge bio",
+        ];
+        const currency = site.batchId === "b-premier" ? "GBP" : "EUR";
+        body.innerHTML = names
+          .map((name, index) => {
+            const price = (9.9 + index * 4.35 + (site.valid % 7)).toFixed(2);
+            return `<tr>
+              <td data-label="商品">${name}<div class="muted" style="font-size:10.5px">${site.domain}/produit/${1200 + site.valid + index}</div></td>
+              <td class="num" data-label="价格">${price}</td>
+              <td data-label="币种">${currency}</td>
+              <td class="num" data-label="描述">${240 + index * 17} 字符</td>
+              <td class="muted" data-label="来源">product_content</td>
+            </tr>`;
+          })
+          .join("");
+      }
+
+      function renderFiles() {
+        const site = selectedSite();
+        const body = $("#filesBody");
+        if (!site) {
+          body.innerHTML = `<tr><td colspan="5"><div class="empty">选择一个站点查看交付文件</div></td></tr>`;
+          return;
+        }
+        const rows = [
+          ["products.csv", `${Math.max(12, Math.round(site.valid * 0.9))} KB`, site.updated, "有效商品明细"],
+          ["task-result.json", `${Math.max(8, Math.round(site.valid * 0.2))} KB`, site.updated, "任务结果与计数"],
+          ["site-audit.json", "18 KB", site.updated, "覆盖与质量审计"],
+        ];
+        body.innerHTML = rows
+          .map(
+            ([name, size, time, note]) => `<tr>
+              <td data-label="文件"><span class="mono">${name}</span></td>
+              <td class="num" data-label="大小">${size}</td>
+              <td class="muted" data-label="更新时间">${time}</td>
+              <td class="muted" data-label="说明">${note}</td>
+              <td class="sticky-right" data-label="操作"><button class="btn sm icon" type="button" data-command="download" title="下载 ${name}" aria-label="下载 ${name}"><svg class="icon sm"><use href="#i-download"/></svg></button></td>
+            </tr>`,
+          )
+          .join("");
+      }
+
+      function renderActiveTab() {
+        if (activeTab === "data") renderData();
+        else if (activeTab === "files") renderFiles();
+        else renderLog();
+      }
+
+      function renderAll() {
+        renderTree();
+        renderSiteHead();
+        renderSummary();
+        renderSiteBody();
+        renderFoot();
+        renderLog();
+        renderActiveTab();
+      }
+
+      function updateSiteCells(site) {
+        const percent = pct(site);
+        $$(`[data-live-processed="${site.key}"]`).forEach((node) => (node.textContent = fmt(site.processed)));
+        $$(`[data-live-valid="${site.key}"]`).forEach((node) => {
+          node.textContent = site.state === "READY" ? "未开始" : fmt(site.valid);
+        });
+        $$(`[data-live-failed="${site.key}"]`).forEach((node) => (node.textContent = `失败 ${fmt(site.failed)}`));
+        $$(`[data-live-percent="${site.key}"]`).forEach((node) => (node.textContent = `${percent}%`));
+        $$(`[data-live-bar="${site.key}"]`).forEach((node) => (node.style.width = `${percent}%`));
+      }
+
+      function doAction(action, key) {
+        const site = sites[key];
+        if (!site) return;
+        selectedSiteKey = key;
+        if (action === "pause") {
+          site.state = "PAUSED";
+          site.logs.push([UI.timeNow(), "INFO", "用户请求暂停，当前商品处理完成后停止"]);
+          toast(`已请求暂停：${site.domain}（原型示例）`);
+        } else if (action === "resume") {
+          site.state = "RUNNING";
+          site.logs.push([UI.timeNow(), "INFO", "任务已恢复，从队列继续"]);
+          toast(`已继续：${site.domain}（原型示例）`);
+        } else if (action === "start") {
+          site.state = "RUNNING";
+          site.taskId = site.taskId || `web-${Math.random().toString(16).slice(2, 14)}`;
+          site.total = site.total || 800;
+          site.logs = [
+            [UI.timeNow(), "INFO", `开始任务 ${site.taskId}，入口 https://www.${site.domain}/`],
+          ];
+          toast(`已启动：${site.domain}（原型示例）`);
+        } else if (action === "retry") {
+          site.state = "RUNNING";
+          site.outcome = null;
+          site.failed = 0;
+          site.logs.push([UI.timeNow(), "INFO", "重试请求已受理，从失败页重新开始"]);
+          toast(`已重试：${site.domain}（原型示例）`);
+        } else if (action === "export") {
+          toast(`原型：导出 ${site.domain} 的当前任务结果`);
+          return;
+        }
+        renderAll();
+      }
+
+      function switchTab(tab) {
+        activeTab = tab;
+        $$(".tabs .tab").forEach((button) => {
+          const active = button.dataset.tab === tab;
+          button.classList.toggle("active", active);
+          button.setAttribute("aria-selected", String(active));
+        });
+        $$(".tab-panel").forEach((panel) => {
+          panel.hidden = panel.id !== `tab-${tab}`;
+        });
+        renderActiveTab();
+      }
+
+      // ---------- 事件 ----------
+
+      $("#tree").addEventListener("click", (event) => {
+        const filterButton = event.target.closest("[data-filter]");
+        if (filterButton) {
+          treeFilter = filterButton.dataset.filter;
+          renderTree();
+          return;
+        }
+        const actionButton = event.target.closest("[data-act]");
+        if (actionButton) {
+          doAction(actionButton.dataset.act, actionButton.dataset.key);
+          return;
+        }
+        const siteButton = event.target.closest("[data-site]");
+        if (siteButton) {
+          selectedSiteKey = siteButton.dataset.site;
+          renderAll();
+          closeTree();
+          return;
+        }
+        const folderButton = event.target.closest("[data-folder]");
+        if (folderButton) {
+          const id = folderButton.dataset.folder;
+          if (expandedFolders.has(id)) expandedFolders.delete(id);
+          else expandedFolders.add(id);
+          renderTree();
+          return;
+        }
+        const batchButton = event.target.closest("[data-batch]");
+        if (batchButton) {
+          const id = batchButton.dataset.batch;
+          if (expandedBatches.has(id)) expandedBatches.delete(id);
+          else expandedBatches.add(id);
+          renderTree();
+        }
+      });
+
+      $("#treeSearch").addEventListener("input", (event) => {
+        treeQuery = event.target.value;
+        renderTree();
+      });
+
+      $(".toolbar").addEventListener("click", (event) => {
+        const button = event.target.closest("[data-view]");
+        if (!button) return;
+        view = button.dataset.view;
+        $$(".toolbar [data-view]").forEach((node) => node.classList.toggle("active", node === button));
+        renderSiteBody();
+      });
+
+      $("#logLevel").addEventListener("change", (event) => {
+        logLevel = event.target.value;
+        renderLog();
+      });
+
+      $("#logSearch").addEventListener("input", (event) => {
+        logQuery = event.target.value;
+        renderLog();
+      });
+
+      $("#autoScroll").addEventListener("change", (event) => {
+        autoScroll = event.target.checked;
+      });
+
+      document.querySelector(".tabs").addEventListener("click", (event) => {
+        const tab = event.target.closest("[data-tab]");
+        if (tab) switchTab(tab.dataset.tab);
+      });
+
+      document.addEventListener("click", (event) => {
+        const command = event.target.closest("[data-command]");
+        if (!command) return;
+        const name = command.dataset.command;
+        const site = selectedSite();
+        if (name === "toggle-tree") {
+          document.body.classList.toggle("tree-open");
+        } else if (name === "pause" && site) {
+          doAction("pause", site.key);
+        } else if (name === "resume" && site) {
+          doAction("resume", site.key);
+        } else if (name === "start" && site) {
+          doAction("start", site.key);
+        } else if (name === "retry" && site) {
+          doAction("retry", site.key);
+        } else if (name === "export") {
+          toast("原型：导出当前站点/任务结果（示例）");
+        } else if (name === "refresh") {
+          lastUpdated = UI.timeNow();
+          renderAll();
+          toast("已刷新（原型示例）");
+        } else if (name === "open-task") {
+          toast("原型：打开任务详情页");
+        } else if (name === "open-site") {
+          toast("原型：打开站点详情页");
+        } else if (name === "rate-policy") {
+          toast("原型：打开站点采集速率设置");
+        } else if (name === "edit-note") {
+          toast("原型：打开站点备注编辑");
+        } else if (name === "new-folder") {
+          toast("原型：打开新建分组对话框");
+        } else if (name === "download") {
+          toast("原型：开始下载（示例）");
+        } else if (name === "more") {
+          toast("原型：打开更多站点操作");
+        } else if (name === "copy-task") {
+          toast(`已复制任务 ID：${site && site.taskId ? site.taskId : "—"}`);
+        }
+      });
+
+      $("#scrim").addEventListener("click", closeTree);
+
+      document.querySelector(".narrow-bar").addEventListener("click", (event) => {
+        const pane = event.target.closest("[data-pane]");
+        if (!pane) return;
+        const showLog = pane.dataset.pane === "log";
+        $("#workspace").classList.toggle("show-log", showLog);
+        $$(".narrow-bar [data-pane]").forEach((button) => {
+          button.classList.toggle("active", (button.dataset.pane === "log") === showLog);
+        });
+      });
+
+      // ---------- 上下分隔条 ----------
+
+      const splitter = $("#splitter");
+      const topPane = $("#topPane");
+      const content = $("#content");
+      let drag = null;
+
+      function setTopHeight(height) {
+        const max = Math.max(260, content.getBoundingClientRect().height - 190);
+        const next = Math.min(max, Math.max(230, height));
+        topPane.style.flex = `0 0 ${next}px`;
+        splitter.setAttribute("aria-valuenow", String(Math.round(next)));
+      }
+
+      splitter.addEventListener("pointerdown", (event) => {
+        drag = { y: event.clientY, height: topPane.getBoundingClientRect().height };
+        splitter.setPointerCapture(event.pointerId);
+      });
+      splitter.addEventListener("pointermove", (event) => {
+        if (!drag) return;
+        setTopHeight(drag.height + event.clientY - drag.y);
+      });
+      splitter.addEventListener("pointerup", () => {
+        drag = null;
+      });
+      splitter.addEventListener("pointercancel", () => {
+        drag = null;
+      });
+      splitter.addEventListener("keydown", (event) => {
+        if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+        event.preventDefault();
+        setTopHeight(topPane.getBoundingClientRect().height + (event.key === "ArrowDown" ? 24 : -24));
+      });
+
+      // ---------- 实时演示 ----------
+
+      const tickerMessages = [
+        (site) => `处理商品 ${site.domain}/produit/lin-${Math.floor(Math.random() * 900 + 100)}，解析成功（价格、币种、主图）`,
+        (site) => `写入 8 件商品，有效累计 ${fmt(site.valid)}`,
+        (site) => `429 Too Many Requests，域名 ${site.domain} 冷却 1.2s`,
+        (site) => `描述 ${180 + Math.floor(Math.random() * 140)} 字符，达到阈值 180`,
+        (site) => `校验价格与币种通过：${fmt(site.valid)} 件`,
+      ];
+
+      window.setInterval(() => {
+        tickCount += 1;
+        const running = allSites().filter((site) => site.state === "RUNNING" && site.processed < site.total);
+        running.forEach((site) => {
+          const step = 5 + Math.floor(Math.random() * 10);
+          site.processed = Math.min(site.total, site.processed + step);
+          site.valid = Math.min(site.processed, site.valid + Math.max(1, Math.round(step * 0.88)));
+          if (Math.random() < 0.05) site.failed += 1;
+          site.updated = UI.timeNow();
+          updateSiteCells(site);
+        });
+        lastUpdated = UI.timeNow();
+        const site = selectedSite();
+        if (site && site.state === "RUNNING" && site.processed < site.total) {
+          const message = tickerMessages[tickCount % tickerMessages.length](site);
+          site.logs.push([lastUpdated, tickCount % 9 === 0 ? "WARN" : "INFO", message]);
+          if (activeTab === "log" && autoScroll && logLevel === "ALL" && !logQuery.trim()) {
+            UI.appendLog($("#logList"), site.logs[site.logs.length - 1]);
+          } else if (activeTab === "log") {
+            renderLog();
+          }
+          const foot = $("#logFoot");
+          if (foot) {
+            const updated = foot.querySelector("[data-foot-updated]");
+            if (updated) updated.textContent = `更新 ${lastUpdated}`;
+          }
+        }
+        renderSummary();
+        renderFoot();
+        if (tickCount % 6 === 0) renderTree();
+        if (activeTab === "data" && tickCount % 3 === 0) renderData();
+      }, 2800);
+
+      renderAll();
+      switchTab("log");
+    })();
+  </script>
+</body>
+</html>

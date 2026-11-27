@@ -78,6 +78,7 @@ from ..runtime.batch import (
 )
 from ..runtime.identity import code_fingerprint, frontend_info, git_info
 from ..runtime.models import (
+    TERMINAL_TASK_STATES,
     Batch,
     BatchFolder,
     BatchSite,
@@ -87,6 +88,8 @@ from ..runtime.models import (
     RuleVersion,
     SiteRule,
     Task,
+    WorkbenchNode,
+    WorkbenchTaskDef,
     WorkItem,
     utc_now,
 )
@@ -109,6 +112,7 @@ from ..runtime.store import (
     TaskStore,
     TaskTransitionError,
 )
+from ..runtime.system_metrics import SystemMetricsSampler
 from ..runtime.worker import Worker
 from .access import (
     LOOPBACK_HOSTS,
@@ -132,9 +136,7 @@ from .access import (
 
 logger = logging.getLogger(__name__)
 
-STATIC_DIR = Path(__file__).with_name("static")
-BATCH_DIST_DIR = Path(__file__).resolve().parents[3] / "frontend" / "dist"
-V2_DIST_DIR = Path(__file__).resolve().parents[3] / "frontend-v2" / "dist"
+FRONTEND_DIST_DIR = Path(__file__).resolve().parents[3] / "frontend" / "dist"
 DEV_IDENTITY_PATH = "/api/dev/identity"
 EXPORT_FILES = (
     "products.csv",
@@ -159,6 +161,71 @@ class CreateTaskRequest(BaseModel):
     task_type: Literal["product", "discovery"] = "product"
     limits: Limits = Field(default_factory=Limits)
     proxy: str | None = Field(default=None, max_length=500)
+
+
+class WorkbenchGroupCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    parent_id: str | None = Field(default=None, max_length=40)
+    after_node_id: str | None = Field(default=None, max_length=40)
+
+
+class WorkbenchNodeRenameRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+
+
+class WorkbenchNodeMoveRequest(BaseModel):
+    parent_id: str | None = Field(default=None, max_length=40)
+    after_node_id: str | None = Field(default=None, max_length=40)
+    before_node_id: str | None = Field(default=None, max_length=40)
+
+
+class WorkbenchTaskCreateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    input_url: str = Field(min_length=1, max_length=1000)
+    parent_id: str | None = Field(default=None, max_length=40)
+    rule_id: str = Field(min_length=1, max_length=200)
+    rule_version: str = Field(min_length=1, max_length=120)
+    task_type: Literal["product", "discovery"] = "product"
+    collection_mode: Literal["sample", "formal"] = "sample"
+    country: str | None = Field(default=None, max_length=80)
+    language: str | None = Field(default=None, max_length=80)
+    market: str | None = Field(default=None, max_length=80)
+    category: str | None = Field(default=None, max_length=120)
+    limits: Limits = Field(default_factory=Limits)
+    proxy: str | None = Field(default=None, max_length=500)
+    note: str | None = Field(default=None, max_length=2000)
+
+
+class WorkbenchTaskUpdateRequest(BaseModel):
+    rule_id: str | None = Field(default=None, min_length=1, max_length=200)
+    rule_version: str | None = Field(default=None, min_length=1, max_length=120)
+    task_type: Literal["product", "discovery"] | None = None
+    collection_mode: Literal["sample", "formal"] | None = None
+    country: str | None = Field(default=None, max_length=80)
+    language: str | None = Field(default=None, max_length=80)
+    market: str | None = Field(default=None, max_length=80)
+    category: str | None = Field(default=None, max_length=120)
+    limits: Limits | None = None
+    proxy: str | None = Field(default=None, max_length=500)
+    note: str | None = Field(default=None, max_length=2000)
+
+
+class WorkbenchBatchImportRequest(BaseModel):
+    batch_id: str = Field(min_length=1, max_length=40)
+    parent_id: str | None = Field(default=None, max_length=40)
+
+
+class WorkbenchRunAttachRequest(BaseModel):
+    parent_id: str | None = Field(default=None, max_length=40)
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+
+
+class WorkbenchStartRequest(BaseModel):
+    request_id: str | None = Field(default=None, max_length=200)
+
+
+class WorkbenchRecentDismissRequest(BaseModel):
+    task_ids: list[str] = Field(min_length=1, max_length=200)
 
 
 FeedbackCategory = Literal[
@@ -730,6 +797,202 @@ def _task_sort_value(item: dict[str, Any], key: str) -> Any:
     return ""
 
 
+def _workbench_host_key(value: str) -> str:
+    return normalize_domain(value).removeprefix("www.")
+
+
+def _workbench_definition_payload(definition: WorkbenchTaskDef | None) -> dict[str, Any] | None:
+    if definition is None:
+        return None
+    return {
+        "input_url": definition.input_url,
+        "domain": definition.domain,
+        "site_key": definition.site_key,
+        "batch_id": definition.batch_id,
+        "country": definition.country,
+        "language": definition.language,
+        "market": definition.market,
+        "category": definition.category,
+        "task_type": definition.task_type,
+        "collection_mode": definition.collection_mode,
+        "rule_id": definition.rule_id,
+        "rule_version": definition.rule_version,
+        "limits": definition.limits,
+        "proxy": definition.proxy,
+        "note": definition.note,
+    }
+
+
+def _workbench_task_brief(task: Task | None) -> dict[str, Any] | None:
+    if task is None:
+        return None
+    return {
+        "task_id": task.task_id,
+        "state": task.state,
+        "outcome": task.outcome,
+        "stop_reason": task.stop_reason,
+        "counts": task.counters,
+        "started_at": task.started_at,
+        "updated_at": task.updated_at,
+    }
+
+
+def _workbench_path(
+    node: WorkbenchNode | None, nodes_by_id: dict[str, WorkbenchNode]
+) -> str | None:
+    if node is None:
+        return None
+    parts: list[str] = []
+    parent_id = node.parent_id
+    seen: set[str] = set()
+    while parent_id and parent_id not in seen:
+        seen.add(parent_id)
+        parent = nodes_by_id.get(parent_id)
+        if parent is None:
+            break
+        parts.append(parent.name)
+        parent_id = parent.parent_id
+    return " / ".join(reversed(parts)) if parts else None
+
+
+def _workbench_tree_payload(store: TaskStore) -> dict[str, Any]:
+    nodes = store.list_workbench_nodes()
+    nodes_by_id = {node.node_id: node for node in nodes}
+    definitions = {item.node_id: item for item in store.list_workbench_task_defs()}
+    runs = sorted(store.list_workbench_task_runs(), key=lambda item: item.created_at)
+    current_by_node: dict[str, Task] = {}
+    for run in runs:
+        task = store.get_task(run.task_id)
+        if task is not None:
+            current_by_node[run.node_id] = task
+
+    task_counts = {node.node_id: 0 for node in nodes if node.node_type == "group"}
+    running_counts = {node.node_id: 0 for node in nodes if node.node_type == "group"}
+    for node in nodes:
+        if node.node_type != "task":
+            continue
+        task = current_by_node.get(node.node_id)
+        parent_id = node.parent_id
+        seen: set[str] = set()
+        while parent_id and parent_id not in seen:
+            seen.add(parent_id)
+            if parent_id in task_counts:
+                task_counts[parent_id] += 1
+                if task is not None and task.state == "RUNNING":
+                    running_counts[parent_id] += 1
+            parent = nodes_by_id.get(parent_id)
+            parent_id = parent.parent_id if parent else None
+
+    items: list[dict[str, Any]] = []
+    for node in nodes:
+        payload: dict[str, Any] = {
+            "node_id": node.node_id,
+            "node_type": node.node_type,
+            "parent_id": node.parent_id,
+            "name": node.name,
+            "sort_order": node.sort_order,
+            "created_at": node.created_at,
+            "updated_at": node.updated_at,
+        }
+        if node.node_type == "group":
+            payload["task_count"] = task_counts.get(node.node_id, 0)
+            payload["running_count"] = running_counts.get(node.node_id, 0)
+        else:
+            payload["definition"] = _workbench_definition_payload(definitions.get(node.node_id))
+            payload["current_run"] = _workbench_task_brief(
+                current_by_node.get(node.node_id)
+            )
+            payload["path"] = _workbench_path(node, nodes_by_id)
+        items.append(payload)
+    return {"nodes": items}
+
+
+def _workbench_recent_payload(
+    store: TaskStore,
+    root: Path,
+    *,
+    scope: str,
+    query: str,
+    limit: int,
+    offset: int,
+) -> dict[str, Any]:
+    tasks = [task for task in store.list_tasks() if task.archived_at is None]
+    runs = store.list_workbench_task_runs()
+    nodes = store.list_workbench_nodes()
+    nodes_by_id = {node.node_id: node for node in nodes}
+    definitions = {item.node_id: item for item in store.list_workbench_task_defs()}
+    node_by_task = {run.task_id: run.node_id for run in runs}
+    dismissals = store.list_workbench_dismissals()
+    batches = {
+        batch.batch_id: batch for batch in store.list_batches(include_archived=True)
+    }
+    needle = query.strip().casefold()
+
+    rows: list[tuple[str, Task]] = []
+    counts = {"recent": 0, "running": 0, "queued": 0, "removed": 0}
+    for task in tasks:
+        dismissed = task.task_id in dismissals
+        if dismissed:
+            counts["removed"] += 1
+        else:
+            counts["recent"] += 1
+            if task.state == "RUNNING":
+                counts["running"] += 1
+            elif task.state == "QUEUED":
+                counts["queued"] += 1
+        if scope == "recent" and dismissed:
+            continue
+        if scope == "running" and (dismissed or task.state != "RUNNING"):
+            continue
+        if scope == "removed" and not dismissed:
+            continue
+        node = nodes_by_id.get(node_by_task.get(task.task_id, ""))
+        definition = definitions.get(node.node_id) if node else None
+        batch = batches.get(task.batch_id or "")
+        path = _workbench_path(node, nodes_by_id)
+        haystack = " ".join(
+            filter(
+                None,
+                (
+                    task.task_id,
+                    task.site_key,
+                    task.domain_key,
+                    node.name if node else "",
+                    definition.domain if definition else "",
+                    path or "",
+                    batch.name if batch else "",
+                ),
+            )
+        ).casefold()
+        if needle and needle not in haystack:
+            continue
+        rows.append((task.started_at or task.created_at, task))
+    rows.sort(key=lambda item: item[0], reverse=True)
+    total = len(rows)
+    page = rows[offset : offset + limit]
+
+    items: list[dict[str, Any]] = []
+    for _, task in page:
+        node_id = node_by_task.get(task.task_id)
+        node = nodes_by_id.get(node_id or "")
+        definition = definitions.get(node_id or "")
+        batch = batches.get(task.batch_id or "")
+        summary = _summary(store, task, root)
+        summary.update(
+            {
+                "node_id": node_id,
+                "path": _workbench_path(node, nodes_by_id),
+                "definition_name": node.name if node else None,
+                "definition": _workbench_definition_payload(definition),
+                "batch_name": batch.name if batch else None,
+                "dismissed": task.task_id in dismissals,
+                "can_dismiss": task.state in TERMINAL_TASK_STATES,
+            }
+        )
+        items.append(summary)
+    return {"total": total, "items": items, "counts": counts}
+
+
 def _item_payload(item: WorkItem) -> dict[str, Any]:
     return {
         "item_id": item.item_id,
@@ -761,18 +1024,6 @@ def _error(
         status_code=status_code,
         detail={"code": code, "message": message, "details": details or {}},
     )
-
-
-def _legacy_ui_enabled() -> bool:
-    """Return True only when the retired UI is explicitly enabled."""
-
-    return os.environ.get("ECOM_LEGACY_UI", "off").strip().lower() in {
-        "1",
-        "on",
-        "true",
-        "yes",
-        "enabled",
-    }
 
 
 def _client_is_loopback(request: Request) -> bool:
@@ -907,11 +1158,9 @@ def _client_key(request: Request) -> str:
 def _is_public_static(path: str, method: str) -> bool:
     if method not in {"GET", "HEAD"}:
         return False
-    return (
-        path == "/"
-        or path == "/favicon.ico"
-        or path == "/next"
-        or path.startswith("/next/")
+    # 旧入口只做兼容重定向，未认证时也应能加载。
+    return path in {"/", "/favicon.ico", "/favicon.svg", "/next"} or path.startswith(
+        ("/assets/", "/next/")
     )
 
 
@@ -1056,7 +1305,6 @@ def create_app(
         root.mkdir(parents=True, exist_ok=True)
     rules = Path(rules_dir).resolve() if rules_dir is not None else None
     builds_disabled = os.environ.get("ECOM_BUILD_DISABLED") == "1"
-    legacy_ui_enabled = _legacy_ui_enabled()
 
     stored_token = parse_token_setting(store.get_setting(SETTING_TOKEN))
     token_salt: str | None
@@ -1159,13 +1407,12 @@ def create_app(
     urls = [str(url) for url in (access_urls or ()) if str(url).strip()]
     if not urls:
         display = f"[{serve_host}]" if ":" in serve_host else serve_host
-        urls = [f"http://{display}:{serve_port}/next/"]
+        urls = [f"http://{display}:{serve_port}/"]
     started_at = utc_now()
-    v2_mounted = (V2_DIST_DIR / "index.html").is_file()
-    legacy_mounted = legacy_ui_enabled and (BATCH_DIST_DIR / "index.html").is_file()
-    frontend_kind = "v2" if v2_mounted else "legacy" if legacy_mounted else "none"
+    frontend_mounted = (FRONTEND_DIST_DIR / "index.html").is_file()
+    frontend_kind = "react" if frontend_mounted else "none"
     startup_code_fingerprint = code_fingerprint(Path(__file__).resolve().parents[1])
-    startup_frontend = frontend_info(V2_DIST_DIR)
+    startup_frontend = frontend_info(FRONTEND_DIST_DIR)
     startup_git = git_info(Path(__file__).resolve().parents[4])
     instance_id = uuid.uuid4().hex[:12]
     worker_label = "read-only" if read_only else ("managed" if manage_worker else "external")
@@ -1181,7 +1428,7 @@ def create_app(
             "git": startup_git,
             "frontend": {
                 "kind": frontend_kind,
-                "next_mounted": v2_mounted,
+                "mounted": frontend_mounted,
                 "index_sha256": startup_frontend["sha256"],
                 "built_at": startup_frontend["built_at"],
             },
@@ -1191,6 +1438,7 @@ def create_app(
         }
 
     started_monotonic = time.monotonic()
+    system_metrics = SystemMetricsSampler()
     if build_manager is None and rules is not None:
         build_manager = BuildManager(
             store,
@@ -2463,40 +2711,27 @@ def create_app(
 
     @app.get("/", include_in_schema=False)
     def index() -> Response:
-        if (V2_DIST_DIR / "index.html").is_file():
-            return RedirectResponse(url="/next/", status_code=307)
-        if legacy_ui_enabled and (BATCH_DIST_DIR / "index.html").is_file():
-            return RedirectResponse(url="/batch/", status_code=307)
-        if legacy_ui_enabled:
-            return FileResponse(STATIC_DIR / "index.html")
+        if (FRONTEND_DIST_DIR / "index.html").is_file():
+            return FileResponse(FRONTEND_DIST_DIR / "index.html")
         raise _error(
             "UI_NOT_BUILT",
-            "v2 UI build not found; build app/frontend-v2/dist or set ECOM_LEGACY_UI=on",
+            "frontend build not found; build app/frontend/dist",
             503,
         )
 
-    @app.get("/legacy", include_in_schema=False)
-    def legacy_index() -> Response:
-        if not legacy_ui_enabled:
-            if (V2_DIST_DIR / "index.html").is_file():
-                return RedirectResponse(url="/next/", status_code=307)
-            raise _error("NOT_FOUND", "legacy UI is disabled", 404)
-        return FileResponse(STATIC_DIR / "index.html")
+    @app.get("/favicon.svg", include_in_schema=False)
+    def frontend_favicon() -> Response:
+        favicon = FRONTEND_DIST_DIR / "favicon.svg"
+        if favicon.is_file():
+            return FileResponse(favicon)
+        raise _error("NOT_FOUND", "frontend favicon not found", 404)
 
-    if not legacy_ui_enabled:
-
-        @app.get("/batch", include_in_schema=False)
-        @app.get("/batch/{path:path}", include_in_schema=False)
-        def retired_batch(path: str = "") -> Response:
-            if (V2_DIST_DIR / "index.html").is_file():
-                return RedirectResponse(url="/next/", status_code=307)
-            raise _error("NOT_FOUND", "legacy UI is disabled", 404)
-
-        @app.get("/static/index.html", include_in_schema=False)
-        def retired_static_index() -> Response:
-            if (V2_DIST_DIR / "index.html").is_file():
-                return RedirectResponse(url="/next/", status_code=307)
-            raise _error("NOT_FOUND", "legacy UI is disabled", 404)
+    @app.get("/next", include_in_schema=False)
+    @app.get("/next/{path:path}", include_in_schema=False)
+    def next_alias(path: str = "") -> Response:
+        if path.startswith("assets/") or path in {"favicon.svg", "favicon.ico"}:
+            return RedirectResponse(url=f"/{path}", status_code=308)
+        return RedirectResponse(url="/", status_code=308)
 
     def _access_payload() -> dict[str, Any]:
         with access_lock:
@@ -2560,7 +2795,6 @@ def create_app(
                 "read_only": read_only,
                 "builds_available": builds_available,
                 "builds_disabled": builds_disabled,
-                "legacy_ui": "enabled" if legacy_ui_enabled else "disabled",
                 "rules_configured": rules is not None and rules.is_dir(),
                 "python": platform.python_version(),
                 "platform": platform.platform(),
@@ -2580,6 +2814,7 @@ def create_app(
                 ),
                 "builds_queued": build_counts.get("QUEUED", 0),
             },
+            "resources": system_metrics.snapshot(),
             "storage": {
                 "db_bytes": db_bytes,
                 "disk_total_bytes": disk.total,
@@ -2764,7 +2999,6 @@ def create_app(
                 and not builds_disabled
                 and not read_only
             ),
-            "legacy_ui": "enabled" if legacy_ui_enabled else "disabled",
         }
 
     @app.get(DEV_IDENTITY_PATH, include_in_schema=False)
@@ -3036,6 +3270,28 @@ def create_app(
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
+
+    @app.get("/api/tasks/{task_id}/events/history")
+    def task_events_history(
+        task_id: str,
+        tail: Annotated[int, Query(ge=1, le=500)] = 200,
+    ) -> dict[str, Any]:
+        require_task(task_id)
+        path = root / task_id / "events.ndjson"
+        if not path.is_file():
+            return {"items": [], "total": 0}
+        lines = path.read_text(encoding="utf-8").splitlines()[-tail:]
+        items: list[dict[str, Any]] = []
+        for line in lines:
+            if not line.strip():
+                continue
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict):
+                items.append(payload)
+        return {"items": items, "total": len(items)}
 
     @app.get("/api/tasks/{task_id}/export")
     def export_task(task_id: str, partial: bool = False) -> Response:
@@ -3713,6 +3969,708 @@ def create_app(
                 "rule_version": target.rule_version,
                 "sha256": target.sha256,
             },
+        }
+
+    @app.get("/api/workbench/tree")
+    def get_workbench_tree() -> dict[str, Any]:
+        return _workbench_tree_payload(store)
+
+    @app.post("/api/workbench/groups", status_code=201)
+    def create_workbench_group(payload: WorkbenchGroupCreateRequest) -> dict[str, Any]:
+        name = payload.name.strip()
+        if not name:
+            raise _error("VALIDATION_ERROR", "name must not be blank", 422)
+        if payload.parent_id:
+            parent = store.get_workbench_node(payload.parent_id)
+            if parent is None:
+                raise _error("NOT_FOUND", f"unknown workbench parent: {payload.parent_id}", 404)
+            if parent.node_type != "group":
+                raise _error("INVALID_PARENT", "parent must be a workbench group", 409)
+        siblings = [
+            node
+            for node in store.list_workbench_nodes()
+            if node.parent_id == payload.parent_id
+        ]
+        node = WorkbenchNode(
+            node_id=f"g-{uuid.uuid4().hex[:12]}",
+            node_type="group",
+            name=name,
+            parent_id=payload.parent_id,
+            sort_order=max((item.sort_order for item in siblings), default=-1) + 1,
+        )
+        try:
+            created = store.create_workbench_group(node)
+        except ValueError as exc:
+            raise _error("CONFLICT", str(exc), 409) from exc
+        return {
+            "node": {
+                "node_id": created.node_id,
+                "node_type": created.node_type,
+                "parent_id": created.parent_id,
+                "name": created.name,
+                "sort_order": created.sort_order,
+            }
+        }
+
+    @app.patch("/api/workbench/nodes/{node_id}")
+    def rename_workbench_node(
+        node_id: str, payload: WorkbenchNodeRenameRequest
+    ) -> dict[str, Any]:
+        name = payload.name.strip()
+        if not name or any(ord(char) < 32 for char in name):
+            raise _error("VALIDATION_ERROR", "name is invalid", 422)
+        try:
+            node = store.rename_workbench_node(node_id, name, utc_now())
+        except KeyError as exc:
+            raise _error("NOT_FOUND", str(exc), 404) from exc
+        return {
+            "node": {
+                "node_id": node.node_id,
+                "node_type": node.node_type,
+                "parent_id": node.parent_id,
+                "name": node.name,
+                "sort_order": node.sort_order,
+            }
+        }
+
+    @app.post("/api/workbench/nodes/{node_id}/move")
+    def move_workbench_node(
+        node_id: str, payload: WorkbenchNodeMoveRequest
+    ) -> dict[str, Any]:
+        try:
+            node = store.move_workbench_node(
+                node_id,
+                payload.parent_id,
+                payload.after_node_id,
+                utc_now(),
+                before_node_id=payload.before_node_id,
+            )
+        except KeyError as exc:
+            raise _error("NOT_FOUND", str(exc), 404) from exc
+        except ValueError as exc:
+            raise _error("INVALID_MOVE", str(exc), 409) from exc
+        return {
+            "node": {
+                "node_id": node.node_id,
+                "node_type": node.node_type,
+                "parent_id": node.parent_id,
+                "name": node.name,
+                "sort_order": node.sort_order,
+            }
+        }
+
+    @app.delete("/api/workbench/groups/{node_id}")
+    def dissolve_workbench_group(node_id: str) -> dict[str, Any]:
+        try:
+            moved = store.dissolve_workbench_group(node_id, utc_now())
+        except KeyError as exc:
+            raise _error("NOT_FOUND", str(exc), 404) from exc
+        except ValueError as exc:
+            raise _error("INVALID_GROUP", str(exc), 409) from exc
+        return {"node_id": node_id, "dissolved": True, "moved": moved}
+
+    @app.post("/api/workbench/import-batch")
+    def import_workbench_batch(payload: WorkbenchBatchImportRequest) -> dict[str, Any]:
+        if rules is None or not rules.is_dir():
+            raise _error("RULES_NOT_CONFIGURED", "serve --rules-dir is not set", 400)
+        batch = store.get_batch(payload.batch_id)
+        if batch is None:
+            raise _error("NOT_FOUND", f"unknown batch: {payload.batch_id}", 404)
+        if batch.archived_at is not None:
+            raise _error("INVALID_STATE", "batch is archived", 409)
+        if payload.parent_id:
+            parent = store.get_workbench_node(payload.parent_id)
+            if parent is None:
+                raise _error("NOT_FOUND", f"unknown workbench parent: {payload.parent_id}", 404)
+            if parent.node_type != "group":
+                raise _error("INVALID_PARENT", "parent must be a workbench group", 409)
+        entries = _rule_entries(rules)
+        definitions = store.list_workbench_task_defs()
+        existing_sites = {definition.site_key for definition in definitions}
+        runs = store.list_workbench_task_runs()
+        mapped_tasks = {run.task_id for run in runs}
+        siblings = [
+            node
+            for node in store.list_workbench_nodes()
+            if node.parent_id == payload.parent_id
+        ]
+        next_order = max((item.sort_order for item in siblings), default=-1) + 1
+        added: list[dict[str, Any]] = []
+        skipped: list[dict[str, str]] = []
+        for site in store.list_batch_sites(batch.batch_id):
+            if not site.site_key or site.site_key in existing_sites:
+                skipped.append({"site_key": site.site_key, "reason": "已在任务树"})
+                continue
+            if not site.rule_id or not site.rule_version:
+                skipped.append({"site_key": site.site_key, "reason": "未匹配规则"})
+                continue
+            matches = [
+                entry
+                for entry in entries
+                if entry.get("rule_id") == site.rule_id
+                and entry.get("rule_version") == site.rule_version
+            ]
+            if len(matches) != 1 or not matches[0].get("valid"):
+                skipped.append({"site_key": site.site_key, "reason": "规则不可用"})
+                continue
+            entry = matches[0]
+            task_types = list(entry.get("task_types", []))
+            task_type = "product" if "product" in task_types else (
+                task_types[0] if task_types else ""
+            )
+            if not task_type:
+                skipped.append({"site_key": site.site_key, "reason": "规则不支持任务类型"})
+                continue
+            rule_domains = [
+                _workbench_host_key(str(domain)) for domain in entry.get("domains", [])
+            ]
+            if rule_domains and _workbench_host_key(site.domain) not in rule_domains:
+                skipped.append({"site_key": site.site_key, "reason": "规则与站点不匹配"})
+                continue
+            raw_input = (site.input_value or "").strip()
+            input_url = (
+                raw_input
+                if re.match(r"^https?://", raw_input, re.IGNORECASE)
+                else f"https://{site.domain}/"
+            )
+            now = utc_now()
+            node = WorkbenchNode(
+                node_id=f"n-{uuid.uuid4().hex[:12]}",
+                node_type="task",
+                name=site.domain or site.site_key,
+                parent_id=payload.parent_id,
+                sort_order=next_order,
+                created_at=now,
+                updated_at=now,
+            )
+            definition = WorkbenchTaskDef(
+                node_id=node.node_id,
+                input_url=input_url,
+                domain=site.domain,
+                site_key=site.site_key,
+                batch_id=batch.batch_id,
+                country=batch.country,
+                language=batch.language,
+                market=batch.market,
+                category=batch.category,
+                task_type=task_type,
+                collection_mode=(
+                    batch.collection_mode
+                    if batch.collection_mode in {"sample", "formal"}
+                    else "formal"
+                ),
+                rule_id=site.rule_id,
+                rule_version=site.rule_version,
+                rule_path=str(entry["path"]),
+                limits={},
+                proxy=site.proxy,
+                note=site.note,
+                created_at=now,
+                updated_at=now,
+            )
+            try:
+                store.create_workbench_task(node, definition)
+            except ValueError as exc:
+                raise _error("CONFLICT", str(exc), 409) from exc
+            existing_sites.add(site.site_key)
+            next_order += 1
+            attached = False
+            if site.task_id and site.task_id not in mapped_tasks:
+                try:
+                    attached = store.attach_workbench_run(
+                        node.node_id, site.task_id, utc_now()
+                    )
+                except (KeyError, ValueError):
+                    attached = False
+                if attached:
+                    mapped_tasks.add(site.task_id)
+            added.append(
+                {
+                    "node_id": node.node_id,
+                    "name": node.name,
+                    "site_key": site.site_key,
+                    "task_id": site.task_id,
+                    "attached": attached,
+                }
+            )
+        return {
+            "batch_id": batch.batch_id,
+            "added": added,
+            "skipped": skipped,
+        }
+
+    @app.post("/api/workbench/tasks", status_code=201)
+    def create_workbench_task(payload: WorkbenchTaskCreateRequest) -> dict[str, Any]:
+        if rules is None or not rules.is_dir():
+            raise _error("RULES_NOT_CONFIGURED", "serve --rules-dir is not set", 400)
+        entries = _rule_entries(rules)
+        matches = [
+            entry
+            for entry in entries
+            if entry.get("rule_id") == payload.rule_id
+            and entry.get("rule_version") == payload.rule_version
+        ]
+        if not matches:
+            raise _error("NOT_FOUND", "rule package not found", 404)
+        if len(matches) != 1 or not matches[0].get("valid"):
+            raise _error("INVALID_RULE", "rule package is invalid or duplicated", 400)
+        entry = matches[0]
+        if payload.task_type not in entry.get("task_types", []):
+            raise _error(
+                "INVALID_TASK_TYPE",
+                f"rule does not support {payload.task_type}",
+                400,
+            )
+        parsed = normalize_site(payload.input_url)
+        if not parsed.valid or not (parsed.site_key or parsed.domain):
+            raise _error(
+                "INVALID_SITE",
+                parsed.error or "站点 URL 无效",
+                422,
+            )
+        rule_domains = [
+            _workbench_host_key(str(domain)) for domain in entry.get("domains", [])
+        ]
+        if rule_domains and _workbench_host_key(parsed.domain) not in rule_domains:
+            raise _error(
+                "RULE_SITE_MISMATCH",
+                "站点域名与所选规则包不匹配",
+                422,
+            )
+        if payload.parent_id:
+            parent = store.get_workbench_node(payload.parent_id)
+            if parent is None:
+                raise _error("NOT_FOUND", f"unknown workbench parent: {payload.parent_id}", 404)
+            if parent.node_type != "group":
+                raise _error("INVALID_PARENT", "parent must be a workbench group", 409)
+        site_key = parsed.site_key or parsed.domain
+        existing = next(
+            (
+                item
+                for item in store.list_workbench_task_defs()
+                if item.site_key == site_key
+            ),
+            None,
+        )
+        if existing is not None:
+            raise _error(
+                "WORKBENCH_TASK_EXISTS",
+                f"task definition already exists for {site_key}",
+                409,
+            )
+        siblings = [
+            node
+            for node in store.list_workbench_nodes()
+            if node.parent_id == payload.parent_id
+        ]
+        now = utc_now()
+        node = WorkbenchNode(
+            node_id=f"n-{uuid.uuid4().hex[:12]}",
+            node_type="task",
+            name=(payload.name or parsed.domain or site_key).strip(),
+            parent_id=payload.parent_id,
+            sort_order=max((item.sort_order for item in siblings), default=-1) + 1,
+            created_at=now,
+            updated_at=now,
+        )
+        definition = WorkbenchTaskDef(
+            node_id=node.node_id,
+            input_url=payload.input_url.strip(),
+            domain=parsed.domain,
+            site_key=site_key,
+            rule_id=payload.rule_id,
+            rule_version=payload.rule_version,
+            rule_path=str(entry["path"]),
+            task_type=payload.task_type,
+            collection_mode=payload.collection_mode,
+            country=payload.country,
+            language=payload.language,
+            market=payload.market,
+            category=payload.category,
+            limits=payload.limits.model_dump(),
+            proxy=payload.proxy,
+            note=payload.note,
+            created_at=now,
+            updated_at=now,
+        )
+        try:
+            store.create_workbench_task(node, definition)
+        except ValueError as exc:
+            raise _error("CONFLICT", str(exc), 409) from exc
+        return {
+            "node": {
+                "node_id": node.node_id,
+                "node_type": node.node_type,
+                "parent_id": node.parent_id,
+                "name": node.name,
+                "sort_order": node.sort_order,
+            },
+            "definition": _workbench_definition_payload(definition),
+        }
+
+    @app.patch("/api/workbench/tasks/{node_id}")
+    def update_workbench_task(
+        node_id: str, payload: WorkbenchTaskUpdateRequest
+    ) -> dict[str, Any]:
+        definition = store.get_workbench_task_def(node_id)
+        if definition is None:
+            raise _error("NOT_FOUND", f"unknown workbench task: {node_id}", 404)
+        updates = payload.model_dump(exclude_unset=True)
+        for key in ("country", "language", "market", "category", "proxy", "note"):
+            if key in updates:
+                value = updates[key]
+                updates[key] = value.strip() or None if isinstance(value, str) else value
+        if "rule_id" in updates or "rule_version" in updates or "task_type" in updates:
+            if rules is None or not rules.is_dir():
+                raise _error("RULES_NOT_CONFIGURED", "serve --rules-dir is not set", 400)
+            rule_id = str(updates.get("rule_id") or definition.rule_id)
+            rule_version = str(
+                updates.get("rule_version") or definition.rule_version
+            )
+            task_type = str(updates.get("task_type") or definition.task_type)
+            entries = _rule_entries(rules)
+            matches = [
+                entry
+                for entry in entries
+                if entry.get("rule_id") == rule_id
+                and entry.get("rule_version") == rule_version
+            ]
+            if len(matches) != 1 or not matches[0].get("valid"):
+                raise _error("INVALID_RULE", "rule package is invalid or duplicated", 400)
+            entry = matches[0]
+            if task_type not in entry.get("task_types", []):
+                raise _error(
+                    "INVALID_TASK_TYPE",
+                    f"rule does not support {task_type}",
+                    400,
+                )
+            rule_domains = [
+                _workbench_host_key(str(domain)) for domain in entry.get("domains", [])
+            ]
+            if rule_domains and _workbench_host_key(definition.domain) not in rule_domains:
+                raise _error(
+                    "RULE_SITE_MISMATCH",
+                    "站点域名与所选规则包不匹配",
+                    422,
+                )
+            updates.update(
+                {
+                    "rule_id": rule_id,
+                    "rule_version": rule_version,
+                    "rule_path": str(entry["path"]),
+                    "task_type": task_type,
+                }
+            )
+        if "limits" in updates and updates["limits"] is None:
+            updates.pop("limits")
+        try:
+            updated = store.update_workbench_task(node_id, utc_now(), **updates)
+        except KeyError as exc:
+            raise _error("NOT_FOUND", str(exc), 404) from exc
+        except ValueError as exc:
+            raise _error("INVALID_TASK", str(exc), 400) from exc
+        return {"definition": _workbench_definition_payload(updated)}
+
+    @app.post("/api/workbench/runs/{task_id}/attach")
+    def attach_workbench_run(
+        task_id: str, payload: WorkbenchRunAttachRequest
+    ) -> dict[str, Any]:
+        task = store.get_task(task_id)
+        if task is None:
+            raise _error("NOT_FOUND", f"unknown task: {task_id}", 404)
+        existing_run = next(
+            (run for run in store.list_workbench_task_runs() if run.task_id == task_id),
+            None,
+        )
+        if existing_run is not None:
+            return {
+                "task_id": task_id,
+                "node_id": existing_run.node_id,
+                "created": False,
+                "attached": False,
+            }
+        if payload.parent_id:
+            parent = store.get_workbench_node(payload.parent_id)
+            if parent is None:
+                raise _error("NOT_FOUND", f"unknown workbench parent: {payload.parent_id}", 404)
+            if parent.node_type != "group":
+                raise _error("INVALID_PARENT", "parent must be a workbench group", 409)
+        site_key = task.site_key or task.domain_key or task.plan_id
+        if "." not in site_key and task.domain_key:
+            site_key = task.domain_key
+        site_key = site_key.removeprefix("www.")
+        definitions = store.list_workbench_task_defs()
+        existing = next(
+            (
+                definition
+                for definition in definitions
+                if definition.site_key.removeprefix("www.") == site_key
+                and task.batch_id
+                and definition.batch_id == task.batch_id
+            ),
+            next(
+                (
+                    definition
+                    for definition in definitions
+                    if definition.site_key.removeprefix("www.") == site_key
+                ),
+                None,
+            ),
+        )
+        if existing is not None:
+            store.attach_workbench_run(existing.node_id, task_id, utc_now())
+            return {
+                "task_id": task_id,
+                "node_id": existing.node_id,
+                "created": False,
+                "attached": True,
+            }
+        if rules is None or not rules.is_dir():
+            raise _error("RULES_NOT_CONFIGURED", "serve --rules-dir is not set", 400)
+        entries = _rule_entries(rules)
+        matches = [
+            entry
+            for entry in entries
+            if entry.get("rule_id") == task.plan_id
+            and entry.get("rule_version") == task.plan_version
+        ]
+        if len(matches) != 1 or not matches[0].get("valid"):
+            raise _error(
+                "RULE_NOT_AVAILABLE",
+                "任务使用的规则包当前不可用，无法加入任务树",
+                409,
+            )
+        entry = matches[0]
+        if task.task_type not in entry.get("task_types", []):
+            raise _error(
+                "INVALID_TASK_TYPE",
+                f"rule does not support {task.task_type}",
+                400,
+            )
+        domain = (task.domain_key or site_key).removeprefix("www.")
+        rule_domains = [
+            _workbench_host_key(str(item)) for item in entry.get("domains", [])
+        ]
+        if rule_domains and _workbench_host_key(domain) not in rule_domains:
+            raise _error("RULE_SITE_MISMATCH", "站点域名与规则包不匹配", 422)
+        batch = store.get_batch(task.batch_id) if task.batch_id else None
+        batch_site = (
+            store.get_batch_site(task.batch_id, site_key)
+            if task.batch_id
+            else None
+        )
+        raw_input = (batch_site.input_value or "").strip() if batch_site else ""
+        input_url = (
+            raw_input
+            if re.match(r"^https?://", raw_input, re.IGNORECASE)
+            else f"https://{domain}/"
+        )
+        limits = {
+            key: task.limits[key]
+            for key in ("max_urls", "max_products", "max_seconds", "max_attempts")
+            if task.limits.get(key) is not None
+        }
+        mode = task.input.get("collection_mode")
+        now = utc_now()
+        siblings = [
+            node
+            for node in store.list_workbench_nodes()
+            if node.parent_id == payload.parent_id
+        ]
+        node = WorkbenchNode(
+            node_id=f"n-{uuid.uuid4().hex[:12]}",
+            node_type="task",
+            name=(payload.name or site_key).strip(),
+            parent_id=payload.parent_id,
+            sort_order=max((item.sort_order for item in siblings), default=-1) + 1,
+            created_at=now,
+            updated_at=now,
+        )
+        definition = WorkbenchTaskDef(
+            node_id=node.node_id,
+            input_url=input_url,
+            domain=domain,
+            site_key=site_key,
+            batch_id=task.batch_id,
+            country=batch.country if batch else None,
+            language=batch.language if batch else None,
+            market=(batch.market if batch else None) or task.market,
+            category=batch.category if batch else None,
+            task_type=task.task_type,
+            collection_mode=mode if mode in {"sample", "formal"} else "formal",
+            rule_id=task.plan_id,
+            rule_version=task.plan_version,
+            rule_path=str(entry["path"]),
+            limits=limits,
+            proxy=batch_site.proxy if batch_site else None,
+            note=batch_site.note if batch_site else None,
+            created_at=now,
+            updated_at=now,
+        )
+        try:
+            store.create_workbench_task(node, definition)
+            store.attach_workbench_run(node.node_id, task_id, now)
+        except (ValueError, KeyError) as exc:
+            raise _error("CONFLICT", str(exc), 409) from exc
+        return {
+            "task_id": task_id,
+            "node_id": node.node_id,
+            "created": True,
+            "attached": True,
+        }
+
+    @app.post("/api/workbench/tasks/{node_id}/start", status_code=202)
+    def start_workbench_task(
+        node_id: str, payload: WorkbenchStartRequest | None = None
+    ) -> dict[str, Any]:
+        if rules is None or not rules.is_dir():
+            raise _error("RULES_NOT_CONFIGURED", "serve --rules-dir is not set", 400)
+        definition = store.get_workbench_task_def(node_id)
+        if definition is None:
+            raise _error("NOT_FOUND", f"unknown workbench task: {node_id}", 404)
+        runs = [
+            run for run in store.list_workbench_task_runs() if run.node_id == node_id
+        ]
+        latest: Task | None = None
+        for run in sorted(runs, key=lambda item: item.created_at):
+            latest = store.get_task(run.task_id) or latest
+        if latest is not None and latest.state not in TERMINAL_TASK_STATES:
+            raise _error(
+                "WORKBENCH_TASK_ACTIVE",
+                f"task is already active: {latest.task_id}",
+                409,
+            )
+        rule_path = (rules / definition.rule_path).resolve()
+        if not rule_path.is_file():
+            raise _error("INVALID_RULE", "rule package file is missing", 409)
+        limits = definition.limits or {}
+        try:
+            task = build_task(
+                rule_path=rule_path,
+                task_id=f"web-{uuid.uuid4().hex[:12]}",
+                task_type=definition.task_type,
+                max_urls=limits.get("max_urls", 100),
+                max_products=limits.get("max_products", 20),
+                max_seconds=limits.get("max_seconds", 180),
+                max_attempts=limits.get("max_attempts", 2),
+                proxy=definition.proxy,
+            )
+        except (RuleError, ContractError) as exc:
+            raise _error("INVALID_RULE", str(exc), 400) from exc
+        task.batch_id = definition.batch_id
+        task.site_key = definition.site_key
+        task.domain_key = definition.domain
+        task.market = definition.market or task.market
+        task.input["collection_mode"] = definition.collection_mode
+        task.input["workbench_node_id"] = node_id
+        task.state = "QUEUED"
+        request_id = (
+            payload.request_id
+            if payload is not None and payload.request_id
+            else f"wb-{uuid.uuid4().hex[:16]}"
+        )
+        request_json = json.dumps(
+            {
+                "node_id": node_id,
+                "rule_id": definition.rule_id,
+                "rule_version": definition.rule_version,
+                "limits": limits,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        try:
+            created_task, created = store.create_workbench_run(
+                task,
+                node_id=node_id,
+                request_id=request_id,
+                request_json=request_json,
+            )
+        except (ValueError, RequestConflictError, BatchTransitionError) as exc:
+            raise _error("CONFLICT", str(exc), 409) from exc
+        return {
+            "created": created,
+            "task": _summary(store, created_task, root),
+            "node_id": node_id,
+        }
+
+    @app.get("/api/workbench/recent")
+    def list_workbench_recent(
+        scope: Literal["recent", "running", "removed"] = "recent",
+        q: Annotated[str, Query(max_length=200)] = "",
+        limit: Annotated[int, Query(ge=1, le=200)] = 100,
+        offset: Annotated[int, Query(ge=0)] = 0,
+    ) -> dict[str, Any]:
+        return _workbench_recent_payload(
+            store,
+            root,
+            scope=scope,
+            query=q,
+            limit=limit,
+            offset=offset,
+        )
+
+    @app.post("/api/workbench/recent/dismiss")
+    def dismiss_workbench_recent_batch(
+        request: WorkbenchRecentDismissRequest,
+    ) -> dict[str, Any]:
+        task_ids = list(dict.fromkeys(request.task_ids))
+        tasks = {task_id: store.get_task(task_id) for task_id in task_ids}
+        missing = [task_id for task_id, task in tasks.items() if task is None]
+        if missing:
+            raise _error("NOT_FOUND", f"unknown task: {', '.join(missing)}", 404)
+        non_terminal = [
+            task_id
+            for task_id, task in tasks.items()
+            if task is not None and task.state not in TERMINAL_TASK_STATES
+        ]
+        if non_terminal:
+            raise _error(
+                "NON_TERMINAL_TASK",
+                "只有已结束的任务可以从最近列表移除: " + ", ".join(non_terminal),
+                409,
+            )
+        store.dismiss_workbench_runs(task_ids)
+        return {"task_ids": task_ids, "dismissed": True}
+
+    @app.post("/api/workbench/recent/{task_id}/dismiss")
+    def dismiss_workbench_recent(task_id: str) -> dict[str, Any]:
+        task = require_task(task_id)
+        if task.state not in TERMINAL_TASK_STATES:
+            raise _error(
+                "NON_TERMINAL_TASK",
+                "只有已结束的任务可以从最近列表移除",
+                409,
+            )
+        store.dismiss_workbench_runs([task_id])
+        return {"task_id": task_id, "dismissed": True}
+
+    @app.post("/api/workbench/recent/{task_id}/restore")
+    def restore_workbench_recent(task_id: str) -> dict[str, Any]:
+        require_task(task_id)
+        store.restore_workbench_runs([task_id])
+        return {"task_id": task_id, "dismissed": False}
+
+    @app.get("/api/workbench/nodes/{node_id}")
+    def get_workbench_node(node_id: str) -> dict[str, Any]:
+        node = store.get_workbench_node(node_id)
+        if node is None:
+            raise _error("NOT_FOUND", f"unknown workbench node: {node_id}", 404)
+        definition = store.get_workbench_task_def(node_id)
+        return {
+            "node": {
+                "node_id": node.node_id,
+                "node_type": node.node_type,
+                "parent_id": node.parent_id,
+                "name": node.name,
+                "sort_order": node.sort_order,
+            },
+            "definition": _workbench_definition_payload(definition),
+            "path": _workbench_path(
+                node,
+                {item.node_id: item for item in store.list_workbench_nodes()},
+            ),
         }
 
     @app.get("/api/batches")
@@ -4854,17 +5812,12 @@ def create_app(
             raise build_failure(exc) from exc
         return {"accepted": True, "build": result}
 
-    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-    if v2_mounted:
-        app.mount(
-            "/next",
-            StaticFiles(directory=V2_DIST_DIR, html=True),
-            name="next",
-        )
-    if legacy_mounted:
-        app.mount(
-            "/batch",
-            StaticFiles(directory=BATCH_DIST_DIR, html=True),
-            name="batch",
-        )
+    if frontend_mounted:
+        assets_dir = FRONTEND_DIST_DIR / "assets"
+        if assets_dir.is_dir():
+            app.mount(
+                "/assets",
+                StaticFiles(directory=assets_dir),
+                name="assets",
+            )
     return app

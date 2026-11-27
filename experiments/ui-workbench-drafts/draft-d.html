@@ -1,0 +1,2310 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>草稿 D · 任务树 + 最近任务</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231f5c4a'/%3E%3Cpath d='M16 7l9 5-9 5-9-5 9-5z' fill='none' stroke='white' stroke-width='2'/%3E%3Cpath d='M7 17l9 5 9-5' fill='none' stroke='white' stroke-width='2'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="draft.css?v=20261127-6">
+</head>
+<body>
+  <div class="shell">
+    <aside class="rail" aria-label="主导航">
+      <a class="brand" href="index.html" title="返回对比页" aria-label="返回对比页">
+        <svg class="icon lg"><use href="#i-layers"/></svg>
+      </a>
+      <nav>
+        <a class="rail-link active" href="draft-d.html" title="采集工作台" aria-current="page">
+          <svg class="icon"><use href="#i-list"/></svg>
+        </a>
+        <a class="rail-link" href="#/tasks" title="全部任务">
+          <svg class="icon"><use href="#i-tasks"/></svg>
+        </a>
+        <a class="rail-link" href="#/builds" title="构建记录">
+          <svg class="icon"><use href="#i-wrench"/></svg>
+        </a>
+        <a class="rail-link" href="#/models" title="模型配置">
+          <svg class="icon"><use href="#i-cpu"/></svg>
+        </a>
+        <div class="spacer"></div>
+        <a class="rail-link" href="index.html" title="返回对比页">
+          <svg class="icon"><use href="#i-settings"/></svg>
+        </a>
+      </nav>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <div class="crumbs">
+          <span class="hide-xs">采集工作台</span>
+          <span class="slash hide-xs">/</span>
+          <strong>任务树 + 最近任务</strong>
+          <span class="draft-chip">草稿 D · 示例数据</span>
+        </div>
+        <div class="spacer"></div>
+        <a class="btn ghost sm" href="index.html">← 返回对比</a>
+        <span class="service-pill"><span class="dot"></span><span class="label">服务正常</span></span>
+      </header>
+
+      <div class="workspace" id="workspace" style="--tree-w: 348px">
+        <aside class="panel tree-pane" id="tree" aria-label="任务树">
+          <div class="pane-head">
+            <div class="title">
+              <h2>任务树</h2>
+              <p>无限层级 · 拖拽调整归属 · 名称自由</p>
+            </div>
+            <button class="btn icon sm" type="button" title="新建目录、任务或批次" aria-label="新建目录、任务或批次" data-command="new-menu">
+              <svg class="icon sm"><use href="#i-plus"/></svg>
+            </button>
+            <button class="btn icon sm" type="button" title="折叠全部分组" aria-label="折叠全部分组" data-command="collapse-all">
+              <svg class="icon sm"><use href="#i-chevron-right"/></svg>
+            </button>
+          </div>
+          <div class="tree-tools">
+            <div class="search">
+              <svg class="icon sm"><use href="#i-search"/></svg>
+              <input id="treeSearch" type="search" placeholder="搜索分组、站点或任务" aria-label="搜索分组、站点或任务">
+            </div>
+          </div>
+          <div class="tree-scroll" id="treeScroll" role="tree" aria-label="任务树"></div>
+          <div class="pane-foot"><span id="treeFoot">16 个任务 · 13 个分组</span></div>
+        </aside>
+
+        <section class="content" id="content" aria-label="最近任务工作区">
+          <div class="narrow-bar">
+            <button class="btn sm tree-toggle" type="button" data-command="toggle-tree">
+              <svg class="icon sm"><use href="#i-menu"/></svg>
+              任务树
+            </button>
+            <div class="views" aria-label="切换窗格">
+              <button type="button" class="seg-top active" data-pane="top">最近任务</button>
+              <button type="button" class="seg-log" data-pane="log">日志</button>
+            </div>
+            <div class="spacer"></div>
+            <span class="badge info" id="narrowRunning">运行中 3</span>
+          </div>
+
+          <section class="panel top-pane" id="topPane" aria-label="最近任务">
+            <div class="batch-head">
+              <div class="identity">
+                <h1><span class="name" id="recentTitle">最近任务</span> <span id="recentBadge"></span></h1>
+                <div class="sub" id="recentSub"></div>
+              </div>
+              <div class="actions">
+                <button class="btn primary" type="button" data-command="start">
+                  <svg class="icon sm"><use href="#i-play"/></svg>
+                  启动可采站点
+                </button>
+                <button class="btn optional" type="button" data-command="pause-running">
+                  <svg class="icon sm"><use href="#i-pause"/></svg>
+                  暂停运行中
+                </button>
+                <button class="btn optional" type="button" data-command="export">
+                  <svg class="icon sm"><use href="#i-download"/></svg>
+                  导出结果
+                </button>
+                <button class="btn icon" type="button" title="更多操作" aria-label="更多操作" data-command="more">
+                  <svg class="icon sm"><use href="#i-more"/></svg>
+                </button>
+              </div>
+            </div>
+
+            <div class="summary" id="summary"></div>
+
+            <div class="toolbar">
+              <div class="views" role="tablist" aria-label="最近任务筛选">
+                <button type="button" class="active" data-recent="recent">最近 <span id="recentCount">0</span></button>
+                <button type="button" data-recent="running">运行中 <span id="runningCount">0</span></button>
+                <button type="button" data-recent="removed">已移除 <span id="removedCount">0</span></button>
+              </div>
+              <span class="tag" id="viewHint" title="运行中、排队中、暂停中的任务不能移除；移除只影响最近列表，任务仍在左侧任务树中">仅已结束可移除</span>
+              <div class="spacer"></div>
+              <div class="search" style="width:210px">
+                <svg class="icon sm"><use href="#i-search"/></svg>
+                <input id="taskSearch" type="search" placeholder="搜索任务、站点或位置" aria-label="搜索任务、站点或位置">
+              </div>
+              <button class="btn icon" type="button" title="刷新" aria-label="刷新" data-command="refresh">
+                <svg class="icon sm"><use href="#i-refresh"/></svg>
+              </button>
+              <button class="btn icon optional" type="button" title="列显示" aria-label="列显示" data-command="columns">
+                <svg class="icon sm"><use href="#i-settings"/></svg>
+              </button>
+            </div>
+
+            <div class="bulkbar" id="bulkbar">
+              <span>已选 <b id="bulkCount">0</b> 个任务</span>
+              <button class="btn sm" type="button" data-bulk="pause">暂停所选</button>
+              <button class="btn sm" type="button" data-bulk="remove">从最近移除</button>
+              <span class="spacer"></span>
+              <button class="btn sm ghost" type="button" data-bulk="clear">清除选择</button>
+            </div>
+
+            <div class="table-wrap" id="tableWrap"></div>
+            <div class="pane-foot" id="topFoot"></div>
+          </section>
+
+          <button class="splitter" id="splitter" type="button" role="separator" aria-orientation="horizontal" aria-label="调整上下窗格高度" aria-valuemin="230" aria-valuenow="360"></button>
+
+          <section class="panel bottom-pane" id="bottomPane" aria-label="运行日志与详情">
+            <div class="tabs" role="tablist" aria-label="运行信息">
+              <button class="tab active" type="button" data-tab="log" role="tab" aria-selected="true">
+                运行日志 <span class="live-dot" aria-hidden="true"></span>
+              </button>
+              <button class="tab" type="button" data-tab="data" role="tab" aria-selected="false">
+                实时数据 <span class="count" id="dataCount">0</span>
+              </button>
+              <button class="tab" type="button" data-tab="detail" role="tab" aria-selected="false">任务详情</button>
+              <button class="tab" type="button" data-tab="files" role="tab" aria-selected="false">
+                文件下载 <span class="count">3</span>
+              </button>
+            </div>
+
+            <div class="tab-panel" id="tab-log" role="tabpanel">
+              <div class="log-toolbar">
+                <select class="select" id="logTaskSelect" aria-label="选择要查看的任务"></select>
+                <select class="select" id="logLevel" aria-label="筛选日志级别">
+                  <option value="ALL">全部级别</option>
+                  <option value="INFO">信息</option>
+                  <option value="WARN">警告</option>
+                  <option value="ERROR">错误</option>
+                </select>
+                <div class="search" style="width:170px">
+                  <svg class="icon sm"><use href="#i-search"/></svg>
+                  <input id="logSearch" type="search" placeholder="筛选日志内容" aria-label="筛选日志内容">
+                </div>
+                <div class="spacer"></div>
+                <label class="check-inline optional">
+                  <input type="checkbox" id="autoScroll" checked>
+                  自动滚动
+                </label>
+                <button class="btn sm" type="button" data-command="open-task">
+                  <svg class="icon sm"><use href="#i-external"/></svg>
+                  任务详情
+                </button>
+              </div>
+              <div class="log-list" id="logList" role="log" aria-label="运行日志"></div>
+              <div class="log-foot" id="logFoot"></div>
+            </div>
+
+            <div class="tab-panel" id="tab-data" role="tabpanel" hidden>
+              <div class="table-wrap">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>商品</th>
+                      <th class="num">价格</th>
+                      <th>币种</th>
+                      <th class="num">描述</th>
+                      <th>来源</th>
+                    </tr>
+                  </thead>
+                  <tbody id="dataBody"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="tab-panel" id="tab-detail" role="tabpanel" hidden>
+              <div class="pane-body" id="detailBody"></div>
+            </div>
+
+            <div class="tab-panel" id="tab-files" role="tabpanel" hidden>
+              <div class="table-wrap">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>文件</th>
+                      <th class="num">大小</th>
+                      <th>更新时间</th>
+                      <th>说明</th>
+                      <th class="sticky-right">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody id="filesBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <div class="scrim" id="scrim"></div>
+  <div class="row-menu" id="rowMenu" role="menu" aria-label="行操作"></div>
+  <div class="row-menu" id="createMenu" role="menu" aria-label="新建"></div>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+
+  <dialog class="dialog" id="renameDialog" aria-labelledby="renameTitle">
+    <div class="dialog-head">
+      <h2 id="renameTitle">重命名</h2>
+      <button class="btn icon sm" type="button" data-dialog-close="renameDialog" aria-label="关闭">
+        <svg class="icon sm"><use href="#i-x"/></svg>
+      </button>
+    </div>
+    <div class="dialog-body">
+      <label>显示名称
+        <input class="input" id="renameInput" maxlength="80" autocomplete="off">
+      </label>
+      <p>只改显示名，不改站点、任务 ID、批次或规则归属。</p>
+    </div>
+    <div class="dialog-actions">
+      <button class="btn" type="button" data-dialog-close="renameDialog">取消</button>
+      <button class="btn primary" type="button" id="renameSave">保存</button>
+    </div>
+  </dialog>
+
+  <dialog class="dialog" id="moveDialog" aria-labelledby="moveTitle">
+    <div class="dialog-head">
+      <h2 id="moveTitle">移动到分组</h2>
+      <button class="btn icon sm" type="button" data-dialog-close="moveDialog" aria-label="关闭">
+        <svg class="icon sm"><use href="#i-x"/></svg>
+      </button>
+    </div>
+    <div class="dialog-body">
+      <label>目标分组
+        <select class="select" id="moveSelect"></select>
+      </label>
+      <p>移动只改变任务树中的归属；批次、市场与规则保持不变。也可以直接拖拽行。</p>
+    </div>
+    <div class="dialog-actions">
+      <button class="btn" type="button" data-dialog-close="moveDialog">取消</button>
+      <button class="btn primary" type="button" id="moveSave">移动</button>
+    </div>
+  </dialog>
+
+  <dialog class="dialog" id="confirmDialog" aria-labelledby="confirmTitle">
+    <div class="dialog-head">
+      <h2 id="confirmTitle">确认操作</h2>
+      <button class="btn icon sm" type="button" data-dialog-close="confirmDialog" aria-label="关闭">
+        <svg class="icon sm"><use href="#i-x"/></svg>
+      </button>
+    </div>
+    <div class="dialog-body">
+      <p id="confirmText"></p>
+    </div>
+    <div class="dialog-actions">
+      <button class="btn" type="button" data-dialog-close="confirmDialog">取消</button>
+      <button class="btn danger" type="button" id="confirmSave">确认</button>
+    </div>
+  </dialog>
+
+  <dialog class="dialog" id="taskDialog" aria-labelledby="taskDialogTitle">
+    <div class="dialog-head">
+      <h2 id="taskDialogTitle">新建单个任务</h2>
+      <button class="btn icon sm" type="button" data-dialog-close="taskDialog" aria-label="关闭">
+        <svg class="icon sm"><use href="#i-x"/></svg>
+      </button>
+    </div>
+    <div class="dialog-body">
+      <div class="form-grid">
+        <label class="span-2">显示名称
+          <input class="input" id="taskName" maxlength="80" placeholder="默认使用域名" autocomplete="off">
+        </label>
+        <label class="span-2">站点 URL
+          <input class="input" id="taskUrl" type="url" placeholder="https://www.example.com/" autocomplete="off">
+        </label>
+        <label>目标目录
+          <select class="select" id="taskParent"></select>
+        </label>
+        <label>规则
+          <select class="select" id="taskRule">
+            <option value="2026.11.26-2">2026.11.26-2 · 法国纺织</option>
+            <option value="2026.11.26-4">2026.11.26-4 · 法国纺织（JSON-LD）</option>
+            <option value="2026.11.26-1">2026.11.26-1 · 英国钓具</option>
+            <option value="2026.11.25-2">2026.11.25-2 · 通用商品</option>
+          </select>
+        </label>
+        <label>国家
+          <input class="input" id="taskCountry" maxlength="20" placeholder="FR">
+        </label>
+        <label>语言
+          <input class="input" id="taskLanguage" maxlength="20" placeholder="fr">
+        </label>
+        <label>市场
+          <input class="input" id="taskMarket" maxlength="20" placeholder="FR">
+        </label>
+        <label>品类
+          <input class="input" id="taskCategory" maxlength="40" placeholder="纺织">
+        </label>
+        <label>采集模式
+          <select class="select" id="taskMode">
+            <option value="sample">试采</option>
+            <option value="formal">正式</option>
+          </select>
+        </label>
+      </div>
+      <p>任务定义可独立存在，不强制批次；目录只决定位置，任务属性以这里为准。</p>
+    </div>
+    <div class="dialog-actions">
+      <button class="btn" type="button" data-dialog-close="taskDialog">取消</button>
+      <button class="btn primary" type="button" id="taskSave">创建任务</button>
+    </div>
+  </dialog>
+
+  <dialog class="dialog" id="batchDialog" aria-labelledby="batchDialogTitle">
+    <div class="dialog-head">
+      <h2 id="batchDialogTitle">添加已有批次</h2>
+      <button class="btn icon sm" type="button" data-dialog-close="batchDialog" aria-label="关闭">
+        <svg class="icon sm"><use href="#i-x"/></svg>
+      </button>
+    </div>
+    <div class="dialog-body">
+      <label>批次
+        <select class="select" id="batchSelect"></select>
+      </label>
+      <label>目标目录
+        <select class="select" id="batchParent"></select>
+      </label>
+      <p id="batchHint">批次只批量添加任务定义；已在树中的站点会跳过。</p>
+    </div>
+    <div class="dialog-actions">
+      <button class="btn" type="button" data-dialog-close="batchDialog">取消</button>
+      <button class="btn primary" type="button" id="batchSave">添加任务</button>
+    </div>
+  </dialog>
+
+  <dialog class="dialog" id="newBatchDialog" aria-labelledby="newBatchDialogTitle">
+    <div class="dialog-head">
+      <h2 id="newBatchDialogTitle">新建批次</h2>
+      <button class="btn icon sm" type="button" data-dialog-close="newBatchDialog" aria-label="关闭">
+        <svg class="icon sm"><use href="#i-x"/></svg>
+      </button>
+    </div>
+    <div class="dialog-body">
+      <div class="form-grid">
+        <label class="span-2">批次名称
+          <input class="input" id="newBatchName" maxlength="80" placeholder="如 202612 法国纺织" autocomplete="off">
+        </label>
+        <label class="span-2">目标目录
+          <select class="select" id="newBatchParent"></select>
+        </label>
+        <label>国家
+          <input class="input" id="newBatchCountry" maxlength="20" placeholder="FR">
+        </label>
+        <label>语言
+          <input class="input" id="newBatchLanguage" maxlength="20" placeholder="fr">
+        </label>
+        <label>市场
+          <input class="input" id="newBatchMarket" maxlength="20" placeholder="FR">
+        </label>
+        <label>品类
+          <input class="input" id="newBatchCategory" maxlength="40" placeholder="纺织">
+        </label>
+      </div>
+      <label>站点（每行一个 URL 或域名）
+        <textarea class="input" id="newBatchSites" placeholder="https://www.example-one.fr/&#10;example-two.fr"></textarea>
+      </label>
+      <p>原型：创建后直接生成待启动任务定义，不调用后端；规则按批次市场选默认示例。</p>
+    </div>
+    <div class="dialog-actions">
+      <button class="btn" type="button" data-dialog-close="newBatchDialog">取消</button>
+      <button class="btn primary" type="button" id="newBatchSave">创建批次并添加</button>
+    </div>
+  </dialog>
+
+  <script src="draft-icons.js?v=20261127-6"></script>
+  <script src="draft-data.js?v=20261127-6"></script>
+  <script>
+    (function () {
+      const { sites, batchById } = MOCK;
+      const { fmt, pct } = UI;
+      const $ = (selector, root = document) => root.querySelector(selector);
+      const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
+
+      const startedAt = {
+        "bennytex.com": "11-27 08:00",
+        "mercerie-stole.com": "11-27 08:23",
+        "ecolaines.fr": "11-27 08:33",
+        "gasparde.fr": "11-27 08:31",
+        "tissus.net": "11-27 08:42",
+        "zephyrtissus.fr": "11-27 08:42",
+        "bubutissus.fr": "11-27 08:00",
+        "tissusdurenard.fr": "11-27 08:15",
+        "espacesoiture.fr": "11-27 07:36",
+        "madeintissus.fr": "11-27 07:36",
+        "premierangling.com": "11-27 07:29",
+        "partsfornissans.com": "11-27 06:47",
+        "babybubblestore.com": "11-27 06:39",
+        "stragier.com": "11-27 06:19",
+      };
+
+      // 无限层级任务树：group = 分组，task = 具体站点任务（taskId 可为空，表示待启动）。
+      let treeNodes = [
+        { id: "g-fr", type: "group", name: "法国 / 纺织", parentId: null, order: 0 },
+        { id: "g-fr-bennytex", type: "group", name: "bennytex", parentId: "g-fr", order: 0 },
+        { id: "g-fr-bennytex-full", type: "group", name: "全量 2026-11", parentId: "g-fr-bennytex", order: 0 },
+        { id: "n-bennytex", type: "task", name: "bennytex.com", siteKey: "bennytex.com", parentId: "g-fr-bennytex-full", order: 0 },
+        { id: "n-mercerie", type: "task", name: "mercerie-stole.com", siteKey: "mercerie-stole.com", parentId: "g-fr-bennytex-full", order: 1 },
+        { id: "g-fr-bennytex-sample", type: "group", name: "试采与异常", parentId: "g-fr-bennytex", order: 1 },
+        { id: "n-gasparde", type: "task", name: "gasparde.fr", siteKey: "gasparde.fr", parentId: "g-fr-bennytex-sample", order: 0 },
+        { id: "n-tissus-net", type: "task", name: "tissus.net", siteKey: "tissus.net", parentId: "g-fr-bennytex-sample", order: 1 },
+        { id: "n-tissusdurenard", type: "task", name: "tissusdurenard.fr", siteKey: "tissusdurenard.fr", parentId: "g-fr-bennytex-sample", order: 2 },
+        { id: "g-fr-20260107", type: "group", name: "20260107", parentId: "g-fr", order: 1 },
+        { id: "n-ecolaines", type: "task", name: "ecolaines.fr", siteKey: "ecolaines.fr", parentId: "g-fr-20260107", order: 0 },
+        { id: "n-zephyr", type: "task", name: "zephyrtissus.fr", siteKey: "zephyrtissus.fr", parentId: "g-fr-20260107", order: 1 },
+        { id: "n-espaces", type: "task", name: "espacesoiture.fr", siteKey: "espacesoiture.fr", parentId: "g-fr-20260107", order: 2 },
+        { id: "n-madein", type: "task", name: "madeintissus.fr", siteKey: "madeintissus.fr", parentId: "g-fr-20260107", order: 3 },
+        { id: "g-fr-bubutissus", type: "group", name: "bubutissus 全量", parentId: "g-fr", order: 2 },
+        { id: "n-bubutissus", type: "task", name: "bubutissus.fr", siteKey: "bubutissus.fr", parentId: "g-fr-bubutissus", order: 0 },
+        { id: "g-uk", type: "group", name: "英国 / 钓具", parentId: null, order: 1 },
+        { id: "g-uk-premier", type: "group", name: "premierangling 试点", parentId: "g-uk", order: 0 },
+        { id: "n-premier", type: "task", name: "premierangling.com", siteKey: "premierangling.com", parentId: "g-uk-premier", order: 0 },
+        { id: "g-uk-parts", type: "group", name: "partsfornissans 全量", parentId: "g-uk", order: 1 },
+        { id: "n-parts", type: "task", name: "partsfornissans.com", siteKey: "partsfornissans.com", parentId: "g-uk-parts", order: 0 },
+        { id: "g-unfiled", type: "group", name: "未分组", parentId: null, order: 2 },
+        { id: "g-unfiled-baby", type: "group", name: "babybubblestore 试点", parentId: "g-unfiled", order: 0 },
+        { id: "n-baby", type: "task", name: "babybubblestore.com", siteKey: "babybubblestore.com", parentId: "g-unfiled-baby", order: 0 },
+        { id: "g-unfiled-stragier", type: "group", name: "stragier 试点", parentId: "g-unfiled", order: 1 },
+        { id: "n-stragier", type: "task", name: "stragier.com", siteKey: "stragier.com", parentId: "g-unfiled-stragier", order: 0 },
+        { id: "g-unfiled-pending", type: "group", name: "待启动", parentId: "g-unfiled", order: 2 },
+        { id: "n-tisseo", type: "task", name: "tisseo.fr", siteKey: "tisseo.fr", parentId: "g-unfiled-pending", order: 0 },
+        { id: "n-lylianne", type: "task", name: "lylianne.com", siteKey: "lylianne.com", parentId: "g-unfiled-pending", order: 1 },
+      ];
+
+      // 仅 D 使用的演示批次：尚未加入任务树，用来演示“添加已有批次”。
+      const extraBatch = {
+        id: "b-202612",
+        name: "202612 补充批",
+        folderId: null,
+        country: "FR",
+        category: "纺织",
+        siteKeys: ["atelierlin.fr", "tissusdauphine.fr", "lainesdusud.fr"],
+        running: 0,
+        queued: 0,
+        finished: 0,
+        failed: 0,
+        ready: 3,
+        valid: 0,
+      };
+      MOCK.batches.push(extraBatch);
+      ["atelierlin.fr", "tissusdauphine.fr", "lainesdusud.fr"].forEach((key) => {
+        sites[key] = {
+          key,
+          domain: key,
+          batchId: extraBatch.id,
+          state: "READY",
+          taskId: null,
+          rule: "2026.11.26-2",
+          processed: 0,
+          total: 0,
+          valid: 0,
+          failed: 0,
+          pending: 0,
+          inFlight: 0,
+          speed: "—",
+          elapsed: "—",
+          updated: "09:00:00",
+          note: "202612 补充批站点，尚未启动",
+          logs: [],
+        };
+      });
+
+      let expanded = new Set([
+        "g-fr",
+        "g-fr-bennytex",
+        "g-fr-bennytex-full",
+        "g-fr-bennytex-sample",
+        "g-uk",
+        "g-uk-premier",
+      ]);
+      let selectedNodeId = "n-bennytex";
+      let selectedTaskNodeId = "n-bennytex";
+      let recentFilter = "recent";
+      let recentRemoved = new Set();
+      let recentMeta = {};
+      let taskQuery = "";
+      let treeQuery = "";
+      let stateFilter = "";
+      let logLevel = "ALL";
+      let logQuery = "";
+      let autoScroll = true;
+      let activeTab = "log";
+      let selected = new Set();
+      let dragId = null;
+      let menuNodeId = null;
+      let renameState = null;
+      let moveState = null;
+      let confirmState = null;
+      let createParentId = null;
+      let lastUpdated = "08:42:16";
+      let tickCount = 0;
+
+      function esc(value) {
+        return String(value == null ? "" : value).replace(/[&<>"']/g, (ch) => ({
+          "&": "&amp;",
+          "<": "&lt;",
+          ">": "&gt;",
+          '"': "&quot;",
+          "'": "&#39;",
+        })[ch]);
+      }
+
+      taskNodes().forEach((node) => {
+        recentMeta[node.id] = {
+          sort: seedSort(node),
+          label: startedAt[node.siteKey] || "—",
+        };
+      });
+
+      function byId(id) {
+        return treeNodes.find((node) => node.id === id) || null;
+      }
+
+      function taskNodes() {
+        return treeNodes.filter((node) => node.type === "task");
+      }
+
+      function groupNodes() {
+        return treeNodes.filter((node) => node.type === "group");
+      }
+
+      function nodeSite(node) {
+        return node && node.type === "task" ? sites[node.siteKey] : null;
+      }
+
+      function seedSort(node) {
+        const label = startedAt[node.siteKey] || "";
+        const match = label.match(/(\d{2}):(\d{2})$/);
+        return match ? Number(match[1]) * 60 + Number(match[2]) : 0;
+      }
+
+      function childrenOf(parentId) {
+        return treeNodes
+          .filter((node) => node.parentId === parentId)
+          .sort((a, b) => a.order - b.order);
+      }
+
+      function depthOf(node) {
+        let depth = 0;
+        let parent = byId(node.parentId);
+        while (parent) {
+          depth += 1;
+          parent = byId(parent.parentId);
+        }
+        return depth;
+      }
+
+      function pathOf(node) {
+        const parts = [];
+        let parent = byId(node.parentId);
+        while (parent) {
+          parts.unshift(parent.name);
+          parent = byId(parent.parentId);
+        }
+        return parts.join(" / ") || "根目录";
+      }
+
+      function descendants(groupId) {
+        const result = [];
+        function walk(id) {
+          childrenOf(id).forEach((child) => {
+            result.push(child);
+            if (child.type === "group") walk(child.id);
+          });
+        }
+        walk(groupId);
+        return result;
+      }
+
+      function descendantTaskCount(groupId) {
+        return descendants(groupId).filter((node) => node.type === "task").length;
+      }
+
+      function runningCountIn(groupId) {
+        return descendants(groupId).filter(
+          (node) => node.type === "task" && nodeSite(node) && nodeSite(node).state === "RUNNING",
+        ).length;
+      }
+
+      function toast(message, actionLabel, onAction) {
+        const wrap = $("#toasts");
+        const node = document.createElement("div");
+        node.className = "toast";
+        const text = document.createElement("span");
+        text.textContent = message;
+        node.appendChild(text);
+        if (actionLabel) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "undo";
+          button.textContent = actionLabel;
+          button.addEventListener("click", () => {
+            onAction();
+            node.remove();
+          });
+          node.appendChild(button);
+        }
+        wrap.appendChild(node);
+        window.setTimeout(() => node.remove(), 4200);
+      }
+
+      function closeTree() {
+        document.body.classList.remove("tree-open");
+      }
+
+      function recentSort(node) {
+        return (recentMeta[node.id] && recentMeta[node.id].sort) || seedSort(node);
+      }
+
+      function recentRows() {
+        let list = taskNodes().filter((node) => nodeSite(node) && nodeSite(node).taskId);
+        if (recentFilter === "removed") {
+          list = list.filter((node) => recentRemoved.has(node.id));
+        } else {
+          list = list.filter((node) => !recentRemoved.has(node.id));
+          if (recentFilter === "running") {
+            list = list.filter((node) => nodeSite(node).state === "RUNNING");
+          }
+        }
+        const needle = taskQuery.trim().toLowerCase();
+        if (needle) {
+          list = list.filter((node) => {
+            const site = nodeSite(node);
+            const batch = batchById(site.batchId);
+            return `${node.name} ${site.domain} ${site.taskId} ${pathOf(node)} ${batch ? batch.name : ""}`
+              .toLowerCase()
+              .includes(needle);
+          });
+        }
+        return list.sort((a, b) => recentSort(b) - recentSort(a) || a.name.localeCompare(b.name));
+      }
+
+      function isTaskVisible(node) {
+        if (!treeQuery.trim()) return true;
+        const needle = treeQuery.trim().toLowerCase();
+        if (node.type === "group") {
+          return (
+            node.name.toLowerCase().includes(needle) ||
+            descendants(node.id).some((child) => {
+              if (child.type === "group") return child.name.toLowerCase().includes(needle);
+              const site = nodeSite(child);
+              return `${child.name} ${site ? site.domain : ""} ${site ? site.taskId || "" : ""}`
+                .toLowerCase()
+                .includes(needle);
+            })
+          );
+        }
+        const site = nodeSite(node);
+        return `${node.name} ${site ? site.domain : ""} ${site ? site.taskId || "" : ""}`
+          .toLowerCase()
+          .includes(needle);
+      }
+
+      function visibleBySearch() {
+        if (!treeQuery.trim()) return null;
+        const visible = new Set();
+        treeNodes.forEach((node) => {
+          if (!isTaskVisible(node)) return;
+          visible.add(node.id);
+          let parent = byId(node.parentId);
+          while (parent) {
+            visible.add(parent.id);
+            parent = byId(parent.parentId);
+          }
+        });
+        return visible;
+      }
+
+      function stateDotClass(site) {
+        if (site.state === "RUNNING") return "running";
+        if (site.state === "FINISHED") {
+          if (site.outcome === "PARTIAL") return "warning";
+          if (site.outcome === "FAILED") return "danger";
+          if (site.outcome === "CANCELLED") return "warning";
+          return "done";
+        }
+        if (site.state === "CANCELLED") return "warning";
+        if (site.state === "PAUSED" || site.state === "QUEUED") return "warning";
+        return "";
+      }
+
+      function treeQuickActions(node) {
+        const site = nodeSite(node);
+        if (!site) return "";
+        let main = "";
+        if (site.state === "RUNNING") {
+          main = `<button class="mini" type="button" data-act="pause" data-key="${site.key}" title="暂停 ${node.name}" aria-label="暂停 ${node.name}"><svg class="icon sm"><use href="#i-pause"/></svg></button>`;
+        } else if (site.state === "PAUSED") {
+          main = `<button class="mini" type="button" data-act="resume" data-key="${site.key}" title="继续 ${node.name}" aria-label="继续 ${node.name}"><svg class="icon sm"><use href="#i-play"/></svg></button>`;
+        } else if (site.state === "READY") {
+          main = `<button class="mini" type="button" data-act="start" data-key="${site.key}" title="启动 ${node.name}" aria-label="启动 ${node.name}"><svg class="icon sm"><use href="#i-play"/></svg></button>`;
+        } else if (site.outcome === "FAILED") {
+          main = `<button class="mini" type="button" data-act="retry" data-key="${site.key}" title="重试 ${node.name}" aria-label="重试 ${node.name}"><svg class="icon sm"><use href="#i-rotate"/></svg></button>`;
+        } else {
+          main = `<button class="mini" type="button" data-act="export" data-key="${site.key}" title="导出 ${node.name}" aria-label="导出 ${node.name}"><svg class="icon sm"><use href="#i-download"/></svg></button>`;
+        }
+        return main;
+      }
+
+      function renderTree() {
+        const visible = visibleBySearch();
+        const scroller = $("#treeScroll");
+        const previousScroll = scroller.scrollTop;
+
+        function renderNode(node, depth) {
+          if (visible && !visible.has(node.id)) return "";
+          const isGroup = node.type === "group";
+          const children = isGroup ? childrenOf(node.id).filter((child) => !visible || visible.has(child.id)) : [];
+          const open = isGroup && (Boolean(treeQuery.trim()) || expanded.has(node.id));
+          const active = selectedNodeId === node.id;
+          const site = nodeSite(node);
+          const siteMeta = site ? UI.stateMeta(site) : null;
+          const meta = isGroup
+            ? `${descendantTaskCount(node.id)} 任务${runningCountIn(node.id) ? ` · ${runningCountIn(node.id)} 跑` : ""}`
+            : site && site.taskId
+              ? fmt(site.valid)
+              : site
+                ? "待启动"
+                : "—";
+
+          const nameButton = `<button class="row-main" type="button" data-select-node="${node.id}" title="${isGroup ? node.name : `${node.name} · ${site ? site.domain : ""}`}">
+            <span class="name">${node.name}</span>
+            ${isGroup ? "" : `<span class="site-dot ${site ? stateDotClass(site) : ""}" aria-hidden="true"></span>`}
+            <span class="meta" ${site ? `data-tree-meta="${node.id}"` : ""}>${meta}</span>
+          </button>`;
+
+          return `<div class="tree-row ${isGroup ? "" : "site-row"} ${active ? "selected" : ""}"
+              style="padding-left:${6 + depth * 14}px"
+              data-node="${node.id}" draggable="true" data-depth="${depth}" role="treeitem" aria-level="${depth + 1}" aria-selected="${active}" ${isGroup ? `aria-expanded="${open}"` : ""}>
+            <span class="drag-handle" title="拖拽调整归属" aria-hidden="true"><svg class="icon"><use href="#i-grip"/></svg></span>
+            ${isGroup
+              ? `<button class="twist" type="button" data-toggle-group="${node.id}" aria-label="${open ? "收起" : "展开"} ${node.name}"><svg class="icon sm"><use href="#i-${open ? "chevron-down" : "chevron-right"}"/></svg></button>
+                 <svg class="icon sm row-icon" aria-hidden="true"><use href="#i-folder"/></svg>`
+              : `<span class="twist" aria-hidden="true"></span><svg class="icon sm row-icon" aria-hidden="true"><use href="#i-file"/></svg>`}
+            ${nameButton}
+            <span class="quick">${treeQuickActions(node)}<button class="mini" type="button" data-more-node="${node.id}" title="更多操作" aria-label="更多 ${node.name} 操作"><svg class="icon sm"><use href="#i-more"/></svg></button></span>
+          </div>
+          ${isGroup && open ? `<div role="group">${children.map((child) => renderNode(child, depth + 1)).join("")}</div>` : ""}`;
+        }
+
+        const rootNodes = childrenOf(null);
+        scroller.innerHTML = `${rootNodes.map((node) => renderNode(node, 0)).join("")}
+          <div class="root-drop" data-drop-root>拖到这里移到根目录</div>`;
+        scroller.scrollTop = previousScroll;
+        $("#treeFoot").textContent = `${taskNodes().length} 个任务 · ${groupNodes().length} 个分组 · 拖拽调整归属`;
+        $("#narrowRunning").textContent = `运行中 ${taskNodes().filter((node) => nodeSite(node) && nodeSite(node).state === "RUNNING").length}`;
+      }
+
+      function renderHeader() {
+        const recent = taskNodes().filter((node) => nodeSite(node) && nodeSite(node).taskId && !recentRemoved.has(node.id));
+        const running = recent.filter((node) => nodeSite(node).state === "RUNNING");
+        const queued = recent.filter((node) => nodeSite(node).state === "QUEUED");
+        $("#recentTitle").textContent = recentFilter === "removed" ? "已移除的任务" : "最近任务";
+        $("#recentBadge").innerHTML =
+          recentFilter === "removed"
+            ? `<span class="badge neutral"><span class="dot"></span>仅本列表</span>`
+            : `<span class="badge info"><span class="dot"></span>按启动时间</span>`;
+        $("#recentSub").innerHTML = `<span class="kv">最近添加/启动 · <b>${recent.length}</b> 个任务</span>
+          <span class="kv">运行中 <b>${running.length}</b></span>
+          <span class="kv">排队中 <b>${queued.length}</b></span>
+          <span class="kv">仅已结束任务可移除</span>`;
+
+        const valid = recent.reduce((sum, node) => sum + nodeSite(node).valid, 0);
+        const failed = recent.reduce((sum, node) => sum + nodeSite(node).failed, 0);
+        $("#summary").innerHTML = [
+          ["最近任务", recent.length, "按启动时间"],
+          ["运行中", running.length, "实时"],
+          ["排队中", queued.length, "等待槽位"],
+          ["有效商品", fmt(valid), "当前累计"],
+          ["失败", fmt(failed), "永久失败"],
+        ]
+          .map(
+            ([label, value, hint]) =>
+              `<div class="item"><div class="k">${label}</div><div class="v">${value}<span class="unit">${hint}</span></div></div>`,
+          )
+          .join("");
+        $("#recentCount").textContent = String(recent.length);
+        $("#runningCount").textContent = String(running.length);
+        $("#removedCount").textContent = String(recentRemoved.size);
+      }
+
+      function isTerminal(node) {
+        const site = nodeSite(node);
+        return Boolean(site && (site.state === "FINISHED" || site.state === "CANCELLED"));
+      }
+
+      function removeBlockedReason(node) {
+        const site = nodeSite(node);
+        if (!site) return "任务不存在";
+        if (site.state === "RUNNING") return "运行中的任务不能移除，请先取消或等待结束";
+        if (site.state === "PAUSED") return "已暂停的任务不能移除，请先取消或继续后等待结束";
+        if (site.state === "QUEUED") return "排队中的任务不能移除，请先取消";
+        if (site.state === "PAUSING" || site.state === "CANCELLING") return "任务正在停止，结束后才能移除";
+        return "任务尚未结束，不能移除";
+      }
+
+      function rowActions(node) {
+        const site = nodeSite(node);
+        if (!site) return "";
+        let primary = "";
+        if (site.state === "RUNNING") primary = `<button class="btn sm icon" type="button" data-act="pause" data-key="${site.key}" title="暂停 ${node.name}" aria-label="暂停 ${node.name}"><svg class="icon sm"><use href="#i-pause"/></svg></button>`;
+        else if (site.state === "PAUSED") primary = `<button class="btn sm icon" type="button" data-act="resume" data-key="${site.key}" title="继续 ${node.name}" aria-label="继续 ${node.name}"><svg class="icon sm"><use href="#i-play"/></svg></button>`;
+        else if (site.state === "QUEUED") primary = `<button class="btn sm icon" type="button" data-act="pause" data-key="${site.key}" title="暂停排队 ${node.name}" aria-label="暂停排队 ${node.name}"><svg class="icon sm"><use href="#i-pause"/></svg></button>`;
+        else if (site.outcome === "FAILED") primary = `<button class="btn sm icon" type="button" data-act="retry" data-key="${site.key}" title="重试 ${node.name}" aria-label="重试 ${node.name}"><svg class="icon sm"><use href="#i-rotate"/></svg></button>`;
+        else primary = `<button class="btn sm icon" type="button" data-act="export" data-key="${site.key}" title="导出 ${node.name}" aria-label="导出 ${node.name}"><svg class="icon sm"><use href="#i-download"/></svg></button>`;
+        let removeButton = "";
+        if (recentRemoved.has(node.id)) {
+          removeButton = `<button class="btn sm icon" type="button" data-act="restore" data-node-id="${node.id}" title="恢复到最近列表" aria-label="恢复 ${node.name} 到最近列表"><svg class="icon sm"><use href="#i-rotate"/></svg></button>`;
+        } else if (isTerminal(node)) {
+          removeButton = `<button class="btn sm icon" type="button" data-act="remove" data-node-id="${node.id}" title="从最近列表移除（任务仍在树中）" aria-label="从最近列表移除 ${node.name}"><svg class="icon sm"><use href="#i-x"/></svg></button>`;
+        } else {
+          removeButton = `<button class="btn sm icon" type="button" disabled title="${removeBlockedReason(node)}" aria-label="${removeBlockedReason(node)}"><svg class="icon sm"><use href="#i-x"/></svg></button>`;
+        }
+        return `<div class="actions">${primary}${removeButton}<button class="btn sm icon" type="button" data-more-node="${node.id}" title="更多操作" aria-label="更多 ${node.name} 操作"><svg class="icon sm"><use href="#i-more"/></svg></button></div>`;
+      }
+
+      function renderTable() {
+        const wrap = $("#tableWrap");
+        const list = recentRows();
+        if (!list.length) {
+          wrap.innerHTML = `<div class="empty"><svg class="icon lg"><use href="#i-${recentFilter === "removed" ? "x" : "clock"}"/></svg><strong>${recentFilter === "removed" ? "没有从最近列表移除的任务" : recentFilter === "running" ? "当前没有运行中的任务" : "最近还没有任务"}</strong><span>${recentFilter === "removed" ? "移除过的任务会在这里出现，可随时恢复。" : "从左侧任务树启动站点后，任务会出现在这里。"}</span></div>`;
+          updateBulkbar();
+          return;
+        }
+        wrap.innerHTML = `<table class="table recent-table">
+          <thead><tr>
+            <th class="check" style="width:32px"><input type="checkbox" data-select-all aria-label="选择全部最近任务"></th>
+            <th style="width:82px">状态</th>
+            <th>任务 / 站点</th>
+            <th style="width:150px">进度</th>
+            <th class="num" style="width:92px">有效 / 失败</th>
+            <th style="width:84px">启动</th>
+            <th class="sticky-right" style="width:96px">操作</th>
+          </tr></thead>
+          <tbody>${list
+            .map((node) => {
+              const site = nodeSite(node);
+              const batch = batchById(site.batchId);
+              const path = pathOf(node);
+              return `<tr data-node="${node.id}" class="${selectedTaskNodeId === node.id ? "selected" : ""}">
+                <td class="check" data-label=""><input type="checkbox" data-select="${node.id}" ${selected.has(node.id) ? "checked" : ""} aria-label="选择任务 ${node.name}"></td>
+                <td data-label="状态">${UI.badge(site)}</td>
+                <td class="identity" data-label="任务 / 站点">
+                  <div class="task-cell">
+                    <div class="top"><span class="name">${node.name}</span><span class="tag">${site.taskId ? "产品 · 正式" : "待启动"}</span></div>
+                    <div class="sub" title="${path} · ${batch ? batch.name : "独立任务"} · ${site.taskId || "未创建任务"}">${path} · ${batch ? batch.name : "独立任务"} · ${site.taskId || "未创建任务"}</div>
+                  </div>
+                </td>
+                <td data-label="进度">${UI.progressBar(site, true)}</td>
+                <td class="num" data-label="有效 / 失败">
+                  <span class="strong" data-live-valid="${site.key}">${fmt(site.valid)}</span>
+                  <div class="muted" data-live-failed="${site.key}">失败 ${fmt(site.failed)}</div>
+                </td>
+                <td class="muted" data-label="启动">${recentMeta[node.id] ? recentMeta[node.id].label : "—"}<div style="font-size:10.5px">${site.elapsed}</div></td>
+                <td class="sticky-right" data-label="操作">${rowActions(node)}</td>
+              </tr>`;
+            })
+            .join("")}</tbody></table>`;
+        updateBulkbar();
+      }
+
+      function updateBulkbar() {
+        const visible = new Set(recentRows().map((node) => node.id));
+        const count = Array.from(selected).filter((id) => visible.has(id)).length;
+        $("#bulkbar").classList.toggle("show", count > 0);
+        $("#bulkCount").textContent = String(count);
+        const removeButton = document.querySelector('#bulkbar [data-bulk="remove"]');
+        if (removeButton) {
+          const selectedNodes = recentRows().filter((node) => selected.has(node.id));
+          const hasActive = selectedNodes.some((node) => !isTerminal(node));
+          removeButton.disabled = count === 0 || hasActive;
+          removeButton.title = hasActive
+            ? "所选包含运行中、排队中或暂停中的任务；结束后才能移除"
+            : "只从最近列表移除已结束任务";
+        }
+      }
+
+      function updateFoot() {
+        const list = recentRows();
+        const all = taskNodes().filter((node) => nodeSite(node) && nodeSite(node).taskId);
+        const running = all.filter((node) => !recentRemoved.has(node.id) && nodeSite(node).state === "RUNNING").length;
+        $("#topFoot").innerHTML = `<span>显示 <b>${list.length}</b></span>
+          <span>最近 ${taskNodes().filter((node) => nodeSite(node) && nodeSite(node).taskId && !recentRemoved.has(node.id)).length}</span>
+          <span>运行中 ${running}</span>
+          <span style="margin-left:auto">最后更新 ${lastUpdated}</span>`;
+      }
+
+      function renderLogSelect() {
+        const options = taskNodes()
+          .filter((node) => {
+            const site = nodeSite(node);
+            return site && (site.taskId || node.id === selectedTaskNodeId);
+          })
+          .sort((a, b) => recentSort(b) - recentSort(a))
+          .map((node) => {
+            const site = nodeSite(node);
+            const batch = batchById(site.batchId);
+            return `<option value="${node.id}" ${node.id === selectedTaskNodeId ? "selected" : ""}>${node.name} · ${batch ? batch.name : "独立任务"}${site.taskId ? "" : " · 待启动"}</option>`;
+          });
+        $("#logTaskSelect").innerHTML = options.join("");
+      }
+
+      function selectedTaskSite() {
+        const node = byId(selectedTaskNodeId);
+        return node ? nodeSite(node) : null;
+      }
+
+      function logEntries() {
+        const site = selectedTaskSite();
+        if (!site) return [];
+        const needle = logQuery.trim().toLowerCase();
+        return (site.logs || []).filter((entry) => {
+          if (logLevel !== "ALL" && entry[1] !== logLevel) return false;
+          if (needle && !`${entry[1]} ${entry[2]}`.toLowerCase().includes(needle)) return false;
+          return true;
+        });
+      }
+
+      function renderLog() {
+        const site = selectedTaskSite();
+        const list = $("#logList");
+        const entries = logEntries();
+        if (!site) {
+          list.innerHTML = `<div class="log-empty">选择一个任务查看运行日志</div>`;
+        } else if (!entries.length) {
+          list.innerHTML =
+            site.logs && site.logs.length
+              ? `<div class="log-empty">没有匹配的日志行</div>`
+              : `<div class="log-empty"><svg class="icon lg"><use href="#i-terminal"/></svg><span>该任务尚无日志，启动后可在这里查看</span></div>`;
+        } else {
+          list.innerHTML = entries.map(UI.logLine).join("");
+          if (autoScroll) list.scrollTop = list.scrollHeight;
+        }
+        $("#dataCount").textContent = site ? fmt(site.valid) : "0";
+        const total = site && site.logs ? site.logs.length : 0;
+        $("#logFoot").innerHTML = `<span>显示 ${entries.length} / ${total} 条</span>
+          <span>任务 ${site && site.taskId ? site.taskId : "—"}</span>
+          <span data-foot-updated>更新 ${site ? site.updated : "—"}</span>
+          <span style="margin-left:auto">${site && site.state === "RUNNING" ? '<span class="live"><span class="dot"></span>实时追加</span>' : "已停止追加"}</span>`;
+      }
+
+      function renderData() {
+        const site = selectedTaskSite();
+        const body = $("#dataBody");
+        if (!site || !site.taskId) {
+          body.innerHTML = `<tr><td colspan="5"><div class="empty">该任务尚无有效商品数据</div></td></tr>`;
+          return;
+        }
+        const names = [
+          "Lin brut lavé 140 cm",
+          "Coton bio écru 150 cm",
+          "Tissu nid d'abeille coton",
+          "Velours côtelé fin",
+          "Lin mélangé viscose",
+          "Coton double gaze",
+          "Toile de lin naturelle",
+          "Tissu éponge bio",
+        ];
+        const currency = site.batchId === "b-premier" ? "GBP" : "EUR";
+        body.innerHTML = names
+          .map((name, index) => {
+            const price = (9.9 + index * 4.35 + (site.valid % 7)).toFixed(2);
+            return `<tr>
+              <td data-label="商品">${name}<div class="muted" style="font-size:10.5px">${site.domain}/produit/${1200 + site.valid + index}</div></td>
+              <td class="num" data-label="价格">${price}</td>
+              <td data-label="币种">${currency}</td>
+              <td class="num" data-label="描述">${240 + index * 17} 字符</td>
+              <td class="muted" data-label="来源">product_content</td>
+            </tr>`;
+          })
+          .join("");
+      }
+
+      function renderDetail() {
+        const node = byId(selectedTaskNodeId);
+        const site = nodeSite(node);
+        const body = $("#detailBody");
+        if (!node || !site) {
+          body.innerHTML = `<div class="empty">选择一个任务查看详情</div>`;
+          return;
+        }
+        const batch = batchById(site.batchId);
+        const definition = definitionOf(node);
+        body.innerHTML = `<div class="cards">
+          <div class="card"><div class="k">已处理</div><div class="v" data-live-processed="${site.key}">${fmt(site.processed)}</div><div class="hint">共 ${fmt(site.total)} 个候选</div></div>
+          <div class="card"><div class="k">有效商品</div><div class="v" data-live-valid="${site.key}">${fmt(site.valid)}</div><div class="hint">写入 products.csv</div></div>
+          <div class="card"><div class="k">永久失败</div><div class="v" data-live-failed="${site.key}">失败 ${fmt(site.failed)}</div><div class="hint">不重试</div></div>
+          <div class="card"><div class="k">速度</div><div class="v">${site.speed}</div><div class="hint">运行 ${site.elapsed}</div></div>
+        </div>
+        <div style="padding:4px 12px 12px">
+          <ul class="detail-list">
+            <li><span class="k">任务 ID</span><span class="v mono">${site.taskId || "尚未创建"}</span></li>
+            <li><span class="k">站点</span><span class="v">${site.domain}</span></li>
+            <li><span class="k">任务树位置</span><span class="v">${pathOf(node)}</span></li>
+            <li><span class="k">批次来源</span><span class="v">${batch ? batch.name : "独立任务"}</span></li>
+            <li><span class="k">任务定义</span><span class="v">${definition.rule || site.rule} · ${definition.market || "—"} · ${definition.category || "—"} · ${definition.mode === "sample" ? "试采" : "正式"}</span></li>
+            <li><span class="k">规则版本</span><span class="v">${site.rule}</span></li>
+            <li><span class="k">队列</span><span class="v">待处理 ${fmt(site.pending)} · 进行中 ${site.inFlight}</span></li>
+            <li><span class="k">结果</span><span class="v">${UI.stateMeta(site).label}</span></li>
+            <li><span class="k">备注</span><span class="v">${site.note || "—"}</span></li>
+          </ul>
+          <div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
+            <a class="btn sm" href="#/tasks/${site.taskId || ""}" data-command="open-task"><svg class="icon sm"><use href="#i-external"/></svg>打开任务详情</a>
+            <button class="btn sm" type="button" data-command="copy-task"><svg class="icon sm"><use href="#i-copy"/></svg>复制任务 ID</button>
+            <button class="btn sm" type="button" data-command="export"><svg class="icon sm"><use href="#i-download"/></svg>导出当前任务</button>
+          </div>
+        </div>`;
+      }
+
+      function renderFiles() {
+        const site = selectedTaskSite();
+        const body = $("#filesBody");
+        if (!site) {
+          body.innerHTML = `<tr><td colspan="5"><div class="empty">选择一个任务查看交付文件</div></td></tr>`;
+          return;
+        }
+        const rows = [
+          ["products.csv", `${Math.max(12, Math.round(site.valid * 0.9))} KB`, site.updated, "有效商品明细"],
+          ["task-result.json", `${Math.max(8, Math.round(site.valid * 0.2))} KB`, site.updated, "任务结果与计数"],
+          ["site-audit.json", "18 KB", site.updated, "覆盖与质量审计"],
+        ];
+        body.innerHTML = rows
+          .map(
+            ([name, size, time, note]) => `<tr>
+              <td data-label="文件"><span class="mono">${name}</span></td>
+              <td class="num" data-label="大小">${size}</td>
+              <td class="muted" data-label="更新时间">${time}</td>
+              <td class="muted" data-label="说明">${note}</td>
+              <td class="sticky-right" data-label="操作"><button class="btn sm icon" type="button" data-command="download" title="下载 ${name}" aria-label="下载 ${name}"><svg class="icon sm"><use href="#i-download"/></svg></button></td>
+            </tr>`,
+          )
+          .join("");
+      }
+
+      function renderActiveTab() {
+        if (activeTab === "data") renderData();
+        else if (activeTab === "detail") renderDetail();
+        else if (activeTab === "files") renderFiles();
+        else renderLog();
+      }
+
+      function renderAll() {
+        renderTree();
+        renderHeader();
+        renderTable();
+        updateFoot();
+        renderLogSelect();
+        renderLog();
+        renderActiveTab();
+      }
+
+      function updateSiteCells(site) {
+        const percent = pct(site);
+        $$(`[data-live-processed="${site.key}"]`).forEach((node) => (node.textContent = fmt(site.processed)));
+        $$(`[data-live-valid="${site.key}"]`).forEach((node) => (node.textContent = fmt(site.valid)));
+        $$(`[data-live-failed="${site.key}"]`).forEach((node) => (node.textContent = `失败 ${fmt(site.failed)}`));
+        $$(`[data-live-percent="${site.key}"]`).forEach((node) => (node.textContent = `${percent}%`));
+        $$(`[data-live-bar="${site.key}"]`).forEach((node) => (node.style.width = `${percent}%`));
+        treeNodes.forEach((node) => {
+          if (node.siteKey !== site.key) return;
+          $$(`[data-tree-meta="${node.id}"]`).forEach((meta) => {
+            meta.textContent = site.taskId ? fmt(site.valid) : "待启动";
+          });
+        });
+      }
+
+      function startNode(node) {
+        const site = nodeSite(node);
+        if (!site) return;
+        if (!site.taskId) {
+          site.taskId = `web-${Math.random().toString(16).slice(2, 14)}`;
+          site.total = site.total || 800;
+          site.logs = [[UI.timeNow(), "INFO", `开始任务 ${site.taskId}，入口 https://www.${site.domain}/`]];
+        }
+        site.state = "RUNNING";
+        recentRemoved.delete(node.id);
+        recentMeta[node.id] = { sort: Date.now(), label: "刚刚" };
+        selectedNodeId = node.id;
+        selectedTaskNodeId = node.id;
+        renderAll();
+        toast(`已启动 ${node.name}，并置顶到最近任务（原型示例）`);
+      }
+
+      function doAction(action, key) {
+        const site = sites[key];
+        if (!site) return;
+        const node = taskNodes().find((item) => item.siteKey === key && item.type === "task");
+        if (!node) return;
+        if (action === "pause") {
+          site.state = "PAUSED";
+          site.logs.push([UI.timeNow(), "INFO", "用户请求暂停，当前商品处理完成后停止"]);
+          toast(`已请求暂停：${node.name}（原型示例）`);
+        } else if (action === "resume") {
+          site.state = "RUNNING";
+          site.logs.push([UI.timeNow(), "INFO", "任务已恢复，从队列继续"]);
+          toast(`已继续：${node.name}（原型示例）`);
+        } else if (action === "retry") {
+          site.state = "RUNNING";
+          site.outcome = null;
+          site.failed = 0;
+          if (recentRemoved.delete(node.id)) {
+            recentMeta[node.id] = { sort: Date.now(), label: "刚刚" };
+          }
+          site.logs.push([UI.timeNow(), "INFO", "重试请求已受理，从失败页重新开始"]);
+          toast(`已重试：${node.name}（原型示例）`);
+        } else if (action === "start") {
+          startNode(node);
+          return;
+        } else if (action === "export") {
+          toast(`原型：导出 ${node.name} 的当前任务结果`);
+          return;
+        } else if (action === "cancel") {
+          if (site.state === "FINISHED" || site.state === "CANCELLED") {
+            toast(`${node.name} 已经结束，无需取消。`);
+            return;
+          }
+          site.state = "CANCELLED";
+          site.outcome = "CANCELLED";
+          site.logs.push([UI.timeNow(), "INFO", "用户取消任务，未处理项保留在任务记录中"]);
+          toast(`已取消 ${node.name}（原型示例）`);
+        } else if (action === "remove") {
+          removeRecent(node);
+          return;
+        } else if (action === "restore") {
+          restoreRecent(node);
+          return;
+        }
+        selectedNodeId = node.id;
+        selectedTaskNodeId = node.id;
+        renderAll();
+      }
+
+      function removeRecent(node) {
+        if (!isTerminal(node)) {
+          toast(removeBlockedReason(node) + "。");
+          return;
+        }
+        recentRemoved.add(node.id);
+        selected.delete(node.id);
+        renderHeader();
+        renderTable();
+        updateFoot();
+        toast(`已从最近列表移除 ${node.name}；任务仍在左侧任务树中。`, "撤销", () => {
+          recentRemoved.delete(node.id);
+          renderHeader();
+          renderTable();
+          updateFoot();
+        });
+      }
+
+      function restoreRecent(node) {
+        recentRemoved.delete(node.id);
+        recentMeta[node.id] = { sort: Date.now(), label: "刚刚" };
+        renderHeader();
+        renderTable();
+        updateFoot();
+        toast(`已恢复 ${node.name} 到最近任务（原型示例）`);
+      }
+
+      function bulkAction(action) {
+        const visible = new Set(recentRows().map((node) => node.id));
+        const ids = Array.from(selected).filter((id) => visible.has(id));
+        if (action === "clear") {
+          selected.clear();
+          renderTable();
+          return;
+        }
+        if (action === "pause") {
+          ids.forEach((id) => {
+            const node = byId(id);
+            const site = nodeSite(node);
+            if (site && (site.state === "RUNNING" || site.state === "QUEUED")) {
+              site.state = "PAUSED";
+              site.logs.push([UI.timeNow(), "INFO", "批量暂停：任务已暂停"]);
+            }
+          });
+          toast(`已暂停 ${ids.length} 个任务（原型示例）`);
+        }
+        if (action === "remove") {
+          const removable = ids.filter((id) => isTerminal(byId(id)));
+          const blocked = ids.length - removable.length;
+          removable.forEach((id) => recentRemoved.add(id));
+          selected.clear();
+          if (removable.length) {
+            toast(
+              `已从最近列表移除 ${removable.length} 个已结束任务${blocked ? `；${blocked} 个任务尚未结束，未移除` : ""}。任务仍在树中。`,
+              "撤销",
+              () => {
+                removable.forEach((id) => recentRemoved.delete(id));
+                renderHeader();
+                renderTable();
+                updateFoot();
+              },
+            );
+          } else {
+            toast(`所选任务尚未结束，不能移除；请先取消或等待结束。`);
+          }
+        }
+        renderHeader();
+        renderTable();
+        updateFoot();
+        renderAll();
+      }
+
+      function selectTaskNode(nodeId) {
+        selectedNodeId = nodeId;
+        selectedTaskNodeId = nodeId;
+        $$(".tree-row").forEach((row) => row.classList.toggle("selected", row.dataset.node === nodeId));
+        $$("#tableWrap tbody tr").forEach((row) => row.classList.toggle("selected", row.dataset.node === nodeId));
+        renderLogSelect();
+        renderLog();
+        if (activeTab !== "log") renderActiveTab();
+      }
+
+      function locateNode(nodeId) {
+        const node = byId(nodeId);
+        if (!node) return;
+        let parent = byId(node.parentId);
+        while (parent) {
+          expanded.add(parent.id);
+          parent = byId(parent.parentId);
+        }
+        selectedNodeId = nodeId;
+        if (node.type === "task") selectedTaskNodeId = nodeId;
+        renderTree();
+        if (window.matchMedia("(max-width: 900px)").matches) document.body.classList.add("tree-open");
+        const row = document.querySelector(`.tree-row[data-node="${nodeId}"]`);
+        if (row) {
+          row.scrollIntoView({ block: "center" });
+          row.style.outline = "2px solid var(--accent)";
+          window.setTimeout(() => {
+            row.style.outline = "";
+          }, 1200);
+        }
+        closeMenu();
+        toast(`已在任务树中定位 ${node.name}`);
+      }
+
+      // ---------- 行菜单 ----------
+
+      function openMenu(anchor, node, point) {
+        const menu = $("#rowMenu");
+        closeCreateMenu();
+        menuNodeId = node.id;
+        const isGroup = node.type === "group";
+        const site = nodeSite(node);
+        const removed = recentRemoved.has(node.id);
+        const canCancel = site && ["RUNNING", "QUEUED", "PAUSED"].includes(site.state);
+        const removeItem = removed
+          ? ["restore", "恢复到最近列表", "rotate"]
+          : isTerminal(node)
+            ? ["remove", "从最近列表移除", "x"]
+            : ["remove", "结束后才能移除", "x", true];
+        const items = isGroup
+          ? [
+              ["new-child", "新建子目录", "folder"],
+              ["new-task", "新建任务", "file"],
+              ["import-batch", "添加已有批次", "list"],
+              ["new-batch", "新建批次", "layers"],
+              ["sep", "", ""],
+              ["rename", "重命名", "pencil"],
+              ["move", "移动到…", "move"],
+              ["sep", "", ""],
+              ["dissolve", "解散目录", "trash"],
+            ]
+          : [
+              ["locate", "在树中定位", "eye"],
+              ["rename", "重命名", "pencil"],
+              ["move", "移动到…", "move"],
+              ["sep", "", ""],
+              ...(canCancel ? [["cancel", "取消任务", "stop"]] : []),
+              removeItem,
+              ["copy", "复制任务 ID", "copy"],
+              ["open", "打开任务详情", "external"],
+            ];
+        menu.innerHTML = items
+          .map(([action, label, icon, disabled]) =>
+            action === "sep"
+              ? '<div class="menu-sep"></div>'
+              : `<button class="menu-item ${action === "dissolve" ? "danger" : ""}" type="button" role="menuitem" data-menu-action="${action}" ${disabled ? `disabled title="${removeBlockedReason(node)}"` : ""}><svg class="icon sm"><use href="#i-${icon}"/></svg>${label}</button>`,
+          )
+          .join("");
+        menu.classList.add("open");
+        const menuRect = menu.getBoundingClientRect();
+        const rect = anchor ? anchor.getBoundingClientRect() : null;
+        const left = point
+          ? Math.min(window.innerWidth - menuRect.width - 8, Math.max(8, point.x))
+          : Math.min(window.innerWidth - menuRect.width - 8, Math.max(8, rect.right - menuRect.width));
+        const top = point
+          ? Math.min(window.innerHeight - menuRect.height - 8, Math.max(8, point.y))
+          : Math.min(window.innerHeight - menuRect.height - 8, Math.max(8, rect.bottom + 4));
+        menu.style.left = `${left}px`;
+        menu.style.top = `${top}px`;
+      }
+
+      function openMenuAt(x, y, node) {
+        openMenu(null, node, { x, y });
+      }
+
+      function closeMenu() {
+        $("#rowMenu").classList.remove("open");
+        menuNodeId = null;
+      }
+
+      // ---------- 拖拽 ----------
+
+      function isDescendant(candidateId, ancestorId) {
+        let node = byId(candidateId);
+        while (node && node.parentId) {
+          if (node.parentId === ancestorId) return true;
+          node = byId(node.parentId);
+        }
+        return false;
+      }
+
+      function moveNode(nodeId, newParentId, index) {
+        const node = byId(nodeId);
+        if (!node) return false;
+        if (nodeId === newParentId) return false;
+        if (node.type === "group" && newParentId && (newParentId === nodeId || isDescendant(newParentId, nodeId))) {
+          toast("不能把分组移动到自己的子分组里。");
+          return false;
+        }
+        const oldParentId = node.parentId;
+        node.parentId = newParentId;
+        const siblings = childrenOf(newParentId).filter((item) => item.id !== nodeId);
+        const insertAt = index == null ? siblings.length : Math.max(0, Math.min(index, siblings.length));
+        siblings.splice(insertAt, 0, node);
+        siblings.forEach((item, i) => {
+          item.order = i;
+        });
+        childrenOf(oldParentId)
+          .filter((item) => item.id !== nodeId)
+          .forEach((item, i) => {
+            item.order = i;
+          });
+        if (newParentId) expanded.add(newParentId);
+        return true;
+      }
+
+      // ---------- 对话框 ----------
+
+      function openRename(mode, node, parentId) {
+        renameState = { mode, nodeId: node ? node.id : null, parentId: parentId || null };
+        $("#renameTitle").textContent = mode === "new" ? "新建分组" : "重命名";
+        $("#renameInput").value = node ? node.name : "";
+        $("#renameInput").setCustomValidity("");
+        $("#renameDialog").showModal();
+        window.setTimeout(() => {
+          $("#renameInput").focus();
+          $("#renameInput").select();
+        }, 0);
+      }
+
+      function saveRename() {
+        const value = $("#renameInput").value.trim();
+        if (!value) {
+          $("#renameInput").focus();
+          $("#renameInput").setCustomValidity("请输入名称");
+          $("#renameInput").reportValidity();
+          return;
+        }
+        $("#renameInput").setCustomValidity("");
+        if (!renameState) return;
+        if (renameState.mode === "new") {
+          const id = `g-new-${Math.random().toString(16).slice(2, 8)}`;
+          treeNodes.push({
+            id,
+            type: "group",
+            name: value,
+            parentId: renameState.parentId,
+            order: childrenOf(renameState.parentId).length,
+          });
+          if (renameState.parentId) expanded.add(renameState.parentId);
+          selectedNodeId = id;
+          toast(`已新建分组「${value}」`);
+        } else {
+          const node = byId(renameState.nodeId);
+          if (node) {
+            node.name = value;
+            toast(`已重命名为「${value}」`);
+          }
+        }
+        $("#renameDialog").close();
+        renderAll();
+      }
+
+      function openMoveDialog(node) {
+        moveState = { nodeId: node.id };
+        const options = [];
+        options.push(`<option value="">根目录</option>`);
+        groupNodes()
+          .filter((group) => group.id !== node.id && !isDescendant(group.id, node.id))
+          .sort((a, b) => pathOf(a).localeCompare(pathOf(b), "zh-CN"))
+          .forEach((group) => {
+            options.push(`<option value="${group.id}">${"　".repeat(depthOf(group))}${group.name}</option>`);
+          });
+        $("#moveSelect").innerHTML = options.join("");
+        $("#moveDialog").showModal();
+      }
+
+      function saveMove() {
+        if (!moveState) return;
+        const node = byId(moveState.nodeId);
+        if (!node) return;
+        const parentId = $("#moveSelect").value || null;
+        if (moveNode(node.id, parentId, null)) {
+          toast(`已移动到「${parentId ? byId(parentId).name : "根目录"}」`);
+          selectedNodeId = node.id;
+          if (node.type === "task") selectedTaskNodeId = node.id;
+          $("#moveDialog").close();
+          renderAll();
+        }
+      }
+
+      function openDissolve(group) {
+        confirmState = { groupId: group.id };
+        $("#confirmTitle").textContent = "解散分组";
+        $("#confirmText").textContent = `解散分组「${group.name}」？其中的子分组和任务会移动到上一级，任务本身不会被删除。`;
+        $("#confirmDialog").showModal();
+      }
+
+      function confirmDissolve() {
+        if (!confirmState) return;
+        const group = byId(confirmState.groupId);
+        if (group) {
+          const parentId = group.parentId;
+          const children = childrenOf(group.id);
+          const base = childrenOf(parentId).filter((item) => item.id !== group.id).length;
+          children.forEach((child, index) => {
+            child.parentId = parentId;
+            child.order = base + index;
+          });
+          treeNodes = treeNodes.filter((node) => node.id !== group.id);
+          if (selectedNodeId === group.id) selectedNodeId = parentId;
+          if (selectedTaskNodeId === group.id) selectedTaskNodeId = selectedNodeId;
+          toast(`已解散分组「${group.name}」，子项已上移`);
+        }
+        $("#confirmDialog").close();
+        confirmState = null;
+        renderAll();
+      }
+
+      // ---------- 新建：目录 / 单任务 / 已有批次 / 新批次 ----------
+
+      function definitionOf(node) {
+        if (node && node.definition) return node.definition;
+        const site = nodeSite(node);
+        const batch = site ? batchById(site.batchId) : null;
+        return {
+          inputUrl: site ? `https://www.${site.domain}/` : "",
+          domain: site ? site.domain : "",
+          country: batch ? batch.country : "",
+          language: batch ? batch.language : "",
+          market: batch ? batch.market : "",
+          category: batch ? batch.category : "",
+          rule: site ? site.rule : "",
+          mode: "formal",
+          batchId: site ? site.batchId : null,
+        };
+      }
+
+      function parentOptions(selectedId) {
+        const options = ['<option value="">根目录</option>'];
+        groupNodes()
+          .sort((a, b) => pathOf(a).localeCompare(pathOf(b), "zh-CN"))
+          .forEach((group) => {
+            const selected = group.id === selectedId ? " selected" : "";
+            options.push(`<option value="${group.id}"${selected}>${"　".repeat(depthOf(group))}${esc(group.name)}</option>`);
+          });
+        return options.join("");
+      }
+
+      function fillParentSelect(selector, selectedId) {
+        const select = $(selector);
+        select.innerHTML = parentOptions(selectedId);
+        select.value = selectedId || "";
+        if (select.value !== (selectedId || "")) select.value = "";
+      }
+
+      function showCreateMenu(parentId, point, anchor) {
+        createParentId = parentId;
+        const target = createParentId ? pathOf(byId(createParentId)) : "根目录";
+        const menu = $("#createMenu");
+        closeMenu();
+        menu.innerHTML = `<div class="menu-label">在「${esc(target)}」新建</div>
+          <button class="menu-item" type="button" role="menuitem" data-create="folder"><svg class="icon sm"><use href="#i-folder"/></svg>新建目录/任务组</button>
+          <button class="menu-item" type="button" role="menuitem" data-create="task"><svg class="icon sm"><use href="#i-file"/></svg>新建单个任务</button>
+          <button class="menu-item" type="button" role="menuitem" data-create="batch"><svg class="icon sm"><use href="#i-list"/></svg>添加已有批次</button>
+          <button class="menu-item" type="button" role="menuitem" data-create="new-batch"><svg class="icon sm"><use href="#i-layers"/></svg>新建批次</button>`;
+        menu.classList.add("open");
+        const menuRect = menu.getBoundingClientRect();
+        let left;
+        let top;
+        if (point) {
+          left = Math.min(window.innerWidth - menuRect.width - 8, Math.max(8, point.x));
+          top = Math.min(window.innerHeight - menuRect.height - 8, Math.max(8, point.y));
+        } else {
+          const rect = anchor.getBoundingClientRect();
+          left = Math.min(window.innerWidth - menuRect.width - 8, Math.max(8, rect.left));
+          top = Math.min(window.innerHeight - menuRect.height - 8, rect.bottom + 4);
+        }
+        menu.style.left = `${left}px`;
+        menu.style.top = `${top}px`;
+      }
+
+      function openCreateMenu(anchor) {
+        const selected = byId(selectedNodeId);
+        const parentId = selected ? (selected.type === "group" ? selected.id : selected.parentId) : null;
+        showCreateMenu(parentId, null, anchor);
+      }
+
+      function openCreateMenuAt(x, y, parentId) {
+        showCreateMenu(parentId, { x, y }, null);
+      }
+
+      function closeCreateMenu() {
+        $("#createMenu").classList.remove("open");
+      }
+
+      function openTaskDialog(parentId) {
+        createParentId = parentId == null ? createParentId : parentId;
+        fillParentSelect("#taskParent", createParentId);
+        $("#taskName").value = "";
+        $("#taskUrl").value = "";
+        $("#taskCountry").value = "FR";
+        $("#taskLanguage").value = "fr";
+        $("#taskMarket").value = "FR";
+        $("#taskCategory").value = "纺织";
+        $("#taskMode").value = "sample";
+        $("#taskDialog").showModal();
+        window.setTimeout(() => $("#taskUrl").focus(), 0);
+      }
+
+      function createTaskDefinition() {
+        const name = $("#taskName").value.trim();
+        let rawUrl = $("#taskUrl").value.trim();
+        if (!rawUrl) {
+          toast("请填写站点 URL。");
+          $("#taskUrl").focus();
+          return;
+        }
+        if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(rawUrl)) rawUrl = `https://${rawUrl}`;
+        let parsed;
+        try {
+          parsed = new URL(rawUrl);
+          if (!/^https?:$/.test(parsed.protocol)) throw new Error("not http");
+        } catch {
+          toast("请输入有效的 http(s) URL。");
+          $("#taskUrl").focus();
+          return;
+        }
+        const domain = parsed.hostname.replace(/^www\./i, "");
+        if (!domain) {
+          toast("URL 中没有有效域名。");
+          return;
+        }
+        const existing = taskNodes().find((node) => node.siteKey === domain);
+        if (existing) {
+          $("#taskDialog").close();
+          selectedNodeId = existing.id;
+          selectedTaskNodeId = existing.id;
+          renderAll();
+          toast(`该站点已有任务定义：${existing.name}`);
+          return;
+        }
+        const parentId = $("#taskParent").value || null;
+        const rule = $("#taskRule").value;
+        const country = $("#taskCountry").value.trim();
+        const language = $("#taskLanguage").value.trim();
+        const market = $("#taskMarket").value.trim();
+        const category = $("#taskCategory").value.trim();
+        const mode = $("#taskMode").value;
+        let site = sites[domain];
+        if (!site) {
+          site = {
+            key: domain,
+            domain,
+            batchId: null,
+            state: "READY",
+            taskId: null,
+            rule,
+            processed: 0,
+            total: 0,
+            valid: 0,
+            failed: 0,
+            pending: 0,
+            inFlight: 0,
+            speed: "—",
+            elapsed: "—",
+            updated: UI.timeNow(),
+            note: "独立任务定义，尚未启动",
+            logs: [],
+          };
+          sites[domain] = site;
+        }
+        const nodeId = `n-new-${Math.random().toString(16).slice(2, 8)}`;
+        treeNodes.push({
+          id: nodeId,
+          type: "task",
+          name: name || domain,
+          siteKey: domain,
+          parentId,
+          order: childrenOf(parentId).length,
+          definition: {
+            inputUrl: rawUrl,
+            domain,
+            country,
+            language,
+            market,
+            category,
+            rule,
+            mode,
+            batchId: site.batchId || null,
+          },
+        });
+        if (parentId) expanded.add(parentId);
+        selectedNodeId = nodeId;
+        selectedTaskNodeId = nodeId;
+        $("#taskDialog").close();
+        renderAll();
+        toast(`已创建任务定义「${name || domain}」（原型示例）`);
+      }
+
+      function openBatchDialog(parentId) {
+        createParentId = parentId == null ? createParentId : parentId;
+        const options = MOCK.batches
+          .slice()
+          .sort((a, b) => a.name.localeCompare(b.name, "zh-CN"))
+          .map((batch) => {
+            const inTree = batch.siteKeys.filter((key) => taskNodes().some((node) => node.siteKey === key)).length;
+            return `<option value="${batch.id}">${esc(batch.name)} · ${batch.siteKeys.length} 站 · 已在树 ${inTree}</option>`;
+          });
+        $("#batchSelect").innerHTML = options.join("");
+        fillParentSelect("#batchParent", createParentId);
+        $("#batchHint").textContent = "批次只批量添加任务定义；已在树中的站点会跳过。";
+        $("#batchDialog").showModal();
+      }
+
+      function importBatch() {
+        const batch = batchById($("#batchSelect").value);
+        if (!batch) {
+          toast("请选择批次。");
+          return;
+        }
+        const parentId = $("#batchParent").value || null;
+        const existing = new Set(taskNodes().map((node) => node.siteKey));
+        const added = [];
+        batch.siteKeys.forEach((siteKey) => {
+          if (existing.has(siteKey)) return;
+          const site = sites[siteKey];
+          if (!site) return;
+          const nodeId = `n-batch-${Math.random().toString(16).slice(2, 8)}`;
+          treeNodes.push({
+            id: nodeId,
+            type: "task",
+            name: site.domain,
+            siteKey,
+            parentId,
+            order: childrenOf(parentId).length + added.length,
+            definition: {
+              inputUrl: `https://www.${site.domain}/`,
+              domain: site.domain,
+              country: batch.country,
+              language: batch.language,
+              market: batch.market || batch.country,
+              category: batch.category,
+              rule: site.rule,
+              mode: "formal",
+              batchId: batch.id,
+            },
+          });
+          existing.add(siteKey);
+          added.push(nodeId);
+        });
+        $("#batchDialog").close();
+        if (!added.length) {
+          toast("该批次的站点任务都已在任务树中。");
+          return;
+        }
+        if (parentId) expanded.add(parentId);
+        selectedNodeId = added[0];
+        selectedTaskNodeId = added[0];
+        renderAll();
+        toast(`已从「${batch.name}」加入 ${added.length} 个任务定义（原型示例）`);
+      }
+
+      function openNewBatchDialog(parentId) {
+        createParentId = parentId == null ? createParentId : parentId;
+        fillParentSelect("#newBatchParent", createParentId);
+        $("#newBatchName").value = "";
+        $("#newBatchCountry").value = "FR";
+        $("#newBatchLanguage").value = "fr";
+        $("#newBatchMarket").value = "FR";
+        $("#newBatchCategory").value = "纺织";
+        $("#newBatchSites").value = "";
+        $("#newBatchDialog").showModal();
+        window.setTimeout(() => $("#newBatchName").focus(), 0);
+      }
+
+      function createNewBatch() {
+        const name = $("#newBatchName").value.trim();
+        const lines = $("#newBatchSites")
+          .value.split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean);
+        if (!name) {
+          toast("请填写批次名称。");
+          $("#newBatchName").focus();
+          return;
+        }
+        if (!lines.length) {
+          toast("请至少填写一个站点 URL。");
+          $("#newBatchSites").focus();
+          return;
+        }
+        const parentId = $("#newBatchParent").value || null;
+        const country = $("#newBatchCountry").value.trim();
+        const language = $("#newBatchLanguage").value.trim();
+        const market = $("#newBatchMarket").value.trim();
+        const category = $("#newBatchCategory").value.trim();
+        const rule = market.toUpperCase() === "GB" ? "2026.11.26-1" : "2026.11.26-2";
+        const batchId = `b-new-${Math.random().toString(16).slice(2, 8)}`;
+        const siteKeys = [];
+        const added = [];
+        lines.forEach((line) => {
+          let raw = line;
+          if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(raw)) raw = `https://${raw}`;
+          let parsed;
+          try {
+            parsed = new URL(raw);
+          } catch {
+            return;
+          }
+          const domain = parsed.hostname.replace(/^www\./i, "");
+          if (!domain || siteKeys.includes(domain)) return;
+          if (sites[domain] || taskNodes().some((node) => node.siteKey === domain)) return;
+          siteKeys.push(domain);
+          if (!sites[domain]) {
+            sites[domain] = {
+              key: domain,
+              domain,
+              batchId,
+              state: "READY",
+              taskId: null,
+              rule,
+              processed: 0,
+              total: 0,
+              valid: 0,
+              failed: 0,
+              pending: 0,
+              inFlight: 0,
+              speed: "—",
+              elapsed: "—",
+              updated: UI.timeNow(),
+              note: "新批次任务定义，尚未启动",
+              logs: [],
+            };
+          }
+          const nodeId = `n-batch-${Math.random().toString(16).slice(2, 8)}`;
+          treeNodes.push({
+            id: nodeId,
+            type: "task",
+            name: domain,
+            siteKey: domain,
+            parentId,
+            order: childrenOf(parentId).length + added.length,
+            definition: {
+              inputUrl: `https://${domain}/`,
+              domain,
+              country,
+              language,
+              market,
+              category,
+              rule,
+              mode: "formal",
+              batchId,
+            },
+          });
+          added.push(nodeId);
+        });
+        if (!added.length) {
+          toast("没有可用的站点 URL。");
+          return;
+        }
+        MOCK.batches.push({
+          id: batchId,
+          name,
+          folderId: null,
+          country,
+          language,
+          market,
+          category,
+          siteKeys,
+          running: 0,
+          queued: 0,
+          finished: 0,
+          failed: 0,
+          ready: siteKeys.length,
+          valid: 0,
+        });
+        if (parentId) expanded.add(parentId);
+        selectedNodeId = added[0];
+        selectedTaskNodeId = added[0];
+        $("#newBatchDialog").close();
+        renderAll();
+        toast(`已创建批次「${name}」并加入 ${added.length} 个任务定义（原型示例）`);
+      }
+
+      // ---------- 事件 ----------
+
+      $("#treeScroll").addEventListener("click", (event) => {
+        const toggle = event.target.closest("[data-toggle-group]");
+        if (toggle) {
+          const id = toggle.dataset.toggleGroup;
+          if (expanded.has(id)) expanded.delete(id);
+          else expanded.add(id);
+          renderTree();
+          return;
+        }
+        const action = event.target.closest("[data-act]");
+        if (action) {
+          doAction(action.dataset.act, action.dataset.key);
+          return;
+        }
+        const more = event.target.closest("[data-more-node]");
+        if (more) {
+          const node = byId(more.dataset.moreNode);
+          if (node) openMenu(more, node);
+          return;
+        }
+        const select = event.target.closest("[data-select-node]");
+        if (select) {
+          const node = byId(select.dataset.selectNode);
+          if (!node) return;
+          selectedNodeId = node.id;
+          if (node.type === "task") {
+            selectedTaskNodeId = node.id;
+            selectTaskNode(node.id);
+            closeTree();
+          } else {
+            $$(".tree-row").forEach((row) => row.classList.toggle("selected", row.dataset.node === node.id));
+            $$("#tableWrap tbody tr").forEach((row) => row.classList.remove("selected"));
+          }
+        }
+      });
+
+      $("#treeScroll").addEventListener("dragstart", (event) => {
+        const row = event.target.closest("[data-node]");
+        if (!row) return;
+        dragId = row.dataset.node;
+        row.classList.add("dragging");
+        document.body.classList.add("dragging");
+        if (event.dataTransfer) {
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData("text/plain", dragId);
+        }
+      });
+
+      $("#treeScroll").addEventListener("dragend", () => {
+        dragId = null;
+        document.body.classList.remove("dragging");
+        $$(".tree-row").forEach((row) => {
+          row.classList.remove("dragging", "drop-inside");
+        });
+        $$(".root-drop").forEach((row) => row.classList.remove("drop-inside"));
+      });
+
+      $("#treeScroll").addEventListener("dragover", (event) => {
+        if (!dragId) return;
+        const target = event.target.closest("[data-node], [data-drop-root]");
+        if (!target) return;
+        const targetId = target.dataset.node;
+        if (targetId === dragId) return;
+        event.preventDefault();
+        if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+        $$(".tree-row").forEach((row) => row.classList.remove("drop-inside"));
+        $$(".root-drop").forEach((row) => row.classList.remove("drop-inside"));
+        target.classList.add("drop-inside");
+      });
+
+      $("#treeScroll").addEventListener("dragleave", (event) => {
+        const target = event.target.closest("[data-node], [data-drop-root]");
+        if (target) target.classList.remove("drop-inside");
+      });
+
+      $("#treeScroll").addEventListener("drop", (event) => {
+        event.preventDefault();
+        const target = event.target.closest("[data-node], [data-drop-root]");
+        if (!target || !dragId) return;
+        const dragged = byId(dragId);
+        if (!dragged) return;
+        if (target.hasAttribute("data-drop-root")) {
+          if (moveNode(dragged.id, null, null)) {
+            toast(`已移动到根目录：${dragged.name}`);
+            renderAll();
+          }
+        } else {
+          const targetNode = byId(target.dataset.node);
+          if (!targetNode) return;
+          let success = false;
+          if (targetNode.type === "group") {
+            success = moveNode(dragged.id, targetNode.id, null);
+            if (success) toast(`已移动到「${targetNode.name}」：${dragged.name}`);
+          } else {
+            const siblings = childrenOf(targetNode.parentId);
+            const index = siblings.findIndex((item) => item.id === targetNode.id) + 1;
+            success = moveNode(dragged.id, targetNode.parentId, index);
+            if (success) toast(`已移动到「${targetNode.name}」之后`);
+          }
+          if (success) {
+            selectedNodeId = dragged.id;
+            if (dragged.type === "task") selectedTaskNodeId = dragged.id;
+            renderAll();
+          }
+        }
+        dragId = null;
+        document.body.classList.remove("dragging");
+      });
+
+      $("#treeScroll").addEventListener("contextmenu", (event) => {
+        const row = event.target.closest("[data-node]");
+        if (!row) {
+          event.preventDefault();
+          openCreateMenuAt(event.clientX, event.clientY, null);
+          return;
+        }
+        const node = byId(row.dataset.node);
+        if (!node) return;
+        event.preventDefault();
+        selectedNodeId = node.id;
+        if (node.type === "task") selectedTaskNodeId = node.id;
+        $$(".tree-row").forEach((item) => item.classList.toggle("selected", item.dataset.node === node.id));
+        if (node.type === "task") {
+          $$("#tableWrap tbody tr").forEach((item) => item.classList.toggle("selected", item.dataset.node === node.id));
+          renderLogSelect();
+          renderLog();
+        } else {
+          $$("#tableWrap tbody tr").forEach((item) => item.classList.remove("selected"));
+        }
+        openMenuAt(event.clientX, event.clientY, node);
+      });
+
+      $("#treeSearch").addEventListener("input", (event) => {
+        treeQuery = event.target.value;
+        renderTree();
+      });
+
+      $("#taskSearch").addEventListener("input", (event) => {
+        taskQuery = event.target.value;
+        renderTable();
+        updateFoot();
+      });
+
+      $(".toolbar").addEventListener("click", (event) => {
+        const button = event.target.closest("[data-recent]");
+        if (!button) return;
+        recentFilter = button.dataset.recent;
+        $$(".toolbar [data-recent]").forEach((node) => node.classList.toggle("active", node === button));
+        selected.clear();
+        renderHeader();
+        renderTable();
+        updateFoot();
+      });
+
+      $("#tableWrap").addEventListener("click", (event) => {
+        const action = event.target.closest("[data-act]");
+        if (action) {
+          if (action.dataset.act === "remove" || action.dataset.act === "restore") {
+            const node = byId(action.dataset.nodeId);
+            if (node) {
+              if (action.dataset.act === "remove") removeRecent(node);
+              else restoreRecent(node);
+            }
+            return;
+          }
+          doAction(action.dataset.act, action.dataset.key);
+          return;
+        }
+        const more = event.target.closest("[data-more-node]");
+        if (more) {
+          const node = byId(more.dataset.moreNode);
+          if (node) openMenu(more, node);
+          return;
+        }
+        if (event.target.closest("input, a")) return;
+        const row = event.target.closest("tr[data-node]");
+        if (!row) return;
+        selectTaskNode(row.dataset.node);
+      });
+
+      $("#tableWrap").addEventListener("change", (event) => {
+        const selectAll = event.target.closest("[data-select-all]");
+        if (selectAll) {
+          const list = recentRows();
+          if (selectAll.checked) list.forEach((node) => selected.add(node.id));
+          else list.forEach((node) => selected.delete(node.id));
+          renderTable();
+          return;
+        }
+        const checkbox = event.target.closest("[data-select]");
+        if (checkbox) {
+          if (checkbox.checked) selected.add(checkbox.dataset.select);
+          else selected.delete(checkbox.dataset.select);
+          updateBulkbar();
+        }
+      });
+
+      $("#bulkbar").addEventListener("click", (event) => {
+        const button = event.target.closest("[data-bulk]");
+        if (button) bulkAction(button.dataset.bulk);
+      });
+
+      $("#logTaskSelect").addEventListener("change", (event) => {
+        selectedTaskNodeId = event.target.value;
+        selectedNodeId = event.target.value;
+        renderTree();
+        renderTable();
+        renderActiveTab();
+      });
+
+      $("#logLevel").addEventListener("change", (event) => {
+        logLevel = event.target.value;
+        renderLog();
+      });
+
+      $("#logSearch").addEventListener("input", (event) => {
+        logQuery = event.target.value;
+        renderLog();
+      });
+
+      $("#autoScroll").addEventListener("change", (event) => {
+        autoScroll = event.target.checked;
+      });
+
+      document.querySelector(".tabs").addEventListener("click", (event) => {
+        const tab = event.target.closest("[data-tab]");
+        if (tab) switchTab(tab.dataset.tab);
+      });
+
+      function switchTab(tab) {
+        activeTab = tab;
+        $$(".tabs .tab").forEach((button) => {
+          const active = button.dataset.tab === tab;
+          button.classList.toggle("active", active);
+          button.setAttribute("aria-selected", String(active));
+        });
+        $$(".tab-panel").forEach((panel) => {
+          panel.hidden = panel.id !== `tab-${tab}`;
+        });
+        renderActiveTab();
+      }
+
+      $("#rowMenu").addEventListener("click", (event) => {
+        const button = event.target.closest("[data-menu-action]");
+        if (!button) return;
+        const action = button.dataset.menuAction;
+        const node = byId(menuNodeId);
+        closeMenu();
+        if (!node) return;
+        if (action === "new-child" && node.type === "group") openRename("new", null, node.id);
+        else if (action === "new-task" && node.type === "group") openTaskDialog(node.id);
+        else if (action === "import-batch" && node.type === "group") openBatchDialog(node.id);
+        else if (action === "new-batch" && node.type === "group") openNewBatchDialog(node.id);
+        else if (action === "rename") openRename("rename", node);
+        else if (action === "move") openMoveDialog(node);
+        else if (action === "dissolve" && node.type === "group") openDissolve(node);
+        else if (action === "locate") locateNode(node.id);
+        else if (action === "cancel") doAction("cancel", nodeSite(node) ? nodeSite(node).key : "");
+        else if (action === "remove") removeRecent(node);
+        else if (action === "restore") restoreRecent(node);
+        else if (action === "copy" && nodeSite(node)) toast(`已复制任务 ID：${nodeSite(node).taskId || "—"}`);
+        else if (action === "open" && nodeSite(node)) toast("原型：打开任务详情页");
+      });
+
+      $("#createMenu").addEventListener("click", (event) => {
+        const button = event.target.closest("[data-create]");
+        if (!button) return;
+        const action = button.dataset.create;
+        const parentId = createParentId;
+        closeCreateMenu();
+        if (action === "folder") openRename("new", null, parentId);
+        else if (action === "task") openTaskDialog(parentId);
+        else if (action === "batch") openBatchDialog(parentId);
+        else if (action === "new-batch") openNewBatchDialog(parentId);
+      });
+
+      document.addEventListener("click", (event) => {
+        if (!event.target.closest("#rowMenu, [data-more-node], [data-command]")) closeMenu();
+        if (!event.target.closest("#createMenu, [data-command='new-menu']")) closeCreateMenu();
+        const close = event.target.closest("[data-dialog-close]");
+        if (close) {
+          const dialog = document.getElementById(close.dataset.dialogClose);
+          if (dialog) dialog.close();
+          return;
+        }
+        const command = event.target.closest("[data-command]");
+        if (!command) return;
+        const name = command.dataset.command;
+        if (name === "toggle-tree") document.body.classList.toggle("tree-open");
+        else if (name === "new-menu") openCreateMenu(command);
+        else if (name === "new-group") {
+          const selected = byId(selectedNodeId);
+          const parentId = selected ? (selected.type === "group" ? selected.id : selected.parentId) : null;
+          openRename("new", null, parentId);
+        } else if (name === "collapse-all") {
+          expanded = new Set();
+          renderTree();
+        } else if (name === "start") {
+          const ready = taskNodes().filter((node) => {
+            const site = nodeSite(node);
+            return site && !site.taskId;
+          });
+          if (ready.length) {
+            ready.forEach((node) => startNode(node));
+          } else {
+            toast("当前没有待启动的站点");
+          }
+        } else if (name === "pause-running") {
+          const running = taskNodes().filter((node) => nodeSite(node) && nodeSite(node).state === "RUNNING");
+          running.forEach((node) => {
+            const site = nodeSite(node);
+            site.state = "PAUSED";
+            site.logs.push([UI.timeNow(), "INFO", "批量暂停：任务已暂停"]);
+          });
+          renderAll();
+          toast(`已暂停 ${running.length} 个运行中任务（原型示例）`);
+        } else if (name === "export") {
+          toast("原型：导出结果（示例）");
+        } else if (name === "refresh") {
+          lastUpdated = UI.timeNow();
+          renderAll();
+          toast("已刷新（原型示例）");
+        } else if (name === "open-task") {
+          toast("原型：打开任务详情页");
+        } else if (name === "copy-task") {
+          const site = selectedTaskSite();
+          toast(`已复制任务 ID：${site && site.taskId ? site.taskId : "—"}`);
+        } else if (name === "download") {
+          toast("原型：开始下载（示例）");
+        } else if (name === "columns") {
+          toast("原型：打开列显示设置");
+        } else if (name === "more") {
+          toast("原型：打开更多操作");
+        }
+      });
+
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          closeMenu();
+          closeCreateMenu();
+        }
+      });
+
+      $("#renameSave").addEventListener("click", saveRename);
+      $("#renameInput").addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          saveRename();
+        }
+      });
+      $("#moveSave").addEventListener("click", saveMove);
+      $("#confirmSave").addEventListener("click", confirmDissolve);
+      $("#taskSave").addEventListener("click", createTaskDefinition);
+      $("#batchSave").addEventListener("click", importBatch);
+      $("#newBatchSave").addEventListener("click", createNewBatch);
+      $("#batchSelect").addEventListener("change", (event) => {
+        const batch = batchById(event.target.value);
+        if (!batch) return;
+        const inTree = batch.siteKeys.filter((key) => taskNodes().some((node) => node.siteKey === key)).length;
+        $("#batchHint").textContent = `该批次 ${batch.siteKeys.length} 个站点，已在树中 ${inTree} 个；将跳过重复，只添加其余任务定义。`;
+      });
+
+      $("#scrim").addEventListener("click", closeTree);
+
+      document.querySelector(".narrow-bar").addEventListener("click", (event) => {
+        const pane = event.target.closest("[data-pane]");
+        if (!pane) return;
+        const showLog = pane.dataset.pane === "log";
+        $("#workspace").classList.toggle("show-log", showLog);
+        $$(".narrow-bar [data-pane]").forEach((button) => {
+          button.classList.toggle("active", (button.dataset.pane === "log") === showLog);
+        });
+      });
+
+      // ---------- 上下分隔条 ----------
+
+      const splitter = $("#splitter");
+      const topPane = $("#topPane");
+      const content = $("#content");
+      let dragSplit = null;
+
+      function setTopHeight(height) {
+        const max = Math.max(260, content.getBoundingClientRect().height - 190);
+        const next = Math.min(max, Math.max(230, height));
+        topPane.style.flex = `0 0 ${next}px`;
+        splitter.setAttribute("aria-valuenow", String(Math.round(next)));
+      }
+
+      splitter.addEventListener("pointerdown", (event) => {
+        dragSplit = { y: event.clientY, height: topPane.getBoundingClientRect().height };
+        splitter.setPointerCapture(event.pointerId);
+      });
+      splitter.addEventListener("pointermove", (event) => {
+        if (!dragSplit) return;
+        setTopHeight(dragSplit.height + event.clientY - dragSplit.y);
+      });
+      splitter.addEventListener("pointerup", () => {
+        dragSplit = null;
+      });
+      splitter.addEventListener("pointercancel", () => {
+        dragSplit = null;
+      });
+      splitter.addEventListener("keydown", (event) => {
+        if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+        event.preventDefault();
+        setTopHeight(topPane.getBoundingClientRect().height + (event.key === "ArrowDown" ? 24 : -24));
+      });
+
+      // ---------- 实时演示 ----------
+
+      const tickerMessages = [
+        (site) => `处理商品 ${site.domain}/produit/lin-${Math.floor(Math.random() * 900 + 100)}，解析成功（价格、币种、主图）`,
+        (site) => `写入 8 件商品，有效累计 ${fmt(site.valid)}`,
+        (site) => `429 Too Many Requests，域名 ${site.domain} 冷却 1.2s`,
+        (site) => `描述 ${180 + Math.floor(Math.random() * 140)} 字符，达到阈值 180`,
+        (site) => `校验价格与币种通过：${fmt(site.valid)} 件`,
+      ];
+
+      window.setInterval(() => {
+        tickCount += 1;
+        const running = Object.values(sites).filter(
+          (site) => site.state === "RUNNING" && site.processed < site.total,
+        );
+        running.forEach((site) => {
+          const step = 5 + Math.floor(Math.random() * 10);
+          site.processed = Math.min(site.total, site.processed + step);
+          site.valid = Math.min(site.processed, site.valid + Math.max(1, Math.round(step * 0.88)));
+          if (Math.random() < 0.05) site.failed += 1;
+          site.updated = UI.timeNow();
+          updateSiteCells(site);
+        });
+        lastUpdated = UI.timeNow();
+        const site = selectedTaskSite();
+        if (site && site.state === "RUNNING" && site.processed < site.total) {
+          const message = tickerMessages[tickCount % tickerMessages.length](site);
+          site.logs.push([lastUpdated, tickCount % 9 === 0 ? "WARN" : "INFO", message]);
+          if (activeTab === "log" && autoScroll && logLevel === "ALL" && !logQuery.trim()) {
+            UI.appendLog($("#logList"), site.logs[site.logs.length - 1]);
+          } else if (activeTab === "log") {
+            renderLog();
+          }
+          const foot = $("#logFoot");
+          if (foot) {
+            const updated = foot.querySelector("[data-foot-updated]");
+            if (updated) updated.textContent = `更新 ${lastUpdated}`;
+          }
+        }
+        renderHeader();
+        updateFoot();
+        if (tickCount % 6 === 0 && !document.body.classList.contains("dragging") && !document.querySelector("#rowMenu.open") && !document.querySelector("dialog[open]")) renderTree();
+        if (activeTab === "data" && tickCount % 3 === 0) renderData();
+        if (activeTab === "detail") renderDetail();
+      }, 2800);
+
+      renderAll();
+      switchTab("log");
+    })();
+  </script>
+</body>
+</html>

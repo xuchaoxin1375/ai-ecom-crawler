@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from patchright.sync_api import Locator, Page
 
 APP = Path(__file__).resolve().parents[1]
-DIST = APP / "frontend-v2" / "dist" / "index.html"
+DIST = APP / "frontend" / "dist" / "index.html"
 SITE = "workbench-fixture.test"
 TIMEOUT = 90
 BUILD_SITE = "build-model-fixture.test"
@@ -151,7 +151,7 @@ def exercise(page: Page, origin: str, fixture: str, root: Path) -> None:
         response is not None and response.ok and response.request.redirected_from is not None,
         "FastAPI root did not redirect to the built workbench",
     )
-    expect(page).to_have_url(re.compile(r"/next/#/batches(?:\?|$)"))
+    expect(page).to_have_url(re.compile(r"/#/batches(?:\?|$)"))
     nav = page.get_by_role("navigation", name="主导航")
     expect(nav.get_by_text("采集工作台", exact=True)).to_be_visible()
     expect(nav.get_by_text("规则与设置", exact=True)).to_be_visible()
@@ -189,9 +189,9 @@ def exercise(page: Page, origin: str, fixture: str, root: Path) -> None:
         f"Wrong saved draft: {created}",
     )
     expect(draft).to_be_hidden()
-    expect(page).to_have_url(re.compile(rf"/next/#/batches/{batch}$"))
+    expect(page).to_have_url(re.compile(rf"/#/batches/{batch}$"))
     page.reload(wait_until="domcontentloaded")
-    expect(page).to_have_url(re.compile(rf"/next/#/batches/{batch}$"))
+    expect(page).to_have_url(re.compile(rf"/#/batches/{batch}$"))
     row_link = page.get_by_role("link", name=SITE, exact=True)
     action = page.get_by_role("button", name="启动 1 个可采站点", exact=True)
     region = page.get_by_role("region", name="站点清单", exact=True)
@@ -234,7 +234,7 @@ def exercise(page: Page, origin: str, fixture: str, root: Path) -> None:
             page.keyboard.press("Escape")
             expect(menu).to_be_focused()
     page.set_viewport_size({"width": 1280, "height": 900})
-    axe_script = APP / "frontend-v2" / "node_modules" / "axe-core" / "axe.min.js"
+    axe_script = APP / "frontend" / "node_modules" / "axe-core" / "axe.min.js"
     page.add_script_tag(path=axe_script)
     violations = page.evaluate("async () => (await axe.run()).violations.map(v => v.id)", isolated_context=False)
     check(not violations, f"Batch detail axe violations: {violations}")
@@ -254,7 +254,7 @@ def exercise(page: Page, origin: str, fixture: str, root: Path) -> None:
     page.go_back()
     expect(filters).to_have_value("startable")
     expect(row_link).to_be_focused()
-    page.goto(f"{origin}/next/#/batches/{batch}/sites/{site_key}")
+    page.goto(f"{origin}/#/batches/{batch}/sites/{site_key}")
     page.get_by_role("link", name=f"返回 {name}", exact=True).click()
     expect(search).to_have_value("")
     expect(filters).to_have_value("all")
@@ -285,7 +285,7 @@ def exercise(page: Page, origin: str, fixture: str, root: Path) -> None:
     )
     task = accepted["accepted"][0]["task_id"]
     page.get_by_role("link", name=re.compile(rf"查看任务 {re.escape(task)} 详情")).click()
-    expect(page).to_have_url(re.compile(rf"/next/#/tasks/{task}$"))
+    expect(page).to_have_url(re.compile(rf"/#/tasks/{task}$"))
     expect(page.get_by_role("button", name="导出 ZIP", exact=True)).to_be_visible(timeout=25_000)
     expect(page.get_by_role("button", name="导出 ZIP", exact=True)).to_have_count(1)
     overview = page.get_by_role("region", name="任务概览")
@@ -388,7 +388,7 @@ def exercise_many_sites(page: Page, origin: str) -> None:
     )
     check(seeded.status == 201, f"Could not seed many-site batch: {seeded.text()}")
     batch = seeded.json()["batch"]["batch_id"]
-    page.goto(f"{origin}/next/#/batches/{batch}")
+    page.goto(f"{origin}/#/batches/{batch}")
     region = page.get_by_role("region", name="站点清单", exact=True)
     search = region.get_by_role("textbox", name="搜索站点")
     search.fill("not-present")
@@ -438,7 +438,7 @@ def browser_check(origin: str, fixture: str, root: Path) -> None:
 
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True, timeout=15_000)
-        print(f"Chromium {browser.version}; {origin}/next/#/batches (temporary)", flush=True)
+        print(f"Chromium {browser.version}; {origin}/#/batches (temporary)", flush=True)
         try:
             context = browser.new_context(
                 viewport={"width": 1280, "height": 900}, service_workers="block"
@@ -494,7 +494,7 @@ def browser_check(origin: str, fixture: str, root: Path) -> None:
                     )
                     check(cancellable.status == 201, f"Could not create cancel fixture: {cancellable.text()}")
                     cancel_batch = cancellable.json()["batch"]["batch_id"]
-                    page.goto(f"{origin}/next/#/batches/{cancel_batch}")
+                    page.goto(f"{origin}/#/batches/{cancel_batch}")
                     page.get_by_role("button", name="接入待采目标", exact=True).click()
                     start_dialog = page.get_by_role("dialog", name="启动可采站点")
                     start_dialog.get_by_role("checkbox", name=re.compile("接入 1 个待接入目标")).check()
@@ -519,7 +519,7 @@ def browser_check(origin: str, fixture: str, root: Path) -> None:
                     )
                     print("Verified automatic onboarding can be cancelled from its batch.", flush=True)
 
-                    page.goto(f"{origin}/next/#/builds/{build_to_cancel}")
+                    page.goto(f"{origin}/#/builds/{build_to_cancel}")
                     overview = page.get_by_role("region", name="构建概览")
                     expect(overview.get_by_text("输出 tokens（含推理）")).to_be_visible()
                     expect(overview.get_by_text(re.compile("120,000"))).to_be_visible()
@@ -538,7 +538,7 @@ def browser_check(origin: str, fixture: str, root: Path) -> None:
                     check(no_rule.status == 404 and no_rule.json()["error"]["code"] == "SITE_NOT_FOUND",
                           f"Unexpected response for a station with no rule or build: {no_rule.status}")
                     site_path = f"/api/batches/{batch_id}/sites/{BUILD_SITE}/build"
-                    page.goto(f"{origin}/next/#/batches/{batch_id}/sites/{BUILD_SITE}")
+                    page.goto(f"{origin}/#/batches/{batch_id}/sites/{BUILD_SITE}")
                     page.get_by_role("button", name="启动构建", exact=True).first.click()
                     dialog = page.get_by_role("dialog", name="启动方案构建")
                     select = dialog.get_by_label("分配方式或模型")
@@ -569,7 +569,7 @@ def browser_check(origin: str, fixture: str, root: Path) -> None:
                     }, f"Wrong selected model: {started['build']['model']}")
                     expect(dialog).to_be_hidden()
                     print("Verified default allocation, variant selection, explicit mock probe, and model pinning.", flush=True)
-                    page.goto(f"{origin}/next/#/settings", wait_until="domcontentloaded")
+                    page.goto(f"{origin}/#/settings", wait_until="domcontentloaded")
                     slots = page.get_by_role("textbox", name="同时采集任务数")
                     expect(slots).to_have_value("1")
                     slots.fill("3")
@@ -679,7 +679,6 @@ def supervise(root: Path) -> None:
         TMP=str(scratch),
         TEMP=str(scratch),
         TMPDIR=str(scratch),
-        ECOM_LEGACY_UI="off",
         ECOM_BUILD_DISABLED="0",
         ECOM_BUILD_MODEL_POOL=f"{DEEPSEEK}#high,{TERRA}#medium",
         NO_PROXY="127.0.0.1",
@@ -746,7 +745,7 @@ def supervise(root: Path) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Run one Chromium smoke against FastAPI, temporary SQLite and a loopback catalog.",
-        epilog=f"Build app/frontend-v2 first (npm run build). Time limit: {TIMEOUT}s. Requires the app dev environment and "
+        epilog=f"Build app/frontend first (npm run build). Time limit: {TIMEOUT}s. Requires the app dev environment and "
         "Patchright Chromium. Nothing is installed; failed-run diagnostics stay in the OS temp folder. "
         "Example: python -m uv run --project app --extra dev --frozen --no-sync python app/tests/frontend_smoke.py",
     )
@@ -757,7 +756,7 @@ def main(argv: list[str] | None = None) -> int:
         return run_worker(args.worker)
     if not DIST.is_file():
         parser.error(
-            "Missing app/frontend-v2/dist/index.html; run npm run build in app/frontend-v2 first"
+            "Missing app/frontend/dist/index.html; run npm run build in app/frontend first"
         )
     root = Path(tempfile.mkdtemp(prefix="ecom-frontend-smoke-"))
     started = time.monotonic()

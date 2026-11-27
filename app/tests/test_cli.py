@@ -191,7 +191,7 @@ class ServeAccessTests(unittest.TestCase):
                 8765,
                 frozenset({"172.17.0.1", "192.168.1.20"}),
             )
-        self.assertEqual(urls[0], "http://192.168.1.20:8765/next/")
+        self.assertEqual(urls[0], "http://192.168.1.20:8765/")
 
     def test_stored_token_allows_non_loopback_without_token(self) -> None:
         with mock.patch(

@@ -24,7 +24,7 @@
 
 从 [`docs/README.md`](docs/README.md) 开始阅读，按其中的阅读顺序进入各主题。
 
-启动本地应用（Web UI + 托管 worker）：按 [`app/README.md`](app/README.md#启动项目) 的「启动项目」一节构建前端并运行 `serve`；默认入口 `http://127.0.0.1:8765/next/#/batches`。
+启动本地应用（Web UI + 托管 worker）：按 [`app/README.md`](app/README.md#启动项目) 的「启动项目」一节构建前端并运行 `serve`；默认入口 `http://127.0.0.1:8765/#/batches`。
 
 创建或刷新共用采集环境（可选，默认写到仓库外）：
 

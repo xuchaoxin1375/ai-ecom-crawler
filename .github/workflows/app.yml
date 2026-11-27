@@ -50,28 +50,28 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-          cache-dependency-path: app/frontend-v2/package-lock.json
+          cache-dependency-path: app/frontend/package-lock.json
 
       - name: Install dependencies
-        working-directory: app/frontend-v2
+        working-directory: app/frontend
         run: npm ci
 
       - name: Lint
-        working-directory: app/frontend-v2
+        working-directory: app/frontend
         run: npm run lint
 
       - name: Typecheck
-        working-directory: app/frontend-v2
+        working-directory: app/frontend
         run: npm run typecheck
 
       - name: Test
-        working-directory: app/frontend-v2
+        working-directory: app/frontend
         run: npm test
 
       - name: Format check
-        working-directory: app/frontend-v2
+        working-directory: app/frontend
         run: npm run format:check
 
       - name: Build
-        working-directory: app/frontend-v2
+        working-directory: app/frontend
         run: npm run build
