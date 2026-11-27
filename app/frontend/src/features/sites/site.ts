@@ -4,6 +4,7 @@ import type {
   BuildStatus,
   BuildSummary,
   QualityException,
+  RuleValidation,
   SiteRuleCandidate,
   TaskItem,
   TaskSummary,
@@ -103,10 +104,9 @@ export function hasPendingBuildApprovals(
   );
 }
 
-export function candidateActivationBlockedReason(
-  candidate: SiteRuleCandidate,
+export function validationActivationBlockedReason(
+  validation: RuleValidation | null | undefined,
 ): string | null {
-  const validation = candidate.validation;
   if (!validation) return "缺少验证记录，不能激活";
   if (validation.status === "INCOMPLETE") return "验证证据不完整，不能激活";
   if (validation.status !== "PASSED") return "验证未通过，不能激活";
@@ -127,6 +127,12 @@ export function candidateActivationBlockedReason(
     }
   }
   return null;
+}
+
+export function candidateActivationBlockedReason(
+  candidate: SiteRuleCandidate,
+): string | null {
+  return validationActivationBlockedReason(candidate.validation);
 }
 
 export function siteHasActiveWork(

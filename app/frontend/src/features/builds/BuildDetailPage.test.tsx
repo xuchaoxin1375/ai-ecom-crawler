@@ -1,6 +1,6 @@
 import { fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import type { BuildMessages, BuildStatus } from "../../lib/api";
+import type { BuildMessages, BuildStatus, SiteRuleResponse } from "../../lib/api";
 import { renderPage, type RenderEntry } from "../../test/renderPage";
 import { BuildDetailPage } from "./BuildDetailPage";
 
@@ -62,7 +62,9 @@ async function renderBuild(
   build: BuildStatus,
   config: Response | object,
   entry: RenderEntry = "/builds/build-1",
+  siteRule?: SiteRuleResponse,
 ) {
+  let currentSiteRule = siteRule;
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     const path = url.split("?")[0];
     if (path === "/api/builds/build-1") return Response.json({ build });
@@ -71,6 +73,34 @@ async function renderBuild(
     if (path === "/api/builds/config") {
       if (config instanceof Response) return config;
       return Response.json(config);
+    }
+    if (path === "/api/sites/fixture.test/rule" && currentSiteRule) {
+      return Response.json(currentSiteRule);
+    }
+    if (
+      path === "/api/sites/fixture.test/rule/activate" &&
+      init?.method === "POST" &&
+      currentSiteRule
+    ) {
+      const body = JSON.parse(String(init.body));
+      currentSiteRule = {
+        ...currentSiteRule,
+        active: {
+          rule_version: body.rule_version,
+          sha256: "a".repeat(64),
+          path: "rules/fixture.yaml",
+          activated_at: date,
+        },
+        candidates: [],
+      };
+      return Response.json({
+        activated: true,
+        site: {
+          site_key: "fixture.test",
+          active: currentSiteRule.active,
+        },
+        previous: { rule_version: "2026.11.27-1", sha256: "b".repeat(64) },
+      });
     }
     throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url}`);
   });
@@ -240,4 +270,104 @@ it("continues the session without offering rebuild", async () => {
   expect(
     screen.queryByRole("button", { name: "重新构建（新 build）" }),
   ).not.toBeInTheDocument();
+});
+
+it("activates a verified candidate from the build detail", async () => {
+  const validation = {
+    status: "PASSED" as const,
+    candidate_smoke: {
+      executed: true,
+      valid_products: 6,
+      failed_products: 0,
+      excluded_products: 0,
+      currencies: { GBP: 6 },
+    },
+    issue_checks: [],
+    regression: {
+      executed: true,
+      required: false,
+      required_checked: 0,
+      checked: 0,
+      regressions: [],
+    },
+    content_audit: { products_checked: 6, description_gaps: 0 },
+    diff: { changed_fields: ["description_selector"], discovery_changed: false },
+    evidence_sha256: "a".repeat(64),
+  };
+  const build = buildFixture({
+    state: "FINISHED",
+    outcome: "succeeded",
+    mode: "repair",
+    rule: {
+      rule_id: "fixture-rule",
+      rule_version: "2026.11.28-1",
+      path: "rules/fixture.yaml",
+    },
+    source_rule: { rule_version: "2026.11.27-1", sha256: "b".repeat(64) },
+    candidate_rule: { rule_version: "2026.11.28-1", sha256: "a".repeat(64) },
+    change_summary: {
+      rule_id: "fixture-rule",
+      rule_version: "2026.11.28-1",
+      parent_version: "2026.11.27-1",
+      changed_fields: ["description_selector"],
+      discovery_changed: false,
+      scope_changed: false,
+      market_changed: false,
+      currency_changed: false,
+    },
+    validation,
+  });
+  const siteRule: SiteRuleResponse = {
+    site_key: "fixture.test",
+    rule_id: "fixture-rule",
+    active: {
+      rule_version: "2026.11.27-1",
+      sha256: "b".repeat(64),
+      path: "rules/fixture.yaml",
+      activated_at: date,
+    },
+    candidates: [
+      {
+        rule_version: "2026.11.28-1",
+        sha256: "a".repeat(64),
+        build_id: "build-1",
+        validation_status: "PASSED",
+        validation,
+        change_summary: {
+          rule_id: "fixture-rule",
+          rule_version: "2026.11.28-1",
+          parent_version: "2026.11.27-1",
+          changed_fields: ["description_selector"],
+          discovery_changed: false,
+          scope_changed: false,
+          market_changed: false,
+          currency_changed: false,
+        },
+        created_at: date,
+      },
+    ],
+    stale_tasks: 0,
+    open_feedback: 0,
+  };
+  const fetchMock = await renderBuild(
+    build,
+    {
+      available: true,
+      reasoning_capture_enabled: false,
+      max_repair_rounds: 1,
+    },
+    "/builds/build-1",
+    siteRule,
+  );
+
+  expect(await screen.findByRole("heading", { name: "规则候选" })).toBeVisible();
+  fireEvent.click(await screen.findByRole("button", { name: "激活规则" }));
+  const dialog = await screen.findByRole("dialog");
+  fireEvent.click(within(dialog).getByRole("button", { name: "激活规则" }));
+
+  expect(await screen.findByText(/候选规则已激活/)).toBeVisible();
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/sites/fixture.test/rule/activate",
+    expect.objectContaining({ method: "POST" }),
+  );
 });

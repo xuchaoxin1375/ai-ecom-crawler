@@ -285,10 +285,10 @@ function FeedbackCard({ feedback, onChanged }: FeedbackCardProps) {
             </Button>
           ) : null}
           {feedback.status === "AWAITING_ACTIVATION" ? (
-            feedback.batch_id && feedback.site_key ? (
+            feedback.repair_build_id ? (
               <Link
                 className="text-sm font-medium text-accent underline"
-                to={`/batches/${encodeURIComponent(feedback.batch_id)}/sites/${encodeURIComponent(feedback.site_key)}?view=rules`}
+                to={`/builds/${encodeURIComponent(feedback.repair_build_id)}`}
               >
                 核对候选规则
               </Link>

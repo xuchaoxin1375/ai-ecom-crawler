@@ -49,6 +49,7 @@ import {
 } from "../sites/build";
 import { BuildTimeline } from "../sites/BuildTimeline";
 import { useBuildStream } from "../sites/useBuildStream";
+import { RuleCandidateCard } from "../rules/RuleCandidateCard";
 import { RuleEvidence } from "../rules/RuleEvidence";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
@@ -432,6 +433,15 @@ export function BuildDetailPage() {
 
   const canCancel = ["QUEUED", "CREATED", "RUNNING", "PAUSED"].includes(build.state);
   const events = visibleBuildEvents(build).slice(-4);
+  const candidateVersion =
+    build.candidate_rule?.rule_version ??
+    (build.state === "FINISHED" && build.outcome === "succeeded"
+      ? build.rule?.rule_version
+      : null) ??
+    null;
+  const candidateRuleId = build.rule?.rule_id ?? build.change_summary?.rule_id ?? null;
+  const candidateSourceVersion =
+    build.source_rule?.rule_version ?? build.change_summary?.parent_version ?? null;
 
   const primary =
     build.state === "QUEUED" || build.state === "CREATED"
@@ -579,7 +589,7 @@ export function BuildDetailPage() {
         <h2 className="text-[17px] leading-6 font-semibold text-warning">继续原会话</h2>
         <p className="mt-1 text-xs leading-5 text-ink-2">
           沿用当前构建记录、会话和工作区，把补充指令发回同一模型会话，不产生新的
-          build。重新构建会回到站点详情发起新构建，旧记录和证据保留。
+          build。重新构建会创建新的构建记录，旧记录和证据保留。
         </p>
       </div>
       <div className="mt-3 space-y-3">
@@ -771,12 +781,30 @@ export function BuildDetailPage() {
   const statusContent = (
     <>
       {continuePanel}
+      {candidateVersion ? (
+        <RuleCandidateCard
+          siteKey={build.site_key}
+          ruleId={candidateRuleId}
+          ruleVersion={candidateVersion}
+          validation={build.validation}
+          change={build.change_summary}
+          sourceVersion={candidateSourceVersion}
+          feedbackId={build.feedback_id ?? null}
+          disabled={active}
+          onChanged={() => {
+            void buildQuery.refetch();
+            void queryClient.invalidateQueries({ queryKey: ["builds"] });
+          }}
+        />
+      ) : null}
       {factsPanel}
       {eventsPanel}
       {build.state === "FINISHED" && build.outcome === "succeeded" ? (
         <p className="flex items-start gap-2 rounded-panel border border-success/25 bg-success-soft px-4 py-3 text-xs leading-5 text-success">
           <FileText className="mt-0.5 shrink-0" size={14} aria-hidden="true" />
-          构建完成，候选规则已安装。回到站点详情启动可采站点即可创建采集任务。
+          {candidateVersion
+            ? "构建完成，候选规则已安装；可在下方核对当前状态、激活或回滚。"
+            : "构建完成。"}
         </p>
       ) : null}
     </>
