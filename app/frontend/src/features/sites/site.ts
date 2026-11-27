@@ -15,7 +15,7 @@ import {
   formatAmount,
   taskStateLabel,
 } from "../../lib/format";
-import { siteExportLabel, siteExportTaskId } from "../batches/actions";
+import { siteExportLabel, siteExportTaskId } from "./siteExport";
 
 export type SiteActionKind =
   | "build"

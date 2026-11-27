@@ -276,7 +276,7 @@ export function WorkbenchTaskDialog({
                 />
                 {editing ? (
                   <p className="mt-1 text-[11px] text-ink-3">
-                    站点身份与批次来源只读；需要换站点时请新建任务定义。
+                    站点身份只读；需要换站点时请新建任务定义。
                   </p>
                 ) : null}
               </div>
@@ -285,12 +285,6 @@ export function WorkbenchTaskDialog({
                   <p>
                     <span className="text-ink-3">站点 key：</span>
                     <code className="font-mono text-ink-2">{definition.site_key}</code>
-                  </p>
-                  <p>
-                    <span className="text-ink-3">批次来源：</span>
-                    <span className="text-ink-2">
-                      {definition.batch_id || "独立任务"}
-                    </span>
                   </p>
                 </div>
               ) : (

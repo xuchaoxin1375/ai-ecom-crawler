@@ -1,11 +1,5 @@
 import { useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
-import {
-  Link,
-  useLocation,
-  useNavigate,
-  useParams,
-  useSearchParams,
-} from "react-router-dom";
+import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Archive,
@@ -13,7 +7,6 @@ import {
   Ban,
   Copy,
   Download,
-  ExternalLink,
   MoreHorizontal,
   Pause,
   Play,
@@ -55,7 +48,7 @@ import { FeedbackPanel } from "./FeedbackPanel";
 import { ProductPreviewSection } from "./ProductPreviewSection";
 import { QualityExceptionsSection } from "./QualityExceptionsSection";
 import { TaskItemsSection } from "./TaskItemsSection";
-import { batchHref, siteTaskHref, taskRuleIsStale, taskTypeLabel } from "./task";
+import { taskRuleIsStale, taskTypeLabel } from "./task";
 import { useTaskStream } from "./useTaskStream";
 
 function Fact({ label, children }: { label: string; children: ReactNode }) {
@@ -123,7 +116,6 @@ async function copyText(value: string): Promise<void> {
 
 export function TaskDetailPage() {
   const { taskId = "" } = useParams<{ taskId: string }>();
-  const navigate = useNavigate();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeView = parseTaskView(searchParams.get("view"));
@@ -336,8 +328,6 @@ export function TaskDetailPage() {
     );
   }
 
-  const siteHref = siteTaskHref(task);
-  const batchLink = batchHref(task);
   const isDiscovery = task.task_type === "discovery";
   const resultCount = isDiscovery
     ? (task.counts.discovered_urls ?? 0)
@@ -423,30 +413,6 @@ export function TaskDetailPage() {
     hint: active ? "运行中不能归档" : undefined,
   });
   moreGroups.push(controlActions);
-  if (siteHref || batchLink) {
-    moreGroups.push([
-      ...(siteHref
-        ? [
-            {
-              key: "site",
-              label: "打开站点详情",
-              icon: <ExternalLink size={14} />,
-              onSelect: () => navigate(siteHref),
-            },
-          ]
-        : []),
-      ...(batchLink
-        ? [
-            {
-              key: "batch",
-              label: "打开批次详情",
-              icon: <ExternalLink size={14} />,
-              onSelect: () => navigate(batchLink),
-            },
-          ]
-        : []),
-    ]);
-  }
 
   const tabCounts: Record<TaskView, string> = {
     results: formatNumber(resultCount),
@@ -569,7 +535,7 @@ export function TaskDetailPage() {
         <div className="border-b border-line px-4 py-4 sm:px-5">
           <h2 className="text-[17px] leading-6 font-semibold text-ink">任务事实</h2>
           <p className="mt-0.5 text-xs leading-5 text-ink-3">
-            状态、规则、站点和批次；低频技术信息不占结果首屏。
+            状态、规则和站点；低频技术信息不占结果首屏。
           </p>
         </div>
         <dl className="grid grid-cols-1 gap-x-6 px-4 py-2 sm:grid-cols-2 sm:px-5">
@@ -597,24 +563,7 @@ export function TaskDetailPage() {
             )}
           </Fact>
           <Fact label="市场">{task.market || "—"}</Fact>
-          <Fact label="站点">
-            {siteHref ? (
-              <Link className="text-accent hover:underline" to={siteHref}>
-                {task.site_key}
-              </Link>
-            ) : (
-              task.site_key || "—"
-            )}
-          </Fact>
-          <Fact label="批次">
-            {batchLink ? (
-              <Link className="text-accent hover:underline" to={batchLink}>
-                {task.batch_id}
-              </Link>
-            ) : (
-              "—"
-            )}
-          </Fact>
+          <Fact label="站点">{task.site_key || "—"}</Fact>
           <Fact label="停止原因">{stopReasonLabel(task.stop_reason)}</Fact>
           <Fact label="更新方式">
             {active ? (stream.connected ? "实时更新" : "轮询更新") : "已结束"}
@@ -755,24 +704,7 @@ export function TaskDetailPage() {
               </code>
             </p>
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-3">
-              {batchLink ? (
-                <span>
-                  批次{" "}
-                  <Link className="text-accent hover:underline" to={batchLink}>
-                    {task.batch_id}
-                  </Link>
-                </span>
-              ) : (
-                <span>未关联批次</span>
-              )}
-              {siteHref ? (
-                <span>
-                  站点{" "}
-                  <Link className="text-accent hover:underline" to={siteHref}>
-                    {task.site_key}
-                  </Link>
-                </span>
-              ) : null}
+              <span>站点 {task.site_key}</span>
               <span>更新 {formatTime(task.updated_at)}</span>
               {active ? (
                 <span title={stream.error || undefined}>
@@ -959,7 +891,7 @@ export function TaskDetailPage() {
         open={dialog === "cancel"}
         title="取消这个任务？"
         description="排队或运行中的任务会停止；已经产生的部分结果保留，可继续导出。"
-        consequence="取消是任务级操作，不会删除批次和站点；可回批次详情或站点详情重新启动。"
+        consequence="取消是任务级操作，不会删除任务定义或已有结果；可在任务工作台重新启动。"
         confirmLabel="确认取消任务"
         tone="danger"
         busy={busy === "cancel"}

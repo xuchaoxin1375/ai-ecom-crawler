@@ -2,6 +2,8 @@
 
 本目录是 monorepo 中生产应用的承载位置。当前已落地 **D02 数据合同与导出 CLI**、**D04 v0 静态执行器**、**浏览器 adapter v0**、**hybrid adapter discovery**、**批次工作台阶段 1／任务控制台** 和 **构建期依赖请求桥**：规则包 → 发现／获取／提取 → SQLite 任务账本 → D02 导出。静态 worker 带跨进程任务租约和资源登记／回收；浏览器 worker 按任务启动 Patchright CDP，登记并回收浏览器进程和 profile；hybrid 规则把 C2 discovery 交给包内 adapter 子进程，商品页仍由声明式 `fetch`／`extract` 处理；批次对象把导入站点、规则匹配和成员任务组织成用户工作流；构建期 `request_dependency` 通过工作区文件桥请求基线／allowlist 依赖或一次性审批。完整跨进程 A20 和 adapter 浏览器资源配额仍未实现；跨重启构建会话恢复已接入并按需继续；2026-11-23 已用真实 `opencode serve` + `deepseek-v4.1-flash` 跑通工具调用、自然完成、站点级构建和 trace，并接入批次站点详情。
 
+> 2026-11-27 前端收口：批次列表、批次详情和站点详情页面已退役，批次只作为任务工作台的“新建批次／添加已有批次”动作，任务统一归入任务树目标目录；站点级构建启动／修复入口暂未迁入，构建记录仍可查看。以下涉及批次／站点详情页面的段落按后端能力和历史记录理解。
+
 ## 边界
 
 - `docs/` 是业务口径与验收的唯一入口；`app/` 不复制业务规则，只提供机器可执行的投影。
@@ -33,7 +35,7 @@
 - 构建 harness 适配器：`harness/` 提供 `HarnessAdapter`、`OpenCodeHttpAdapter`、`OpenCodeServer`、构建工作区、HTTP/SSE 客户端和事件归一化；真实 `opencode serve` 的 session／事件／权限探针已跑通。
 - 构建期依赖请求桥：每个工作区写入 `request-dependency` 插件，Agent 调用 `request_dependency` 后写 `control/dependencies/requests/<id>.json`；`DependencyBridge` 在 host 侧按 `DependencyPolicy` 返回基线／allowlist 结果、安装 allowlist 包、挂起一次性审批或取消未决请求，再写 `responses/<id>.json`。安装支持 build 解释器的 `pip` 和 `uv pip --python`，安装后用 `importlib.metadata` 验证版本。
 - 批次目录树（P1）：批次页使用左侧目录树 + 右侧批次表／任务文件面板；新增 `GET /api/batch-tree`、`POST/PATCH/DELETE /api/batch-folders...`、`PATCH /api/batches/{batch_id}`、`POST /api/batches/move` 和 `folder_id`／`unfiled`／`archived_only` 筛选。分组只改变展示位置，批次不嵌套、任务不跨批次移动，解散分组不删除批次；设计与验收见 `docs/48`。
-- 前端：`frontend/` 是 React 19 + TypeScript + Vite + Tailwind CSS v4 应用，已覆盖应用外壳、批次列表、列表页内“新建批次”弹窗、批次详情、继续导入、站点详情、站点级构建、任务列表、任务详情、任务工作台（目录 + 独立任务定义 + 最近任务 + 结构化运行事件 + 实时数据 + 原始日志 + 批次批量添加 + 定义编辑）、构建记录列表、构建详情和模型配置页（模型池增删、默认档位、探测、保存与恢复环境值），接真实 `/api/batches`／`/api/batches/{id}`／`/api/batches/{id}/import`／`/api/batches/{id}/sites/{site_key}/build`／`/api/builds`／`/api/builds/{id}`／`/api/tasks`／`/api/tasks/{id}`／`/api/tasks/{id}/items`／`/api/tasks/{id}/csv`／`/api/tasks/{id}/events/history`／`/api/tasks/{id}/feedback`／`/api/feedback/{id}/triage`／`/api/workbench/tree`／`/api/workbench/groups`／`/api/workbench/tasks`／`/api/workbench/import-batch`／`/api/workbench/runs/{task_id}/attach`／`/api/workbench/recent`／`/api/health`；批次详情支持状态带筛选、启动弹窗、继续导入弹窗、暂停、归档／恢复、取消确认和 ZIP 导出入口，站点详情支持结果预览、质量异常、CSV、构建／修复、构建审批、任务控制和技术详情；任务列表支持状态／类型／批次／站点筛选、行菜单和归档，任务详情复用结果预览、质量异常、CSV 和明细分页，并提供任务 SSE（断线回退轮询）、运行中规范计数、暂停／继续／取消后回读任务详情、结果验收反馈、分诊、归档／恢复和导出；站点详情提供站点任务历史和“规则版本”候选卡（激活／放弃／回滚）；任务反馈卡支持启动修复、创建复跑和关闭；构建记录列表按状态／模式／搜索过滤，构建详情展示多轮修复历史、验证明细、审批、完整时间线、trace 和失败构建手动继续输入框；构建时间线走 `/api/builds/{id}/events` SSE，实时思考需 `ECOM_BUILD_CAPTURE_REASONING=1`，默认不写入 trace；全量采集不额外设服务层商品数或时长上限。四个主列表共用自有 `DataTable` 单元：列宽拖动／键盘调整／还原并按表持久化，`Display options` 管理列显隐和重置列宽，工具栏“视图”切换标准／字段（批次列表字段视图单行、按字段拆列并支持左右滚动；其他列表暂保留标准／紧凑摘要），可排序表头使用 `aria-sort`；表头 40px、14px／500、surface 底，可调列右缘保留 2×20px 短竖线；表体不画垂直网格线，首末粘性列不画常驻边线，容器小于 700px 且可见数据列不超过 6 时切换为卡片，超过 6 列保持表格横滚；卡片顶部保留全选和排序，浮动批量条在窄屏横向铺开。任务列表排序走 `/api/tasks` 的 `sort`／`order`。任务 SSE、站点任务历史已迁到当前前端。应用外壳支持 248／64 侧栏折叠、pinned 本地偏好、悬停／键盘 peek、Esc 回焦，以及菜单、批量条、Toast、提示条和对话框的短时进出场；单分组不画 Rail 分隔线，顶栏品牌槽跟随侧栏 slot，面包屑只在详情页显示。FastAPI 根路径直接返回前端构建，静态资源挂在 `/assets/`；任务工作台入口是 `/#/workbench`。桌面以 1280／1440 为主；窄屏和移动抽屉已适配，待项目方验收。验证记录见 `app/frontend/README.md` 和 `docs/35`。
+- 前端：`frontend/` 是唯一 React 前端，覆盖任务工作台（任务树、最近任务、运行信息、新建/添加批次动作、目标目录）、任务列表／详情、构建记录／详情、模型配置和系统设置；批次列表、批次详情、站点详情和站点级构建入口已退役，批次只保留批量创建动作。
 - 站点构建入口：`needs_onboarding` 站点可在站点详情启动构建 Agent；站点进入 `building`，主机验证通过后规则以 `candidate` 安装并自动激活、站点变为 `ready`，失败则回到 `needs_onboarding`；已可采站点的定向修复默认只产生候选，需在站点详情人工激活。已 `ready` 的站点可在同一面板使用“重新验证／修复规则”：构建 Agent 读取已安装规则、当前任务结果和样例页，修复描述块／字段缺口后重新验证；失败时保留原规则和已有采集数据。修复 brief 自动带当前任务的计数、覆盖、内容审计、前 10 条质量异常和最多 8 个样本 URL。站点详情提供 SSE 构建时间线（思考、工具调用、可见文本按时间合并；思考默认展开并实时追加）、“验证失败后自动修复 1 轮”、“全量目录”和“归档样例页面”；实时思考需 `ECOM_BUILD_CAPTURE_REASONING=1`，默认不写 trace；构建启动前 host 机会式探测 robots.txt，只把 `Sitemap:` URL 注入 brief，失败不阻塞，不读整份、不按 disallow 拦截；构建 workspace 写入 `work/AGENTS.md` 固定阅读顺序和“不要读 robots 全文”的规则；全量目录只提高规则目标商品数，验证仍用少量商品，通过后从批次详情启动全量采集，不设商品数或时长上限。
 - 描述块合成与审计：规则可用 `compose` 按 DOM 顺序合并叙事正文、`ul.feature-list`、规格标签页等多个块，块级去重并支持 `exclude_selectors` 排除促销角标；`extract.fields.description_html.audit.blocks` 声明必须进入最终描述的页面块。主机验证会检查 `content_audit.description_gaps`，有缺口时触发自动修复；任务结果的 `content_audit` 记录审计商品数和缺口样例，任务详情显示“内容完整度”。
 - 已采数据预览：站点详情在任务运行中每 3 秒刷新最近有效商品，展示图片、名称、价格、品牌／分类和来源链接；任务结束后保留最近 10 条预览。下方“CSV 表格预览”按导出 9 列结构分页展示（运行中读 `products.jsonl`，结束后读 `products.csv`）；点击主图在弹窗内查看大图并支持缩放、复制 URL、下载和打开原图，点击“查看全文”在弹窗内查看完整描述并支持复制文本／HTML 和打开来源页。
@@ -54,7 +56,7 @@
 - `src/ecom_crawler/`：应用代码。
 - `src/ecom_crawler/runtime/`、`executor/`：从 R06 抽取的静态运行时和提取器；`runtime/browser.py` 是 Patchright CDP 浏览器 fetcher。
 - `src/ecom_crawler/web/`：本地 FastAPI 应用。
-- `frontend/`：React 19 + TypeScript + Vite + Tailwind v4 的唯一前端（应用外壳 + 批次列表 + 新建批次弹窗 + 批次详情 + 站点详情 + 任务列表／详情 + 结果验收）；构建产物挂在 `/`；设计依据见 `docs/35` 和 ADR 0012。
+- `frontend/`：React 19 + TypeScript + Vite + Tailwind v4 的唯一前端（任务工作台 + 任务列表／详情 + 构建记录 + 模型配置 + 系统设置）；批次只保留新建／添加动作；构建产物挂在 `/`；设计依据见 `docs/35` 和 ADR 0012。
 - `src/ecom_crawler/execution.py`、`bridge.py`：执行入口与 R06→D02 转换。
 - `schemas/`：候选输入、内部商品记录和任务结果的 JSON Schema。
 - `tests/`：T1 契约／单元测试和本地 fixture 集成测试，无外部网络。
@@ -110,7 +112,7 @@ New-Item -ItemType Directory -Force -Path $data, "$data\out", "$data\rules" | Ou
 python -m uv run --project app ecom-crawler serve --db "$data\tasks.db" --out-root "$data\out" --rules-dir "$data\rules" --port 8765
 ```
 
-打开 `http://127.0.0.1:8765/#/batches`；任务入口是 `http://127.0.0.1:8765/#/tasks`，构建记录入口是 `http://127.0.0.1:8765/#/builds`。停止用 `Ctrl+C`；重启前先停旧实例并继续使用 8765。服务启动后才构建 `frontend/dist` 时，要重启服务才可用。
+打开 `http://127.0.0.1:8765/#/workbench`；任务入口是 `http://127.0.0.1:8765/#/tasks`，构建记录入口是 `http://127.0.0.1:8765/#/builds`。停止用 `Ctrl+C`；重启前先停旧实例并继续使用 8765。服务启动后才构建 `frontend/dist` 时，要重启服务才可用。
 
 ### 开发实例与前端热更新
 
@@ -136,7 +138,7 @@ python scripts/serve_dev.py prune --ports 8775,8877-8879
 
 1. 记录当前应用版本及 `--db`、`--rules-dir`、`--out-root`。先让在途任务结清，停止 `serve` 和同账本的独立 worker。
 2. 将账本、规则目录和输出目录备到同一批次的私有备份。用 SQLite Backup API 生成独立账本，目录保留原结构和历史版本。数据库记录采用哪次交付，CSV 和结果清单在输出目录。
-3. 先在空目录还原一套，使用原启动命令替换三个路径并追加 `--read-only`。打开[原批次入口](http://127.0.0.1:8765/#/batches)，从站点和批次各下载一次，核对 ZIP 内 `batch.json` 的任务编号、CSV 内容和规则哈希。ZIP 生成时间会变化，以内容为准。
+3. 先在空目录还原一套，使用原启动命令替换三个路径并追加 `--read-only`。打开[工作台](http://127.0.0.1:8765/#/workbench)，从任务详情下载任务导出包并核对任务编号和 CSV 内容；批次 ZIP 导出已随批次页面退役，历史 ZIP 仍以文件内容为准。
 4. 要恢复运行中的任务，先恢复到记录中的原路径，再用原启动参数启动。任务规则路径、构建工作区及自定义归档路径可为绝对路径。OpenCode 未结束会话还依赖原 harness 会话存储。另一路径的只读下载演练只验证历史交付。
 
 备份位置含运行数据和配置，只保存在有权限的仓库外目录。恢复实现及边界见[批次中断与交付恢复](../docs/45-批次采集与交付改进计划.md#批次中断与交付恢复)。
@@ -151,7 +153,7 @@ $data = "C:\path\to\evidence\workbench"
 python -m uv run --project app ecom-crawler serve --db "$data\tasks.db" --out-root "$data\out" --rules-dir "$data\rules" --host 0.0.0.0 --port 8765
 ```
 
-在另一台电脑打开启动输出里的 `http://<本机局域网 IP>:8765/#/batches`。浏览器会打开登录页：用户名固定为只读的 `ecom`，输入访问密钥即可；浏览器密码管理器可以保存和填充这一组凭据。登录成功后使用 30 天会话 Cookie。命令行脚本仍可用 HTTP Basic：`curl -u "任意用户名:<访问密钥>"`。
+在另一台电脑打开启动输出里的 `http://<本机局域网 IP>:8765/#/workbench`。浏览器会打开登录页：用户名固定为只读的 `ecom`，输入访问密钥即可；浏览器密码管理器可以保存和填充这一组凭据。登录成功后使用 30 天会话 Cookie。命令行脚本仍可用 HTTP Basic：`curl -u "任意用户名:<访问密钥>"`。
 
 - 访问密钥 1–256 个字符，首尾空白会被去掉；可在启动参数／环境变量提供，也可在 `/settings` 自定义或随机生成。非回环 `--host` 没有可用密钥时拒绝启动；设置密钥后，回环访问同样需要登录。
 - Host 只接受回环、本机检测到的地址／主机名，以及 `--allow-host <名称>` 追加的名称；用 mDNS 名称（如 `my-pc.local`）访问时把它加进 `--allow-host`，可重复传入。
@@ -358,7 +360,7 @@ runtime:
 - `GET /api/tasks/{id}/events` 是 SSE：连接先发 `snapshot`，再转发 `events.ndjson` 增量，终态发 `end`；断线重连以快照为准。
 - 导出 zip 只允许 `products.csv`、`task-result.json`、`records.jsonl` 和 `diagnostics/` 下的排除／失败文件；`partial=true` 才允许导出未结束任务。
 - 页面支持列表（状态、结果／覆盖、质量异常数）、创建（市场／语言由规则包确定并显示）、详情、控制按钮、计数（7 张主卡 + 完整计数行）、质量异常、商品预览（价格、币种、正文状态、缺失字段、可展开字段来源）、items 和导出；页首显示服务／worker 状态，`QUEUED` 详情显示排队原因；控制请求显示“已受理”，最终状态以账本为准；取消需二次确认。真实案例走查见 `experiments/d08/ui-preview/`（`web-946474de5cf1`，familidoo 6／6、0 失败、0 条质量异常；暂停／恢复／取消、归档／还原、导出和错误提示通过）。
-- `frontend/` 构建后由 FastAPI 在根路径提供 React 前端，静态资源挂在 `/assets/`。入口是 `http://127.0.0.1:<port>/#/batches`，任务入口是 `/#/tasks`，构建记录是 `/#/builds`。前端未构建时，`/` 返回 503 `UI_NOT_BUILT`，提示先构建 `frontend/dist`。
+- `frontend/` 构建后由 FastAPI 在根路径提供 React 前端，静态资源挂在 `/assets/`。入口是 `http://127.0.0.1:<port>/#/workbench`，任务入口是 `/#/tasks`，构建记录是 `/#/builds`。前端未构建时，`/` 返回 503 `UI_NOT_BUILT`，提示先构建 `frontend/dist`。
 - 托管 worker 在服务生命周期内执行 `QUEUED` 任务；服务退出时先停止领取新任务，再等待已启动任务结束。
 - `--no-worker` 时创建／启动的任务保持 `QUEUED`，需要另跑 `ecom-crawler worker`；设计门已于 2026-11-22 通过，A16 1280 已于 2026-11-23 验收；四引擎跨浏览器已自验，真实 Safari／读屏未测。
 - 证据：`tests/test_web.py` 覆盖健康、规则目录、列表筛选、详情、items 分页、创建幂等、控制转移、归档／还原、SSE、导出白名单和错误码；`tests/test_feedback.py` 覆盖质量反馈创建幂等、终态守卫、查询／筛选、分诊和 422 envelope；`tests/test_workbench.py` 覆盖目录/任务定义、启动运行映射、最近任务、非终止移除 409、恢复、批次导入去重、定义属性编辑、同级排序和历史运行加入；任务页的筛选、导出、归档和反馈逻辑由 `src/features/tasks/task.test.ts` 与浏览器实机走查覆盖。

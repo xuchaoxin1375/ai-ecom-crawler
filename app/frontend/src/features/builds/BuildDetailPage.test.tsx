@@ -223,7 +223,7 @@ it("keeps build list filters on the back link", async () => {
   expect(back).toHaveAttribute("href", "/builds?state=active&mode=repair");
 });
 
-it("separates continuing the session from rebuilding", async () => {
+it("continues the session without offering rebuild", async () => {
   const build = buildFixture({
     state: "FINISHED",
     outcome: "failed",
@@ -237,6 +237,7 @@ it("separates continuing the session from rebuilding", async () => {
 
   expect(await screen.findByRole("button", { name: "继续原会话" })).toBeVisible();
   expect(screen.getByRole("button", { name: "发送并继续" })).toBeVisible();
-  expect(screen.getByRole("button", { name: "重新构建（新 build）" })).toBeVisible();
-  expect(screen.getByText(/不产生新的 build/)).toBeVisible();
+  expect(
+    screen.queryByRole("button", { name: "重新构建（新 build）" }),
+  ).not.toBeInTheDocument();
 });

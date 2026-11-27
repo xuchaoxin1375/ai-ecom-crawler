@@ -68,7 +68,6 @@ import { taskPrimaryControl } from "../../lib/taskControl";
 import {
   TASK_STATE_OPTIONS,
   TASK_TYPE_OPTIONS,
-  batchHref,
   summarizeTasks,
   taskMatchesQuery,
   taskNeedsAttention,
@@ -113,7 +112,6 @@ export function TasksPage() {
 
   const state = searchParams.get("state") ?? "";
   const taskType = searchParams.get("type") ?? "";
-  const batchId = searchParams.get("batch") ?? "";
   const siteKey = searchParams.get("site") ?? "";
   const includeArchived = searchParams.get("archived") === "1";
   const queryParam = searchParams.get("q") ?? "";
@@ -126,7 +124,6 @@ export function TasksPage() {
   const [queryDraft, setQueryDraft] = useState(queryParam);
   const resetWidthsRef = useRef<(() => void) | null>(null);
   const [widthsCustomized, setWidthsCustomized] = useState(false);
-  const [batchDraft, setBatchDraft] = useState(batchId);
   const [siteDraft, setSiteDraft] = useState(siteKey);
   const [busy, setBusy] = useState("");
   const [refreshing, setRefreshing] = useState(false);
@@ -140,8 +137,6 @@ export function TasksPage() {
   // and reset.
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => setQueryDraft(queryParam), [queryParam]);
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => setBatchDraft(batchId), [batchId]);
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => setSiteDraft(siteKey), [siteKey]);
 
@@ -162,7 +157,6 @@ export function TasksPage() {
   function resetFilters() {
     setSearchParams(new URLSearchParams(), { replace: true });
     setQueryDraft("");
-    setBatchDraft("");
     setSiteDraft("");
   }
 
@@ -171,7 +165,6 @@ export function TasksPage() {
       "tasks",
       state,
       taskType,
-      batchId,
       siteKey,
       includeArchived,
       offset,
@@ -183,7 +176,6 @@ export function TasksPage() {
         {
           state: state || undefined,
           taskType: taskType || undefined,
-          batchId: batchId || undefined,
           siteKey: siteKey || undefined,
           includeArchived,
           limit: PAGE_SIZE,
@@ -218,7 +210,7 @@ export function TasksPage() {
   });
 
   const hasFilters = Boolean(
-    state || taskType || batchId || siteKey || queryParam || includeArchived,
+    state || taskType || siteKey || queryParam || includeArchived,
   );
 
   async function refresh() {
@@ -417,17 +409,6 @@ export function TasksPage() {
                 {task.task_id}
               </span>
               <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[11px] text-ink-3">
-                {batchHref(task) ? (
-                  <Link
-                    className="hover:text-accent hover:underline"
-                    to={batchHref(task) ?? ""}
-                  >
-                    {task.batch_id}
-                  </Link>
-                ) : (
-                  <span>未关联批次</span>
-                )}
-                <span>·</span>
                 <span>{taskTypeLabel(task.task_type)}</span>
               </div>
             </>
@@ -662,7 +643,7 @@ export function TasksPage() {
       <PageHeader
         eyebrow="任务控制台"
         title="全部任务"
-        description="按站点和批次查看每一次采集运行；任务结果、反馈和导出都属于单个任务，不改变批次汇总口径。"
+        description="按站点查看每一次采集运行；任务结果、反馈和导出都属于单个任务。"
         actions={
           <div className="flex flex-wrap items-center gap-2">
             {liveRefresh ? (
@@ -760,19 +741,6 @@ export function TasksPage() {
             </Select>
           </FilterField>
 
-          <FilterField label="批次 ID">
-            <Input
-              className="w-40"
-              value={batchDraft}
-              placeholder="b-..."
-              onChange={(event) => setBatchDraft(event.target.value)}
-              onBlur={() => commitText("batch", batchDraft.trim())}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") commitText("batch", batchDraft.trim());
-              }}
-            />
-          </FilterField>
-
           <FilterField label="站点 ID">
             <Input
               className="w-40"
@@ -796,7 +764,7 @@ export function TasksPage() {
               <Input
                 className="pl-8"
                 value={queryDraft}
-                placeholder="任务、站点或批次"
+                placeholder="任务或站点"
                 onChange={(event) => setQueryDraft(event.target.value)}
                 onBlur={() => commitText("q", queryDraft.trim())}
                 onKeyDown={(event) => {
@@ -892,14 +860,14 @@ export function TasksPage() {
               description={
                 hasFilters
                   ? "换一个筛选条件，或重置后查看全部任务。"
-                  : "从批次或站点详情启动采集后，任务会出现在这里。"
+                  : "从任务工作台启动采集后，任务会出现在这里。"
               }
               action={
                 hasFilters ? (
                   <Button onClick={resetFilters}>重置筛选</Button>
                 ) : (
                   <Button asChild>
-                    <Link to="/batches">去采集批次</Link>
+                    <Link to="/workbench">去任务工作台</Link>
                   </Button>
                 )
               }
@@ -944,7 +912,7 @@ export function TasksPage() {
             ? `任务 ${confirmCancel.task_id} 会停止；已经产生的部分结果保留。`
             : ""
         }
-        consequence="取消是任务级操作，不会删除批次和站点；可回批次详情或站点详情重新启动。"
+        consequence="取消是任务级操作，不会删除任务定义或已有结果；可在任务工作台重新启动。"
         confirmLabel="确认取消任务"
         tone="danger"
         busy={confirmBusy}

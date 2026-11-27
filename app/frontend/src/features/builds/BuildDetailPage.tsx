@@ -1,16 +1,9 @@
 import { useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
-import {
-  Link,
-  useLocation,
-  useNavigate,
-  useParams,
-  useSearchParams,
-} from "react-router-dom";
+import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
   Download,
-  ExternalLink,
   FileText,
   MoreHorizontal,
   Pause,
@@ -101,13 +94,6 @@ function BuildFact({ label, children }: { label: string; children: ReactNode }) 
   );
 }
 
-function siteHref(build: BuildStatus): string | null {
-  if (!build.batch_id || !build.site_key) return null;
-  return `/batches/${encodeURIComponent(build.batch_id)}/sites/${encodeURIComponent(
-    build.site_key,
-  )}`;
-}
-
 function newBuildRequest(prefix: string): string {
   const random =
     typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -192,7 +178,6 @@ function RepairHistory({ repairs }: { repairs: BuildRepair[] }) {
 
 export function BuildDetailPage() {
   const { buildId = "" } = useParams<{ buildId: string }>();
-  const navigate = useNavigate();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeView = parseBuildView(searchParams.get("view"));
@@ -413,7 +398,6 @@ export function BuildDetailPage() {
   );
   const dependencyInstallerConfigured =
     build?.dependency_installer_configured !== false;
-  const href = build ? siteHref(build) : null;
   const hasEvidence =
     Array.isArray(build?.change_summary?.changed_fields) ||
     build?.validation?.status === "PASSED" ||
@@ -444,7 +428,6 @@ export function BuildDetailPage() {
     );
   }
 
-  const rebuildHref = href ? `${href}?build=1` : null;
   const canCancel = ["QUEUED", "CREATED", "RUNNING", "PAUSED"].includes(build.state);
   const events = visibleBuildEvents(build).slice(-4);
 
@@ -460,11 +443,7 @@ export function BuildDetailPage() {
           ? { kind: "resume" as const, label: "继续构建" }
           : canContinue
             ? { kind: "continue" as const, label: "继续原会话" }
-            : build.state === "FINISHED" && build.outcome === "succeeded"
-              ? { kind: "site" as const, label: "查看站点" }
-              : build.state === "CANCELLED"
-                ? { kind: "rebuild" as const, label: "重新构建" }
-                : null;
+            : null;
 
   function focusContinue() {
     if (activeView !== "status") setView("status");
@@ -549,18 +528,6 @@ export function BuildDetailPage() {
 
   const moreGroups: RowActionItem[][] = [];
   const primaryActions: RowActionItem[] = [];
-  if (
-    rebuildHref &&
-    (canContinue || build.state === "CANCELLED") &&
-    primary?.kind !== "rebuild"
-  ) {
-    primaryActions.push({
-      key: "rebuild",
-      label: "重新构建（新 build）",
-      icon: <RefreshCw size={14} />,
-      onSelect: () => navigate(rebuildHref),
-    });
-  }
   if (canCancel && primary?.kind !== "cancel") {
     primaryActions.push({
       key: "cancel",
@@ -583,22 +550,6 @@ export function BuildDetailPage() {
       onSelect: () => void copyId(),
     },
   ];
-  if (href) {
-    utilityActions.push({
-      key: "site",
-      label: "打开站点详情",
-      icon: <ArrowLeft size={14} />,
-      onSelect: () => navigate(href),
-    });
-  }
-  if (build.batch_id) {
-    utilityActions.push({
-      key: "batch",
-      label: "打开批次详情",
-      icon: <ArrowLeft size={14} />,
-      onSelect: () => navigate(`/batches/${encodeURIComponent(build.batch_id ?? "")}`),
-    });
-  }
   if (build.trace_available) {
     utilityActions.push(
       {
@@ -666,15 +617,6 @@ export function BuildDetailPage() {
                 >
                   {continueBusy ? "发送中…" : "发送并继续"}
                 </Button>
-                {rebuildHref ? (
-                  <Button
-                    size="sm"
-                    onClick={() => navigate(rebuildHref)}
-                    disabled={continueBusy}
-                  >
-                    重新构建（新 build）
-                  </Button>
-                ) : null}
               </div>
             </div>
             {configBlockReason ? (
@@ -768,7 +710,7 @@ export function BuildDetailPage() {
           {build.catalog?.catalog_scope === "full"
             ? `全量目标 ${build.catalog.catalog_products ?? "—"}`
             : build.catalog?.catalog_scope === "batch"
-              ? "批次目标范围"
+              ? "目标范围"
               : "样例"}
         </BuildFact>
         <BuildFact label="思考">
@@ -959,14 +901,6 @@ export function BuildDetailPage() {
       focusContinue();
       return;
     }
-    if (primary.kind === "site" && href) {
-      navigate(href);
-      return;
-    }
-    if (primary.kind === "rebuild" && rebuildHref) {
-      navigate(rebuildHref);
-      return;
-    }
     if (primary.kind === "pause" || primary.kind === "resume") {
       void runControl(primary.kind);
     }
@@ -1007,19 +941,7 @@ export function BuildDetailPage() {
               </span>
             </p>
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-3">
-              {href ? (
-                <Link className="text-accent hover:underline" to={href}>
-                  站点详情
-                </Link>
-              ) : null}
-              {build.batch_id ? (
-                <Link
-                  className="text-accent hover:underline"
-                  to={`/batches/${encodeURIComponent(build.batch_id)}`}
-                >
-                  批次 {build.batch_id}
-                </Link>
-              ) : null}
+              <span>站点 {build.site_key || "—"}</span>
               <span>更新 {formatTime(build.updated_at)}</span>
               {queued && build.queue_position ? (
                 <span className="font-medium text-ink-2">
@@ -1040,29 +962,15 @@ export function BuildDetailPage() {
                 variant={primary.kind === "cancel" ? "danger" : "primary"}
                 onClick={handlePrimary}
                 disabled={
-                  Boolean(busy) ||
-                  (primary.kind === "continue" && continueDisabled) ||
-                  (primary.kind === "site" && !href) ||
-                  (primary.kind === "rebuild" && !rebuildHref)
+                  Boolean(busy) || (primary.kind === "continue" && continueDisabled)
                 }
               >
                 {primary.kind === "pause" ? (
                   <Pause size={14} aria-hidden="true" />
-                ) : primary.kind === "resume" ? (
+                ) : primary.kind === "resume" || primary.kind === "continue" ? (
                   <Play size={14} aria-hidden="true" />
-                ) : primary.kind === "continue" ? (
-                  <Play size={14} aria-hidden="true" />
-                ) : primary.kind === "site" ? (
-                  <ExternalLink size={14} aria-hidden="true" />
-                ) : (
-                  <RefreshCw size={14} aria-hidden="true" />
-                )}
-                {busy &&
-                primary.kind !== "continue" &&
-                primary.kind !== "site" &&
-                primary.kind !== "rebuild"
-                  ? "处理中…"
-                  : primary.label}
+                ) : null}
+                {busy && primary.kind !== "continue" ? "处理中…" : primary.label}
               </Button>
             ) : null}
             <RowActionsMenu

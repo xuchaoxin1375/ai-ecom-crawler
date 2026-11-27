@@ -12,7 +12,6 @@ import { useQuery } from "@tanstack/react-query";
 import {
   Cpu,
   Layers,
-  LayoutList,
   ListTodo,
   ListTree,
   MemoryStick,
@@ -260,16 +259,12 @@ export function AppShell() {
   const [focused, setFocused] = useState(false);
   const [suppressed, setSuppressed] = useState(false);
   const [mobileOpenPath, setMobileOpenPath] = useState<string | null>(null);
-  const siteMatch = location.pathname.match(/^\/batches\/([^/]+)\/sites\/[^/]+/);
-  const batchMatch = location.pathname.match(/^\/batches\/([^/]+)/);
   const isTaskDetail = /^\/tasks\/[^/]+/.test(location.pathname);
   const isBuildDetail = /^\/builds\/[^/]+/.test(location.pathname);
   const isModelSettings = location.pathname.startsWith("/models");
   const isSystemSettings = location.pathname.startsWith("/settings");
   const isWorkbench = location.pathname.startsWith("/workbench");
-  const isSiteDetail = Boolean(siteMatch);
-  const isBatchDetail = Boolean(batchMatch) && !isSiteDetail;
-  const showBreadcrumb = isBatchDetail || isSiteDetail || isTaskDetail || isBuildDetail;
+  const showBreadcrumb = isTaskDetail || isBuildDetail;
 
   const visualOpen = pinned || (!suppressed && (hovered || focused));
   const peeking = !pinned && visualOpen;
@@ -296,27 +291,21 @@ export function AppShell() {
       ? "任务详情"
       : isBuildDetail
         ? "构建详情"
-        : isSiteDetail
-          ? "站点详情"
-          : isBatchDetail
-            ? "批次详情"
-            : isModelSettings
-              ? "模型配置"
-              : isSystemSettings
-                ? "系统设置"
-                : location.pathname.startsWith("/workbench")
-                  ? "任务工作台"
-                  : location.pathname.startsWith("/tasks")
-                    ? "全部任务"
-                    : location.pathname.startsWith("/builds")
-                      ? "构建记录"
-                      : "采集批次";
+        : isModelSettings
+          ? "模型配置"
+          : isSystemSettings
+            ? "系统设置"
+            : location.pathname.startsWith("/workbench")
+              ? "任务工作台"
+              : location.pathname.startsWith("/tasks")
+                ? "全部任务"
+                : location.pathname.startsWith("/builds")
+                  ? "构建记录"
+                  : "任务工作台";
     document.title = `${title} · 电商采集`;
   }, [
-    isBatchDetail,
     isBuildDetail,
     isModelSettings,
-    isSiteDetail,
     isSystemSettings,
     isTaskDetail,
     location.pathname,
@@ -464,7 +453,7 @@ export function AppShell() {
               "flex h-9 w-full items-center overflow-hidden rounded-control text-ink transition-colors hover:bg-surface-muted",
               pinned ? "px-[18px]" : "justify-center",
             )}
-            href="#/batches"
+            href="#/workbench"
             aria-label="电商采集首页"
           >
             <span
@@ -505,7 +494,7 @@ export function AppShell() {
           </button>
           <a
             className="flex min-w-0 items-center gap-2 rounded-control text-ink"
-            href="#/batches"
+            href="#/workbench"
             aria-label="电商采集首页"
           >
             <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] bg-accent text-white">
@@ -542,32 +531,7 @@ export function AppShell() {
                 </span>
                 <span className="font-medium text-ink">构建详情</span>
               </>
-            ) : (
-              <>
-                <a className="hover:text-ink" href="#/batches">
-                  采集批次
-                </a>
-                <span className="text-line-strong" aria-hidden="true">
-                  /
-                </span>
-                {isSiteDetail ? (
-                  <>
-                    <a
-                      className="hover:text-ink"
-                      href={`#/batches/${encodeURIComponent(siteMatch?.[1] ?? "")}`}
-                    >
-                      批次详情
-                    </a>
-                    <span className="text-line-strong" aria-hidden="true">
-                      /
-                    </span>
-                    <span className="font-medium text-ink">站点详情</span>
-                  </>
-                ) : (
-                  <span className="font-medium text-ink">批次详情</span>
-                )}
-              </>
-            )}
+            ) : null}
           </nav>
         ) : null}
 
@@ -614,15 +578,6 @@ export function AppShell() {
                     <WorkbenchTreeToggle expanded={visualOpen} />
                   </div>
                 ) : null}
-                <SidebarLink
-                  to="/batches"
-                  icon={<LayoutList size={17} />}
-                  label="采集批次"
-                  expanded={visualOpen}
-                  onPointerNavigate={() => {
-                    if (!pinned) setFocused(false);
-                  }}
-                />
                 <SidebarLink
                   to="/tasks"
                   icon={<ListTodo size={17} />}
@@ -720,7 +675,7 @@ export function AppShell() {
             <div className="flex h-14 items-center justify-between gap-3 border-b border-line px-4">
               <a
                 className="flex min-w-0 items-center gap-2.5 rounded-control text-ink"
-                href="#/batches"
+                href="#/workbench"
                 aria-label="电商采集首页"
                 onClick={closeMobile}
               >
@@ -748,13 +703,6 @@ export function AppShell() {
                     to="/workbench"
                     icon={<ListTree size={17} />}
                     label="任务工作台"
-                    expanded
-                    onPointerNavigate={closeMobile}
-                  />
-                  <SidebarLink
-                    to="/batches"
-                    icon={<LayoutList size={17} />}
-                    label="采集批次"
                     expanded
                     onPointerNavigate={closeMobile}
                   />

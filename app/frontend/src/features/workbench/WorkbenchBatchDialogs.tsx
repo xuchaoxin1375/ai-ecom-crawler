@@ -2,7 +2,6 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { useQuery } from "@tanstack/react-query";
 import { Layers, ListPlus, X } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
-import { Link } from "react-router-dom";
 import {
   getBatch,
   getBatches,
@@ -193,11 +192,7 @@ export function WorkbenchImportBatchDialog({
           </p>
         ) : batches.length === 0 ? (
           <div className="rounded-panel border border-dashed border-line-strong px-3 py-4 text-xs text-ink-3">
-            还没有批次可添加。先到
-            <Link className="mx-1 text-accent hover:underline" to="/batches">
-              采集批次
-            </Link>
-            创建并导入站点，再回到这里批量添加。
+            还没有可添加的批次记录。先用任务工作台的“新建批次”创建并选择目标目录。
           </div>
         ) : (
           <>

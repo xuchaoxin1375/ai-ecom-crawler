@@ -1386,7 +1386,6 @@ export function WorkbenchPage() {
     : (selectedNode?.name ?? "");
   const selectedDefinition =
     selectedRecent?.definition ?? selectedNode?.definition ?? null;
-  const selectedBatchName = selectedRecent?.batch_name ?? null;
   const selectedPath = selectedRecent?.path ?? selectedNode?.path ?? null;
   const detailCounts =
     selectedRecent?.counts ?? selectedNode?.current_run?.counts ?? {};
@@ -2109,10 +2108,9 @@ export function WorkbenchPage() {
                                   </div>
                                   <p
                                     className="mt-0.5 truncate text-[10.5px] text-ink-3"
-                                    title={`${item.path || "未加入任务树"} · ${item.batch_name || "独立任务"} · ${item.task_id}`}
+                                    title={`${item.path || "未加入任务树"} · ${item.task_id}`}
                                   >
-                                    {item.path || "未加入任务树"} ·{" "}
-                                    {item.batch_name || "独立任务"} · {item.task_id}
+                                    {item.path || "未加入任务树"} · {item.task_id}
                                   </p>
                                 </div>
                               </td>
@@ -2693,7 +2691,6 @@ export function WorkbenchPage() {
                         ],
                         ["任务 ID", selectedTaskId || "—"],
                         ["位置", selectedPath || "未加入任务树"],
-                        ["批次", selectedBatchName || "独立任务"],
                         [
                           "规则",
                           selectedDefinition
@@ -2768,7 +2765,7 @@ export function WorkbenchPage() {
                     </a>
                     <p className="text-[11px] leading-5 text-ink-3">
                       导出包包含 products.csv、task-result.json、records.jsonl 和
-                      diagnostics；批次 ZIP 仍在批次页导出。
+                      diagnostics；批次 ZIP 导出已随批次页面退役。
                     </p>
                     {selectedTaskUrl ? (
                       <Link

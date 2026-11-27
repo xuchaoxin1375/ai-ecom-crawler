@@ -29,20 +29,12 @@ import { PageHeader } from "../../components/ui/PageHeader";
 
 const LIMIT = 100;
 
-function siteHref(build: BuildStatus): string | null {
-  if (!build.batch_id || !build.site_key) return null;
-  return `/batches/${encodeURIComponent(build.batch_id)}/sites/${encodeURIComponent(
-    build.site_key,
-  )}`;
-}
-
 function matchesQuery(build: BuildStatus, query: string): boolean {
   const text = query.trim().toLowerCase();
   if (!text) return true;
   return [
     build.build_id,
     build.site_key,
-    build.batch_id,
     build.rule?.rule_id,
     build.rule?.rule_version,
     build.error,
@@ -175,16 +167,6 @@ export function BuildsPage() {
                 >
                   {buildModeLabel(build.mode)}
                 </Badge>
-                {build.batch_id ? (
-                  <Link
-                    className="hover:text-accent hover:underline"
-                    to={`/batches/${encodeURIComponent(build.batch_id)}`}
-                  >
-                    {build.batch_id}
-                  </Link>
-                ) : (
-                  <span>未关联批次</span>
-                )}
               </div>
             </>
           )}
@@ -203,7 +185,6 @@ export function BuildsPage() {
       minWidth: 160,
       maxWidth: 400,
       cell: (build, { compact }) => {
-        const href = siteHref(build);
         const ruleText = build.rule
           ? `${build.rule.rule_id}@${build.rule.rule_version}`
           : build.mode === "repair" && build.source_rule?.rule_version
@@ -221,18 +202,9 @@ export function BuildsPage() {
         }
         return (
           <div className="min-w-0">
-            {href ? (
-              <Link
-                className="block truncate text-sm font-medium text-ink hover:text-accent hover:underline"
-                to={href}
-              >
-                {build.site_key}
-              </Link>
-            ) : (
-              <span className="block truncate text-sm text-ink">
-                {build.site_key || "—"}
-              </span>
-            )}
+            <span className="block truncate text-sm text-ink">
+              {build.site_key || "—"}
+            </span>
             <span className="mt-0.5 block truncate font-mono text-[11px] text-ink-3">
               {ruleText}
             </span>
@@ -413,7 +385,7 @@ export function BuildsPage() {
             <Input
               id="build-search"
               value={queryDraft}
-              placeholder="构建 ID、站点、批次或规则版本"
+              placeholder="构建 ID、站点或规则版本"
               onChange={(event) => setQueryDraft(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter") submitSearch();
@@ -503,14 +475,14 @@ export function BuildsPage() {
               description={
                 hasFilters
                   ? "换一个筛选条件，或重置后查看全部构建。"
-                  : "从站点详情启动方案构建或规则修复后，构建会出现在这里。"
+                  : "站点构建入口暂未迁入任务工作台；已有构建记录仍可在这里查看。"
               }
               action={
                 hasFilters ? (
                   <Button onClick={resetFilters}>重置筛选</Button>
                 ) : (
                   <Button asChild>
-                    <Link to="/batches">去采集批次</Link>
+                    <Link to="/workbench">去任务工作台</Link>
                   </Button>
                 )
               }

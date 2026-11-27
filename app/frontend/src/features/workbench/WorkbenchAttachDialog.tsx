@@ -120,12 +120,6 @@ export function WorkbenchAttachDialog({
                 </dd>
               </div>
               <div className="min-w-0">
-                <dt className="text-ink-3">批次来源</dt>
-                <dd className="truncate text-ink-2" title={item.batch_name ?? ""}>
-                  {item.batch_name || "独立任务"}
-                </dd>
-              </div>
-              <div className="min-w-0">
                 <dt className="text-ink-3">状态</dt>
                 <dd className="text-ink-2">{item.state}</dd>
               </div>
