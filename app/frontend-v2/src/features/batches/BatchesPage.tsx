@@ -1449,7 +1449,7 @@ export function BatchesPage() {
             tree={tree}
             loading={treeQuery.isPending}
             error={treeError}
-            selectedFolderId={batchParam ? null : folderParam || null}
+            selectedFolderId={folderParam || null}
             selectedBatchId={batchParam || null}
             onCreateFolder={openCreateFolder}
             onRenameFolder={openRenameFolder}
