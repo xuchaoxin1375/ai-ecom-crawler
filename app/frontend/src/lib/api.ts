@@ -1742,13 +1742,38 @@ export function restoreWorkbenchRecent(
   );
 }
 
+export interface TaskEventItem extends Record<string, unknown> {
+  seq: number;
+}
+
+export interface TaskEventHistoryPage {
+  items: TaskEventItem[];
+  total: number;
+  has_more: boolean;
+  oldest_seq: number | null;
+  newest_seq: number | null;
+}
+
+export interface TaskEventHistoryOptions {
+  limit?: number;
+  before?: number;
+  after?: number;
+  tail?: number;
+  signal?: AbortSignal;
+}
+
 export function getTaskEventsHistory(
   taskId: string,
-  signal?: AbortSignal,
-): Promise<{ items: Array<Record<string, unknown>>; total: number }> {
-  return getJson<{ items: Array<Record<string, unknown>>; total: number }>(
-    `/api/tasks/${encodeURIComponent(taskId)}/events/history?tail=200`,
-    signal,
+  options: TaskEventHistoryOptions = {},
+): Promise<TaskEventHistoryPage> {
+  return getJson<TaskEventHistoryPage>(
+    `/api/tasks/${encodeURIComponent(taskId)}/events/history${query({
+      limit: options.limit,
+      before: options.before,
+      after: options.after,
+      tail: options.tail,
+    })}`,
+    options.signal,
   );
 }
 
@@ -1909,8 +1934,9 @@ export function rejectRuleVersion(
   );
 }
 
-export function taskEventsUrl(taskId: string): string {
-  return `/api/tasks/${encodeURIComponent(taskId)}/events`;
+export function taskEventsUrl(taskId: string, after?: number | null): string {
+  const suffix = after != null ? `?after=${after}` : "";
+  return `/api/tasks/${encodeURIComponent(taskId)}/events${suffix}`;
 }
 
 export function taskExportUrl(taskId: string, partial = true): string {

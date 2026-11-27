@@ -35,6 +35,7 @@ import {
   taskStateTone,
 } from "../../lib/format";
 import { cn } from "../../lib/cn";
+import { useManualRefresh } from "../../lib/liveRefresh";
 import { readListReturn } from "../../lib/listReturn";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
@@ -134,6 +135,7 @@ export function TaskDetailPage() {
   const [error, setError] = useState("");
 
   const stream = useTaskStream(taskId, Boolean(taskId));
+  const { refreshing, runRefresh } = useManualRefresh();
 
   const taskQuery = useQuery({
     queryKey: ["task", taskId],
@@ -199,7 +201,7 @@ export function TaskDetailPage() {
   }
 
   function refresh() {
-    void taskQuery.refetch();
+    void runRefresh(() => taskQuery.refetch());
   }
 
   function setView(next: TaskView) {
@@ -753,9 +755,9 @@ export function TaskDetailPage() {
                 </Button>
               }
             />
-            <Button onClick={refresh} disabled={taskQuery.isFetching}>
+            <Button onClick={refresh} disabled={refreshing}>
               <RefreshCw
-                className={taskQuery.isFetching ? "animate-spin" : undefined}
+                className={refreshing ? "animate-spin" : undefined}
                 size={14}
                 aria-hidden="true"
               />

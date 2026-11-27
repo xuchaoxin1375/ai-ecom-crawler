@@ -253,6 +253,13 @@ const productItem = {
 
 beforeEach(() => {
   setWorkbenchTreeCollapsed(false);
+  vi.stubGlobal(
+    "EventSource",
+    class {
+      addEventListener() {}
+      close() {}
+    },
+  );
 });
 
 afterEach(() => {
@@ -413,7 +420,7 @@ it("renders the task tree, recent run and structured events", async () => {
   expect(await within(treePanel).findByText("fixture.example")).toBeInTheDocument();
   const recentSection = screen.getByLabelText("最近任务");
   fireEvent.click(within(recentSection).getByText(/web-1/));
-  expect(await screen.findByText("task_started")).toBeInTheDocument();
+  expect((await screen.findAllByText("task_started")).length).toBeGreaterThan(0);
   expect(screen.getByRole("button", { name: "暂停 web-1" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /更多 web-1 操作/ })).toBeInTheDocument();
 });
@@ -467,7 +474,7 @@ it("resizes and collapses the workbench panels", async () => {
   expect(
     screen.queryByRole("separator", { name: "调整上下窗格高度" }),
   ).not.toBeInTheDocument();
-  expect(screen.queryByRole("tabpanel", { name: "运行事件" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("tabpanel", { name: "运行日志" })).not.toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("tab", { name: "任务详情" }));
   expect(screen.getByRole("tabpanel", { name: "任务详情" })).toBeInTheDocument();
@@ -477,7 +484,7 @@ it("resizes and collapses the workbench panels", async () => {
   );
 });
 
-it("shows live product data and raw event lines", async () => {
+it("shows live product data and runtime log lines", async () => {
   stubFetch();
   renderPage("/workbench", { pathname: "/workbench" }, <WorkbenchPage />);
 
@@ -487,10 +494,21 @@ it("shows live product data and raw event lines", async () => {
   expect(await screen.findByText("Fixture product")).toBeInTheDocument();
   expect(screen.getByText("Fixture · toy")).toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole("tab", { name: "原始日志" }));
-  const rawPanel = screen.getByRole("tabpanel", { name: "原始日志" });
-  expect(within(rawPanel).getByText(/task_started/)).toBeInTheDocument();
-  expect(within(rawPanel).getByText(/显示 1 \/ 1 行/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("tab", { name: "运行日志" }));
+  const logPanel = screen.getByRole("tabpanel", { name: "运行日志" });
+  expect((await within(logPanel).findAllByText("task_started")).length).toBeGreaterThan(
+    0,
+  );
+  expect(within(logPanel).getByText(/已加载/)).toHaveTextContent("1");
+  expect(within(logPanel).getByText(/^\d{2}:\d{2}:\d{2}$/)).toBeInTheDocument();
+  const dateToggle = within(logPanel).getByRole("checkbox", {
+    name: "显示日期",
+  });
+  expect(dateToggle).not.toBeChecked();
+  fireEvent.click(dateToggle);
+  expect(
+    within(logPanel).getByText(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/),
+  ).toBeInTheDocument();
 });
 
 it("runs header bulk actions and exports the selected run", async () => {

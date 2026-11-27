@@ -11,6 +11,7 @@ import {
 } from "../../lib/format";
 import { buildIsActive } from "../sites/site";
 import { buildModeLabel } from "../sites/build";
+import { useDelayedFlag, useManualRefresh } from "../../lib/liveRefresh";
 import { rememberListReturn, useListReturnRestore } from "../../lib/listReturn";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
@@ -63,6 +64,8 @@ export function BuildsPage() {
   });
 
   const builds = useMemo(() => query.data?.builds ?? [], [query.data?.builds]);
+  const { refreshing, runRefresh } = useManualRefresh();
+  const showUpdating = useDelayedFlag(query.isFetching);
   const visible = useMemo(
     () =>
       builds.filter((build) => {
@@ -333,9 +336,12 @@ export function BuildsPage() {
         title="构建记录"
         description="查看站点方案构建和规则修复的会话、自动修复轮次、主机验证与审批请求。构建与采集任务分开记录。"
         actions={
-          <Button onClick={() => void query.refetch()} disabled={query.isFetching}>
+          <Button
+            onClick={() => void runRefresh(() => query.refetch())}
+            disabled={refreshing}
+          >
             <RefreshCw
-              className={query.isFetching ? "animate-spin" : undefined}
+              className={refreshing ? "animate-spin" : undefined}
               size={14}
               aria-hidden="true"
             />
@@ -434,7 +440,7 @@ export function BuildsPage() {
             {query.isPending
               ? "正在读取构建记录…"
               : `显示 ${visible.length} / ${builds.length} 条${
-                  query.isFetching ? " · 更新中…" : ""
+                  showUpdating ? " · 更新中…" : ""
                 }`}
           </p>
           <div className="flex flex-wrap items-center gap-2">

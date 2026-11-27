@@ -121,14 +121,30 @@ export function siteStatusText(
   return "";
 }
 
-export function formatTime(value: string | null | undefined): string {
+export function formatTime(
+  value: string | null | undefined,
+  withSeconds = false,
+): string {
   if (!value) return "-";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   const pad = (part: number) => String(part).padStart(2, "0");
+  const seconds = withSeconds ? `:${pad(date.getSeconds())}` : "";
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
     date.getDate(),
-  )} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  )} ${pad(date.getHours())}:${pad(date.getMinutes())}${seconds}`;
+}
+
+export function formatClock(
+  value: string | number | Date | null | undefined,
+  withSeconds = false,
+): string {
+  if (value == null || value === "") return "—";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  const pad = (part: number) => String(part).padStart(2, "0");
+  const minutes = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  return withSeconds ? `${minutes}:${pad(date.getSeconds())}` : minutes;
 }
 
 export function formatNumber(value: number): string {

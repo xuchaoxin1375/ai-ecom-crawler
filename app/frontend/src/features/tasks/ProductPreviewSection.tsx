@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
 import { getTaskItems, type TaskItem } from "../../lib/api";
 import { descriptionStatusTone, formatNumber } from "../../lib/format";
+import { useManualRefresh } from "../../lib/liveRefresh";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
 import { ErrorNotice } from "../../components/ui/ErrorNotice";
@@ -30,6 +31,7 @@ export function ProductPreviewSection({
   const [previewItem, setPreviewItem] = useState<TaskItem | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewTab, setPreviewTab] = useState<"image" | "description">("image");
+  const { refreshing, runRefresh } = useManualRefresh();
 
   // A task that just became terminal must not keep the last live snapshot:
   // switch to a fresh query key so the final products.jsonl / products.csv
@@ -68,11 +70,11 @@ export function ProductPreviewSection({
           <div className="flex shrink-0 items-center gap-2">
             <Button
               size="sm"
-              onClick={() => void previewQuery.refetch()}
-              disabled={previewQuery.isFetching}
+              onClick={() => void runRefresh(() => previewQuery.refetch())}
+              disabled={refreshing}
             >
               <RefreshCw
-                className={previewQuery.isFetching ? "animate-spin" : undefined}
+                className={refreshing ? "animate-spin" : undefined}
                 size={13}
                 aria-hidden="true"
               />

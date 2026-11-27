@@ -10,6 +10,7 @@ import {
   itemStateTone,
 } from "../../lib/format";
 import { cn } from "../../lib/cn";
+import { useDelayedFlag, useManualRefresh } from "../../lib/liveRefresh";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
 import { DataTable, type DataTableColumn } from "../../components/ui/DataTable";
@@ -50,6 +51,8 @@ export function TaskItemsSection({ taskId, taskActive }: TaskItemsSectionProps) 
 
   const total = itemsQuery.data?.total ?? 0;
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const { refreshing, runRefresh } = useManualRefresh();
+  const showUpdating = useDelayedFlag(itemsQuery.isFetching);
 
   const columns: DataTableColumn<TaskItem>[] = [
     {
@@ -138,11 +141,13 @@ export function TaskItemsSection({ taskId, taskActive }: TaskItemsSectionProps) 
         <div>
           <h2 className="text-[17px] leading-6 font-semibold text-ink">任务明细</h2>
           <p className="mt-0.5 text-xs leading-5 text-ink-3" role="status">
-            {itemsQuery.isPending && !taskActive
-              ? "任务已结束，正在更新结果…"
-              : itemsQuery.isFetching
-                ? "更新中…"
-                : `共 ${formatNumber(total)} 条${taskActive ? "，运行中每 3 秒刷新" : ""}`}
+            {itemsQuery.isPending
+              ? taskActive
+                ? "正在读取任务明细…"
+                : "任务已结束，正在更新结果…"
+              : `共 ${formatNumber(total)} 条${
+                  taskActive ? "，运行中每 3 秒刷新" : ""
+                }${showUpdating ? " · 更新中…" : ""}`}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -172,11 +177,11 @@ export function TaskItemsSection({ taskId, taskActive }: TaskItemsSectionProps) 
           ))}
           <Button
             size="sm"
-            onClick={() => void itemsQuery.refetch()}
-            disabled={itemsQuery.isFetching}
+            onClick={() => void runRefresh(() => itemsQuery.refetch())}
+            disabled={refreshing}
           >
             <RefreshCw
-              className={itemsQuery.isFetching ? "animate-spin" : undefined}
+              className={refreshing ? "animate-spin" : undefined}
               size={13}
               aria-hidden="true"
             />
@@ -217,7 +222,7 @@ export function TaskItemsSection({ taskId, taskActive }: TaskItemsSectionProps) 
         <div className="flex flex-wrap items-center gap-2">
           <Button
             size="sm"
-            disabled={page === 0 || itemsQuery.isFetching}
+            disabled={page === 0}
             onClick={() => setPage((value) => Math.max(0, value - 1))}
           >
             <ChevronLeft size={13} aria-hidden="true" />
@@ -225,7 +230,7 @@ export function TaskItemsSection({ taskId, taskActive }: TaskItemsSectionProps) 
           </Button>
           <Button
             size="sm"
-            disabled={page + 1 >= pageCount || itemsQuery.isFetching}
+            disabled={page + 1 >= pageCount}
             onClick={() => setPage((value) => Math.min(pageCount - 1, value + 1))}
           >
             下一页

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -243,6 +244,144 @@ class WorkbenchApiTests(unittest.TestCase):
         history = self.client.get(f"/api/tasks/{task['task_id']}/events/history")
         self.assertEqual(history.status_code, 200, history.text)
         self.assertEqual(history.json()["items"], [])
+
+    def test_event_history_pages_and_totals(self) -> None:
+        task_id = self.create_generic_task("req-log-pages")
+        run_dir = self.out_root / task_id
+        run_dir.mkdir(parents=True, exist_ok=True)
+        path = run_dir / "events.ndjson"
+        events = [
+            {
+                "ts": f"2026-11-27T10:00:0{index}Z",
+                "event": "item_finished",
+                "state": "DONE",
+                "index": index,
+            }
+            for index in range(1, 6)
+        ]
+        path.write_text(
+            "\n".join(json.dumps(event) for event in events) + "\n",
+            encoding="utf-8",
+        )
+
+        tail = self.client.get(
+            f"/api/tasks/{task_id}/events/history?limit=2"
+        ).json()
+        self.assertEqual(tail["total"], 5)
+        self.assertEqual([item["seq"] for item in tail["items"]], [4, 5])
+        self.assertTrue(tail["has_more"])
+        self.assertEqual(tail["oldest_seq"], 4)
+        self.assertEqual(tail["newest_seq"], 5)
+
+        legacy = self.client.get(
+            f"/api/tasks/{task_id}/events/history?tail=2"
+        ).json()
+        self.assertEqual([item["seq"] for item in legacy["items"]], [4, 5])
+
+        conflict = self.client.get(
+            f"/api/tasks/{task_id}/events/history?before=4&after=2"
+        )
+        self.assertEqual(conflict.status_code, 400)
+        self.assertEqual(conflict.json()["error"]["code"], "BAD_REQUEST")
+
+        older = self.client.get(
+            f"/api/tasks/{task_id}/events/history?before=4&limit=2"
+        ).json()
+        self.assertEqual([item["seq"] for item in older["items"]], [2, 3])
+        self.assertTrue(older["has_more"])
+
+        first = self.client.get(
+            f"/api/tasks/{task_id}/events/history?before=2&limit=2"
+        ).json()
+        self.assertEqual([item["seq"] for item in first["items"]], [1])
+        self.assertFalse(first["has_more"])
+
+        after = self.client.get(
+            f"/api/tasks/{task_id}/events/history?after=2&limit=2"
+        ).json()
+        self.assertEqual([item["seq"] for item in after["items"]], [3, 4])
+        self.assertTrue(after["has_more"])
+
+        after_last = self.client.get(
+            f"/api/tasks/{task_id}/events/history?after=5"
+        ).json()
+        self.assertEqual(after_last["items"], [])
+        self.assertEqual(after_last["total"], 5)
+        self.assertFalse(after_last["has_more"])
+
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(
+                json.dumps(
+                    {"ts": "2026-11-27T10:00:06Z", "event": "item_finished"}
+                )
+                + "\n"
+            )
+            handle.write(
+                json.dumps(
+                    {"ts": "2026-11-27T10:00:07Z", "event": "task_finished"}
+                )
+                + "\n"
+            )
+        refreshed = self.client.get(
+            f"/api/tasks/{task_id}/events/history?limit=2"
+        ).json()
+        self.assertEqual(refreshed["total"], 7)
+        self.assertEqual([item["seq"] for item in refreshed["items"]], [6, 7])
+
+    def test_event_stream_after_cursor_replays_and_ends(self) -> None:
+        task_id = self.create_generic_task("req-log-stream")
+        run_dir = self.out_root / task_id
+        run_dir.mkdir(parents=True, exist_ok=True)
+        path = run_dir / "events.ndjson"
+        path.write_text(
+            "\n".join(
+                json.dumps(
+                    {
+                        "ts": f"2026-11-27T10:00:0{index}Z",
+                        "event": "item_finished",
+                        "index": index,
+                    }
+                )
+                for index in range(1, 6)
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        cancelled = self.client.post(f"/api/tasks/{task_id}/cancel")
+        self.assertEqual(cancelled.status_code, 202, cancelled.text)
+
+        lines: list[str] = []
+        with self.client.stream(
+            "GET", f"/api/tasks/{task_id}/events?after=2"
+        ) as response:
+            self.assertEqual(response.status_code, 200)
+            for line in response.iter_lines():
+                lines.append(line)
+                if line == "event: end":
+                    break
+        text = "\n".join(lines)
+        self.assertIn("id: 3", text)
+        self.assertIn("id: 4", text)
+        self.assertIn("id: 5", text)
+        self.assertNotIn("id: 1", text)
+        self.assertNotIn("id: 2", text)
+        self.assertIn("event: end", text)
+
+        replay_lines: list[str] = []
+        with self.client.stream(
+            "GET",
+            f"/api/tasks/{task_id}/events",
+            headers={**CLIENT_HEADERS, "Last-Event-ID": "2"},
+        ) as response:
+            for line in response.iter_lines():
+                replay_lines.append(line)
+                if line == "event: end":
+                    break
+        replay_text = "\n".join(replay_lines)
+        self.assertIn("id: 3", replay_text)
+        self.assertIn("id: 5", replay_text)
+        self.assertNotIn("id: 1", replay_text)
+        self.assertNotIn("id: 2", replay_text)
 
     def test_rename_move_and_dissolve_nodes(self) -> None:
         group_id, node_id = self.create_task_node()

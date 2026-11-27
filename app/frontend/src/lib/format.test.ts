@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { taskStatusLabel, taskStatusTone } from "./format";
+import { formatClock, formatTime, taskStatusLabel, taskStatusTone } from "./format";
 
 describe("taskStatusLabel", () => {
   it("uses the outcome once a task has ended", () => {
@@ -17,6 +17,22 @@ describe("taskStatusLabel", () => {
 
   it("falls back to the state when an ended task has no outcome", () => {
     expect(taskStatusLabel("FINISHED", null)).toBe("已结束");
+  });
+});
+
+describe("formatClock", () => {
+  it("renders a stable clock label", () => {
+    expect(formatClock(new Date(2026, 10, 27, 8, 5, 9))).toBe("08:05");
+    expect(formatClock(new Date(2026, 10, 27, 8, 5, 9), true)).toBe("08:05:09");
+    expect(formatClock(null)).toBe("—");
+    expect(formatClock("not-a-date")).toBe("—");
+  });
+});
+
+describe("formatTime", () => {
+  it("adds seconds only when requested", () => {
+    expect(formatTime("2026-11-27T08:05:09")).toBe("2026-11-27 08:05");
+    expect(formatTime("2026-11-27T08:05:09", true)).toBe("2026-11-27 08:05:09");
   });
 });
 

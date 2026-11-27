@@ -1,5 +1,4 @@
 import {
-  useEffect,
   useMemo,
   useRef,
   useState,
@@ -51,7 +50,6 @@ import {
   dissolveWorkbenchGroup,
   getRules,
   getSystemInfo,
-  getTaskEventsHistory,
   getTaskItems,
   getWorkbenchRecent,
   getWorkbenchTree,
@@ -73,12 +71,18 @@ import {
   type WorkbenchTaskUpdateRequest,
 } from "../../lib/api";
 import {
+  formatClock,
   formatNumber,
   formatTime,
   taskStatusLabel,
   taskStatusTone,
 } from "../../lib/format";
 import { cn } from "../../lib/cn";
+import {
+  useDelayedFlag,
+  useManualRefresh,
+  useStableUpdatedAt,
+} from "../../lib/liveRefresh";
 import { previewMeta, previewName, previewPrice } from "../sites/site";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
@@ -95,6 +99,7 @@ import {
   WorkbenchNewBatchDialog,
 } from "./WorkbenchBatchDialogs";
 import { WorkbenchGroupDialog } from "./WorkbenchGroupDialog";
+import { WorkbenchLogView } from "./WorkbenchLogView";
 import { WorkbenchTaskDialog } from "./WorkbenchTaskDialog";
 import { WorkbenchTreeToggle } from "./WorkbenchTreeToggle";
 import { useWorkbenchTreeCollapsed } from "./workbenchTreeState";
@@ -243,21 +248,6 @@ function compactTime(value: string | null | undefined): string {
   return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-function eventSummary(event: Record<string, unknown>): string {
-  const details = Object.entries(event)
-    .filter(([key]) => !["ts", "event"].includes(key))
-    .slice(0, 5)
-    .map(([key, value]) => {
-      const text =
-        typeof value === "object" && value !== null
-          ? JSON.stringify(value)
-          : String(value ?? "");
-      return `${key}=${text.length > 80 ? `${text.slice(0, 80)}…` : text}`;
-    })
-    .join(" ");
-  return details;
-}
-
 function isActiveState(state: string | null | undefined): boolean {
   return Boolean(state && ACTIVE_TASK_STATES.has(state));
 }
@@ -325,11 +315,9 @@ export function WorkbenchPage() {
     ),
   );
   const [bottomCollapsed, setBottomCollapsed] = useState(false);
-  const [bottomTab, setBottomTab] = useState<
-    "events" | "data" | "raw" | "detail" | "files"
-  >("events");
-  const [rawLogQuery, setRawLogQuery] = useState("");
-  const [autoScrollLog, setAutoScrollLog] = useState(true);
+  const [bottomTab, setBottomTab] = useState<"logs" | "data" | "detail" | "files">(
+    "logs",
+  );
   const [treeMenu, setTreeMenu] = useState<{
     x: number;
     y: number;
@@ -352,8 +340,6 @@ export function WorkbenchPage() {
   const [dropTarget, setDropTarget] = useState<
     { nodeId: string; position: "before" | "after" | "inside" } | "root" | null
   >(null);
-  const eventsRef = useRef<HTMLOListElement>(null);
-  const rawLogRef = useRef<HTMLOListElement>(null);
   const paneRef = useRef<HTMLDivElement>(null);
 
   const treeQuery = useQuery({
@@ -377,16 +363,6 @@ export function WorkbenchPage() {
     refetchInterval: 3000,
     placeholderData: (previous) => previous,
   });
-  const eventsQuery = useQuery({
-    queryKey: ["task-events-history", selectedTaskId],
-    queryFn: ({ signal }) =>
-      selectedTaskId
-        ? getTaskEventsHistory(selectedTaskId, signal)
-        : Promise.resolve({ items: [], total: 0 }),
-    enabled: Boolean(selectedTaskId),
-    refetchInterval: 3000,
-  });
-
   const nodes = useMemo(() => treeQuery.data?.nodes ?? [], [treeQuery.data]);
   const defaultGroupId = useMemo(
     () =>
@@ -426,15 +402,11 @@ export function WorkbenchPage() {
     refetchInterval: activeSelected ? 3000 : false,
   });
 
-  useEffect(() => {
-    if (!eventsRef.current) return;
-    eventsRef.current.scrollTop = eventsRef.current.scrollHeight;
-  }, [eventsQuery.data?.items.length]);
-
-  useEffect(() => {
-    if (!autoScrollLog || bottomTab !== "raw" || !rawLogRef.current) return;
-    rawLogRef.current.scrollTop = rawLogRef.current.scrollHeight;
-  }, [autoScrollLog, bottomTab, eventsQuery.data?.items.length]);
+  const { refreshing: treeRefreshing, runRefresh: runTreeRefresh } = useManualRefresh();
+  const { refreshing: recentRefreshing, runRefresh: runRecentRefresh } =
+    useManualRefresh();
+  const { refreshing: panelRefreshing, runRefresh: runPanelRefresh } =
+    useManualRefresh();
 
   const recentCounts = recentQuery.data?.counts ?? {
     recent: 0,
@@ -467,11 +439,9 @@ export function WorkbenchPage() {
     .filter((item) => item.state === "RUNNING")
     .map((item) => item.task_id);
   const bulkRemoveBlocked = visibleSelected.some((item) => !item.can_dismiss);
-  const lastUpdated = recentQuery.dataUpdatedAt
-    ? new Date(recentQuery.dataUpdatedAt).toLocaleTimeString("zh-CN", {
-        hour12: false,
-      })
-    : "—";
+  const lastUpdatedAt = useStableUpdatedAt(recentQuery.data, recentQuery.dataUpdatedAt);
+  const lastUpdated = lastUpdatedAt ? formatClock(lastUpdatedAt, true) : "—";
+  const showRecentUpdating = useDelayedFlag(recentQuery.isFetching);
   const nodesById = useMemo(
     () => new Map(nodes.map((node) => [node.node_id, node])),
     [nodes],
@@ -1185,18 +1155,6 @@ export function WorkbenchPage() {
     window.location.href = taskExportUrl(exportTaskId);
   }
 
-  async function copyRawLog() {
-    if (!rawLogEvents.length) return;
-    try {
-      await navigator.clipboard.writeText(
-        rawLogEvents.map((event) => JSON.stringify(event)).join("\n"),
-      );
-      showToast("success", `已复制 ${rawLogEvents.length} 行原始日志。`);
-    } catch {
-      showToast("error", "复制失败；请检查浏览器剪贴板权限。");
-    }
-  }
-
   async function runNode(node: WorkbenchNode) {
     if (readOnly) {
       showToast("error", "只读预览不能启动任务。");
@@ -1519,13 +1477,7 @@ export function WorkbenchPage() {
     : taskNodeCount;
   const treeError = treeQuery.isError ? errorText(treeQuery.error) : "";
   const recentError = recentQuery.isError ? errorText(recentQuery.error) : "";
-  const events = eventsQuery.data?.items ?? [];
   const taskDataItems: TaskItem[] = dataQuery.data?.items ?? [];
-  const rawLogNeedle = rawLogQuery.trim().toLowerCase();
-  const rawLogEvents = events.filter(
-    (event) =>
-      !rawLogNeedle || JSON.stringify(event).toLowerCase().includes(rawLogNeedle),
-  );
   const selectedLabel = selectedTaskId
     ? selectedRecent?.definition_name || selectedNode?.name || `任务 ${selectedTaskId}`
     : (selectedNode?.name ?? "");
@@ -1601,15 +1553,17 @@ export function WorkbenchPage() {
                   variant="ghost"
                   className="h-7 w-7 shrink-0 px-0"
                   onClick={() =>
-                    void queryClient.invalidateQueries({ queryKey: ["workbench-tree"] })
+                    void runTreeRefresh(() =>
+                      queryClient.invalidateQueries({ queryKey: ["workbench-tree"] }),
+                    )
                   }
-                  disabled={treeQuery.isFetching}
+                  disabled={treeRefreshing}
                   aria-label="刷新任务目录"
                   title="刷新任务目录"
                 >
                   <RefreshCw
                     size={13}
-                    className={treeQuery.isFetching ? "animate-spin" : undefined}
+                    className={treeRefreshing ? "animate-spin" : undefined}
                     aria-hidden="true"
                   />
                 </Button>
@@ -1966,14 +1920,14 @@ export function WorkbenchPage() {
                     size="sm"
                     variant="ghost"
                     className="h-7 w-7 shrink-0 px-0"
-                    onClick={() => void recentQuery.refetch()}
-                    disabled={recentQuery.isFetching}
+                    onClick={() => void runRecentRefresh(() => recentQuery.refetch())}
+                    disabled={recentRefreshing}
                     aria-label="刷新最近任务"
                     title="刷新最近任务"
                   >
                     <RefreshCw
                       size={13}
-                      className={recentQuery.isFetching ? "animate-spin" : undefined}
+                      className={recentRefreshing ? "animate-spin" : undefined}
                       aria-hidden="true"
                     />
                   </Button>
@@ -2116,6 +2070,10 @@ export function WorkbenchPage() {
                         {recentItems.map((item) => {
                           const progress = progressFor(item);
                           const active = isActiveState(item.state);
+                          const elapsedLive =
+                            item.state === "RUNNING" ||
+                            item.state === "PAUSING" ||
+                            item.state === "CANCELLING";
                           const selected = selectedTaskId === item.task_id;
                           const busy =
                             actionBusy === `pause:${item.task_id}` ||
@@ -2324,7 +2282,9 @@ export function WorkbenchPage() {
                                 <p className="tabular">
                                   {elapsedLabel(
                                     item.started_at || item.created_at,
-                                    active ? null : item.finished_at || item.updated_at,
+                                    elapsedLive
+                                      ? null
+                                      : item.finished_at || item.updated_at,
                                   )}
                                 </p>
                               </td>
@@ -2444,9 +2404,19 @@ export function WorkbenchPage() {
                   {formatNumber(recentCounts.running)}
                 </b>
               </span>
-              <span className="sm:ml-auto">
+              <span
+                className="tabular sm:ml-auto"
+                title={
+                  lastUpdatedAt
+                    ? `数据最近一次变化：${formatTime(
+                        new Date(lastUpdatedAt).toISOString(),
+                        true,
+                      )}；页面可见时每 3 秒检查，数据无变化时不更新此时间。`
+                    : "页面可见时每 3 秒检查，数据变化时更新此时间。"
+                }
+              >
                 最后更新 {lastUpdated}
-                {recentQuery.isFetching ? " · 更新中…" : ""}
+                {showRecentUpdating ? " · 更新中…" : ""}
               </span>
             </div>
           </section>
@@ -2497,9 +2467,8 @@ export function WorkbenchPage() {
               >
                 {(
                   [
-                    ["events", "运行事件", "事件"],
+                    ["logs", "运行日志", "日志"],
                     ["data", "实时数据", "数据"],
-                    ["raw", "原始日志", "日志"],
                     ["detail", "任务详情", "详情"],
                     ["files", "文件与导出", "文件"],
                   ] as const
@@ -2523,7 +2492,7 @@ export function WorkbenchPage() {
                   >
                     <span className="sm:hidden">{shortLabel}</span>
                     <span className="hidden sm:inline">{label}</span>
-                    {value === "events" && activeSelected ? (
+                    {value === "logs" && activeSelected ? (
                       <span
                         className="h-1.5 w-1.5 rounded-full bg-success"
                         aria-hidden="true"
@@ -2539,39 +2508,23 @@ export function WorkbenchPage() {
                     ? ` · ${taskStatusLabel(selectedState, selectedOutcome)}`
                     : ""}
                 </span>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="hidden h-7 w-7 shrink-0 px-0 sm:inline-flex"
-                  disabled={
-                    !selectedTaskId ||
-                    !["events", "data", "raw"].includes(bottomTab) ||
-                    (bottomTab === "data"
-                      ? dataQuery.isFetching
-                      : eventsQuery.isFetching)
-                  }
-                  onClick={() =>
-                    bottomTab === "data"
-                      ? void dataQuery.refetch()
-                      : void eventsQuery.refetch()
-                  }
-                  aria-label={bottomTab === "data" ? "刷新实时数据" : "刷新运行日志"}
-                  title={bottomTab === "data" ? "刷新实时数据" : "刷新运行日志"}
-                >
-                  <RefreshCw
-                    size={13}
-                    className={
-                      (
-                        bottomTab === "data"
-                          ? dataQuery.isFetching
-                          : eventsQuery.isFetching
-                      )
-                        ? "animate-spin"
-                        : undefined
-                    }
-                    aria-hidden="true"
-                  />
-                </Button>
+                {bottomTab === "data" ? (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="hidden h-7 w-7 shrink-0 px-0 sm:inline-flex"
+                    disabled={!selectedTaskId || panelRefreshing}
+                    onClick={() => void runPanelRefresh(() => dataQuery.refetch())}
+                    aria-label="刷新实时数据"
+                    title="刷新实时数据"
+                  >
+                    <RefreshCw
+                      size={13}
+                      className={panelRefreshing ? "animate-spin" : undefined}
+                      aria-hidden="true"
+                    />
+                  </Button>
+                ) : null}
                 <Button
                   size="sm"
                   variant="ghost"
@@ -2589,62 +2542,13 @@ export function WorkbenchPage() {
               </div>
             </div>
 
-            {bottomCollapsed ? null : bottomTab === "events" ? (
-              <div
-                role="tabpanel"
-                aria-label="运行事件"
-                className="flex min-h-0 flex-1 flex-col"
-              >
-                {!selectedTaskId ? (
-                  <p className="px-2.5 py-4 text-xs text-ink-3">
-                    从左侧或最近任务选择一条运行，查看结构化事件。
-                  </p>
-                ) : eventsQuery.isPending ? (
-                  <p className="px-2.5 py-4 text-xs text-ink-3" role="status">
-                    正在读取运行事件…
-                  </p>
-                ) : eventsQuery.isError ? (
-                  <div className="p-2">
-                    <ErrorNotice
-                      title="读取运行事件失败"
-                      message={errorText(eventsQuery.error)}
-                      onRetry={() => void eventsQuery.refetch()}
-                      compact
-                    />
-                  </div>
-                ) : events.length === 0 ? (
-                  <p className="px-2.5 py-4 text-xs text-ink-3">
-                    这次运行还没有事件；任务开始后会自动刷新。
-                  </p>
-                ) : (
-                  <ol
-                    ref={eventsRef}
-                    className="min-h-0 flex-1 overflow-y-auto px-2.5 py-1 font-mono text-[11px] leading-5"
-                  >
-                    {events.map((event, index) => (
-                      <li
-                        key={`${String(event.ts)}-${index}`}
-                        className="flex flex-col gap-0.5 border-b border-line/60 py-1 last:border-b-0 sm:grid sm:grid-cols-[72px_130px_minmax(0,1fr)] sm:gap-2"
-                      >
-                        <span className="text-ink-3">
-                          {formatTime(String(event.ts || ""))}
-                        </span>
-                        <span className="truncate font-semibold text-ink-2">
-                          {String(event.event || "event")}
-                        </span>
-                        <span className="min-w-0 break-words text-ink-2">
-                          {eventSummary(event)}
-                        </span>
-                      </li>
-                    ))}
-                  </ol>
-                )}
-                {activeSelected ? (
-                  <p className="border-t border-line px-2.5 py-1 text-[11px] text-ink-3">
-                    任务仍在运行，事件每 3 秒刷新。
-                  </p>
-                ) : null}
-              </div>
+            {bottomCollapsed ? null : bottomTab === "logs" ? (
+              <WorkbenchLogView
+                key={selectedTaskId ?? "none"}
+                taskId={selectedTaskId}
+                active={activeSelected}
+                showToast={showToast}
+              />
             ) : bottomTab === "data" ? (
               <div
                 role="tabpanel"
@@ -2751,91 +2655,6 @@ export function WorkbenchPage() {
                       </tbody>
                     </table>
                   </div>
-                )}
-              </div>
-            ) : bottomTab === "raw" ? (
-              <div
-                role="tabpanel"
-                aria-label="原始日志"
-                className="flex min-h-0 flex-1 flex-col"
-              >
-                <div className="flex flex-wrap items-center gap-2 border-b border-line px-2.5 py-1.5 text-[11px] text-ink-3">
-                  <span>
-                    显示 {rawLogEvents.length} / {events.length} 行
-                  </span>
-                  <div className="relative w-44">
-                    <Search
-                      className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-ink-3"
-                      size={12}
-                      aria-hidden="true"
-                    />
-                    <Input
-                      className="h-6 pl-7 text-[11px]"
-                      value={rawLogQuery}
-                      placeholder="筛选日志内容"
-                      aria-label="筛选原始日志"
-                      onChange={(event) => setRawLogQuery(event.target.value)}
-                    />
-                  </div>
-                  <label className="inline-flex items-center gap-1">
-                    <input
-                      type="checkbox"
-                      className="h-3 w-3 accent-accent"
-                      checked={autoScrollLog}
-                      onChange={(event) => setAutoScrollLog(event.target.checked)}
-                    />
-                    自动滚动
-                  </label>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="ml-auto h-6 px-2 text-[11px]"
-                    onClick={() => void copyRawLog()}
-                    disabled={rawLogEvents.length === 0}
-                  >
-                    复制
-                  </Button>
-                </div>
-                {!selectedTaskId ? (
-                  <p className="px-2.5 py-4 text-xs text-ink-3">
-                    选择一条运行后查看原始事件行。
-                  </p>
-                ) : eventsQuery.isError ? (
-                  <div className="p-2">
-                    <ErrorNotice
-                      title="读取原始日志失败"
-                      message={errorText(eventsQuery.error)}
-                      onRetry={() => void eventsQuery.refetch()}
-                      compact
-                    />
-                  </div>
-                ) : rawLogEvents.length === 0 ? (
-                  <p className="px-2.5 py-4 text-xs text-ink-3">
-                    {events.length
-                      ? "没有匹配的日志行。"
-                      : "这次运行还没有事件；任务开始后会自动刷新。"}
-                  </p>
-                ) : (
-                  <ol
-                    ref={rawLogRef}
-                    role="log"
-                    aria-label="原始运行日志"
-                    className="min-h-0 flex-1 overflow-auto px-2.5 py-1 font-mono text-[10.5px] leading-5"
-                  >
-                    {rawLogEvents.map((event, index) => (
-                      <li
-                        key={`raw-${String(event.ts)}-${index}`}
-                        className="flex gap-2 border-b border-line/60 py-0.5 last:border-b-0"
-                      >
-                        <span className="w-8 shrink-0 select-none text-right text-ink-3 tabular">
-                          {index + 1}
-                        </span>
-                        <code className="min-w-0 whitespace-pre-wrap break-all text-ink-2">
-                          {JSON.stringify(event)}
-                        </code>
-                      </li>
-                    ))}
-                  </ol>
                 )}
               </div>
             ) : bottomTab === "detail" ? (

@@ -35,6 +35,7 @@ import {
   formatTime,
 } from "../../lib/format";
 import { cn } from "../../lib/cn";
+import { useManualRefresh } from "../../lib/liveRefresh";
 import { readListReturn } from "../../lib/listReturn";
 import { buildIsActive, buildServiceBlockReason } from "../sites/site";
 import {
@@ -202,6 +203,7 @@ export function BuildDetailPage() {
   const [confirmError, setConfirmError] = useState("");
   const [continueDraft, setContinueDraft] = useState("");
   const [continueBusy, setContinueBusy] = useState(false);
+  const { refreshing, runRefresh } = useManualRefresh();
 
   const buildQuery = useQuery({
     queryKey: ["build", buildId],
@@ -985,18 +987,15 @@ export function BuildDetailPage() {
               }
             />
             <Button
-              onClick={() => {
-                void buildQuery.refetch();
-                void messagesQuery.refetch();
-              }}
-              disabled={buildQuery.isFetching || messagesQuery.isFetching}
+              onClick={() =>
+                void runRefresh(async () => {
+                  await Promise.all([buildQuery.refetch(), messagesQuery.refetch()]);
+                })
+              }
+              disabled={refreshing}
             >
               <RefreshCw
-                className={
-                  buildQuery.isFetching || messagesQuery.isFetching
-                    ? "animate-spin"
-                    : undefined
-                }
+                className={refreshing ? "animate-spin" : undefined}
                 size={14}
                 aria-hidden="true"
               />

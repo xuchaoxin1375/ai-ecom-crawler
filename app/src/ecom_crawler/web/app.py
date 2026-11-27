@@ -1178,9 +1178,112 @@ def _is_auth_path(path: str) -> bool:
     return path in {"/api/auth/login", "/api/auth/logout"}
 
 
-def _sse(event: str, data: Any) -> str:
+def _sse(event: str, data: Any, event_id: int | None = None) -> str:
     payload = data if isinstance(data, str) else json.dumps(data, ensure_ascii=False)
-    return f"event: {event}\ndata: {payload}\n\n"
+    lines = []
+    if event_id is not None:
+        lines.append(f"id: {event_id}")
+    lines.extend((f"event: {event}", f"data: {payload}"))
+    return "\n".join(lines) + "\n\n"
+
+
+class _EventLogIndex:
+    """Byte offsets of non-empty lines in an append-only events.ndjson."""
+
+    __slots__ = ("ends", "size", "starts")
+
+    def __init__(self) -> None:
+        self.size = 0
+        self.starts: list[int] = []
+        self.ends: list[int] = []
+
+
+_EVENT_LOG_INDEXES: dict[str, _EventLogIndex] = {}
+_EVENT_LOG_INDEX_LOCK = threading.Lock()
+
+
+def _event_log_index(path: Path) -> _EventLogIndex:
+    key = str(path)
+    with _EVENT_LOG_INDEX_LOCK:
+        index = _EVENT_LOG_INDEXES.get(key)
+        if index is None:
+            index = _EventLogIndex()
+            _EVENT_LOG_INDEXES[key] = index
+        if not path.is_file():
+            index.size = 0
+            index.starts.clear()
+            index.ends.clear()
+            return index
+        stat = path.stat()
+        if stat.st_size < index.size:
+            index.size = 0
+            index.starts.clear()
+            index.ends.clear()
+        if stat.st_size == index.size:
+            return index
+        with path.open("rb") as handle:
+            handle.seek(index.size)
+            data = handle.read()
+        complete = data.rfind(b"\n") + 1
+        if complete <= 0:
+            return index
+        chunk = data[:complete]
+        cursor = index.size
+        parts = chunk.split(b"\n")
+        if parts and parts[-1] == b"":
+            parts.pop()
+        for raw in parts:
+            if raw.strip():
+                index.starts.append(cursor)
+                index.ends.append(cursor + len(raw))
+            cursor += len(raw) + 1
+        index.size += complete
+        return index
+
+
+def _event_log_page(
+    path: Path,
+    *,
+    limit: int,
+    tail: int | None = None,
+    before: int | None = None,
+    after: int | None = None,
+) -> dict[str, Any]:
+    index = _event_log_index(path)
+    total = len(index.starts)
+    window = tail if tail is not None else limit
+    if before is not None:
+        end = min(max(0, before - 1), total)
+        start = max(0, end - window)
+        has_more = start > 0
+    elif after is not None:
+        start = min(max(0, after), total)
+        end = min(total, start + window)
+        has_more = end < total
+    else:
+        end = total
+        start = max(0, total - window)
+        has_more = start > 0
+
+    items: list[dict[str, Any]] = []
+    if end > start:
+        with path.open("rb") as handle:
+            for seq in range(start + 1, end + 1):
+                handle.seek(index.starts[seq - 1])
+                raw = handle.read(index.ends[seq - 1] - index.starts[seq - 1])
+                try:
+                    payload = json.loads(raw.decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    continue
+                if isinstance(payload, dict):
+                    items.append({**payload, "seq": seq})
+    return {
+        "items": items,
+        "total": total,
+        "has_more": has_more,
+        "oldest_seq": start + 1 if end > start else None,
+        "newest_seq": end if end > start else None,
+    }
 
 
 def _rule_entries(rules_dir: Path | None) -> list[dict[str, Any]]:
@@ -3243,31 +3346,55 @@ def create_app(
         return control(task_id, "restore")
 
     @app.get("/api/tasks/{task_id}/events")
-    async def task_events(task_id: str) -> StreamingResponse:
+    async def task_events(
+        task_id: str,
+        request: Request,
+        after: Annotated[int | None, Query(ge=0)] = None,
+    ) -> StreamingResponse:
         require_task(task_id)
+        header_value = request.headers.get("last-event-id", "")
+        try:
+            header_after = int(header_value) if header_value.strip() else None
+        except ValueError:
+            header_after = None
+        cursor = max(
+            (value for value in (after, header_after) if value is not None),
+            default=None,
+        )
 
         async def stream() -> Any:
             yield _sse("snapshot", _summary(store, require_task(task_id), root))
             path = root / task_id / "events.ndjson"
-            offset = path.stat().st_size if path.is_file() else 0
+            if cursor is None:
+                cursor_seq = _event_log_page(path, limit=1)["total"]
+            else:
+                cursor_seq = cursor
             last_heartbeat = time.monotonic()
             while True:
-                if path.is_file():
-                    size = path.stat().st_size
-                    if size < offset:
-                        offset = 0
-                    if size > offset:
-                        with path.open("r", encoding="utf-8") as handle:
-                            handle.seek(offset)
-                            chunk = handle.read()
-                            offset = handle.tell()
-                        for line in chunk.splitlines():
-                            if line.strip():
-                                yield _sse("update", line)
+                page = _event_log_page(path, after=cursor_seq, limit=500)
+                if page["total"] < cursor_seq:
+                    cursor_seq = 0
+                    yield _sse("reset", {"reason": "events_reset"})
+                    continue
+                for item in page["items"]:
+                    yield _sse(
+                        "update",
+                        {key: value for key, value in item.items() if key != "seq"},
+                        item["seq"],
+                    )
+                if page["newest_seq"] is not None:
+                    cursor_seq = max(cursor_seq, int(page["newest_seq"]))
                 current = store.get_task(task_id)
                 if current is None:
                     break
                 if current.state in {"FINISHED", "CANCELLED"}:
+                    final = _event_log_page(path, after=cursor_seq, limit=500)
+                    for item in final["items"]:
+                        yield _sse(
+                            "update",
+                            {key: value for key, value in item.items() if key != "seq"},
+                            item["seq"],
+                        )
                     yield _sse("end", {"state": current.state})
                     break
                 if time.monotonic() - last_heartbeat >= 15:
@@ -3284,24 +3411,24 @@ def create_app(
     @app.get("/api/tasks/{task_id}/events/history")
     def task_events_history(
         task_id: str,
-        tail: Annotated[int, Query(ge=1, le=500)] = 200,
+        tail: Annotated[int | None, Query(ge=1, le=500)] = None,
+        limit: Annotated[int, Query(ge=1, le=1000)] = 500,
+        before: Annotated[int | None, Query(ge=1)] = None,
+        after: Annotated[int | None, Query(ge=0)] = None,
     ) -> dict[str, Any]:
         require_task(task_id)
-        path = root / task_id / "events.ndjson"
-        if not path.is_file():
-            return {"items": [], "total": 0}
-        lines = path.read_text(encoding="utf-8").splitlines()[-tail:]
-        items: list[dict[str, Any]] = []
-        for line in lines:
-            if not line.strip():
-                continue
-            try:
-                payload = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(payload, dict):
-                items.append(payload)
-        return {"items": items, "total": len(items)}
+        if before is not None and after is not None:
+            raise _error(
+                "BAD_REQUEST", "before and after cannot be used together", 400
+            )
+        page = _event_log_page(
+            root / task_id / "events.ndjson",
+            limit=limit,
+            tail=tail,
+            before=before,
+            after=after,
+        )
+        return page
 
     @app.get("/api/tasks/{task_id}/export")
     def export_task(task_id: str, partial: bool = False) -> Response:

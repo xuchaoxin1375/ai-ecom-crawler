@@ -23,6 +23,7 @@ import { Input } from "../../components/ui/Input";
 import { MetricStrip } from "../../components/ui/MetricStrip";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { cn } from "../../lib/cn";
+import { useManualRefresh } from "../../lib/liveRefresh";
 import { CollectionPolicySettings } from "./CollectionPolicySettings";
 import { ResourceGauges } from "./ResourceGauges";
 import {
@@ -567,6 +568,7 @@ export function SystemSettingsPage() {
   const [customKeyChanged, setCustomKeyChanged] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const focusedResources = useRef(false);
+  const { refreshing, runRefresh } = useManualRefresh();
 
   const query = useQuery({
     queryKey: ["system"],
@@ -748,17 +750,15 @@ export function SystemSettingsPage() {
             <Button
               onClick={() => {
                 setError("");
-                void query.refetch();
+                void runRefresh(() => query.refetch());
               }}
-              disabled={
-                query.isFetching || savingAccess || rotating || autoRefreshPaused
-              }
+              disabled={refreshing || savingAccess || rotating || autoRefreshPaused}
               title={autoRefreshPaused ? "请先重新加载页面" : undefined}
             >
               <RefreshCw
                 size={14}
                 aria-hidden="true"
-                className={query.isFetching ? "animate-spin" : undefined}
+                className={refreshing ? "animate-spin" : undefined}
               />
               刷新
             </Button>

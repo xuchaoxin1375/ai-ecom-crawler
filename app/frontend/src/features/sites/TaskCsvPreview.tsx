@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 import { getTaskCsv } from "../../lib/api";
 import { formatNumber } from "../../lib/format";
+import { useManualRefresh } from "../../lib/liveRefresh";
 import { Button } from "../../components/ui/Button";
 import { ErrorNotice } from "../../components/ui/ErrorNotice";
 
@@ -45,6 +46,7 @@ interface TaskCsvPreviewProps {
 
 export function TaskCsvPreview({ taskId, live }: TaskCsvPreviewProps) {
   const [page, setPage] = useState(0);
+  const { refreshing, runRefresh } = useManualRefresh();
 
   // The live and final snapshots come from different files. Use separate query
   // keys so a task turning terminal triggers one final read instead of keeping
@@ -75,11 +77,11 @@ export function TaskCsvPreview({ taskId, live }: TaskCsvPreviewProps) {
         <div className="flex shrink-0 items-center gap-2">
           <Button
             size="sm"
-            onClick={() => void query.refetch()}
-            disabled={query.isFetching}
+            onClick={() => void runRefresh(() => query.refetch())}
+            disabled={refreshing}
           >
             <RefreshCw
-              className={query.isFetching ? "animate-spin" : undefined}
+              className={refreshing ? "animate-spin" : undefined}
               size={13}
               aria-hidden="true"
             />
@@ -193,7 +195,7 @@ export function TaskCsvPreview({ taskId, live }: TaskCsvPreviewProps) {
         <div className="flex flex-wrap items-center gap-2">
           <Button
             size="sm"
-            disabled={page === 0 || query.isFetching}
+            disabled={page === 0}
             onClick={() => setPage((value) => Math.max(0, value - 1))}
           >
             <ChevronLeft size={13} aria-hidden="true" />
@@ -204,7 +206,7 @@ export function TaskCsvPreview({ taskId, live }: TaskCsvPreviewProps) {
           </span>
           <Button
             size="sm"
-            disabled={page + 1 >= pageCount || query.isFetching}
+            disabled={page + 1 >= pageCount}
             onClick={() => setPage((value) => Math.min(pageCount - 1, value + 1))}
           >
             下一页

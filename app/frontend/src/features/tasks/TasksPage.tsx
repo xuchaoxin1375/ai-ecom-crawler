@@ -42,6 +42,7 @@ import {
   taskStateTone,
 } from "../../lib/format";
 import { cn } from "../../lib/cn";
+import { useDelayedFlag } from "../../lib/liveRefresh";
 import { rememberListReturn, useListReturnRestore } from "../../lib/listReturn";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
@@ -192,6 +193,7 @@ export function TasksPage() {
 
   const items = useMemo(() => query.data?.items ?? [], [query.data]);
   const liveRefresh = tasksNeedLiveRefresh(items);
+  const showUpdating = useDelayedFlag(query.isFetching);
   const total = query.data?.total ?? 0;
   const summary = summarizeTasks(items, total);
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -819,7 +821,7 @@ export function TasksPage() {
                 ? "正在读取任务…"
                 : `共 ${formatNumber(total)} 个任务，当前页显示 ${formatNumber(
                     visibleItems.length,
-                  )} 个${query.isFetching ? " · 更新中…" : ""}`}
+                  )} 个${showUpdating ? " · 更新中…" : ""}`}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -882,7 +884,7 @@ export function TasksPage() {
           <div className="flex flex-wrap items-center gap-2">
             <Button
               size="sm"
-              disabled={offset === 0 || query.isFetching}
+              disabled={offset === 0}
               onClick={() =>
                 updateParams({ offset: String(Math.max(0, offset - PAGE_SIZE)) }, false)
               }
@@ -892,7 +894,7 @@ export function TasksPage() {
             </Button>
             <Button
               size="sm"
-              disabled={page >= pageCount || query.isFetching}
+              disabled={page >= pageCount}
               onClick={() =>
                 updateParams({ offset: String(offset + PAGE_SIZE) }, false)
               }
