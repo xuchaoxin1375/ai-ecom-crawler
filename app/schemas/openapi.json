@@ -2503,6 +2503,22 @@
         "title": "WorkbenchBatchImportRequest",
         "type": "object"
       },
+      "WorkbenchCleanupRequest": {
+        "properties": {
+          "purge_feedback": {
+            "default": false,
+            "title": "Purge Feedback",
+            "type": "boolean"
+          },
+          "purge_runs": {
+            "default": false,
+            "title": "Purge Runs",
+            "type": "boolean"
+          }
+        },
+        "title": "WorkbenchCleanupRequest",
+        "type": "object"
+      },
       "WorkbenchGroupCreateRequest": {
         "properties": {
           "after_node_id": {
@@ -6444,6 +6460,47 @@
         "summary": "Cancel Task"
       }
     },
+    "/api/tasks/{task_id}/cleanup-preview": {
+      "get": {
+        "operationId": "get_task_cleanup_preview_api_tasks__task_id__cleanup_preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Task Cleanup Preview Api Tasks  Task Id  Cleanup Preview Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Task Cleanup Preview"
+      }
+    },
     "/api/tasks/{task_id}/csv": {
       "get": {
         "operationId": "preview_task_csv_api_tasks__task_id__csv_get",
@@ -6994,6 +7051,64 @@
         "summary": "Pause Task"
       }
     },
+    "/api/tasks/{task_id}/purge": {
+      "post": {
+        "operationId": "purge_task_api_tasks__task_id__purge_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/WorkbenchCleanupRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Purge Task Api Tasks  Task Id  Purge Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Purge Task"
+      }
+    },
     "/api/tasks/{task_id}/restore": {
       "post": {
         "operationId": "restore_task_api_tasks__task_id__restore_post",
@@ -7346,6 +7461,105 @@
           }
         },
         "summary": "Rename Workbench Node"
+      }
+    },
+    "/api/workbench/nodes/{node_id}/cleanup-preview": {
+      "get": {
+        "operationId": "get_workbench_node_cleanup_preview_api_workbench_nodes__node_id__cleanup_preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "title": "Node Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Workbench Node Cleanup Preview Api Workbench Nodes  Node Id  Cleanup Preview Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Workbench Node Cleanup Preview"
+      }
+    },
+    "/api/workbench/nodes/{node_id}/delete": {
+      "post": {
+        "operationId": "delete_workbench_node_api_workbench_nodes__node_id__delete_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "title": "Node Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/WorkbenchCleanupRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Delete Workbench Node Api Workbench Nodes  Node Id  Delete Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Workbench Node"
       }
     },
     "/api/workbench/nodes/{node_id}/move": {

@@ -97,6 +97,10 @@ import { RowActionsMenu, type RowActionItem } from "../../components/ui/Dropdown
 import { Toast, useToast } from "../../components/ui/Toast";
 import { WorkbenchContextMenu } from "./WorkbenchContextMenu";
 import type { WorkbenchMenuItem } from "./WorkbenchContextMenu";
+import {
+  WorkbenchCleanupDialog,
+  type WorkbenchCleanupTarget,
+} from "./WorkbenchCleanupDialog";
 import { WorkbenchAttachDialog } from "./WorkbenchAttachDialog";
 import {
   WorkbenchImportBatchDialog,
@@ -339,6 +343,9 @@ export function WorkbenchPage() {
   const [renameNode, setRenameNode] = useState<WorkbenchNode | null>(null);
   const [moveNode, setMoveNode] = useState<WorkbenchNode | null>(null);
   const [dissolveNode, setDissolveNode] = useState<WorkbenchNode | null>(null);
+  const [cleanupTarget, setCleanupTarget] = useState<WorkbenchCleanupTarget | null>(
+    null,
+  );
   const [editNode, setEditNode] = useState<WorkbenchNode | null>(null);
   const [attachRun, setAttachRun] = useState<WorkbenchRecentItem | null>(null);
   const [defaultDialogOpen, setDefaultDialogOpen] = useState(false);
@@ -684,6 +691,19 @@ export function WorkbenchPage() {
     } finally {
       setNodeActionBusy(false);
     }
+  }
+
+  function handleCleanupCompleted(message: string) {
+    if (cleanupTarget?.kind === "node" && selectedNodeId === cleanupTarget.nodeId) {
+      setSelectedNodeId(null);
+    }
+    if (cleanupTarget?.kind === "run" && selectedTaskId === cleanupTarget.taskId) {
+      setSelectedTaskId(null);
+    }
+    setCleanupTarget(null);
+    void refreshWorkbench();
+    void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+    showToast("success", message);
   }
 
   async function moveNodeTo(
@@ -1448,6 +1468,23 @@ export function WorkbenchPage() {
         },
       ],
       [
+        ...(item.can_dismiss
+          ? [
+              {
+                key: "purge",
+                label: "永久删除运行…",
+                icon: <Trash2 size={14} />,
+                danger: true,
+                disabled: readOnly,
+                onSelect: () =>
+                  setCleanupTarget({
+                    kind: "run" as const,
+                    taskId: item.task_id,
+                    name: item.definition_name || item.site_key || item.task_id,
+                  }),
+              },
+            ]
+          : []),
         scope === "removed"
           ? {
               key: "restore",
@@ -3091,6 +3128,20 @@ export function WorkbenchPage() {
                         disabled: readOnly,
                         onSelect: () => openMoveDialog(node),
                       },
+                      {
+                        key: "task-delete",
+                        label: "删除任务定义…",
+                        icon: <Trash2 size={14} />,
+                        danger: true,
+                        hint: "可同时清理运行和结果",
+                        disabled: readOnly,
+                        onSelect: () =>
+                          setCleanupTarget({
+                            kind: "node",
+                            nodeId: node.node_id,
+                            name: node.name,
+                          }),
+                      },
                     ];
                     return [items, second, third].filter((group) => group.length > 0);
                   })()
@@ -3261,6 +3312,20 @@ export function WorkbenchPage() {
           onSubmit={(parentId) => void submitMove(parentId)}
         />
       ) : null}
+      {cleanupTarget ? (
+        <WorkbenchCleanupDialog
+          key={
+            cleanupTarget.kind === "node" ? cleanupTarget.nodeId : cleanupTarget.taskId
+          }
+          open
+          target={cleanupTarget}
+          onOpenChange={(open) => {
+            if (!open) setCleanupTarget(null);
+          }}
+          onCompleted={handleCleanupCompleted}
+        />
+      ) : null}
+
       {dissolveNode ? (
         <WorkbenchConfirmDialog
           open

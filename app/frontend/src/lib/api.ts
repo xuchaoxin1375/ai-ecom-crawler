@@ -402,6 +402,66 @@ export interface WorkbenchRecentPage {
   unassigned_total?: number;
 }
 
+export interface WorkbenchCleanupBatchLink {
+  batch_id: string;
+  site_key: string;
+  field: "task_id" | "delivery_task_id";
+}
+
+export interface WorkbenchRunCleanupPreview {
+  task_id: string;
+  state: string;
+  outcome: string | null;
+  archived: boolean;
+  feedback_ids: string[];
+  feedback_count: number;
+  batch_links: WorkbenchCleanupBatchLink[];
+  can_purge: boolean;
+  blockers: string[];
+  bytes: number;
+  files: number;
+}
+
+export interface WorkbenchDefinitionCleanupRun {
+  task_id: string;
+  state: string;
+  outcome: string | null;
+  archived: boolean;
+  feedback_count: number;
+  bytes: number;
+  files: number;
+}
+
+export interface WorkbenchDefinitionCleanupPreview {
+  node_id: string;
+  name: string;
+  task_ids: string[];
+  runs: WorkbenchDefinitionCleanupRun[];
+  run_count: number;
+  active_count: number;
+  feedback_ids: string[];
+  feedback_count: number;
+  batch_links: WorkbenchCleanupBatchLink[];
+  can_delete: boolean;
+  can_purge_runs: boolean;
+  blockers: string[];
+  bytes: number;
+  files: number;
+}
+
+export interface WorkbenchCleanupResult {
+  deleted?: boolean;
+  purged?: boolean | unknown[];
+  node_id?: string;
+  task_id?: string;
+  task_ids?: string[];
+  feedback_count?: number;
+  batch_links?: WorkbenchCleanupBatchLink[];
+  deleted_directories?: number;
+  bytes: number;
+  files: number;
+}
+
 export interface WorkbenchRunLimits {
   max_urls: number | null;
   max_products: number | null;
@@ -1865,6 +1925,48 @@ export function restoreWorkbenchRecent(
   return sendJson<{ task_id: string; dismissed: boolean }>(
     `/api/workbench/recent/${encodeURIComponent(taskId)}/restore`,
     "POST",
+  );
+}
+
+export function getWorkbenchNodeCleanup(
+  nodeId: string,
+  signal?: AbortSignal,
+): Promise<WorkbenchDefinitionCleanupPreview> {
+  return getJson<WorkbenchDefinitionCleanupPreview>(
+    `/api/workbench/nodes/${encodeURIComponent(nodeId)}/cleanup-preview`,
+    signal,
+  );
+}
+
+export function deleteWorkbenchNode(
+  nodeId: string,
+  body: { purge_runs: boolean; purge_feedback?: boolean },
+): Promise<WorkbenchCleanupResult> {
+  return sendJson<WorkbenchCleanupResult>(
+    `/api/workbench/nodes/${encodeURIComponent(nodeId)}/delete`,
+    "POST",
+    body,
+  );
+}
+
+export function getTaskCleanup(
+  taskId: string,
+  signal?: AbortSignal,
+): Promise<WorkbenchRunCleanupPreview> {
+  return getJson<WorkbenchRunCleanupPreview>(
+    `/api/tasks/${encodeURIComponent(taskId)}/cleanup-preview`,
+    signal,
+  );
+}
+
+export function purgeTask(
+  taskId: string,
+  body: { purge_feedback?: boolean } = {},
+): Promise<WorkbenchCleanupResult> {
+  return sendJson<WorkbenchCleanupResult>(
+    `/api/tasks/${encodeURIComponent(taskId)}/purge`,
+    "POST",
+    body,
   );
 }
 

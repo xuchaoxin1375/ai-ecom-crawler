@@ -245,6 +245,147 @@ class WorkbenchApiTests(unittest.TestCase):
         self.assertEqual(history.status_code, 200, history.text)
         self.assertEqual(history.json()["items"], [])
 
+    def test_cleanup_preview_and_purge_run_removes_data(self) -> None:
+        _, node_id = self.create_task_node()
+        started = self.client.post(f"/api/workbench/tasks/{node_id}/start")
+        self.assertEqual(started.status_code, 202, started.text)
+        task_id = started.json()["task"]["task_id"]
+        self.store.update_task(task_id, state="FINISHED", outcome="COMPLETED")
+        run_dir = self.out_root / task_id
+        run_dir.mkdir()
+        (run_dir / "products.csv").write_text("a,b\n1,2\n", encoding="utf-8")
+
+        preview = self.client.get(f"/api/tasks/{task_id}/cleanup-preview")
+        self.assertEqual(preview.status_code, 200, preview.text)
+        self.assertTrue(preview.json()["can_purge"])
+        self.assertEqual(preview.json()["files"], 1)
+        self.assertGreater(preview.json()["bytes"], 0)
+
+        purged = self.client.post(f"/api/tasks/{task_id}/purge")
+        self.assertEqual(purged.status_code, 200, purged.text)
+        self.assertTrue(purged.json()["purged"])
+        self.assertFalse(run_dir.exists())
+        self.assertEqual(self.client.get(f"/api/tasks/{task_id}").status_code, 404)
+        self.assertEqual(self.client.get("/api/workbench/recent").json()["items"], [])
+
+        tree = self.client.get("/api/workbench/tree").json()["nodes"]
+        node = next(item for item in tree if item["node_id"] == node_id)
+        self.assertIsNone(node["current_run"])
+
+    def test_cleanup_blocks_active_run_and_feedback_without_confirmation(self) -> None:
+        _, node_id = self.create_task_node()
+        started = self.client.post(f"/api/workbench/tasks/{node_id}/start")
+        self.assertEqual(started.status_code, 202, started.text)
+        task_id = started.json()["task"]["task_id"]
+
+        preview = self.client.get(f"/api/tasks/{task_id}/cleanup-preview")
+        self.assertEqual(preview.status_code, 200, preview.text)
+        self.assertFalse(preview.json()["can_purge"])
+        blocked = self.client.post(f"/api/tasks/{task_id}/purge")
+        self.assertEqual(blocked.status_code, 409)
+        self.assertEqual(blocked.json()["error"]["code"], "CLEANUP_BLOCKED")
+        self.assertIsNotNone(self.store.get_task(task_id))
+
+        self.store.update_task(task_id, state="FINISHED", outcome="COMPLETED")
+        created = self.client.post(
+            f"/api/tasks/{task_id}/feedback",
+            json={
+                "request_id": "req-cleanup-feedback",
+                "category": "DESCRIPTION",
+                "samples": ["https://fixture.example/product/1"],
+                "expectation": "描述应包含规格块",
+            },
+        )
+        self.assertEqual(created.status_code, 201, created.text)
+        feedback_id = created.json()["feedback"]["feedback_id"]
+        referenced = self.client.post(f"/api/tasks/{task_id}/purge")
+        self.assertEqual(referenced.status_code, 409)
+        self.assertEqual(referenced.json()["error"]["code"], "CLEANUP_REFERENCED")
+
+        purged = self.client.post(
+            f"/api/tasks/{task_id}/purge",
+            json={"purge_feedback": True},
+        )
+        self.assertEqual(purged.status_code, 200, purged.text)
+        self.assertEqual(
+            self.client.get(f"/api/feedback/{feedback_id}").status_code, 404
+        )
+
+    def test_purge_run_clears_batch_task_and_delivery_pointers(self) -> None:
+        batch_id = self.create_batch("cleanup pointers")
+        task_id = self.create_generic_task("req-cleanup-pointers")
+        self.store.update_task(task_id, state="FINISHED", outcome="COMPLETED")
+        self.store.update_batch_site(
+            batch_id, "fixture.example", task_id=task_id
+        )
+        with self.store._connect() as connection:
+            connection.execute(
+                "UPDATE batch_sites SET delivery_task_id = ? "
+                "WHERE batch_id = ? AND site_key = ?",
+                (task_id, batch_id, "fixture.example"),
+            )
+            connection.commit()
+
+        preview = self.client.get(f"/api/tasks/{task_id}/cleanup-preview")
+        self.assertEqual(preview.status_code, 200, preview.text)
+        self.assertEqual(
+            {link["field"] for link in preview.json()["batch_links"]},
+            {"task_id", "delivery_task_id"},
+        )
+
+        purged = self.client.post(f"/api/tasks/{task_id}/purge")
+        self.assertEqual(purged.status_code, 200, purged.text)
+        site = self.store.get_batch_site(batch_id, "fixture.example")
+        self.assertIsNotNone(site)
+        self.assertIsNone(site.task_id)
+        self.assertIsNone(site.delivery_task_id)
+
+    def test_delete_task_definition_can_keep_or_purge_runs(self) -> None:
+        _, node_id = self.create_task_node()
+        started = self.client.post(f"/api/workbench/tasks/{node_id}/start")
+        self.assertEqual(started.status_code, 202, started.text)
+        task_id = started.json()["task"]["task_id"]
+        self.store.update_task(task_id, state="FINISHED", outcome="COMPLETED")
+        run_dir = self.out_root / task_id
+        run_dir.mkdir()
+        (run_dir / "products.csv").write_text("a,b\n1,2\n", encoding="utf-8")
+
+        preview = self.client.get(
+            f"/api/workbench/nodes/{node_id}/cleanup-preview"
+        )
+        self.assertEqual(preview.status_code, 200, preview.text)
+        self.assertEqual(preview.json()["run_count"], 1)
+        self.assertTrue(preview.json()["can_delete"])
+
+        deleted = self.client.post(
+            f"/api/workbench/nodes/{node_id}/delete",
+            json={"purge_runs": True},
+        )
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        self.assertTrue(deleted.json()["deleted"])
+        self.assertFalse(run_dir.exists())
+        self.assertIsNone(self.store.get_task(task_id))
+        tree = self.client.get("/api/workbench/tree").json()["nodes"]
+        self.assertNotIn(node_id, {item["node_id"] for item in tree})
+
+    def test_delete_task_definition_without_purge_keeps_runs(self) -> None:
+        _, node_id = self.create_task_node()
+        started = self.client.post(f"/api/workbench/tasks/{node_id}/start")
+        self.assertEqual(started.status_code, 202, started.text)
+        task_id = started.json()["task"]["task_id"]
+        self.store.update_task(task_id, state="FINISHED", outcome="COMPLETED")
+
+        deleted = self.client.post(
+            f"/api/workbench/nodes/{node_id}/delete",
+            json={"purge_runs": False},
+        )
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        self.assertIsNotNone(self.store.get_task(task_id))
+        recent = self.client.get("/api/workbench/recent").json()["items"]
+        self.assertEqual(len(recent), 1)
+        self.assertEqual(recent[0]["task_id"], task_id)
+        self.assertIsNone(recent[0]["definition_name"])
+
     def test_event_history_pages_and_totals(self) -> None:
         task_id = self.create_generic_task("req-log-pages")
         run_dir = self.out_root / task_id

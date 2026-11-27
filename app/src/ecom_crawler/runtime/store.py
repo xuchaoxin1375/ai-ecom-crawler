@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from .models import (
+    TERMINAL_TASK_STATES,
     Batch,
     BatchFolder,
     BatchSite,
@@ -447,6 +448,10 @@ class RuleActivationConflictError(RuleVersionError):
 
 class SiteRuleNotFoundError(ValueError):
     """Raised when a site has no rule pointer and no candidates."""
+
+
+class CleanupError(ValueError):
+    """A cleanup request is blocked by task state or retained references."""
 
 
 class RuleActivationNotFoundError(ValueError):
@@ -2291,6 +2296,277 @@ class TaskStore:
                 connection.rollback()
                 raise
         return len(child_ids)
+
+    def _cleanup_references(
+        self,
+        connection: sqlite3.Connection,
+        task_ids: list[str],
+    ) -> tuple[list[str], list[dict[str, str]]]:
+        unique_ids = sorted({str(task_id) for task_id in task_ids if task_id})
+        if not unique_ids:
+            return [], []
+        placeholders = ", ".join("?" for _ in unique_ids)
+        feedback_rows = connection.execute(
+            f"SELECT feedback_id FROM quality_feedback "
+            f"WHERE task_id IN ({placeholders}) "
+            f"OR rerun_task_id IN ({placeholders})",
+            [*unique_ids, *unique_ids],
+        ).fetchall()
+        link_rows = connection.execute(
+            f"SELECT batch_id, site_key, task_id, delivery_task_id FROM batch_sites "
+            f"WHERE task_id IN ({placeholders}) "
+            f"OR delivery_task_id IN ({placeholders})",
+            [*unique_ids, *unique_ids],
+        ).fetchall()
+        links: list[dict[str, str]] = []
+        for row in link_rows:
+            for field in ("task_id", "delivery_task_id"):
+                if row[field] in unique_ids:
+                    links.append(
+                        {
+                            "batch_id": str(row["batch_id"]),
+                            "site_key": str(row["site_key"]),
+                            "field": field,
+                        }
+                    )
+        return (
+            [str(row["feedback_id"]) for row in feedback_rows],
+            links,
+        )
+
+    def cleanup_run_preview(self, task_id: str) -> dict[str, Any]:
+        task = self.get_task(task_id)
+        if task is None:
+            raise TaskNotFoundError(f"unknown task: {task_id}")
+        with self._connect() as connection:
+            feedback_ids, batch_links = self._cleanup_references(
+                connection, [task_id]
+            )
+        blockers: list[str] = []
+        if task.state not in TERMINAL_TASK_STATES:
+            blockers.append(f"任务状态为 {task.state}，只有已结束的任务可以永久移除")
+        return {
+            "task_id": task.task_id,
+            "state": task.state,
+            "outcome": task.outcome,
+            "archived": task.archived_at is not None,
+            "feedback_ids": feedback_ids,
+            "feedback_count": len(feedback_ids),
+            "batch_links": batch_links,
+            "can_purge": not blockers,
+            "blockers": blockers,
+        }
+
+    def cleanup_definition_preview(self, node_id: str) -> dict[str, Any]:
+        node = self.get_workbench_node(node_id)
+        if node is None:
+            raise KeyError(f"unknown workbench node: {node_id}")
+        if node.node_type != "task":
+            raise ValueError("only task definitions can be deleted")
+        with self._connect() as connection:
+            run_rows = connection.execute(
+                "SELECT task_id FROM workbench_task_runs WHERE node_id = ? "
+                "ORDER BY created_at, task_id",
+                (node_id,),
+            ).fetchall()
+            task_ids = [str(row["task_id"]) for row in run_rows]
+            feedback_ids, batch_links = self._cleanup_references(
+                connection, task_ids
+            )
+        runs: list[dict[str, Any]] = []
+        active: list[str] = []
+        for task_id in task_ids:
+            task = self.get_task(task_id)
+            if task is None:
+                continue
+            with self._connect() as connection:
+                run_feedback, _ = self._cleanup_references(connection, [task_id])
+            if task.state not in TERMINAL_TASK_STATES:
+                active.append(task_id)
+            runs.append(
+                {
+                    "task_id": task.task_id,
+                    "state": task.state,
+                    "outcome": task.outcome,
+                    "archived": task.archived_at is not None,
+                    "feedback_count": len(run_feedback),
+                }
+            )
+        blockers = []
+        if active:
+            blockers.append(
+                "定义下仍有未结束运行，请先取消或等待结束: " + ", ".join(active)
+            )
+        return {
+            "node_id": node.node_id,
+            "name": node.name,
+            "task_ids": task_ids,
+            "runs": runs,
+            "run_count": len(runs),
+            "active_count": len(active),
+            "feedback_ids": feedback_ids,
+            "feedback_count": len(feedback_ids),
+            "batch_links": batch_links,
+            "can_delete": not blockers,
+            "can_purge_runs": not blockers,
+            "blockers": blockers,
+        }
+
+    def _purge_task_rows(
+        self,
+        connection: sqlite3.Connection,
+        task_id: str,
+        *,
+        purge_feedback: bool,
+    ) -> dict[str, Any]:
+        return_row = connection.execute(
+            "SELECT * FROM tasks WHERE task_id = ?", (task_id,)
+        ).fetchone()
+        if return_row is None:
+            raise TaskNotFoundError(f"unknown task: {task_id}")
+        task = _task_from_row(return_row)
+        if task.state not in TERMINAL_TASK_STATES:
+            raise CleanupError(
+                f"task {task_id} is {task.state}; only terminal tasks can be removed"
+            )
+        feedback_ids, batch_links = self._cleanup_references(connection, [task_id])
+        if feedback_ids and not purge_feedback:
+            raise CleanupError(
+                f"task {task_id} still has {len(feedback_ids)} feedback record(s); "
+                "confirm purging them first"
+            )
+        now = utc_now()
+        connection.execute(
+            "UPDATE batch_sites SET task_id = NULL, updated_at = ? WHERE task_id = ?",
+            (now, task_id),
+        )
+        connection.execute(
+            "UPDATE batch_sites SET delivery_task_id = NULL, updated_at = ? "
+            "WHERE delivery_task_id = ?",
+            (now, task_id),
+        )
+        if feedback_ids:
+            placeholders = ", ".join("?" for _ in feedback_ids)
+            connection.execute(
+                f"UPDATE builds SET feedback_id = NULL "
+                f"WHERE feedback_id IN ({placeholders})",
+                feedback_ids,
+            )
+            connection.execute(
+                f"DELETE FROM quality_feedback "
+                f"WHERE feedback_id IN ({placeholders})",
+                feedback_ids,
+            )
+        connection.execute(
+            "DELETE FROM workbench_task_runs WHERE task_id = ?", (task_id,)
+        )
+        connection.execute(
+            "DELETE FROM workbench_recent_dismissals WHERE task_id = ?", (task_id,)
+        )
+        connection.execute("DELETE FROM task_requests WHERE task_id = ?", (task_id,))
+        connection.execute("DELETE FROM task_items WHERE task_id = ?", (task_id,))
+        connection.execute("DELETE FROM task_resources WHERE task_id = ?", (task_id,))
+        connection.execute("DELETE FROM tasks WHERE task_id = ?", (task_id,))
+        return {
+            "task_id": task_id,
+            "feedback_deleted": len(feedback_ids),
+            "batch_links": batch_links,
+        }
+
+    def purge_run(self, task_id: str, *, purge_feedback: bool = False) -> dict[str, Any]:
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                result = self._purge_task_rows(
+                    connection, task_id, purge_feedback=purge_feedback
+                )
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+        return result
+
+    def delete_workbench_task_definition(
+        self,
+        node_id: str,
+        *,
+        purge_runs: bool,
+        purge_feedback: bool = False,
+    ) -> dict[str, Any]:
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                node = connection.execute(
+                    "SELECT * FROM workbench_nodes WHERE node_id = ?", (node_id,)
+                ).fetchone()
+                if node is None:
+                    raise KeyError(f"unknown workbench node: {node_id}")
+                if node["node_type"] != "task":
+                    raise ValueError("only task definitions can be deleted")
+                run_rows = connection.execute(
+                    "SELECT task_id FROM workbench_task_runs WHERE node_id = ? "
+                    "ORDER BY created_at, task_id",
+                    (node_id,),
+                ).fetchall()
+                task_ids = [str(row["task_id"]) for row in run_rows]
+                tasks = [
+                    _task_from_row(row)
+                    for row in (
+                        connection.execute(
+                            "SELECT * FROM tasks WHERE task_id = ?", (task_id,)
+                        ).fetchone()
+                        for task_id in task_ids
+                    )
+                    if row is not None
+                ]
+                active = [
+                    task.task_id
+                    for task in tasks
+                    if task.state not in TERMINAL_TASK_STATES
+                ]
+                if active:
+                    raise CleanupError(
+                        "task definition still has active runs: "
+                        + ", ".join(active)
+                    )
+                feedback_ids, batch_links = self._cleanup_references(
+                    connection, task_ids
+                )
+                if purge_runs and feedback_ids and not purge_feedback:
+                    raise CleanupError(
+                        f"definition still has {len(feedback_ids)} feedback record(s); "
+                        "confirm purging them first"
+                    )
+                purged: list[dict[str, Any]] = []
+                if purge_runs:
+                    for task in tasks:
+                        purged.append(
+                            self._purge_task_rows(
+                                connection,
+                                task.task_id,
+                                purge_feedback=purge_feedback,
+                            )
+                        )
+                connection.execute(
+                    "DELETE FROM workbench_task_runs WHERE node_id = ?", (node_id,)
+                )
+                connection.execute(
+                    "DELETE FROM workbench_task_defs WHERE node_id = ?", (node_id,)
+                )
+                connection.execute(
+                    "DELETE FROM workbench_nodes WHERE node_id = ?", (node_id,)
+                )
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+        return {
+            "node_id": node_id,
+            "task_ids": task_ids,
+            "purged": purged,
+            "feedback_count": len(feedback_ids),
+            "batch_links": batch_links,
+        }
 
     def list_workbench_task_defs(self) -> list[WorkbenchTaskDef]:
         with self._connect() as connection:

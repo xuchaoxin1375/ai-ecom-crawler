@@ -117,6 +117,7 @@ from ..runtime.store import (
     BatchNotFoundError,
     BatchTransitionError,
     BuildContinuationConflictError,
+    CleanupError,
     FeedbackNotFoundError,
     FeedbackRequestConflictError,
     FeedbackTransitionError,
@@ -282,6 +283,11 @@ class WorkbenchRunConfigUpdate(BaseModel):
 
 class WorkbenchRecentDismissRequest(BaseModel):
     task_ids: list[str] = Field(min_length=1, max_length=200)
+
+
+class WorkbenchCleanupRequest(BaseModel):
+    purge_runs: bool = False
+    purge_feedback: bool = False
 
 
 FeedbackCategory = Literal[
@@ -734,6 +740,50 @@ def _load_result(out_root: Path, task_id: str) -> dict[str, Any]:
     except (OSError, json.JSONDecodeError):
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def _task_output_dir(out_root: Path, task_id: str) -> Path:
+    root = out_root.resolve()
+    candidate = (root / task_id).resolve()
+    if candidate.parent != root or candidate.name != task_id:
+        raise ValueError(f"invalid task output directory: {task_id}")
+    return candidate
+
+
+def _directory_stats(path: Path) -> dict[str, int]:
+    if not path.exists():
+        return {"bytes": 0, "files": 0}
+    total_bytes = 0
+    file_count = 0
+    for directory, _, filenames in os.walk(path):
+        for filename in filenames:
+            try:
+                total_bytes += (Path(directory) / filename).stat().st_size
+                file_count += 1
+            except OSError:
+                continue
+    return {"bytes": total_bytes, "files": file_count}
+
+
+def _with_cleanup_stats(out_root: Path, preview: dict[str, Any]) -> dict[str, Any]:
+    total_bytes = 0
+    total_files = 0
+    if "runs" in preview:
+        for run in preview["runs"]:
+            try:
+                stats = _directory_stats(_task_output_dir(out_root, run["task_id"]))
+            except ValueError:
+                stats = {"bytes": 0, "files": 0}
+            run.update(stats)
+            total_bytes += stats["bytes"]
+            total_files += stats["files"]
+    else:
+        stats = _directory_stats(_task_output_dir(out_root, preview["task_id"]))
+        total_bytes = stats["bytes"]
+        total_files = stats["files"]
+    preview["bytes"] = total_bytes
+    preview["files"] = total_files
+    return preview
 
 
 def _counts(store: TaskStore, task: Task, result: dict[str, Any]) -> dict[str, int]:
@@ -5536,6 +5586,142 @@ def create_app(
                 node,
                 {item.node_id: item for item in store.list_workbench_nodes()},
             ),
+        }
+
+    @app.get("/api/workbench/nodes/{node_id}/cleanup-preview")
+    def get_workbench_node_cleanup_preview(node_id: str) -> dict[str, Any]:
+        try:
+            preview = store.cleanup_definition_preview(node_id)
+        except KeyError as exc:
+            raise _error("NOT_FOUND", str(exc), 404) from exc
+        except ValueError as exc:
+            raise _error("INVALID_CLEANUP_TARGET", str(exc), 409) from exc
+        return _with_cleanup_stats(root, preview)
+
+    @app.post("/api/workbench/nodes/{node_id}/delete")
+    def delete_workbench_node(
+        node_id: str, payload: WorkbenchCleanupRequest | None = None
+    ) -> dict[str, Any]:
+        request = payload or WorkbenchCleanupRequest()
+        try:
+            preview = store.cleanup_definition_preview(node_id)
+        except KeyError as exc:
+            raise _error("NOT_FOUND", str(exc), 404) from exc
+        except ValueError as exc:
+            raise _error("INVALID_CLEANUP_TARGET", str(exc), 409) from exc
+        _with_cleanup_stats(root, preview)
+        if not preview["can_delete"]:
+            raise _error(
+                "CLEANUP_BLOCKED",
+                "任务定义仍有未结束运行，不能删除",
+                409,
+                {"blockers": preview["blockers"]},
+            )
+        if (
+            request.purge_runs
+            and preview["feedback_count"]
+            and not request.purge_feedback
+        ):
+            raise _error(
+                "CLEANUP_REFERENCED",
+                "任务定义下的运行仍有关联反馈；请确认同时删除反馈，或先关闭后再清理",
+                409,
+                {"feedback_count": preview["feedback_count"]},
+            )
+        deleted_dirs = 0
+        if request.purge_runs:
+            for run in preview["runs"]:
+                path = _task_output_dir(root, run["task_id"])
+                if not path.exists():
+                    continue
+                try:
+                    shutil.rmtree(path)
+                    deleted_dirs += 1
+                except OSError as exc:
+                    raise _error(
+                        "CLEANUP_FILES",
+                        f"删除任务产物失败：{run['task_id']}：{exc}",
+                        409,
+                        {"task_id": run["task_id"]},
+                    ) from exc
+        try:
+            result = store.delete_workbench_task_definition(
+                node_id,
+                purge_runs=request.purge_runs,
+                purge_feedback=request.purge_feedback,
+            )
+        except KeyError as exc:
+            raise _error("NOT_FOUND", str(exc), 404) from exc
+        except CleanupError as exc:
+            raise _error("CLEANUP_BLOCKED", str(exc), 409) from exc
+        except ValueError as exc:
+            raise _error("INVALID_CLEANUP_TARGET", str(exc), 409) from exc
+        return {
+            "deleted": True,
+            **result,
+            "deleted_directories": deleted_dirs,
+            "bytes": preview["bytes"],
+            "files": preview["files"],
+        }
+
+    @app.get("/api/tasks/{task_id}/cleanup-preview")
+    def get_task_cleanup_preview(task_id: str) -> dict[str, Any]:
+        require_task(task_id)
+        try:
+            preview = store.cleanup_run_preview(task_id)
+        except TaskNotFoundError as exc:
+            raise _error("NOT_FOUND", str(exc), 404) from exc
+        return _with_cleanup_stats(root, preview)
+
+    @app.post("/api/tasks/{task_id}/purge")
+    def purge_task(
+        task_id: str, payload: WorkbenchCleanupRequest | None = None
+    ) -> dict[str, Any]:
+        request = payload or WorkbenchCleanupRequest()
+        require_task(task_id)
+        try:
+            preview = store.cleanup_run_preview(task_id)
+        except TaskNotFoundError as exc:
+            raise _error("NOT_FOUND", str(exc), 404) from exc
+        _with_cleanup_stats(root, preview)
+        if not preview["can_purge"]:
+            raise _error(
+                "CLEANUP_BLOCKED",
+                "只有已结束的任务可以永久移除",
+                409,
+                {"blockers": preview["blockers"]},
+            )
+        if preview["feedback_count"] and not request.purge_feedback:
+            raise _error(
+                "CLEANUP_REFERENCED",
+                "任务仍有关联反馈；请确认同时删除反馈，或先关闭后再清理",
+                409,
+                {"feedback_count": preview["feedback_count"]},
+            )
+        path = _task_output_dir(root, task_id)
+        if path.exists():
+            try:
+                shutil.rmtree(path)
+            except OSError as exc:
+                raise _error(
+                    "CLEANUP_FILES",
+                    f"删除任务产物失败：{exc}",
+                    409,
+                    {"task_id": task_id},
+                ) from exc
+        try:
+            result = store.purge_run(
+                task_id, purge_feedback=request.purge_feedback
+            )
+        except TaskNotFoundError as exc:
+            raise _error("NOT_FOUND", str(exc), 404) from exc
+        except CleanupError as exc:
+            raise _error("CLEANUP_BLOCKED", str(exc), 409) from exc
+        return {
+            "purged": True,
+            **result,
+            "bytes": preview["bytes"],
+            "files": preview["files"],
         }
 
     @app.get("/api/batches")
