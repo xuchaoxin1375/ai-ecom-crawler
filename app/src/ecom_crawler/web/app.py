@@ -55,6 +55,17 @@ from ..execution import build_task
 from ..executor.runner import CSV_COLUMNS
 from ..harness.adapter import HarnessStateError
 from ..harness.dependencies import DependencyPolicy
+from ..image_proxy import (
+    IMAGE_PROXY_SETTING,
+    ImageProxyConfigError,
+    ImageProxyError,
+    ImageProxyUrlError,
+    dump_image_proxy,
+    fetch_image_with_attempts,
+    image_proxy_attempts,
+    load_image_proxy,
+    validate_image_proxy,
+)
 from ..model import ContractError
 from ..rate_policy import (
     SITE_RATE_POLICIES_SETTING,
@@ -473,6 +484,13 @@ class CollectionPolicyRequest(BaseModel):
     formal_max_seconds: int | None = Field(default=None, ge=60, le=86400)
     default_per_domain_rps: float | None = Field(default=None, ge=0.1, le=10)
     default_concurrency: int | None = Field(default=None, ge=1, le=8)
+
+
+class ImageProxyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["auto", "specified", "direct"] = "auto"
+    proxy: str | None = Field(default=None, max_length=500)
 
 
 class SiteRatePolicyRequest(BaseModel):
@@ -1455,6 +1473,14 @@ def create_app(
     login_limiter = LoginRateLimiter()
     rate_policy_lock = threading.Lock()
     collection_policy_lock = threading.Lock()
+    image_proxy_lock = threading.Lock()
+
+    def _image_proxy_payload() -> dict[str, Any]:
+        setting = load_image_proxy(store)
+        return {
+            **setting,
+            "service_proxy_configured": bool(proxy),
+        }
 
     def _collection_policy_payload() -> dict[str, Any]:
         policy = load_collection_policy(store)
@@ -3000,6 +3026,20 @@ def create_app(
             )
         return _collection_policy_payload()
 
+    @app.get("/api/system/image-proxy")
+    def get_image_proxy() -> dict[str, Any]:
+        return _image_proxy_payload()
+
+    @app.put("/api/system/image-proxy")
+    def put_image_proxy(payload: ImageProxyRequest) -> dict[str, Any]:
+        try:
+            setting = validate_image_proxy(payload.model_dump())
+        except ImageProxyConfigError as exc:
+            raise _error("VALIDATION_ERROR", str(exc), 422) from exc
+        with image_proxy_lock:
+            store.set_setting(IMAGE_PROXY_SETTING, dump_image_proxy(setting))
+        return _image_proxy_payload()
+
     def _slots_payload(setting: str, current: int, override: bool) -> dict[str, Any]:
         if override:
             return {"next_start": current, "source": "cli"}
@@ -3320,6 +3360,43 @@ def create_app(
             "total": len(items),
             "items": [_item_payload(item) for item in items[offset : offset + limit]],
         }
+
+    @app.get("/api/media/image")
+    def media_image(
+        url: Annotated[str, Query(min_length=1, max_length=2048)],
+        task_id: Annotated[str | None, Query(max_length=100)] = None,
+    ) -> Response:
+        task_proxy: str | None = None
+        if task_id:
+            task = require_task(task_id)
+            task_proxy = str(task.input.get("proxy") or "").strip() or None
+        setting = load_image_proxy(store)
+        attempts = image_proxy_attempts(
+            mode=str(setting["mode"]),
+            task_proxy=task_proxy,
+            service_proxy=proxy,
+            system_proxy=setting.get("proxy"),
+        )
+        try:
+            content, content_type = fetch_image_with_attempts(url, attempts)
+        except ImageProxyUrlError as exc:
+            raise _error("INVALID_IMAGE_URL", str(exc), 400) from exc
+        except ImageProxyError as exc:
+            logger.warning(
+                "image proxy failed: task=%s host=%s attempts=%s",
+                task_id or "none",
+                urlsplit(url).hostname or "unknown",
+                exc.attempts,
+            )
+            raise _error("IMAGE_FETCH_FAILED", str(exc), 502) from exc
+        return Response(
+            content=content,
+            media_type=content_type,
+            headers={
+                "Cache-Control": "public, max-age=3600",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
 
     @app.post("/api/tasks/{task_id}/start", status_code=202)
     def start_task(task_id: str) -> dict[str, Any]:

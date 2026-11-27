@@ -1560,6 +1560,35 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "ImageProxyRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "default": "auto",
+            "enum": [
+              "auto",
+              "specified",
+              "direct"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "proxy": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proxy"
+          }
+        },
+        "title": "ImageProxyRequest",
+        "type": "object"
+      },
       "Limits": {
         "properties": {
           "max_attempts": {
@@ -5099,6 +5128,62 @@
         "summary": "Health"
       }
     },
+    "/api/media/image": {
+      "get": {
+        "operationId": "media_image_api_media_image_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "url",
+            "required": true,
+            "schema": {
+              "maxLength": 2048,
+              "minLength": 1,
+              "title": "Url",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "task_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Media Image"
+      }
+    },
     "/api/rules": {
       "get": {
         "operationId": "list_rules_api_rules_get",
@@ -5688,6 +5773,64 @@
           }
         },
         "summary": "Update Collection Slots"
+      }
+    },
+    "/api/system/image-proxy": {
+      "get": {
+        "operationId": "get_image_proxy_api_system_image_proxy_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Image Proxy Api System Image Proxy Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Image Proxy"
+      },
+      "put": {
+        "operationId": "put_image_proxy_api_system_image_proxy_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImageProxyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Put Image Proxy Api System Image Proxy Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Image Proxy"
       }
     },
     "/api/tasks": {

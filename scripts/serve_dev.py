@@ -187,6 +187,11 @@ def _windows_listener_pids(port: int) -> list[int]:
             continue
         if parts[1].rsplit(":", 1)[-1] != str(port):
             continue
+        # Only LISTENING owns the port. Closed/time-wait/fin-wait rows can
+        # still carry the local port and a dead PID, which previously blocked
+        # restart after a clean stop.
+        if parts[3].upper() not in {"LISTEN", "LISTENING"}:
+            continue
         candidate = parts[-1]
         if candidate.isdigit() and int(candidate) > 0:
             pids.add(int(candidate))

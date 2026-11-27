@@ -123,6 +123,14 @@ export interface CollectionPolicyResponse {
   >;
 }
 
+export type ImageProxyMode = "auto" | "specified" | "direct";
+
+export interface ImageProxySettings {
+  mode: ImageProxyMode;
+  proxy: string | null;
+  service_proxy_configured: boolean;
+}
+
 export interface SystemAccessResponse {
   access: SystemAccess;
 }
@@ -1232,6 +1240,16 @@ export function setCollectionPolicy(
     "PUT",
     policy,
   );
+}
+
+export function getImageProxy(signal?: AbortSignal): Promise<ImageProxySettings> {
+  return getJson<ImageProxySettings>("/api/system/image-proxy", signal);
+}
+
+export function setImageProxy(
+  settings: Pick<ImageProxySettings, "mode" | "proxy">,
+): Promise<ImageProxySettings> {
+  return sendJson<ImageProxySettings>("/api/system/image-proxy", "PUT", settings);
 }
 
 export function setSystemCollectionSlots(

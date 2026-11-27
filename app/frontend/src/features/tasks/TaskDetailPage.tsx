@@ -39,14 +39,12 @@ import { useManualRefresh } from "../../lib/liveRefresh";
 import { readListReturn } from "../../lib/listReturn";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
-import { EmptyState } from "../../components/ui/EmptyState";
 import { ErrorNotice } from "../../components/ui/ErrorNotice";
 import { RowActionsMenu, type RowActionItem } from "../../components/ui/DropdownMenu";
 import { ConfirmBatchActionDialog } from "../batches/ConfirmBatchActionDialog";
 import { TaskCsvPreview } from "../sites/TaskCsvPreview";
 import { taskIsActive } from "../sites/site";
 import { FeedbackPanel } from "./FeedbackPanel";
-import { ProductPreviewSection } from "./ProductPreviewSection";
 import { QualityExceptionsSection } from "./QualityExceptionsSection";
 import { TaskItemsSection } from "./TaskItemsSection";
 import { taskRuleIsStale, taskTypeLabel } from "./task";
@@ -84,18 +82,19 @@ function DetailSkeleton() {
   );
 }
 
-const TASK_VIEWS = ["results", "quality", "data", "detail"] as const;
+const TASK_VIEWS = ["data", "quality", "detail"] as const;
 type TaskView = (typeof TASK_VIEWS)[number];
 
 const TASK_VIEW_LABELS: Record<TaskView, string> = {
-  results: "结果",
-  quality: "质量与验收",
   data: "数据明细",
+  quality: "质量与验收",
   detail: "运行明细",
 };
 
 function parseTaskView(value: string | null): TaskView {
-  return TASK_VIEWS.find((item) => item === value) ?? "results";
+  // '' and the retired ?view=results both open the data view.
+  if (value === "results") return "data";
+  return TASK_VIEWS.find((item) => item === value) ?? "data";
 }
 
 async function copyText(value: string): Promise<void> {
@@ -206,7 +205,7 @@ export function TaskDetailPage() {
 
   function setView(next: TaskView) {
     const params = new URLSearchParams(searchParams);
-    if (next === "results") params.delete("view");
+    if (next === "data") params.delete("view");
     else params.set("view", next);
     setSearchParams(params, { replace: true, state: location.state });
   }
@@ -417,87 +416,14 @@ export function TaskDetailPage() {
   moreGroups.push(controlActions);
 
   const tabCounts: Record<TaskView, string> = {
-    results: formatNumber(resultCount),
-    quality: formatNumber(quality.length + (task.feedback?.open ?? 0)),
     data: isDiscovery
-      ? ""
+      ? formatNumber(resultCount)
       : formatNumber(
           (task.counts.valid_products ?? 0) + (task.counts.failed_products ?? 0),
         ),
+    quality: formatNumber(quality.length + (task.feedback?.open ?? 0)),
     detail: "",
   };
-
-  const qualitySummary = (
-    <section className="rounded-panel border border-line bg-surface px-4 py-4 sm:px-5">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0">
-          <h2 className="text-[17px] leading-6 font-semibold text-ink">
-            质量异常 {formatNumber(quality.length)}
-          </h2>
-          <p className="mt-1 text-xs leading-5 text-ink-3">
-            正文不完整或非可选字段缺失；先看具体商品和原因，再决定修复规则或复跑。
-          </p>
-        </div>
-        <Button size="sm" onClick={() => setView("quality")}>
-          查看质量与验收
-        </Button>
-      </div>
-    </section>
-  );
-
-  const dataEntry = (
-    <section className="rounded-panel border border-line bg-surface px-4 py-4 sm:px-5">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0">
-          <h2 className="text-[17px] leading-6 font-semibold text-ink">数据明细</h2>
-          <p className="mt-1 text-xs leading-5 text-ink-3">
-            CSV 预览和全部商品／网址明细在「数据明细」；结果视图只保留预览。
-          </p>
-        </div>
-        <Button size="sm" onClick={() => setView("data")}>
-          查看数据明细
-        </Button>
-      </div>
-    </section>
-  );
-
-  const emptyResults = (
-    <section className="rounded-panel border border-line bg-surface">
-      <EmptyState
-        title="本次没有有效商品"
-        description="先看质量异常和全部明细，确认是范围、访问还是规则问题；导出仍会包含失败记录。"
-        action={
-          <div className="flex flex-wrap justify-center gap-2">
-            <Button size="sm" onClick={() => setView("quality")}>
-              查看质量与验收
-            </Button>
-            <Button size="sm" onClick={() => setView("data")}>
-              查看数据明细
-            </Button>
-          </div>
-        }
-      />
-    </section>
-  );
-
-  const resultsContent = isDiscovery ? (
-    <>
-      <TaskItemsSection taskId={task.task_id} taskActive={active} />
-      {dataEntry}
-    </>
-  ) : resultCount > 0 ? (
-    <>
-      <ProductPreviewSection
-        taskId={task.task_id}
-        taskActive={active}
-        validCount={task.counts.valid_products ?? 0}
-      />
-      {qualitySummary}
-      {dataEntry}
-    </>
-  ) : (
-    emptyResults
-  );
 
   const qualityContent = (
     <>
@@ -515,15 +441,7 @@ export function TaskDetailPage() {
   );
 
   const dataContent = isDiscovery ? (
-    <section className="rounded-panel border border-line bg-surface px-4 py-6 sm:px-5">
-      <h2 className="text-[17px] leading-6 font-semibold text-ink">数据明细</h2>
-      <p className="mt-1 text-xs leading-5 text-ink-3">
-        网址发现任务不产生商品 CSV；全部网址已列在「结果」视图。
-      </p>
-      <Button className="mt-3" size="sm" onClick={() => setView("results")}>
-        查看网址结果
-      </Button>
-    </section>
+    <TaskItemsSection taskId={task.task_id} taskActive={active} />
   ) : (
     <>
       <TaskCsvPreview taskId={task.task_id} live={active} />
@@ -635,9 +553,8 @@ export function TaskDetailPage() {
   );
 
   const panels: Record<TaskView, ReactNode> = {
-    results: resultsContent,
-    quality: qualityContent,
     data: dataContent,
+    quality: qualityContent,
     detail: detailContent,
   };
 

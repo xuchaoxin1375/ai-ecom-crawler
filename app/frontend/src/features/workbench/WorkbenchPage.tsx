@@ -83,7 +83,10 @@ import {
   useManualRefresh,
   useStableUpdatedAt,
 } from "../../lib/liveRefresh";
-import { previewMeta, previewName, previewPrice } from "../sites/site";
+import { previewMeta, previewName, previewPrice, previewImage } from "../sites/site";
+import { ProductThumb } from "../sites/ProductThumb";
+import { ProductPreviewDialog } from "../sites/ProductPreviewDialog";
+import { PreviewSettingsButton } from "../sites/PreviewSettingsButton";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
 import { Input } from "../../components/ui/Input";
@@ -318,6 +321,8 @@ export function WorkbenchPage() {
   const [bottomTab, setBottomTab] = useState<"logs" | "data" | "detail" | "files">(
     "logs",
   );
+  const [previewItem, setPreviewItem] = useState<TaskItem | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [treeMenu, setTreeMenu] = useState<{
     x: number;
     y: number;
@@ -389,15 +394,7 @@ export function WorkbenchPage() {
       activeSelected ? "live" : "final",
     ],
     queryFn: ({ signal }) =>
-      getTaskItems(
-        selectedTaskId as string,
-        "product",
-        50,
-        0,
-        undefined,
-        "desc",
-        signal,
-      ),
+      getTaskItems(selectedTaskId as string, "product", 50, 0, "DONE", "desc", signal),
     enabled: Boolean(selectedTaskId) && bottomTab === "data" && !bottomCollapsed,
     refetchInterval: activeSelected ? 3000 : false,
   });
@@ -491,6 +488,11 @@ export function WorkbenchPage() {
   function selectRecent(item: WorkbenchRecentItem) {
     if (item.node_id) setSelectedNodeId(item.node_id);
     setSelectedTaskId(item.task_id);
+  }
+
+  function openPreview(item: TaskItem) {
+    setPreviewItem(item);
+    setPreviewOpen(true);
   }
 
   function parentForCreate(): string | null {
@@ -2558,7 +2560,7 @@ export function WorkbenchPage() {
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-line px-2.5 py-1.5 text-[11px] text-ink-3">
                   <span>
                     最近 <b className="text-ink-2 tabular">{taskDataItems.length}</b>{" "}
-                    条商品记录
+                    条有效商品
                   </span>
                   <span>
                     共{" "}
@@ -2579,6 +2581,7 @@ export function WorkbenchPage() {
                       打开任务详情
                     </Link>
                   ) : null}
+                  <PreviewSettingsButton />
                 </div>
                 {!selectedTaskId ? (
                   <p className="px-2.5 py-4 text-xs text-ink-3">
@@ -2600,8 +2603,8 @@ export function WorkbenchPage() {
                 ) : taskDataItems.length === 0 ? (
                   <p className="px-2.5 py-4 text-xs text-ink-3">
                     {activeSelected
-                      ? "还没有商品记录；任务运行中，数据会自动刷新。"
-                      : "这次运行没有商品记录。"}
+                      ? "还没有有效商品；任务运行中，数据会自动刷新。"
+                      : "这次运行没有有效商品。"}
                   </p>
                 ) : (
                   <div className="min-h-0 flex-1 overflow-auto">
@@ -2619,15 +2622,30 @@ export function WorkbenchPage() {
                         {taskDataItems.map((item) => (
                           <tr key={item.item_id} className="hover:bg-surface-muted">
                             <td className="px-2.5 py-1.5">
-                              <p className="truncate font-medium text-ink">
-                                {previewName(item)}
-                              </p>
-                              <p
-                                className="truncate text-[10.5px] text-ink-3"
-                                title={previewMeta(item) || item.url}
+                              <button
+                                type="button"
+                                className="flex min-w-0 items-center gap-2 rounded-control text-left hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                                title={`查看大图：${previewName(item)}`}
+                                onClick={() => openPreview(item)}
                               >
-                                {previewMeta(item) || item.url}
-                              </p>
+                                <ProductThumb
+                                  src={previewImage(item)}
+                                  alt={previewName(item)}
+                                  taskId={selectedTaskId}
+                                  className="h-9 w-9 rounded-control border border-line bg-surface-muted"
+                                />
+                                <span className="min-w-0">
+                                  <span className="block truncate font-medium text-ink">
+                                    {previewName(item)}
+                                  </span>
+                                  <span
+                                    className="block truncate text-[10.5px] text-ink-3"
+                                    title={previewMeta(item) || item.url}
+                                  >
+                                    {previewMeta(item) || item.url}
+                                  </span>
+                                </span>
+                              </button>
                             </td>
                             <td className="px-2 py-1.5 text-ink-2 tabular">
                               {previewPrice(item)}
@@ -3176,6 +3194,15 @@ export function WorkbenchPage() {
           onConfirm={() => void submitDissolve()}
         />
       ) : null}
+      <ProductPreviewDialog
+        key={`${previewItem?.item_id ?? "none"}-${previewOpen}`}
+        open={previewOpen}
+        item={previewItem}
+        items={taskDataItems}
+        taskId={selectedTaskId}
+        initialTab="image"
+        onOpenChange={setPreviewOpen}
+      />
       <Toast toast={toast} onDismiss={dismissToast} />
     </div>
   );

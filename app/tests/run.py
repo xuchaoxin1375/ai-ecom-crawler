@@ -22,6 +22,7 @@ GROUPS = {
         "test_web",
         "test_batches",
         "test_feedback",
+        "test_image_proxy",
         "test_migrate_rules",
         "test_workbench",
         "test_system_metrics",

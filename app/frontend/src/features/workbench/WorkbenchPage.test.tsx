@@ -247,8 +247,16 @@ const productItem = {
       price_currency: "GBP",
       brand: "Fixture",
       category: "toy",
+      primary_image_url: "https://images.example.test/fixture.jpg",
     },
   },
+};
+
+const pendingItem = {
+  ...productItem,
+  item_id: "item-pending",
+  state: "PENDING",
+  result: {},
 };
 
 beforeEach(() => {
@@ -289,7 +297,9 @@ function stubFetch(
       });
     }
     if (path === "/api/tasks/web-1/items") {
-      return Response.json({ total: 1, items: [productItem] });
+      const params = new URL(url, "http://localhost").searchParams;
+      const items = params.get("state") === "DONE" ? [productItem] : [pendingItem];
+      return Response.json({ total: items.length, items });
     }
     if (path === "/api/batches" && init?.method !== "POST") {
       return Response.json({ total: 1, items: [batch] });
@@ -493,6 +503,20 @@ it("shows live product data and runtime log lines", async () => {
   fireEvent.click(screen.getByRole("tab", { name: "实时数据" }));
   expect(await screen.findByText("Fixture product")).toBeInTheDocument();
   expect(screen.getByText("Fixture · toy")).toBeInTheDocument();
+
+  expect(
+    screen.getByRole("button", { name: "预览设置：图片代理" }),
+  ).toBeInTheDocument();
+
+  const thumb = screen.getByTitle("查看大图：Fixture product");
+  const thumbSrc = thumb.querySelector("img")?.getAttribute("src") ?? "";
+  expect(thumbSrc.startsWith("/api/media/image?")).toBe(true);
+  expect(new URLSearchParams(thumbSrc.split("?")[1]).get("task_id")).toBe("web-1");
+
+  fireEvent.click(thumb);
+  const dialog = await screen.findByRole("dialog");
+  expect(within(dialog).getByText("Fixture product")).toBeInTheDocument();
+  fireEvent.click(within(dialog).getByRole("button", { name: "关闭商品预览" }));
 
   fireEvent.click(screen.getByRole("tab", { name: "运行日志" }));
   const logPanel = screen.getByRole("tabpanel", { name: "运行日志" });

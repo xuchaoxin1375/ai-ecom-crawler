@@ -147,6 +147,24 @@ function stubFetch(
       current = { ...current, server: result.access };
       return Response.json(result);
     }
+    if (path === "/api/system/image-proxy") {
+      if (init?.method === "PUT") {
+        const body = JSON.parse(String(init.body)) as {
+          mode: "auto" | "specified" | "direct";
+          proxy: string | null;
+        };
+        return Response.json({
+          ...body,
+          proxy: body.mode === "direct" ? null : body.proxy,
+          service_proxy_configured: false,
+        });
+      }
+      return Response.json({
+        mode: "auto",
+        proxy: null,
+        service_proxy_configured: false,
+      });
+    }
     if (path === "/api/system/collection-policy" && init?.method === "PUT") {
       const body = JSON.parse(String(init.body)) as CollectionPolicy;
       const policy = {

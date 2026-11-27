@@ -402,6 +402,27 @@ export function productPreview(item: TaskItem): Record<string, unknown> {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
 }
 
+/**
+ * Render HTML-shaped descriptions as plain text for previews. Kept in one
+ * place so the product dialog and CSV preview do not drift in how they strip
+ * tags or normalize entities.
+ */
+export function htmlToText(value: unknown): string {
+  return String(value ?? "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|li|h[1-6])>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 export function previewImage(item: TaskItem): string {
   return String(productPreview(item).primary_image_url || "");
 }

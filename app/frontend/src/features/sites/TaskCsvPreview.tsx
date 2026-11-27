@@ -1,13 +1,31 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
-import { getTaskCsv } from "../../lib/api";
+import { getTaskCsv, type TaskItem } from "../../lib/api";
 import { formatNumber } from "../../lib/format";
 import { useManualRefresh } from "../../lib/liveRefresh";
+import { cn } from "../../lib/cn";
 import { Button } from "../../components/ui/Button";
 import { ErrorNotice } from "../../components/ui/ErrorNotice";
+import { ProductThumb } from "./ProductThumb";
+import { ProductPreviewDialog } from "./ProductPreviewDialog";
+import { PreviewSettingsButton } from "./PreviewSettingsButton";
+import { htmlToText, previewImage } from "./site";
 
 const PAGE_SIZE = 20;
+const DESCRIPTION_MODE_KEY = "ecom.csv-description-mode";
+
+type DescriptionMode = "truncate" | "wrap";
+
+function readDescriptionMode(): DescriptionMode {
+  try {
+    return window.localStorage.getItem(DESCRIPTION_MODE_KEY) === "wrap"
+      ? "wrap"
+      : "truncate";
+  } catch {
+    return "truncate";
+  }
+}
 
 const COLUMN_LABELS: Record<string, string> = {
   name: "商品名",
@@ -21,14 +39,6 @@ const COLUMN_LABELS: Record<string, string> = {
   source_url: "来源",
 };
 
-function stripHtml(value: unknown): string {
-  return String(value || "")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 function displayValue(value: unknown): string {
   if (value === null || value === undefined || value === "") return "—";
   return String(value);
@@ -39,6 +49,35 @@ function imageUrl(value: unknown): string {
   return /^https?:\/\//.test(text) ? text : "";
 }
 
+/**
+ * Adapt a CSV row to the item shape consumed by ProductPreviewDialog. The
+ * dialog is shared with the workbench and product cards, so a CSV row does not
+ * need a second image-preview implementation.
+ */
+function csvRowItem(row: Record<string, unknown>, index: number): TaskItem {
+  const sourceUrl = String(row.source_url || "");
+  return {
+    item_id: `csv-${index}-${sourceUrl || String(row.name || "")}`,
+    item_type: "product",
+    url: sourceUrl,
+    state: "DONE",
+    occurred_at: "",
+    attempts: 0,
+    failure_class: null,
+    result: {
+      product_preview: {
+        name: String(row.name || ""),
+        primary_image_url: imageUrl(row.primary_image_url),
+        price_amount: row.price_amount ?? "",
+        price_currency: String(row.price_currency || ""),
+        description_html: String(row.description_html || ""),
+        brand: String(row.brand || ""),
+        category: String(row.category || ""),
+      },
+    },
+  };
+}
+
 interface TaskCsvPreviewProps {
   taskId: string;
   live: boolean;
@@ -46,7 +85,26 @@ interface TaskCsvPreviewProps {
 
 export function TaskCsvPreview({ taskId, live }: TaskCsvPreviewProps) {
   const [page, setPage] = useState(0);
+  const [previewItem, setPreviewItem] = useState<TaskItem | null>(null);
+  const [previewTab, setPreviewTab] = useState<"image" | "description">("image");
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [descriptionMode, setDescriptionMode] =
+    useState<DescriptionMode>(readDescriptionMode);
   const { refreshing, runRefresh } = useManualRefresh();
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(DESCRIPTION_MODE_KEY, descriptionMode);
+    } catch {
+      // A blocked storage area should not break the preview.
+    }
+  }, [descriptionMode]);
+
+  function openPreview(item: TaskItem, tab: "image" | "description") {
+    setPreviewItem(item);
+    setPreviewTab(tab);
+    setPreviewOpen(true);
+  }
 
   // The live and final snapshots come from different files. Use separate query
   // keys so a task turning terminal triggers one final read instead of keeping
@@ -63,18 +121,48 @@ export function TaskCsvPreview({ taskId, live }: TaskCsvPreviewProps) {
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const rows = payload?.rows ?? [];
   const columns = payload?.columns ?? [];
+  const previewItems = rows.map((row, index) => csvRowItem(row, index));
+  const previewGallery = previewItems.filter((item) => Boolean(previewImage(item)));
 
   return (
     <section className="rounded-panel border border-line bg-surface">
-      <div className="flex items-start justify-between gap-4 border-b border-line px-5 py-4">
+      <div className="flex flex-col gap-3 border-b border-line px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h2 className="text-[17px] leading-6 font-semibold text-ink">CSV 表格预览</h2>
           <p className="mt-0.5 text-xs leading-5 text-ink-3">
             按导出的 9 列结构显示；任务运行中读取 products.jsonl，结束后读取
-            products.csv。描述单元格去标签显示。
+            products.csv。描述去标签显示，可切换单行或换行，点击描述查看全文。
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <div
+            className="flex items-center gap-0.5 rounded-full border border-line bg-surface p-0.5"
+            role="group"
+            aria-label="描述显示方式"
+          >
+            {(
+              [
+                ["truncate", "单行"],
+                ["wrap", "换行"],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={descriptionMode === value}
+                className={cn(
+                  "h-6 rounded-full px-2 text-[10.5px] font-medium",
+                  descriptionMode === value
+                    ? "bg-accent-soft text-accent"
+                    : "text-ink-3 hover:bg-surface-muted hover:text-ink",
+                )}
+                onClick={() => setDescriptionMode(value)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <PreviewSettingsButton />
           <Button
             size="sm"
             onClick={() => void runRefresh(() => query.refetch())}
@@ -116,7 +204,9 @@ export function TaskCsvPreview({ taskId, live }: TaskCsvPreviewProps) {
                       ? { width: "28%" }
                       : column === "name"
                         ? { width: "18%" }
-                        : undefined
+                        : column === "primary_image_url"
+                          ? { width: "64px" }
+                          : undefined
                   }
                 />
               ))}
@@ -140,37 +230,83 @@ export function TaskCsvPreview({ taskId, live }: TaskCsvPreviewProps) {
                   key={`${String(row.source_url || "")}-${index}`}
                   className="border-b border-line bg-surface last:border-0 hover:bg-surface-muted"
                 >
-                  {columns.map((column) => (
-                    <td
-                      key={column}
-                      className="truncate px-3 py-2 align-top text-ink-2"
-                      title={displayValue(row[column])}
-                    >
-                      {column === "primary_image_url" && imageUrl(row[column]) ? (
-                        <a
-                          href={imageUrl(row[column])}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-accent hover:underline"
-                        >
-                          查看图片
-                        </a>
-                      ) : column === "source_url" && imageUrl(row[column]) ? (
-                        <a
-                          href={imageUrl(row[column])}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-accent hover:underline"
-                        >
-                          来源页
-                        </a>
-                      ) : column === "description_html" ? (
-                        stripHtml(row[column]) || "—"
-                      ) : (
-                        displayValue(row[column])
-                      )}
-                    </td>
-                  ))}
+                  {columns.map((column) => {
+                    const descriptionText =
+                      column === "description_html" ? htmlToText(row[column]) : "";
+                    return (
+                      <td
+                        key={column}
+                        className={cn(
+                          "px-3 py-2 align-top text-ink-2",
+                          column === "description_html" && descriptionMode === "wrap"
+                            ? "whitespace-pre-wrap break-words"
+                            : "truncate",
+                        )}
+                        title={
+                          column === "primary_image_url"
+                            ? String(row.name || "")
+                            : column === "description_html"
+                              ? descriptionText
+                              : displayValue(row[column])
+                        }
+                      >
+                        {column === "primary_image_url" && imageUrl(row[column]) ? (
+                          <button
+                            type="button"
+                            className="group relative block h-9 w-9 overflow-hidden rounded-control border border-line bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+                            title={`查看大图：${String(row.name || "商品")}`}
+                            aria-label={`查看大图：${String(row.name || "商品")}`}
+                            onClick={() => {
+                              const preview = previewItems[index];
+                              if (preview) openPreview(preview, "image");
+                            }}
+                          >
+                            <ProductThumb
+                              src={imageUrl(row[column])}
+                              alt={String(row.name || "商品主图")}
+                              taskId={taskId}
+                              className="h-full w-full transition-transform duration-150 group-hover:scale-105"
+                            />
+                          </button>
+                        ) : column === "primary_image_url" ? (
+                          <span className="text-ink-3">—</span>
+                        ) : column === "source_url" && imageUrl(row[column]) ? (
+                          <a
+                            href={imageUrl(row[column])}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-accent hover:underline"
+                          >
+                            来源页
+                          </a>
+                        ) : column === "description_html" ? (
+                          descriptionText ? (
+                            <button
+                              type="button"
+                              className={cn(
+                                "block w-full text-left hover:text-accent",
+                                descriptionMode === "wrap"
+                                  ? "whitespace-pre-wrap break-words"
+                                  : "truncate hover:underline",
+                              )}
+                              title="点击在窗口中查看完整描述"
+                              aria-label={`查看完整描述：${String(row.name || "商品")}`}
+                              onClick={() => {
+                                const preview = previewItems[index];
+                                if (preview) openPreview(preview, "description");
+                              }}
+                            >
+                              {descriptionText}
+                            </button>
+                          ) : (
+                            "—"
+                          )
+                        ) : (
+                          displayValue(row[column])
+                        )}
+                      </td>
+                    );
+                  })}
                 </tr>
               ))}
             </tbody>
@@ -214,6 +350,16 @@ export function TaskCsvPreview({ taskId, live }: TaskCsvPreviewProps) {
           </Button>
         </div>
       </div>
+
+      <ProductPreviewDialog
+        key={`${previewItem?.item_id ?? "none"}-${previewTab}-${previewOpen}`}
+        open={previewOpen}
+        item={previewItem}
+        items={previewGallery}
+        taskId={taskId}
+        initialTab={previewTab}
+        onOpenChange={setPreviewOpen}
+      />
     </section>
   );
 }

@@ -141,23 +141,38 @@ describe("task detail recovery", () => {
     expect(cancelTask).toHaveBeenCalledTimes(2);
   });
 
-  it("switches task views from the tab bar", async () => {
+  it("switches task views from the tab bar with data as the default", async () => {
     const { unmount } = openTaskPage();
     try {
+      expect(await screen.findByRole("tab", { name: /数据明细/ })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
       expect(
-        await screen.findByRole("heading", { name: "已采数据预览" }),
+        await screen.findByRole("heading", { name: "CSV 表格预览" }),
       ).toBeVisible();
+      expect(screen.queryByRole("tab", { name: "结果" })).not.toBeInTheDocument();
 
       fireEvent.click(screen.getByRole("tab", { name: /质量与验收/ }));
       expect(await screen.findByRole("heading", { name: "结果验收" })).toBeVisible();
 
-      fireEvent.click(screen.getByRole("tab", { name: /数据明细/ }));
+      fireEvent.click(screen.getByRole("tab", { name: /运行明细/ }));
+      expect(await screen.findByRole("heading", { name: "任务事实" })).toBeVisible();
+    } finally {
+      unmount();
+    }
+  });
+
+  it("maps the retired results view to data detail", async () => {
+    const { unmount } = openTaskPage(task, "/tasks/web-1?view=results");
+    try {
+      expect(await screen.findByRole("tab", { name: /数据明细/ })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
       expect(
         await screen.findByRole("heading", { name: "CSV 表格预览" }),
       ).toBeVisible();
-
-      fireEvent.click(screen.getByRole("tab", { name: /运行明细/ }));
-      expect(await screen.findByRole("heading", { name: "任务事实" })).toBeVisible();
     } finally {
       unmount();
     }
@@ -189,26 +204,34 @@ describe("task detail recovery", () => {
     }
   });
 
-  it("shows URL results for discovery tasks without a product CSV", async () => {
+  it("shows URL results for discovery tasks in data detail without a product CSV", async () => {
     const { unmount } = openTaskPage(discoveryTask);
     try {
+      expect(await screen.findByRole("tab", { name: /数据明细/ })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
       expect(await screen.findByRole("heading", { name: "任务明细" })).toBeVisible();
+      expect(
+        screen.queryByRole("heading", { name: "CSV 表格预览" }),
+      ).not.toBeInTheDocument();
       expect(
         screen.queryByRole("heading", { name: "已采数据预览" }),
       ).not.toBeInTheDocument();
-      fireEvent.click(screen.getByRole("tab", { name: /数据明细/ }));
-      expect(await screen.findByText(/不产生商品 CSV/)).toBeVisible();
     } finally {
       unmount();
     }
   });
 
-  it("keeps empty results in the results view with quality entry", async () => {
+  it("keeps empty product results in data detail with the quality tab available", async () => {
     const { unmount } = openTaskPage(emptyTask);
     try {
-      expect(await screen.findByText("本次没有有效商品")).toBeVisible();
-      expect(screen.getByRole("button", { name: "查看质量与验收" })).toBeVisible();
-      expect(screen.getByRole("button", { name: "查看数据明细" })).toBeVisible();
+      expect(
+        await screen.findByRole("heading", { name: "CSV 表格预览" }),
+      ).toBeVisible();
+      expect(await screen.findByText("本次任务没有 CSV 数据。")).toBeVisible();
+      fireEvent.click(screen.getByRole("tab", { name: /质量与验收/ }));
+      expect(await screen.findByRole("heading", { name: "结果验收" })).toBeVisible();
     } finally {
       unmount();
     }

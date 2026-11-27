@@ -25,6 +25,7 @@ import { PageHeader } from "../../components/ui/PageHeader";
 import { cn } from "../../lib/cn";
 import { useManualRefresh } from "../../lib/liveRefresh";
 import { CollectionPolicySettings } from "./CollectionPolicySettings";
+import { ImageProxySettings } from "./ImageProxySettings";
 import { ResourceGauges } from "./ResourceGauges";
 import {
   formatBytes,
@@ -1168,6 +1169,8 @@ export function SystemSettingsPage() {
       </section>
 
       <CollectionPolicySettings />
+
+      <ImageProxySettings />
 
       <div className="grid gap-6 lg:grid-cols-2">
         <section className="rounded-panel border border-line bg-surface">

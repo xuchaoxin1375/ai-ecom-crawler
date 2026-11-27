@@ -2,7 +2,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { useState, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ProductPreviewSection } from "./ProductPreviewSection";
 import { TaskItemsSection } from "./TaskItemsSection";
 import { TaskCsvPreview } from "../sites/TaskCsvPreview";
 
@@ -131,45 +130,5 @@ describe("task result refresh on terminal transition", () => {
     final.resolve(Response.json({ items: [productItem], total: 1 }));
     expect(await screen.findByText(/最终商品/)).toBeVisible();
     expect(screen.getByText("共 1 条")).toBeVisible();
-  });
-
-  it("reads the final product preview before treating an empty live result as final", async () => {
-    const final = deferred<Response>();
-    let calls = 0;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => {
-        calls += 1;
-        if (calls === 1) return Response.json({ items: [], total: 0 });
-        return final.promise;
-      }),
-    );
-
-    function Harness() {
-      const [active, setActive] = useState(true);
-      return (
-        <>
-          <button type="button" onClick={() => setActive(false)}>
-            结束任务
-          </button>
-          <ProductPreviewSection
-            taskId="web-1"
-            taskActive={active}
-            validCount={active ? 0 : 1}
-          />
-        </>
-      );
-    }
-
-    renderWithQuery(<Harness />);
-    expect(
-      await screen.findByText("还没有完成的有效商品；任务运行中，预览会自动刷新。"),
-    ).toBeVisible();
-
-    fireEvent.click(screen.getByRole("button", { name: "结束任务" }));
-    expect(await screen.findByText("任务已结束，正在更新结果…")).toBeVisible();
-
-    final.resolve(Response.json({ items: [productItem], total: 1 }));
-    expect(await screen.findByText("最终商品")).toBeVisible();
   });
 });
