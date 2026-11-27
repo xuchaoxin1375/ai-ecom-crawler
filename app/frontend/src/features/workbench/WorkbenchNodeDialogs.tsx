@@ -6,7 +6,7 @@ import { Button } from "../../components/ui/Button";
 import { ErrorNotice } from "../../components/ui/ErrorNotice";
 import { Input, Select } from "../../components/ui/Input";
 
-function nodePaths(nodes: WorkbenchNode[]): Map<string, string> {
+export function nodePaths(nodes: WorkbenchNode[]): Map<string, string> {
   const byId = new Map(nodes.map((node) => [node.node_id, node]));
   const paths = new Map<string, string>();
   function resolve(node: WorkbenchNode, seen: Set<string>): string {

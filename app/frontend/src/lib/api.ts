@@ -462,6 +462,66 @@ export interface WorkbenchCleanupResult {
   files: number;
 }
 
+export interface WorkbenchCloneRule {
+  rule_id: string;
+  rule_version: string;
+  path: string;
+  status: string;
+  sha256?: string;
+}
+
+export interface WorkbenchCloneRun {
+  task_id: string;
+  state: string;
+  outcome: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  bytes: number;
+  files: number;
+}
+
+export interface WorkbenchClonePreview {
+  node_id: string;
+  name: string;
+  parent_id: string | null;
+  definition: WorkbenchDefinition;
+  source_rule: WorkbenchCloneRule | null;
+  source_run: WorkbenchCloneRun | null;
+  default_name: string;
+  can_copy_rule: boolean;
+  can_copy_data: boolean;
+  rule_blockers: string[];
+  data_blockers: string[];
+}
+
+export interface WorkbenchCloneRequest {
+  name?: string;
+  parent_id?: string | null;
+  copy_rule?: boolean;
+  copy_data?: boolean;
+  copy_run_id?: string;
+}
+
+export interface WorkbenchCloneResult {
+  node: {
+    node_id: string;
+    node_type: "task";
+    parent_id: string | null;
+    name: string;
+    sort_order: number;
+  };
+  definition: WorkbenchDefinition;
+  rule: WorkbenchCloneRule | null;
+  run: {
+    task_id: string;
+    source_task_id: string | null;
+    state: string;
+    outcome: string | null;
+    bytes: number;
+    files: number;
+  } | null;
+}
+
 export interface WorkbenchRunLimits {
   max_urls: number | null;
   max_products: number | null;
@@ -1815,6 +1875,27 @@ export function updateWorkbenchTask(
   return sendJson<{ definition: WorkbenchDefinition }>(
     `/api/workbench/tasks/${encodeURIComponent(nodeId)}`,
     "PATCH",
+    body,
+  );
+}
+
+export function getWorkbenchClonePreview(
+  nodeId: string,
+  signal?: AbortSignal,
+): Promise<WorkbenchClonePreview> {
+  return getJson<WorkbenchClonePreview>(
+    `/api/workbench/tasks/${encodeURIComponent(nodeId)}/clone-preview`,
+    signal,
+  );
+}
+
+export function cloneWorkbenchTask(
+  nodeId: string,
+  body: WorkbenchCloneRequest,
+): Promise<WorkbenchCloneResult> {
+  return sendJson<WorkbenchCloneResult>(
+    `/api/workbench/tasks/${encodeURIComponent(nodeId)}/clone`,
+    "POST",
     body,
   );
 }

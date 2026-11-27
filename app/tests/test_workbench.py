@@ -7,7 +7,8 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from ecom_crawler.runtime.models import WorkbenchNode
+from ecom_crawler.runtime.models import WorkbenchNode, WorkItem
+from ecom_crawler.runtime.rule import load_rule
 from ecom_crawler.runtime.store import TaskStore
 from ecom_crawler.web.app import create_app
 from tests.test_execution import RULE_TEMPLATE
@@ -244,6 +245,216 @@ class WorkbenchApiTests(unittest.TestCase):
         history = self.client.get(f"/api/tasks/{task['task_id']}/events/history")
         self.assertEqual(history.status_code, 200, history.text)
         self.assertEqual(history.json()["items"], [])
+
+    def test_clone_task_definition_can_copy_rule_version(self) -> None:
+        _, node_id = self.create_task_node()
+        source_rule = self.rules_dir / "fixture.yaml"
+        source_text = source_rule.read_text(encoding="utf-8")
+
+        preview = self.client.get(
+            f"/api/workbench/tasks/{node_id}/clone-preview"
+        )
+        self.assertEqual(preview.status_code, 200, preview.text)
+        body = preview.json()
+        self.assertTrue(body["can_copy_rule"])
+        self.assertFalse(body["can_copy_data"])
+        self.assertEqual(body["default_name"], "fixture.example 副本")
+        self.assertEqual(body["source_rule"]["rule_version"], "2026.11.21-1")
+
+        cloned = self.client.post(
+            f"/api/workbench/tasks/{node_id}/clone",
+            json={"copy_rule": True},
+        )
+        self.assertEqual(cloned.status_code, 201, cloned.text)
+        payload = cloned.json()
+        self.assertIsNone(payload["run"])
+        self.assertIn("-exp-", payload["definition"]["rule_version"])
+        self.assertEqual(
+            payload["definition"]["rule_version"], payload["rule"]["rule_version"]
+        )
+        self.assertEqual(payload["rule"]["status"], "candidate")
+        self.assertEqual(source_rule.read_text(encoding="utf-8"), source_text)
+
+        cloned_rule = self.rules_dir / payload["rule"]["path"]
+        self.assertTrue(cloned_rule.is_file())
+        rule = load_rule(cloned_rule)
+        self.assertEqual(rule.rule_id, "fixture-local")
+        self.assertEqual(rule.rule_version, payload["rule"]["rule_version"])
+        self.assertEqual(rule.raw.get("status"), "candidate")
+
+        tree = self.client.get("/api/workbench/tree").json()["nodes"]
+        source_node = next(item for item in tree if item["node_id"] == node_id)
+        clone_node = next(
+            item for item in tree if item["node_id"] == payload["node"]["node_id"]
+        )
+        self.assertEqual(clone_node["parent_id"], source_node["parent_id"])
+        self.assertEqual(clone_node["definition"]["site_key"], "fixture.example")
+        self.assertIn("克隆自", clone_node["definition"]["note"])
+        self.assertIsNone(clone_node["current_run"])
+
+        rules = self.client.get("/api/rules").json()["items"]
+        versions = {
+            item["rule_version"]
+            for item in rules
+            if item["rule_id"] == "fixture-local"
+        }
+        self.assertIn("2026.11.21-1", versions)
+        self.assertIn(payload["rule"]["rule_version"], versions)
+
+    def test_clone_task_with_data_isolates_batch_and_rewrites_clone_run(self) -> None:
+        group = self.client.post(
+            "/api/workbench/groups", json={"name": "克隆实验目录"}
+        )
+        self.assertEqual(group.status_code, 201, group.text)
+        group_id = group.json()["node"]["node_id"]
+        batch_id = self.create_batch("clone data batch")
+        source_task_id = self.create_generic_task("clone-source-task")
+        self.store.update_task(
+            source_task_id,
+            site_key="fixture.example",
+            batch_id=batch_id,
+            state="FINISHED",
+            outcome="COMPLETED",
+        )
+        self.store.update_batch_site(
+            batch_id, "fixture.example", task_id=source_task_id
+        )
+        self.store.add_item(
+            WorkItem(
+                task_id=source_task_id,
+                item_id="item-1",
+                item_type="product",
+                url="https://fixture.example/p/1",
+                normalized_url="https://fixture.example/p/1",
+                stage="product",
+                state="DONE",
+                result={"name": "Fixture product"},
+            )
+        )
+        source_dir = self.out_root / source_task_id
+        source_dir.mkdir()
+        (source_dir / "task-result.json").write_text(
+            json.dumps(
+                {
+                    "task_id": source_task_id,
+                    "state": "FINISHED",
+                    "outcome": "COMPLETED",
+                    "counts": {"valid_products": 1},
+                }
+            ),
+            encoding="utf-8",
+        )
+        (source_dir / "products.csv").write_text(
+            "source_url,name\nhttps://fixture.example/p/1,Fixture product\n",
+            encoding="utf-8",
+        )
+        (source_dir / "events.ndjson").write_text(
+            '{"event":"task_started"}\n', encoding="utf-8"
+        )
+        imported = self.client.post(
+            "/api/workbench/import-batch",
+            json={"batch_id": batch_id, "parent_id": group_id},
+        )
+        self.assertEqual(imported.status_code, 200, imported.text)
+        node_id = imported.json()["added"][0]["node_id"]
+
+        preview = self.client.get(
+            f"/api/workbench/tasks/{node_id}/clone-preview"
+        )
+        self.assertEqual(preview.status_code, 200, preview.text)
+        preview_body = preview.json()
+        self.assertTrue(preview_body["can_copy_data"])
+        self.assertEqual(
+            preview_body["source_run"]["task_id"], source_task_id
+        )
+        self.assertGreater(preview_body["source_run"]["files"], 0)
+
+        cloned = self.client.post(
+            f"/api/workbench/tasks/{node_id}/clone",
+            json={"copy_rule": True, "copy_data": True},
+        )
+        self.assertEqual(cloned.status_code, 201, cloned.text)
+        payload = cloned.json()
+        clone_node_id = payload["node"]["node_id"]
+        clone_task_id = payload["run"]["task_id"]
+        self.assertNotEqual(clone_task_id, source_task_id)
+        self.assertEqual(payload["run"]["source_task_id"], source_task_id)
+        self.assertEqual(payload["definition"]["batch_id"], None)
+        self.assertIn("克隆自", payload["definition"]["note"])
+        self.assertIn("-exp-", payload["definition"]["rule_version"])
+
+        source_task = self.store.get_task(source_task_id)
+        self.assertIsNotNone(source_task)
+        self.assertEqual(source_task.batch_id, batch_id)
+        clone_task = self.store.get_task(clone_task_id)
+        self.assertIsNotNone(clone_task)
+        self.assertEqual(clone_task.state, "FINISHED")
+        self.assertEqual(clone_task.outcome, "COMPLETED")
+        self.assertEqual(clone_task.batch_id, None)
+        self.assertEqual(clone_task.plan_version, "2026.11.21-1")
+        self.assertEqual(clone_task.input.get("cloned_from"), source_task_id)
+        self.assertEqual(
+            clone_task.input.get("workbench_node_id"), clone_node_id
+        )
+        self.assertEqual(len(self.store.items(clone_task_id, "product")), 1)
+
+        clone_dir = self.out_root / clone_task_id
+        self.assertTrue((clone_dir / "products.csv").is_file())
+        result = json.loads(
+            (clone_dir / "task-result.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(result["task_id"], clone_task_id)
+        self.assertEqual(result["cloned_from"], source_task_id)
+        self.assertEqual(result["counts"]["valid_products"], 1)
+
+        site = self.store.get_batch_site(batch_id, "fixture.example")
+        self.assertIsNotNone(site)
+        self.assertEqual(site.task_id, source_task_id)
+
+        tree = self.client.get("/api/workbench/tree").json()["nodes"]
+        clone_node = next(
+            item for item in tree if item["node_id"] == clone_node_id
+        )
+        self.assertEqual(clone_node["definition"]["batch_id"], None)
+        self.assertEqual(clone_node["definition"]["rule_version"],
+                         payload["definition"]["rule_version"])
+        self.assertEqual(
+            clone_node["current_run"]["task_id"], clone_task_id
+        )
+
+        summary = self.client.get(f"/api/tasks/{clone_task_id}")
+        self.assertEqual(summary.status_code, 200, summary.text)
+        self.assertEqual(summary.json()["state"], "FINISHED")
+        self.assertEqual(summary.json()["counts"]["valid_products"], 1)
+
+        config = self.client.get(f"/api/workbench/runs/{clone_task_id}/config")
+        self.assertEqual(config.status_code, 200, config.text)
+        self.assertFalse(config.json()["can_continue"])
+        self.assertIn("快照", config.json()["continue_hint"] or "")
+
+    def test_clone_blocks_data_without_terminal_run(self) -> None:
+        _, node_id = self.create_task_node()
+        preview = self.client.get(
+            f"/api/workbench/tasks/{node_id}/clone-preview"
+        )
+        self.assertEqual(preview.status_code, 200, preview.text)
+        self.assertFalse(preview.json()["can_copy_data"])
+        self.assertTrue(preview.json()["data_blockers"])
+
+        blocked = self.client.post(
+            f"/api/workbench/tasks/{node_id}/clone",
+            json={"copy_data": True},
+        )
+        self.assertEqual(blocked.status_code, 409)
+        self.assertEqual(
+            blocked.json()["error"]["code"], "CLONE_DATA_UNAVAILABLE"
+        )
+        self.assertEqual(
+            self.client.get("/api/workbench/tree").json()["nodes"][0][
+                "node_type"
+            ],
+            "group",
+        )
 
     def test_cleanup_preview_and_purge_run_removes_data(self) -> None:
         _, node_id = self.create_task_node()

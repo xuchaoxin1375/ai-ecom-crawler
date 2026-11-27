@@ -2047,6 +2047,109 @@ class TaskStore:
             raise ValueError(f"unknown workbench node: {node.node_id}")
         return created
 
+    def clone_workbench_task(
+        self,
+        node: WorkbenchNode,
+        definition: WorkbenchTaskDef,
+        *,
+        source_task: Task | None = None,
+        copy_items_from: str | None = None,
+    ) -> WorkbenchNode:
+        """Create a task definition clone and optionally a copied historical run.
+
+        The copied run is a data snapshot: task rows and work items are copied,
+        while requests, leases, batch pointers and feedback references are not.
+        Files are copied by the service layer before this transaction, so a
+        failure here leaves no ledger-visible clone.
+        """
+        if node.node_type != "task":
+            raise ValueError("task nodes require node_type=task")
+        if definition.node_id != node.node_id:
+            raise ValueError("task definition node_id must match the node")
+        if source_task is not None and source_task.state not in TERMINAL_TASK_STATES:
+            raise ValueError("cloned data run must be terminal")
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                connection.execute(
+                    "INSERT INTO workbench_nodes (node_id, node_type, parent_id, name, "
+                    "sort_order, created_at, updated_at) VALUES (?, 'task', ?, ?, ?, ?, ?)",
+                    (
+                        node.node_id,
+                        node.parent_id,
+                        node.name,
+                        node.sort_order,
+                        node.created_at,
+                        node.updated_at,
+                    ),
+                )
+                connection.execute(
+                    """
+                    INSERT INTO workbench_task_defs (
+                        node_id, input_url, domain, site_key, batch_id,
+                        country, language, market, category, task_type,
+                        collection_mode, rule_id, rule_version, rule_path,
+                        limits_json, proxy, note, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        definition.node_id,
+                        definition.input_url,
+                        definition.domain,
+                        definition.site_key,
+                        definition.batch_id,
+                        definition.country,
+                        definition.language,
+                        definition.market,
+                        definition.category,
+                        definition.task_type,
+                        definition.collection_mode,
+                        definition.rule_id,
+                        definition.rule_version,
+                        definition.rule_path,
+                        json_dumps(definition.limits),
+                        definition.proxy,
+                        definition.note,
+                        definition.created_at,
+                        definition.updated_at,
+                    ),
+                )
+                if source_task is not None:
+                    self._insert_task(connection, source_task)
+                    connection.execute(
+                        "INSERT INTO workbench_task_runs (node_id, task_id, created_at) "
+                        "VALUES (?, ?, ?)",
+                        (node.node_id, source_task.task_id, utc_now()),
+                    )
+                    connection.execute(
+                        """
+                        INSERT INTO task_items (
+                            task_id, item_id, item_type, url, normalized_url, stage,
+                            state, attempts, failure_class, parent_url,
+                            discovered_from, result_json, updated_at
+                        )
+                        SELECT ?, item_id, item_type, url, normalized_url, stage,
+                            state, attempts, failure_class, parent_url,
+                            discovered_from, result_json, updated_at
+                        FROM task_items WHERE task_id = ?
+                        """,
+                        (
+                            source_task.task_id,
+                            copy_items_from or source_task.task_id,
+                        ),
+                    )
+                connection.commit()
+            except sqlite3.IntegrityError as exc:
+                connection.rollback()
+                raise ValueError(f"workbench clone already exists: {node.node_id}") from exc
+            except Exception:
+                connection.rollback()
+                raise
+        created = self.get_workbench_node(node.node_id)
+        if created is None:
+            raise ValueError(f"unknown workbench node: {node.node_id}")
+        return created
+
     def rename_workbench_node(
         self, node_id: str, name: str, updated_at: str
     ) -> WorkbenchNode:

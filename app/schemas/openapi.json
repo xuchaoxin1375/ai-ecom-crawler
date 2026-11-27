@@ -2856,6 +2856,59 @@
         "title": "WorkbenchStartRequest",
         "type": "object"
       },
+      "WorkbenchTaskCloneRequest": {
+        "properties": {
+          "copy_data": {
+            "default": false,
+            "title": "Copy Data",
+            "type": "boolean"
+          },
+          "copy_rule": {
+            "default": false,
+            "title": "Copy Rule",
+            "type": "boolean"
+          },
+          "copy_run_id": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Copy Run Id"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          }
+        },
+        "title": "WorkbenchTaskCloneRequest",
+        "type": "object"
+      },
       "WorkbenchTaskCreateRequest": {
         "properties": {
           "category": {
@@ -8046,6 +8099,98 @@
           }
         },
         "summary": "Update Workbench Task"
+      }
+    },
+    "/api/workbench/tasks/{node_id}/clone": {
+      "post": {
+        "operationId": "clone_workbench_task_api_workbench_tasks__node_id__clone_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "title": "Node Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkbenchTaskCloneRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Clone Workbench Task Api Workbench Tasks  Node Id  Clone Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Clone Workbench Task"
+      }
+    },
+    "/api/workbench/tasks/{node_id}/clone-preview": {
+      "get": {
+        "operationId": "get_workbench_task_clone_preview_api_workbench_tasks__node_id__clone_preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "title": "Node Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Workbench Task Clone Preview Api Workbench Tasks  Node Id  Clone Preview Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Workbench Task Clone Preview"
       }
     },
     "/api/workbench/tasks/{node_id}/start": {

@@ -16,6 +16,7 @@ import {
   ChevronRight,
   ChevronsDownUp,
   ChevronsUpDown,
+  Copy,
   Download,
   ExternalLink,
   FileText,
@@ -102,6 +103,10 @@ import {
   type WorkbenchCleanupTarget,
 } from "./WorkbenchCleanupDialog";
 import { WorkbenchAttachDialog } from "./WorkbenchAttachDialog";
+import {
+  WorkbenchCloneDialog,
+  type WorkbenchCloneTarget,
+} from "./WorkbenchCloneDialog";
 import {
   WorkbenchImportBatchDialog,
   WorkbenchNewBatchDialog,
@@ -346,6 +351,7 @@ export function WorkbenchPage() {
   const [cleanupTarget, setCleanupTarget] = useState<WorkbenchCleanupTarget | null>(
     null,
   );
+  const [cloneTarget, setCloneTarget] = useState<WorkbenchCloneTarget | null>(null);
   const [editNode, setEditNode] = useState<WorkbenchNode | null>(null);
   const [attachRun, setAttachRun] = useState<WorkbenchRecentItem | null>(null);
   const [defaultDialogOpen, setDefaultDialogOpen] = useState(false);
@@ -703,6 +709,14 @@ export function WorkbenchPage() {
     setCleanupTarget(null);
     void refreshWorkbench();
     void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+    showToast("success", message);
+  }
+
+  function handleCloneCompleted(message: string) {
+    setCloneTarget(null);
+    void refreshWorkbench();
+    void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+    void queryClient.invalidateQueries({ queryKey: ["rules"] });
     showToast("success", message);
   }
 
@@ -1440,6 +1454,22 @@ export function WorkbenchPage() {
                 onSelect: () => {
                   const target = nodesById.get(item.node_id ?? "");
                   if (target) openEditTask(target);
+                },
+              },
+              {
+                key: "clone-definition",
+                label: "克隆任务…",
+                hint: "可复制规则和运行数据",
+                icon: <Copy size={14} />,
+                disabled: readOnly,
+                onSelect: () => {
+                  const target = nodesById.get(item.node_id ?? "");
+                  if (target) {
+                    setCloneTarget({
+                      nodeId: target.node_id,
+                      name: target.name,
+                    });
+                  }
                 },
               },
             ]
@@ -3129,6 +3159,18 @@ export function WorkbenchPage() {
                         onSelect: () => openMoveDialog(node),
                       },
                       {
+                        key: "task-clone",
+                        label: "克隆任务…",
+                        hint: "可复制规则和运行数据",
+                        icon: <Copy size={14} />,
+                        disabled: readOnly,
+                        onSelect: () =>
+                          setCloneTarget({
+                            nodeId: node.node_id,
+                            name: node.name,
+                          }),
+                      },
+                      {
                         key: "task-delete",
                         label: "删除任务定义…",
                         icon: <Trash2 size={14} />,
@@ -3310,6 +3352,18 @@ export function WorkbenchPage() {
             }
           }}
           onSubmit={(parentId) => void submitMove(parentId)}
+        />
+      ) : null}
+      {cloneTarget ? (
+        <WorkbenchCloneDialog
+          key={cloneTarget.nodeId}
+          open
+          target={cloneTarget}
+          nodes={nodes}
+          onOpenChange={(open) => {
+            if (!open) setCloneTarget(null);
+          }}
+          onCompleted={handleCloneCompleted}
         />
       ) : null}
       {cleanupTarget ? (

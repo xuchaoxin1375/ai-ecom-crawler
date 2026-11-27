@@ -23,6 +23,7 @@ import zipfile
 from collections import Counter
 from collections.abc import Iterable
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from pathlib import Path
 from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
@@ -236,6 +237,14 @@ class WorkbenchTaskUpdateRequest(BaseModel):
     limits: Limits | None = None
     proxy: str | None = Field(default=None, max_length=500)
     note: str | None = Field(default=None, max_length=2000)
+
+
+class WorkbenchTaskCloneRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    parent_id: str | None = Field(default=None, max_length=40)
+    copy_rule: bool = False
+    copy_data: bool = False
+    copy_run_id: str | None = Field(default=None, max_length=100)
 
 
 class WorkbenchBatchImportRequest(BaseModel):
@@ -786,6 +795,253 @@ def _with_cleanup_stats(out_root: Path, preview: dict[str, Any]) -> dict[str, An
     return preview
 
 
+def _workbench_terminal_runs(store: TaskStore, node_id: str) -> list[tuple[Any, Task]]:
+    pairs: list[tuple[Any, Task]] = []
+    for run in store.list_workbench_task_runs():
+        if run.node_id != node_id:
+            continue
+        task = store.get_task(run.task_id)
+        if task is not None and task.state in TERMINAL_TASK_STATES:
+            pairs.append((run, task))
+    pairs.sort(key=lambda item: item[0].created_at, reverse=True)
+    return pairs
+
+
+def _clone_default_name(source_name: str, siblings: list[WorkbenchNode]) -> str:
+    base = f"{source_name.strip() or '任务'} 副本"[:80]
+    names = {node.name for node in siblings}
+    if base not in names:
+        return base
+    index = 2
+    while index < 1000:
+        suffix = f" ({index})"
+        candidate = base[: max(1, 80 - len(suffix))] + suffix
+        if candidate not in names:
+            return candidate
+        index += 1
+    return f"{base[:73]}-{uuid.uuid4().hex[:6]}"
+
+
+def _clone_rule_source(
+    rules_dir: Path | None, definition: WorkbenchTaskDef
+) -> tuple[Any | None, str | None]:
+    if rules_dir is None or not rules_dir.is_dir():
+        return None, "未配置规则目录"
+    if not definition.rule_path:
+        return None, "任务定义没有规则文件"
+    root = rules_dir.resolve()
+    try:
+        path = (root / definition.rule_path).resolve()
+    except OSError as exc:
+        return None, f"规则路径无法解析：{exc}"
+    if not path.is_relative_to(root):
+        return None, "规则文件不在规则目录内"
+    if not path.is_file():
+        return None, "规则文件不存在"
+    try:
+        rule = load_rule(path)
+    except Exception as exc:  # noqa: BLE001 - rule files are user data
+        return None, f"规则文件无法加载：{exc}"
+    if rule.rule_id != definition.rule_id:
+        return None, "规则文件与任务定义的 rule_id 不一致"
+    if rule.rule_version != definition.rule_version:
+        return None, "规则文件与任务定义的 rule_version 不一致"
+    if not rule.capabilities.get(definition.task_type):
+        return None, f"规则不支持任务类型 {definition.task_type}"
+    return rule, None
+
+
+def _yaml_scalar(value: str) -> str:
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]*", value):
+        return value
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _clone_rule_text(text: str, version: str, now: str) -> str:
+    newline = "\r\n" if "\r\n" in text else "\n"
+    lines = text.splitlines()
+
+    def replace_top_level(key: str, value: str) -> int:
+        pattern = re.compile(rf"^{re.escape(key)}\s*:")
+        for index, line in enumerate(lines):
+            if pattern.match(line):
+                lines[index] = f"{key}: {value}"
+                return index
+        return -1
+
+    version_index = replace_top_level("rule_version", _yaml_scalar(version))
+    if version_index < 0:
+        raise ValueError("规则文件缺少 rule_version")
+    status_index = replace_top_level("status", "candidate")
+    if status_index < 0:
+        status_index = version_index + 1
+        lines.insert(status_index, "status: candidate")
+    updated_index = replace_top_level("updated_at", f"'{now}'")
+    if updated_index < 0:
+        lines.insert(status_index + 1, f"updated_at: '{now}'")
+    return newline.join(lines) + newline
+
+
+def _clone_rule_names(source: Path, source_version: str) -> tuple[str, str]:
+    suffix = uuid.uuid4().hex[:6]
+    base_version = (source_version.strip() or "clone")[:64].rstrip("-._") or "clone"
+    version = f"{base_version}-exp-{suffix}"
+    stem = source.stem
+    maximum = 120 - len("-exp-") - len(suffix) - len(source.suffix)
+    if len(stem) > maximum:
+        stem = stem[:maximum].rstrip("-._") or "rule"
+    return version, f"{stem}-exp-{suffix}{source.suffix}"
+
+
+def _write_clone_rule(
+    source: Path, rules_root: Path, *, version: str, filename: str, now: str
+) -> Path:
+    target = rules_root / filename
+    if target.exists():
+        raise ValueError(f"规则副本已存在：{filename}")
+    text = source.read_bytes().decode("utf-8-sig")
+    new_text = _clone_rule_text(text, version, now)
+    with target.open("x", encoding="utf-8", newline="") as handle:
+        handle.write(new_text)
+    try:
+        rule = load_rule(target)
+        if rule.rule_version != version:
+            raise ValueError("规则副本元数据与原规则不一致")
+    except Exception:
+        target.unlink(missing_ok=True)
+        raise
+    return target
+
+
+def _clone_task_snapshot(
+    source: Task, *, task_id: str, node_id: str, now: str
+) -> Task:
+    task_input = dict(source.input or {})
+    task_input["cloned_from"] = source.task_id
+    task_input["source_workbench_node_id"] = task_input.get("workbench_node_id")
+    task_input["workbench_node_id"] = node_id
+    return replace(
+        source,
+        task_id=task_id,
+        input=task_input,
+        limits=dict(source.limits or {}),
+        output=dict(source.output or {}),
+        counters=dict(source.counters or {}),
+        created_at=now,
+        updated_at=now,
+        started_at=now,
+        finished_at=now,
+        archived_at=None,
+        batch_id=None,
+        lease_owner=None,
+        lease_token=0,
+        lease_expires_at=None,
+        lease_heartbeat_at=None,
+    )
+
+
+def _copy_clone_output(
+    source_dir: Path, target_dir: Path, *, source: Task, clone: Task
+) -> None:
+    shutil.copytree(source_dir, target_dir)
+    result_path = target_dir / "task-result.json"
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise TypeError("运行结果文件不是对象")
+    payload["task_id"] = clone.task_id
+    payload["cloned_from"] = source.task_id
+    payload["source_started_at"] = source.started_at
+    payload["source_finished_at"] = source.finished_at
+    payload["started_at"] = clone.started_at
+    payload["finished_at"] = clone.finished_at
+    result_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
+
+def _workbench_clone_preview(
+    store: TaskStore, root: Path, rules_dir: Path | None, node_id: str
+) -> dict[str, Any]:
+    node = store.get_workbench_node(node_id)
+    definition = store.get_workbench_task_def(node_id)
+    if node is None or node.node_type != "task" or definition is None:
+        raise KeyError(f"unknown workbench task: {node_id}")
+
+    rule, rule_error = _clone_rule_source(rules_dir, definition)
+    terminal_runs = _workbench_terminal_runs(store, node_id)
+    source_run = terminal_runs[0] if terminal_runs else None
+    run_stats = {"bytes": 0, "files": 0}
+    data_error: str | None = None
+    if source_run is None:
+        data_error = "还没有已结束的运行可复制"
+    else:
+        try:
+            source_dir = _task_output_dir(root, source_run[1].task_id)
+        except ValueError:
+            source_dir = None
+        if source_dir is None or not source_dir.is_dir():
+            data_error = "运行输出目录不存在"
+        else:
+            run_stats = _directory_stats(source_dir)
+            if not run_stats["files"]:
+                data_error = "运行输出目录为空"
+            else:
+                result_path = source_dir / "task-result.json"
+                if not result_path.is_file():
+                    data_error = "运行结果文件缺失"
+                else:
+                    try:
+                        payload = json.loads(result_path.read_text(encoding="utf-8"))
+                    except (OSError, json.JSONDecodeError):
+                        data_error = "运行结果文件损坏"
+                    else:
+                        if not isinstance(payload, dict):
+                            data_error = "运行结果文件不是对象"
+
+    siblings = [
+        item
+        for item in store.list_workbench_nodes()
+        if item.parent_id == node.parent_id and item.node_id != node.node_id
+    ]
+    source_rule = None
+    if rule is not None:
+        source_rule = {
+            "rule_id": rule.rule_id,
+            "rule_version": rule.rule_version,
+            "path": rule.path.resolve().relative_to(rules_dir.resolve()).as_posix()
+            if rules_dir is not None
+            else rule.path.name,
+            "status": rule.raw.get("status", "candidate"),
+            "sha256": hashlib.sha256(rule.path.read_bytes()).hexdigest(),
+        }
+    source_run_payload = None
+    if source_run is not None:
+        source_run_payload = {
+            "task_id": source_run[1].task_id,
+            "state": source_run[1].state,
+            "outcome": source_run[1].outcome,
+            "started_at": source_run[1].started_at,
+            "finished_at": source_run[1].finished_at,
+            "bytes": run_stats["bytes"],
+            "files": run_stats["files"],
+        }
+    return {
+        "node_id": node.node_id,
+        "name": node.name,
+        "parent_id": node.parent_id,
+        "definition": _workbench_definition_payload(definition),
+        "source_rule": source_rule,
+        "source_run": source_run_payload,
+        "default_name": _clone_default_name(node.name, siblings),
+        "can_copy_rule": rule is not None,
+        "can_copy_data": data_error is None,
+        "rule_blockers": [rule_error] if rule_error else [],
+        "data_blockers": [data_error] if data_error else [],
+    }
+
+
 def _counts(store: TaskStore, task: Task, result: dict[str, Any]) -> dict[str, int]:
     raw = result.get("counts")
     if isinstance(raw, dict) and raw:
@@ -1015,12 +1271,18 @@ def _workbench_run_can_continue(
     discovery_truncated = bool(discovery_limit) or any(
         marker in stop_detail for marker in _RUN_DISCOVERY_DETAIL_MARKERS
     )
+    cloned_snapshot = bool(task.input.get("cloned_from"))
     can_continue = (
         task.state == "FINISHED"
         and task.archived_at is None
+        and not cloned_snapshot
         and (pending_products + pending_navigation > 0 or discovery_truncated)
     )
     hints: list[str] = []
+    if cloned_snapshot:
+        hints.append(
+            "这是克隆的数据快照，不能续采；请从克隆任务定义启动新运行。"
+        )
     if pending_products:
         valid = int((result.get("counts") or {}).get("valid_products") or 0)
         if not valid:
@@ -4889,6 +5151,250 @@ def create_app(
                 "sort_order": node.sort_order,
             },
             "definition": _workbench_definition_payload(definition),
+        }
+
+    @app.get("/api/workbench/tasks/{node_id}/clone-preview")
+    def get_workbench_task_clone_preview(node_id: str) -> dict[str, Any]:
+        try:
+            return _workbench_clone_preview(store, root, rules, node_id)
+        except KeyError as exc:
+            raise _error("NOT_FOUND", str(exc), 404) from exc
+
+    @app.post("/api/workbench/tasks/{node_id}/clone", status_code=201)
+    def clone_workbench_task(
+        node_id: str, payload: WorkbenchTaskCloneRequest
+    ) -> dict[str, Any]:
+        node = store.get_workbench_node(node_id)
+        definition = store.get_workbench_task_def(node_id)
+        if node is None or node.node_type != "task" or definition is None:
+            raise _error("NOT_FOUND", f"unknown workbench task: {node_id}", 404)
+        rule, rule_error = _clone_rule_source(rules, definition)
+        if rule is None:
+            raise _error(
+                "CLONE_RULE_UNAVAILABLE",
+                rule_error or "规则文件不可用",
+                409,
+            )
+
+        terminal_runs = _workbench_terminal_runs(store, node_id)
+        source_task: Task | None = None
+        if payload.copy_data:
+            if payload.copy_run_id:
+                source_task = next(
+                    (
+                        task
+                        for _, task in terminal_runs
+                        if task.task_id == payload.copy_run_id
+                    ),
+                    None,
+                )
+                if source_task is None:
+                    raise _error(
+                        "CLONE_DATA_UNAVAILABLE",
+                        "指定的运行不存在或未结束",
+                        409,
+                    )
+            elif terminal_runs:
+                source_task = terminal_runs[0][1]
+            if source_task is None:
+                raise _error(
+                    "CLONE_DATA_UNAVAILABLE",
+                    "还没有已结束的运行可复制",
+                    409,
+                )
+            try:
+                source_dir = _task_output_dir(root, source_task.task_id)
+            except ValueError:
+                source_dir = None
+            if source_dir is None or not source_dir.is_dir():
+                raise _error(
+                    "CLONE_DATA_UNAVAILABLE",
+                    "运行输出目录不存在",
+                    409,
+                )
+            result_path = source_dir / "task-result.json"
+            if not result_path.is_file():
+                raise _error(
+                    "CLONE_DATA_UNAVAILABLE",
+                    "运行结果文件缺失",
+                    409,
+                )
+            try:
+                result_payload = json.loads(result_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                result_payload = None
+            if not isinstance(result_payload, dict):
+                raise _error(
+                    "CLONE_DATA_UNAVAILABLE",
+                    "运行结果文件损坏",
+                    409,
+                )
+
+        if "parent_id" in payload.model_fields_set:
+            parent_id = payload.parent_id or None
+        else:
+            parent_id = node.parent_id
+        if parent_id:
+            parent = store.get_workbench_node(parent_id)
+            if parent is None or parent.node_type != "group":
+                raise _error(
+                    "INVALID_PARENT",
+                    "目标目录不存在或不是目录",
+                    409,
+                )
+        siblings = [
+            item
+            for item in store.list_workbench_nodes()
+            if item.parent_id == parent_id
+        ]
+        name = (payload.name or "").strip() or _clone_default_name(node.name, siblings)
+        if len(name) > 80:
+            raise _error("INVALID_NAME", "名称不能超过 80 个字符", 422)
+        if any(ord(character) < 32 for character in name):
+            raise _error("INVALID_NAME", "名称不能包含控制字符", 422)
+
+        now = utc_now()
+        existing_node_ids = {item.node_id for item in store.list_workbench_nodes()}
+        new_node_id = f"n-{uuid.uuid4().hex[:12]}"
+        while new_node_id in existing_node_ids:
+            new_node_id = f"n-{uuid.uuid4().hex[:12]}"
+        new_task_id = f"web-{uuid.uuid4().hex[:12]}"
+        while (
+            store.get_task(new_task_id) is not None
+            or (root / new_task_id).exists()
+        ):
+            new_task_id = f"web-{uuid.uuid4().hex[:12]}"
+
+        created_rule: Path | None = None
+        created_data: Path | None = None
+        cloned_task: Task | None = None
+        try:
+            rules_root = rules.resolve()
+            new_rule_path = rule.path.resolve().relative_to(rules_root).as_posix()
+            new_rule_version = rule.rule_version
+            rule_payload = None
+            if payload.copy_rule:
+                version, filename = _clone_rule_names(
+                    rule.path, rule.rule_version
+                )
+                copied_rule = _write_clone_rule(
+                    rule.path,
+                    rules_root,
+                    version=version,
+                    filename=filename,
+                    now=now,
+                )
+                created_rule = copied_rule
+                new_rule_path = (
+                    copied_rule.resolve().relative_to(rules_root).as_posix()
+                )
+                new_rule_version = version
+                rule_payload = {
+                    "rule_id": rule.rule_id,
+                    "rule_version": version,
+                    "path": new_rule_path,
+                    "status": "candidate",
+                }
+            if source_task is not None:
+                cloned_task = _clone_task_snapshot(
+                    source_task,
+                    task_id=new_task_id,
+                    node_id=new_node_id,
+                    now=now,
+                )
+                target_dir = _task_output_dir(root, cloned_task.task_id)
+                source_dir = _task_output_dir(root, source_task.task_id)
+                created_data = target_dir
+                _copy_clone_output(
+                    source_dir,
+                    target_dir,
+                    source=source_task,
+                    clone=cloned_task,
+                )
+
+            provenance = f"克隆自「{node.name}」（{node.node_id}）"
+            note = (definition.note or "").strip()
+            if note:
+                room = max(0, 2000 - len(provenance) - 1)
+                note = f"{note[:room]}\n{provenance}"[:2000]
+            else:
+                note = provenance
+            new_node = WorkbenchNode(
+                node_id=new_node_id,
+                node_type="task",
+                name=name,
+                parent_id=parent_id,
+                sort_order=max(
+                    (item.sort_order for item in siblings), default=-1
+                )
+                + 1,
+                created_at=now,
+                updated_at=now,
+            )
+            new_definition = WorkbenchTaskDef(
+                node_id=new_node_id,
+                input_url=definition.input_url,
+                domain=definition.domain,
+                site_key=definition.site_key,
+                rule_id=definition.rule_id,
+                rule_version=new_rule_version,
+                rule_path=new_rule_path,
+                task_type=definition.task_type,
+                collection_mode=definition.collection_mode,
+                batch_id=None,
+                country=definition.country,
+                language=definition.language,
+                market=definition.market,
+                category=definition.category,
+                limits=dict(definition.limits or {}),
+                proxy=definition.proxy,
+                note=note,
+                created_at=now,
+                updated_at=now,
+            )
+            store.clone_workbench_task(
+                new_node,
+                new_definition,
+                source_task=cloned_task,
+                copy_items_from=(
+                    source_task.task_id if source_task is not None else None
+                ),
+            )
+        except ValueError as exc:
+            if created_data is not None and created_data.exists():
+                shutil.rmtree(created_data, ignore_errors=True)
+            if created_rule is not None and created_rule.exists():
+                created_rule.unlink(missing_ok=True)
+            raise _error("CLONE_FAILED", str(exc), 409) from exc
+        except Exception:
+            if created_data is not None and created_data.exists():
+                shutil.rmtree(created_data, ignore_errors=True)
+            if created_rule is not None and created_rule.exists():
+                created_rule.unlink(missing_ok=True)
+            raise
+
+        run_payload = None
+        if cloned_task is not None and created_data is not None:
+            stats = _directory_stats(created_data)
+            run_payload = {
+                "task_id": cloned_task.task_id,
+                "source_task_id": cloned_task.input.get("cloned_from"),
+                "state": cloned_task.state,
+                "outcome": cloned_task.outcome,
+                "bytes": stats["bytes"],
+                "files": stats["files"],
+            }
+        return {
+            "node": {
+                "node_id": new_node.node_id,
+                "node_type": new_node.node_type,
+                "parent_id": new_node.parent_id,
+                "name": new_node.name,
+                "sort_order": new_node.sort_order,
+            },
+            "definition": _workbench_definition_payload(new_definition),
+            "rule": rule_payload,
+            "run": run_payload,
         }
 
     @app.patch("/api/workbench/tasks/{node_id}")
