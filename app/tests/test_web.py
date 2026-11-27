@@ -14,6 +14,7 @@ from unittest import mock
 
 from fastapi.testclient import TestClient
 
+from ecom_crawler.runtime.identity import frontend_info
 from ecom_crawler.runtime.models import Task, WorkItem
 from ecom_crawler.runtime.store import TaskStore
 from ecom_crawler.web.app import (
@@ -142,8 +143,19 @@ class WebApiTests(unittest.TestCase):
     def test_health_and_read_only_index(self) -> None:
         health = self.client.get("/api/health")
         self.assertEqual(health.status_code, 200)
-        self.assertEqual(health.json()["status"], "ok")
-        self.assertEqual(health.json()["legacy_ui"], "disabled")
+        body = health.json()
+        self.assertEqual(body["status"], "ok")
+        self.assertEqual(body["legacy_ui"], "disabled")
+        self.assertIsInstance(body["pid"], int)
+        self.assertEqual(body["port"], 8765)
+        self.assertTrue(body["started_at"].endswith("Z"))
+        self.assertEqual(len(body["instance_id"]), 12)
+        self.assertEqual(len(body["code_fingerprint"]), 16)
+        commit = body["git"]["commit"]
+        self.assertTrue(commit is None or len(commit) == 40)
+        self.assertIn(body["git"]["dirty"], (True, False, None))
+        self.assertIn(body["frontend"]["kind"], {"v2", "legacy", "none"})
+        self.assertIsInstance(body["frontend"]["next_mounted"], bool)
         if (V2_DIST_DIR / "index.html").is_file():
             legacy = self.client.get("/legacy", follow_redirects=False)
             self.assertEqual(legacy.status_code, 307)
@@ -169,6 +181,43 @@ class WebApiTests(unittest.TestCase):
             index = self.client.get("/", follow_redirects=False)
             self.assertEqual(index.status_code, 503)
             self.assertEqual(index.json()["error"]["code"], "UI_NOT_BUILT")
+
+    def test_health_frontend_identity_is_snapshot_at_startup(self) -> None:
+        dist = self.root / "frontend-dist"
+        dist.mkdir()
+        index = dist / "index.html"
+        index.write_text("<html>old</html>", encoding="utf-8")
+        with mock.patch("ecom_crawler.web.app.V2_DIST_DIR", dist), TestClient(
+            create_app(self.db_path, self.out_root, self.rules_dir),
+            headers=CLIENT_HEADERS,
+        ) as client:
+            first = client.get("/api/health").json()["frontend"]
+            self.assertEqual(first["kind"], "v2")
+            self.assertTrue(first["next_mounted"])
+            self.assertEqual(len(first["index_sha256"]), 16)
+            index.write_text("<html>new</html>", encoding="utf-8")
+            second = client.get("/api/health").json()["frontend"]
+            self.assertEqual(second["index_sha256"], first["index_sha256"])
+            self.assertNotEqual(frontend_info(dist)["sha256"], first["index_sha256"])
+
+    def test_dev_identity_is_loopback_only_and_skips_auth(self) -> None:
+        with TestClient(
+            create_app(self.db_path, self.out_root, self.rules_dir, access_token="secret"),
+            headers=CLIENT_HEADERS,
+            client=("127.0.0.1", 50000),
+        ) as client:
+            self.assertEqual(client.get("/api/health").status_code, 401)
+            identity = client.get("/api/dev/identity")
+            self.assertEqual(identity.status_code, 200)
+            self.assertEqual(identity.json()["pid"], os.getpid())
+            self.assertEqual(identity.json()["port"], 8765)
+
+        with TestClient(
+            create_app(self.db_path, self.out_root, self.rules_dir, access_token="secret"),
+            headers=CLIENT_HEADERS,
+            client=("192.168.1.10", 50000),
+        ) as remote:
+            self.assertEqual(remote.get("/api/dev/identity").status_code, 404)
 
     def test_read_only_mode_rejects_writes_and_opens_ledger_read_only(self) -> None:
         app = create_app(

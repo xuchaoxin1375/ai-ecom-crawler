@@ -8,6 +8,7 @@ import binascii
 import csv
 import hashlib
 import io
+import ipaddress
 import json
 import logging
 import os
@@ -75,6 +76,7 @@ from ..runtime.batch import (
     target_entry_mode,
     target_key,
 )
+from ..runtime.identity import code_fingerprint, frontend_info, git_info
 from ..runtime.models import (
     Batch,
     BatchFolder,
@@ -133,6 +135,7 @@ logger = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).with_name("static")
 BATCH_DIST_DIR = Path(__file__).resolve().parents[3] / "frontend" / "dist"
 V2_DIST_DIR = Path(__file__).resolve().parents[3] / "frontend-v2" / "dist"
+DEV_IDENTITY_PATH = "/api/dev/identity"
 EXPORT_FILES = (
     "products.csv",
     "task-result.json",
@@ -772,6 +775,19 @@ def _legacy_ui_enabled() -> bool:
     }
 
 
+def _client_is_loopback(request: Request) -> bool:
+    client = request.client
+    if client is None:
+        return False
+    try:
+        address = ipaddress.ip_address(client.host)
+    except ValueError:
+        return False
+    if address.version == 6 and address.ipv4_mapped is not None:
+        return address.ipv4_mapped.is_loopback
+    return address.is_loopback
+
+
 def _forbidden(message: str) -> JSONResponse:
     return JSONResponse(
         status_code=403,
@@ -1145,6 +1161,35 @@ def create_app(
         display = f"[{serve_host}]" if ":" in serve_host else serve_host
         urls = [f"http://{display}:{serve_port}/next/"]
     started_at = utc_now()
+    v2_mounted = (V2_DIST_DIR / "index.html").is_file()
+    legacy_mounted = legacy_ui_enabled and (BATCH_DIST_DIR / "index.html").is_file()
+    frontend_kind = "v2" if v2_mounted else "legacy" if legacy_mounted else "none"
+    startup_code_fingerprint = code_fingerprint(Path(__file__).resolve().parents[1])
+    startup_frontend = frontend_info(V2_DIST_DIR)
+    startup_git = git_info(Path(__file__).resolve().parents[4])
+    instance_id = uuid.uuid4().hex[:12]
+    worker_label = "read-only" if read_only else ("managed" if manage_worker else "external")
+
+    def identity_fields() -> dict[str, Any]:
+        return {
+            "pid": os.getpid(),
+            "host": serve_host,
+            "port": serve_port,
+            "started_at": started_at,
+            "instance_id": instance_id,
+            "code_fingerprint": startup_code_fingerprint,
+            "git": startup_git,
+            "frontend": {
+                "kind": frontend_kind,
+                "next_mounted": v2_mounted,
+                "index_sha256": startup_frontend["sha256"],
+                "built_at": startup_frontend["built_at"],
+            },
+            "db": str(store.path),
+            "worker": worker_label,
+            "read_only": read_only,
+        }
+
     started_monotonic = time.monotonic()
     if build_manager is None and rules is not None:
         build_manager = BuildManager(
@@ -1579,13 +1624,19 @@ def create_app(
         method = request.method.upper()
         auth_path = _is_auth_path(path)
         public_static = _is_public_static(path, method)
+        dev_identity = path == DEV_IDENTITY_PATH
         with access_lock:
             lan_enabled_now = bool(access_state["lan_enabled"])
             token_salt_now = access_state["token_salt"]
             token_hash_now = access_state["token_hash"]
         if lan_capable and not lan_enabled_now and not is_loopback_host(host):
             return _forbidden("LAN access is disabled")
-        if token_hash_now is not None and not auth_path and not public_static:
+        if (
+            token_hash_now is not None
+            and not auth_path
+            and not public_static
+            and not dev_identity
+        ):
             session_value = request.cookies.get(SESSION_COOKIE_NAME)
             if not verify_session(session_value, token_hash_now):
                 password = _basic_password(request.headers.get("authorization"))
@@ -2702,14 +2753,8 @@ def create_app(
         return {
             "status": "ok",
             "version": __version__,
-            "db": str(store.path),
+            **identity_fields(),
             "tasks": len(store.list_tasks()),
-            "worker": (
-                "read-only"
-                if read_only
-                else ("managed" if manage_worker else "external")
-            ),
-            "read_only": read_only,
             "max_tasks": max_tasks if manage_worker else None,
             "max_browser_tasks": max_browser_tasks if manage_worker else None,
             "rules_configured": rules is not None and rules.is_dir(),
@@ -2721,6 +2766,12 @@ def create_app(
             ),
             "legacy_ui": "enabled" if legacy_ui_enabled else "disabled",
         }
+
+    @app.get(DEV_IDENTITY_PATH, include_in_schema=False)
+    def dev_identity(request: Request) -> dict[str, Any]:
+        if not _client_is_loopback(request):
+            raise _error("NOT_FOUND", "not found", 404)
+        return {"status": "ok", "version": __version__, **identity_fields()}
 
     @app.get("/api/rules")
     def list_rules() -> dict[str, Any]:
@@ -4804,13 +4855,13 @@ def create_app(
         return {"accepted": True, "build": result}
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-    if (V2_DIST_DIR / "index.html").is_file():
+    if v2_mounted:
         app.mount(
             "/next",
             StaticFiles(directory=V2_DIST_DIR, html=True),
             name="next",
         )
-    if legacy_ui_enabled and (BATCH_DIST_DIR / "index.html").is_file():
+    if legacy_mounted:
         app.mount(
             "/batch",
             StaticFiles(directory=BATCH_DIST_DIR, html=True),

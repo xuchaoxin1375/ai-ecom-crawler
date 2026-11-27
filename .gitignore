@@ -9,6 +9,7 @@ serviceAccountKey.json
 .commandcode
 
 # 运行与临时产物
+.runtime/
 *.log
 *.tmp.*
 *.temp.*

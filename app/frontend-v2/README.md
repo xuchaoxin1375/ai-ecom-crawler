@@ -17,15 +17,22 @@ npm install
 npm run dev
 ```
 
-前端地址是 `http://127.0.0.1:5175/next/#/batches`，批次详情按 `http://127.0.0.1:5175/next/#/batches/<batch_id>` 访问，站点详情按 `http://127.0.0.1:5175/next/#/batches/<batch_id>/sites/<site_key>` 访问，任务列表和详情按 `http://127.0.0.1:5175/next/#/tasks`、`/next/#/tasks/<task_id>` 访问，构建记录和详情按 `http://127.0.0.1:5175/next/#/builds`、`/next/#/builds/<build_id>` 访问，新建批次弹窗可用 `http://127.0.0.1:5175/next/#/batches?new=1` 直接打开。FastAPI 启动后根路径 `http://127.0.0.1:8775/` 会跳到 `/next/`；v2 不再提供旧版入口。Vite 仍把 `/api`、`/batch` 和 `/legacy` 代理到 `http://127.0.0.1:8775`，其中 `/batch`、`/legacy` 只在 `ECOM_LEGACY_UI=on` 时可用；写请求会按后端要求把代理后的 `Host`／`Origin` 对齐到 API 源，需要另开一个 shell 启动本地服务：
+前端地址是 `http://127.0.0.1:5175/next/#/batches`，批次详情按 `http://127.0.0.1:5175/next/#/batches/<batch_id>` 访问，站点详情按 `http://127.0.0.1:5175/next/#/batches/<batch_id>/sites/<site_key>` 访问，任务列表和详情按 `http://127.0.0.1:5175/next/#/tasks`、`/next/#/tasks/<task_id>` 访问，构建记录和详情按 `http://127.0.0.1:5175/next/#/builds`、`/next/#/builds/<build_id>` 访问，新建批次弹窗可用 `http://127.0.0.1:5175/next/#/batches?new=1` 直接打开。FastAPI 启动后根路径 `http://127.0.0.1:8765/` 会跳到 `/next/`；v2 不再提供旧版入口。Vite 把 `/api`、`/batch` 和 `/legacy` 代理到 `http://127.0.0.1:8765`，其中 `/batch`、`/legacy` 只在 `ECOM_LEGACY_UI=on` 时可用；写请求会按后端要求把代理后的 `Host`／`Origin` 对齐到 API 源。组件改动由 HMR 立即生效，不需要重启后端；需要对着临时实例开发时用 `ECOM_API_TARGET` 覆盖代理目标：
 
 ```powershell
-app\.venv\Scripts\python.exe -m ecom_crawler serve `
-  --db /path/to/tasks.db --out-root /path/to/tasks `
-  --rules-dir /path/to/rules --host 127.0.0.1 --port 8775
+$env:ECOM_API_TARGET = "http://127.0.0.1:8899"
+npm run dev
 ```
 
-如果服务端口不同，修改 `vite.config.ts` 的代理目标。要在构建时间线里看到实时思考，启动服务前设置 `ECOM_BUILD_CAPTURE_REASONING=1`；需要把思考写入 trace 时再设 `ECOM_BUILD_PERSIST_REASONING=1`，默认不写。
+先按 `app/README.md` 的“开发实例与前端热更新”启动 8765（推荐 `python scripts/serve_dev.py start ...` 或 `restart`）：
+
+```powershell
+python scripts/serve_dev.py start `
+  --db /path/to/tasks.db --out-root /path/to/tasks `
+  --rules-dir /path/to/rules
+```
+
+如果服务端口不同，用 `ECOM_API_TARGET` 指定，不要改默认入口。要在构建时间线里看到实时思考，启动服务前设置 `ECOM_BUILD_CAPTURE_REASONING=1`；需要把思考写入 trace 时再设 `ECOM_BUILD_PERSIST_REASONING=1`，默认不写。
 
 ## 校验
 

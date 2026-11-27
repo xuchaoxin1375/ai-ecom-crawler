@@ -115,6 +115,26 @@ python -m uv run --project app ecom-crawler serve --db "$data\tasks.db" --out-ro
 
 打开 `http://127.0.0.1:8765/next/#/batches`；任务入口是 `http://127.0.0.1:8765/next/#/tasks`，构建记录入口是 `http://127.0.0.1:8765/next/#/builds`。根路径 `/` 在 v2 构建产物存在时 307 跳到 `/next/`；旧 Vue 与旧原生控制台默认下线，`/batch`、`/legacy` 都 307 到 `/next/`，只有设置 `ECOM_LEGACY_UI=on` 时才恢复直访回退。停止用 `Ctrl+C`；重启前先停旧实例并继续使用 8765。服务启动后才构建 `frontend-v2/dist` 时，`/next/` 要重启服务才可用。
 
+### 开发实例与前端热更新
+
+开发期用 `scripts/serve_dev.py` 管理 8765，避免每个 agent 另开端口并留下旧实例：
+
+```powershell
+python scripts/serve_dev.py status
+python scripts/serve_dev.py status --scan 8700-8899
+python scripts/serve_dev.py start --db "$data\tasks.db" --out-root "$data\out" --rules-dir "$data\rules"
+python scripts/serve_dev.py restart
+python scripts/serve_dev.py stop
+python scripts/serve_dev.py prune --ports 8775,8877-8879
+```
+
+- `status` 比较运行实例的代码指纹、前端挂载和当前工作区；8765 正在运行且不落后时退出码为 0。旧实例没有本地身份接口时会显示 PID，并可用 `restart` 从启动命令行接管。
+- 启动参数、PID 和日志写入仓库外可忽略的 `.runtime/`；`start` 在端口已占用时拒绝再开一个实例。`prune` 默认预演，加 `--yes` 才停止可确认的 ecom-crawler 实例。
+- 前端日常迭代用 Vite：`npm run dev` 打开 `http://127.0.0.1:5175/next/`，HMR 立即生效；代理目标默认 `http://127.0.0.1:8765`，需要临时实例时用 `ECOM_API_TARGET` 覆盖。
+- 验证构建产物时 `npm run build` 后刷新 8765 即可；只有启动时 `frontend-v2/dist` 不存在、`/next/` 未挂载，或后端代码／启动参数变化时才执行 `restart`。停止或重启会中断在途采集；构建在服务停止后标记中断，可在构建详情继续。
+
+详细决策与失败边界见[开发实例管理与前端热更新](../docs/50-开发实例与前端热更新.md)。
+
 ### 备份与恢复批次交付
 
 1. 记录当前应用版本及 `--db`、`--rules-dir`、`--out-root`。先让在途任务结清，停止 `serve` 和同账本的独立 worker。
