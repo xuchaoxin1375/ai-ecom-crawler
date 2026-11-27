@@ -524,7 +524,8 @@ def stale_reasons(health_payload: dict[str, Any], current: dict[str, Any]) -> tu
     server_git = health_payload.get("git") or {}
     current_git = current["git"]
     if (
-        server_git.get("commit")
+        not health_payload.get("code_fingerprint")
+        and server_git.get("commit")
         and current_git.get("commit")
         and server_git.get("commit") != current_git.get("commit")
     ):
