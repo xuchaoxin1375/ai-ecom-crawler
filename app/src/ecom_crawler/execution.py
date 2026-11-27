@@ -79,6 +79,8 @@ def build_task(
     delay_ms: int | None = None,
     retry_backoff_ms: int | None = None,
     rate_policy: dict[str, Any] | None = None,
+    max_navigation: int | None = None,
+    max_sitemaps: int | None = None,
 ) -> Task:
     rule_path = Path(rule_path).resolve()
     if not rule_path.is_file():
@@ -135,6 +137,16 @@ def build_task(
                 "product": effective_concurrency,
             },
             "fetch_delay_ms": effective_delay_ms,
+            **(
+                {"max_navigation": int(max_navigation)}
+                if max_navigation is not None
+                else {}
+            ),
+            **(
+                {"max_sitemaps": int(max_sitemaps)}
+                if max_sitemaps is not None
+                else {}
+            ),
         },
         output={
             "url_list": True,

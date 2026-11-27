@@ -25,6 +25,7 @@ GROUPS = {
         "test_image_proxy",
         "test_migrate_rules",
         "test_workbench",
+        "test_run_config",
         "test_system_metrics",
     ),
     "build": (

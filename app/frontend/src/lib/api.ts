@@ -287,6 +287,8 @@ export interface TaskSummary {
   state: string;
   outcome: string | null;
   stop_reason: string | null;
+  stop_detail?: string | null;
+  limits?: Record<string, unknown>;
   counts: TaskCounts;
   coverage?: TaskCoverage | null;
   quality_exceptions?: QualityException[];
@@ -316,6 +318,21 @@ export interface TaskPage {
   items: TaskSummary[];
 }
 
+export interface WorkbenchLimits {
+  max_urls?: number | null;
+  max_products?: number | null;
+  max_seconds?: number | null;
+  max_attempts?: number;
+  max_navigation?: number | null;
+  max_sitemaps?: number | null;
+  concurrency?: number | { navigation?: number; product?: number } | null;
+  per_domain_rps?: number | null;
+  delay_ms?: number | null;
+  fetch_delay_ms?: number;
+  retry_backoff_ms?: number;
+  [key: string]: unknown;
+}
+
 export interface WorkbenchDefinition {
   input_url: string;
   domain: string;
@@ -329,7 +346,7 @@ export interface WorkbenchDefinition {
   collection_mode: string;
   rule_id: string;
   rule_version: string;
-  limits: Record<string, number | null>;
+  limits: WorkbenchLimits;
   proxy: string | null;
   note: string | null;
 }
@@ -383,6 +400,77 @@ export interface WorkbenchRecentPage {
     removed: number;
   };
   unassigned_total?: number;
+}
+
+export interface WorkbenchRunLimits {
+  max_urls: number | null;
+  max_products: number | null;
+  max_seconds: number | null;
+  max_attempts: number;
+  max_navigation: number | null;
+  max_sitemaps: number | null;
+  concurrency: number | null;
+  per_domain_rps: number | null;
+  delay_ms: number | null;
+}
+
+export interface WorkbenchRunConfig {
+  task_id: string;
+  task_type: string;
+  collection_mode: string | null;
+  state: string;
+  outcome: string | null;
+  stop_reason: string | null;
+  stop_detail: string | null;
+  counts: TaskCounts;
+  limits: WorkbenchRunLimits;
+  definition: {
+    node_id: string;
+    name: string;
+    collection_mode: string;
+    limits: WorkbenchLimits;
+  } | null;
+  rule_limits: {
+    max_navigation?: number;
+    max_sitemaps?: number;
+  } | null;
+  site_rate_policy: Record<string, number> | null;
+  can_continue: boolean;
+  continue_hint: string | null;
+  reset_discovery: boolean;
+  pending_products: number;
+  pending_navigation: number;
+  discovery_truncated: boolean;
+}
+
+export interface WorkbenchRunConfigUpdate {
+  limits?: {
+    max_urls?: number | null;
+    max_products?: number | null;
+    max_seconds?: number | null;
+    max_attempts?: number;
+    max_navigation?: number | null;
+    max_sitemaps?: number | null;
+  };
+  rate?: {
+    concurrency?: number;
+    per_domain_rps?: number;
+    delay_ms?: number;
+  };
+  sync_definition?: boolean;
+  action?: "save" | "continue";
+  reset_discovery?: boolean;
+}
+
+export interface WorkbenchRunConfigResult {
+  task: TaskSummary;
+  applied: {
+    run: boolean;
+    definition: boolean;
+    continued: boolean;
+    resume_required: boolean;
+  };
+  warnings: string[];
 }
 
 export interface WorkbenchAttachUnassignedResult {
@@ -440,12 +528,7 @@ export interface WorkbenchTaskCreateRequest {
   language?: string | null;
   market?: string | null;
   category?: string | null;
-  limits?: {
-    max_urls?: number | null;
-    max_products?: number | null;
-    max_seconds?: number | null;
-    max_attempts?: number;
-  };
+  limits?: WorkbenchLimits;
   proxy?: string | null;
   note?: string | null;
 }
@@ -459,12 +542,7 @@ export interface WorkbenchTaskUpdateRequest {
   language?: string | null;
   market?: string | null;
   category?: string | null;
-  limits?: {
-    max_urls?: number | null;
-    max_products?: number | null;
-    max_seconds?: number | null;
-    max_attempts?: number;
-  };
+  limits?: WorkbenchLimits;
   proxy?: string | null;
   note?: string | null;
 }
@@ -1699,6 +1777,27 @@ export function attachWorkbenchRun(
   return sendJson<WorkbenchRunAttachResponse>(
     `/api/workbench/runs/${encodeURIComponent(taskId)}/attach`,
     "POST",
+    body,
+  );
+}
+
+export function getWorkbenchRunConfig(
+  taskId: string,
+  signal?: AbortSignal,
+): Promise<WorkbenchRunConfig> {
+  return getJson<WorkbenchRunConfig>(
+    `/api/workbench/runs/${encodeURIComponent(taskId)}/config`,
+    signal,
+  );
+}
+
+export function updateWorkbenchRunConfig(
+  taskId: string,
+  body: WorkbenchRunConfigUpdate,
+): Promise<WorkbenchRunConfigResult> {
+  return sendJson<WorkbenchRunConfigResult>(
+    `/api/workbench/runs/${encodeURIComponent(taskId)}/config`,
+    "PATCH",
     body,
   );
 }

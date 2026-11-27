@@ -24,7 +24,8 @@ import {
 import { useTablePreferences } from "../../components/ui/tablePreferences";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { ErrorNotice } from "../../components/ui/ErrorNotice";
-import { Input, Select } from "../../components/ui/Input";
+import { Select } from "../../components/ui/Input";
+import { SearchInput } from "../../components/ui/SearchInput";
 import { MetricStrip } from "../../components/ui/MetricStrip";
 import { PageHeader } from "../../components/ui/PageHeader";
 
@@ -383,12 +384,11 @@ export function BuildsPage() {
 
       <section className="rounded-panel border border-line bg-surface">
         <div className="flex flex-wrap items-end gap-3 border-b border-line px-5 py-3">
-          <label
-            className="flex min-w-[220px] flex-1 flex-col gap-1"
-            htmlFor="build-search"
-          >
-            <span className="text-xs font-medium text-ink-3">搜索</span>
-            <Input
+          <div className="flex min-w-[220px] flex-1 flex-col gap-1">
+            <label className="text-xs font-medium text-ink-3" htmlFor="build-search">
+              搜索
+            </label>
+            <SearchInput
               id="build-search"
               value={queryDraft}
               placeholder="构建 ID、站点或规则版本"
@@ -396,8 +396,13 @@ export function BuildsPage() {
               onKeyDown={(event) => {
                 if (event.key === "Enter") submitSearch();
               }}
+              onClear={() => {
+                setQueryDraft("");
+                updateParams({ q: "" });
+              }}
+              clearLabel="清除构建搜索"
             />
-          </label>
+          </div>
           <label className="flex w-36 flex-col gap-1" htmlFor="build-state">
             <span className="text-xs font-medium text-ink-3">状态</span>
             <Select

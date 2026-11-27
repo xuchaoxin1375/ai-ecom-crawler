@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import type {
   RuleCatalogEntry,
   WorkbenchDefinition,
+  WorkbenchLimits,
   WorkbenchNode,
   WorkbenchTaskCreateRequest,
   WorkbenchTaskUpdateRequest,
@@ -18,6 +19,20 @@ import {
   planWorkbenchPath,
   readNestedPathEnabled,
 } from "./workbenchTreePath";
+
+function concurrencyText(value: unknown): string {
+  if (typeof value === "number") return String(value);
+  if (value && typeof value === "object") {
+    const record = value as { navigation?: unknown; product?: unknown };
+    const raw = record.product ?? record.navigation;
+    return typeof raw === "number" ? String(raw) : "";
+  }
+  return "";
+}
+
+function optionalNumberText(value: unknown): string {
+  return typeof value === "number" ? String(value) : "";
+}
 
 function nodePaths(nodes: WorkbenchNode[]): Map<string, string> {
   const byId = new Map(nodes.map((node) => [node.node_id, node]));
@@ -83,16 +98,48 @@ export function WorkbenchTaskDialog({
   const [language, setLanguage] = useState(definition?.language ?? "");
   const [market, setMarket] = useState(definition?.market ?? "");
   const [category, setCategory] = useState(definition?.category ?? "");
-  const [maxUrls, setMaxUrls] = useState(String(definition?.limits?.max_urls ?? 100));
+  const [maxUrls, setMaxUrls] = useState(
+    definition?.limits?.max_urls === undefined
+      ? definition?.collection_mode === "formal"
+        ? ""
+        : "100"
+      : optionalNumberText(definition.limits.max_urls),
+  );
   const [maxProducts, setMaxProducts] = useState(
-    String(definition?.limits?.max_products ?? 20),
+    definition?.limits?.max_products === undefined
+      ? definition?.collection_mode === "formal"
+        ? ""
+        : "20"
+      : optionalNumberText(definition.limits.max_products),
   );
   const [maxSeconds, setMaxSeconds] = useState(
-    String(definition?.limits?.max_seconds ?? 180),
+    definition?.limits?.max_seconds === undefined
+      ? definition?.collection_mode === "formal"
+        ? ""
+        : "180"
+      : optionalNumberText(definition.limits.max_seconds),
   );
   const [maxAttempts, setMaxAttempts] = useState(
     String(definition?.limits?.max_attempts ?? 2),
   );
+  const [maxNavigation, setMaxNavigation] = useState(
+    optionalNumberText(definition?.limits?.max_navigation),
+  );
+  const [maxSitemaps, setMaxSitemaps] = useState(
+    optionalNumberText(definition?.limits?.max_sitemaps),
+  );
+  const [concurrency, setConcurrency] = useState(
+    concurrencyText(definition?.limits?.concurrency),
+  );
+  const [perDomainRps, setPerDomainRps] = useState(
+    optionalNumberText(definition?.limits?.per_domain_rps),
+  );
+  const [delayMs, setDelayMs] = useState(
+    optionalNumberText(
+      definition?.limits?.delay_ms ?? definition?.limits?.fetch_delay_ms,
+    ),
+  );
+  const [limitsTouched, setLimitsTouched] = useState(Boolean(definition));
   const [proxy, setProxy] = useState(definition?.proxy ?? "");
   const [note, setNote] = useState(definition?.note ?? "");
   const [localError, setLocalError] = useState("");
@@ -129,6 +176,20 @@ export function WorkbenchTaskDialog({
     validRules.find((rule) => `${rule.rule_id}@${rule.rule_version}` === ruleKey) ??
     validRules[0];
 
+  function changeCollectionMode(next: "sample" | "formal") {
+    setCollectionMode(next);
+    if (limitsTouched) return;
+    setMaxUrls(next === "formal" ? "" : "100");
+    setMaxProducts(next === "formal" ? "" : "20");
+    setMaxSeconds(next === "formal" ? "" : "180");
+  }
+
+  function updateLimit(setter: (value: string) => void, value: string) {
+    setLimitsTouched(true);
+    setLocalError("");
+    setter(value);
+  }
+
   function submit() {
     const url = inputUrl.trim();
     if (!editing && !url) {
@@ -152,40 +213,64 @@ export function WorkbenchTaskDialog({
         return;
       }
     }
-    const urls = Number(maxUrls);
-    const products = Number(maxProducts);
-    const seconds = Number(maxSeconds);
-    const attempts = Number(maxAttempts);
-    if (
-      !Number.isFinite(urls) ||
-      urls < 1 ||
-      !Number.isFinite(products) ||
-      products < 1 ||
-      !Number.isFinite(seconds) ||
-      seconds < 1 ||
-      !Number.isFinite(attempts) ||
-      attempts < 1
-    ) {
-      setLocalError("采集限制必须是大于 0 的数字");
-      return;
+    const formal = collectionMode === "formal";
+    const limitSpecs = [
+      ["最大 URL", maxUrls, !formal, 1, 100000],
+      ["最大商品", maxProducts, !formal, 1, 100000],
+      ["最大秒数", maxSeconds, !formal, 1, 86400],
+      ["最大尝试", maxAttempts, true, 1, 10],
+      ["最大导航", maxNavigation, false, 1, 10000],
+      ["最大 sitemap", maxSitemaps, false, 1, 1000],
+      ["并发", concurrency, false, 1, 8],
+      ["每域 RPS", perDomainRps, false, 0.1, 10],
+      ["请求间隔", delayMs, false, 0, 10000],
+    ] as const;
+    const parsed: Record<string, number | null> = {};
+    for (const [label, value, required, min, max] of limitSpecs) {
+      const text = value.trim();
+      if (!text) {
+        if (required) {
+          setLocalError(`${label}不能为空`);
+          return;
+        }
+        parsed[label] = null;
+        continue;
+      }
+      const number = Number(text);
+      if (!Number.isFinite(number) || number < min || number > max) {
+        setLocalError(`${label}必须是 ${min} 到 ${max} 之间的数字`);
+        return;
+      }
+      parsed[label] = number;
     }
     if (!editing && namePlan && !namePlan.ok) {
       setLocalError("");
       return;
     }
     setLocalError("");
+    const limits: WorkbenchLimits = {
+      ...(definition?.limits ?? {}),
+      max_urls: parsed["最大 URL"],
+      max_products: parsed["最大商品"],
+      max_seconds: parsed["最大秒数"],
+      max_attempts: parsed["最大尝试"] as number,
+      max_navigation: parsed["最大导航"],
+      max_sitemaps: parsed["最大 sitemap"],
+    };
+    delete limits.fetch_delay_ms;
+    if (parsed["并发"] === null) delete limits.concurrency;
+    else limits.concurrency = parsed["并发"];
+    if (parsed["每域 RPS"] === null) delete limits.per_domain_rps;
+    else limits.per_domain_rps = parsed["每域 RPS"];
+    if (parsed["请求间隔"] === null) delete limits.delay_ms;
+    else limits.delay_ms = parsed["请求间隔"];
     const common = {
       collection_mode: collectionMode,
       country: country.trim() || null,
       language: language.trim() || null,
       market: market.trim() || null,
       category: category.trim() || null,
-      limits: {
-        max_urls: urls,
-        max_products: products,
-        max_seconds: seconds,
-        max_attempts: attempts,
-      },
+      limits,
       proxy: proxy.trim() || null,
       note: note.trim() || null,
     } satisfies WorkbenchTaskUpdateRequest;
@@ -250,7 +335,7 @@ export function WorkbenchTaskDialog({
                 </Dialog.Title>
                 <Dialog.Description className="mt-1 text-sm leading-6 text-ink-2">
                   {editing
-                    ? "属性只对之后创建的运行生效；当前运行保持入队时的规则与限制。"
+                    ? "属性只对之后创建的运行生效；当前运行的预算请在下方「运行配置」页签调整。"
                     : "任务定义可以独立存在，不强制批次；目录只决定位置。"}
                 </Dialog.Description>
               </div>
@@ -464,7 +549,7 @@ export function WorkbenchTaskDialog({
                   id="workbench-task-mode"
                   value={collectionMode}
                   onChange={(event) =>
-                    setCollectionMode(event.target.value as "sample" | "formal")
+                    changeCollectionMode(event.target.value as "sample" | "formal")
                   }
                 >
                   <option value="sample">试采</option>
@@ -530,7 +615,7 @@ export function WorkbenchTaskDialog({
             </div>
 
             <fieldset className="rounded-panel border border-line bg-surface-muted p-4">
-              <legend className="px-1 text-xs font-medium text-ink-3">采集限制</legend>
+              <legend className="px-1 text-xs font-medium text-ink-3">采集预算</legend>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                 {[
                   ["最大 URL", maxUrls, setMaxUrls],
@@ -544,14 +629,58 @@ export function WorkbenchTaskDialog({
                       className="mt-1"
                       type="number"
                       min="1"
+                      placeholder={collectionMode === "formal" ? "不限制" : undefined}
                       value={value as string}
                       onChange={(event) =>
-                        (setter as (value: string) => void)(event.target.value)
+                        updateLimit(
+                          setter as (value: string) => void,
+                          event.target.value,
+                        )
                       }
                     />
                   </label>
                 ))}
               </div>
+              <p className="mt-2 text-[11px] leading-5 text-ink-3">
+                正式采集留空表示使用系统正式采集设置（当前默认不限制）；试采必须填写。
+              </p>
+            </fieldset>
+
+            <fieldset className="rounded-panel border border-line bg-surface-muted p-4">
+              <legend className="px-1 text-xs font-medium text-ink-3">
+                速度与发现
+              </legend>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+                {[
+                  ["并发", concurrency, setConcurrency, "1", "8"],
+                  ["每域 RPS", perDomainRps, setPerDomainRps, "0.1", "10"],
+                  ["请求间隔 ms", delayMs, setDelayMs, "0", "10000"],
+                  ["最大导航", maxNavigation, setMaxNavigation, "1", "10000"],
+                  ["最大 sitemap", maxSitemaps, setMaxSitemaps, "1", "1000"],
+                ].map(([label, value, setter, min, max]) => (
+                  <label key={label as string} className="text-xs text-ink-3">
+                    {label as string}
+                    <Input
+                      className="mt-1"
+                      type="number"
+                      min={min as string}
+                      max={max as string}
+                      placeholder="沿用"
+                      value={value as string}
+                      onChange={(event) =>
+                        updateLimit(
+                          setter as (value: string) => void,
+                          event.target.value,
+                        )
+                      }
+                    />
+                  </label>
+                ))}
+              </div>
+              <p className="mt-2 text-[11px] leading-5 text-ink-3">
+                留空表示沿用站点速率策略或规则声明；并发、RPS
+                和请求间隔在运行中修改需暂停并继续才生效。
+              </p>
             </fieldset>
 
             <div className="grid gap-4 sm:grid-cols-2">

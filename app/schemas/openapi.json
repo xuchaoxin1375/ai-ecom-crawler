@@ -1591,6 +1591,32 @@
       },
       "Limits": {
         "properties": {
+          "concurrency": {
+            "anyOf": [
+              {
+                "maximum": 8.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Concurrency"
+          },
+          "delay_ms": {
+            "anyOf": [
+              {
+                "maximum": 10000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delay Ms"
+          },
           "max_attempts": {
             "default": 2,
             "maximum": 10.0,
@@ -1598,10 +1624,23 @@
             "title": "Max Attempts",
             "type": "integer"
           },
-          "max_products": {
+          "max_navigation": {
             "anyOf": [
               {
                 "maximum": 10000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Navigation"
+          },
+          "max_products": {
+            "anyOf": [
+              {
+                "maximum": 100000.0,
                 "minimum": 1.0,
                 "type": "integer"
               },
@@ -1626,6 +1665,19 @@
             "default": 180,
             "title": "Max Seconds"
           },
+          "max_sitemaps": {
+            "anyOf": [
+              {
+                "maximum": 1000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Sitemaps"
+          },
           "max_urls": {
             "anyOf": [
               {
@@ -1639,6 +1691,19 @@
             ],
             "default": 100,
             "title": "Max Urls"
+          },
+          "per_domain_rps": {
+            "anyOf": [
+              {
+                "maximum": 10.0,
+                "minimum": 0.1,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Per Domain Rps"
           }
         },
         "title": "Limits",
@@ -2581,6 +2646,180 @@
           }
         },
         "title": "WorkbenchRunAttachRequest",
+        "type": "object"
+      },
+      "WorkbenchRunConfigUpdate": {
+        "properties": {
+          "action": {
+            "default": "save",
+            "enum": [
+              "save",
+              "continue"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "limits": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkbenchRunLimitsUpdate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rate": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkbenchRunRateUpdate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reset_discovery": {
+            "default": false,
+            "title": "Reset Discovery",
+            "type": "boolean"
+          },
+          "sync_definition": {
+            "default": true,
+            "title": "Sync Definition",
+            "type": "boolean"
+          }
+        },
+        "title": "WorkbenchRunConfigUpdate",
+        "type": "object"
+      },
+      "WorkbenchRunLimitsUpdate": {
+        "properties": {
+          "max_attempts": {
+            "anyOf": [
+              {
+                "maximum": 10.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Attempts"
+          },
+          "max_navigation": {
+            "anyOf": [
+              {
+                "maximum": 10000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Navigation"
+          },
+          "max_products": {
+            "anyOf": [
+              {
+                "maximum": 100000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Products"
+          },
+          "max_seconds": {
+            "anyOf": [
+              {
+                "maximum": 86400.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Seconds"
+          },
+          "max_sitemaps": {
+            "anyOf": [
+              {
+                "maximum": 1000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Sitemaps"
+          },
+          "max_urls": {
+            "anyOf": [
+              {
+                "maximum": 100000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Urls"
+          }
+        },
+        "title": "WorkbenchRunLimitsUpdate",
+        "type": "object"
+      },
+      "WorkbenchRunRateUpdate": {
+        "properties": {
+          "concurrency": {
+            "anyOf": [
+              {
+                "maximum": 8.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Concurrency"
+          },
+          "delay_ms": {
+            "anyOf": [
+              {
+                "maximum": 10000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delay Ms"
+          },
+          "per_domain_rps": {
+            "anyOf": [
+              {
+                "maximum": 10.0,
+                "minimum": 0.1,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Per Domain Rps"
+          }
+        },
+        "title": "WorkbenchRunRateUpdate",
         "type": "object"
       },
       "WorkbenchStartRequest": {
@@ -7412,6 +7651,96 @@
           }
         },
         "summary": "Attach Workbench Run"
+      }
+    },
+    "/api/workbench/runs/{task_id}/config": {
+      "get": {
+        "operationId": "get_workbench_run_config_api_workbench_runs__task_id__config_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Workbench Run Config Api Workbench Runs  Task Id  Config Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Workbench Run Config"
+      },
+      "patch": {
+        "operationId": "update_workbench_run_config_api_workbench_runs__task_id__config_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkbenchRunConfigUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Update Workbench Run Config Api Workbench Runs  Task Id  Config Patch",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Workbench Run Config"
       }
     },
     "/api/workbench/tasks": {

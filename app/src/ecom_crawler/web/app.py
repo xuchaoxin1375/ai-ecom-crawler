@@ -68,6 +68,10 @@ from ..image_proxy import (
 )
 from ..model import ContractError
 from ..rate_policy import (
+    RATE_LIMIT_MAX_CONCURRENCY,
+    RATE_LIMIT_MAX_DELAY_MS,
+    RATE_LIMIT_MAX_RPS,
+    RATE_LIMIT_MIN_RPS,
     SITE_RATE_POLICIES_SETTING,
     RatePolicyError,
     dump_policies,
@@ -161,9 +165,20 @@ EXPORT_FILES = (
 
 class Limits(BaseModel):
     max_urls: int | None = Field(default=100, ge=1, le=100000)
-    max_products: int | None = Field(default=20, ge=1, le=10000)
+    max_products: int | None = Field(default=20, ge=1, le=100000)
     max_seconds: int | None = Field(default=180, ge=1, le=86400)
     max_attempts: int = Field(default=2, ge=1, le=10)
+    max_navigation: int | None = Field(default=None, ge=1, le=10000)
+    max_sitemaps: int | None = Field(default=None, ge=1, le=1000)
+    concurrency: int | None = Field(
+        default=None, ge=1, le=RATE_LIMIT_MAX_CONCURRENCY
+    )
+    per_domain_rps: float | None = Field(
+        default=None, ge=RATE_LIMIT_MIN_RPS, le=RATE_LIMIT_MAX_RPS
+    )
+    delay_ms: int | None = Field(
+        default=None, ge=0, le=RATE_LIMIT_MAX_DELAY_MS
+    )
 
 
 class CreateTaskRequest(BaseModel):
@@ -234,6 +249,35 @@ class WorkbenchRunAttachRequest(BaseModel):
 
 class WorkbenchStartRequest(BaseModel):
     request_id: str | None = Field(default=None, max_length=200)
+
+
+class WorkbenchRunLimitsUpdate(BaseModel):
+    max_urls: int | None = Field(default=None, ge=1, le=100000)
+    max_products: int | None = Field(default=None, ge=1, le=100000)
+    max_seconds: int | None = Field(default=None, ge=1, le=86400)
+    max_attempts: int | None = Field(default=None, ge=1, le=10)
+    max_navigation: int | None = Field(default=None, ge=1, le=10000)
+    max_sitemaps: int | None = Field(default=None, ge=1, le=1000)
+
+
+class WorkbenchRunRateUpdate(BaseModel):
+    concurrency: int | None = Field(
+        default=None, ge=1, le=RATE_LIMIT_MAX_CONCURRENCY
+    )
+    per_domain_rps: float | None = Field(
+        default=None, ge=RATE_LIMIT_MIN_RPS, le=RATE_LIMIT_MAX_RPS
+    )
+    delay_ms: int | None = Field(
+        default=None, ge=0, le=RATE_LIMIT_MAX_DELAY_MS
+    )
+
+
+class WorkbenchRunConfigUpdate(BaseModel):
+    limits: WorkbenchRunLimitsUpdate | None = None
+    rate: WorkbenchRunRateUpdate | None = None
+    sync_definition: bool = True
+    action: Literal["save", "continue"] = "save"
+    reset_discovery: bool = False
 
 
 class WorkbenchRecentDismissRequest(BaseModel):
@@ -762,6 +806,7 @@ def _summary(store: TaskStore, task: Task, out_root: Path) -> dict[str, Any]:
         if item.status not in {"RESOLVED", "WONTFIX"}
     ]
     latest_feedback = feedback[0] if feedback else None
+    counts = _counts(store, task, result)
     return {
         "task_id": task.task_id,
         "task_type": task.task_type,
@@ -774,7 +819,9 @@ def _summary(store: TaskStore, task: Task, out_root: Path) -> dict[str, Any]:
         "state": task.state,
         "outcome": task.outcome,
         "stop_reason": task.stop_reason,
-        "counts": _counts(store, task, result),
+        "stop_detail": _workbench_stop_detail(task, counts, result),
+        "limits": dict(task.limits),
+        "counts": counts,
         "coverage": result.get("coverage") or {"status": "UNKNOWN"},
         "quality_exceptions": result.get("quality_exceptions") or [],
         "content_audit": result.get("content_audit") or {},
@@ -843,6 +890,221 @@ def _workbench_definition_payload(definition: WorkbenchTaskDef | None) -> dict[s
         "limits": definition.limits,
         "proxy": definition.proxy,
         "note": definition.note,
+    }
+
+
+_RUN_DISCOVERY_DETAIL_MARKERS = (
+    "max_sitemaps",
+    "max_navigation",
+    "max_pages",
+    "max_depth",
+    "max_batches",
+    "max_requests",
+    "max_products",
+    "max_urls",
+)
+
+LIMIT_KEYS = (
+    "max_urls",
+    "max_products",
+    "max_seconds",
+    "max_attempts",
+    "max_navigation",
+    "max_sitemaps",
+)
+
+
+def _workbench_stop_detail(
+    task: Task, counts: dict[str, int], result: dict[str, Any]
+) -> str | None:
+    detail = result.get("stop_detail")
+    if task.state not in {"FINISHED", "CANCELLED"}:
+        return None
+    if task.stop_reason != "BUDGET_EXHAUSTED":
+        return str(detail) if detail else None
+    generic = {
+        "task budget exhausted",
+        "formal collection reached its product limit",
+    }
+    if detail and detail not in generic:
+        return str(detail)
+    if task.task_type == "discovery":
+        limit = task.limits.get("max_urls")
+        processed = (
+            int(counts.get("valid_urls") or 0)
+            + int(counts.get("excluded_urls") or 0)
+            + int(counts.get("failed_urls") or 0)
+        )
+        label = "URL 数"
+    else:
+        limit = task.limits.get("max_products")
+        processed = int(counts.get("processed_products") or 0)
+        label = "商品数"
+    if limit is not None and processed >= int(limit):
+        return f"{label}达到入队时的上限 {int(limit)}"
+    max_seconds = task.limits.get("max_seconds")
+    if max_seconds is not None:
+        seconds = int(max_seconds)
+        hours = seconds / 3600
+        suffix = f"（{hours:g} 小时）" if hours >= 1 else ""
+        return f"任务时长达到入队时的上限 {seconds} 秒{suffix}"
+    return str(detail) if detail else None
+
+
+def _workbench_run_can_continue(
+    store: TaskStore, task: Task, result: dict[str, Any]
+) -> dict[str, Any]:
+    products = store.item_counts(task.task_id, "product")
+    navigation = store.item_counts(task.task_id, "navigation")
+    pending_products = products.get("PENDING", 0) + products.get("IN_FLIGHT", 0)
+    pending_navigation = navigation.get("PENDING", 0) + navigation.get(
+        "IN_FLIGHT", 0
+    )
+    stop_detail = str(result.get("stop_detail") or "")
+    discovery_limit = str(task.counters.get("discovery_limit") or "")
+    discovery_truncated = bool(discovery_limit) or any(
+        marker in stop_detail for marker in _RUN_DISCOVERY_DETAIL_MARKERS
+    )
+    can_continue = (
+        task.state == "FINISHED"
+        and task.archived_at is None
+        and (pending_products + pending_navigation > 0 or discovery_truncated)
+    )
+    hints: list[str] = []
+    if pending_products:
+        valid = int((result.get("counts") or {}).get("valid_products") or 0)
+        if not valid:
+            valid = products.get("DONE", 0)
+        hints.append(
+            f"剩余 {pending_products} 个待采商品；续采会保留已采 {valid} 条结果。"
+        )
+    if pending_navigation:
+        hints.append(f"剩余 {pending_navigation} 个导航／发现项。")
+    if discovery_truncated:
+        detail = stop_detail or discovery_limit or "发现上限"
+        hints.append(
+            f"发现被「{detail}」截断；续采会重置发现项并重新请求入口、分类或 sitemap。"
+        )
+    return {
+        "can_continue": can_continue,
+        "continue_hint": " ".join(hints) or None,
+        "reset_discovery": discovery_truncated,
+        "pending_products": pending_products,
+        "pending_navigation": pending_navigation,
+        "discovery_truncated": discovery_truncated,
+    }
+
+
+def _workbench_run_rule_limits(
+    task: Task,
+) -> dict[str, int]:
+    if not task.rule_path:
+        return {}
+    try:
+        rule = load_rule(task.rule_path)
+    except (OSError, RuleError):
+        return {}
+    discovery_limits = rule.discovery.get("limits", {}) or {}
+    sitemap_limits = [
+        int(source.get("max_sitemaps", discovery_limits.get("max_sitemaps", 50)))
+        for source in rule.sources
+        if source.get("type") == "sitemap"
+    ]
+    return {
+        "max_navigation": int(
+            discovery_limits.get("max_navigation", 100) or 100
+        ),
+        "max_sitemaps": int(
+            min(sitemap_limits)
+            if sitemap_limits
+            else discovery_limits.get("max_sitemaps", 50) or 50
+        ),
+    }
+
+
+def _workbench_run_config_payload(
+    store: TaskStore, root: Path, task: Task
+) -> dict[str, Any]:
+    result = _load_result(root, task.task_id)
+    counts = _counts(store, task, result)
+    raw_limits = dict(task.limits)
+    raw_concurrency = raw_limits.get("concurrency")
+    if isinstance(raw_concurrency, dict):
+        product_concurrency = raw_concurrency.get(
+            "product", raw_concurrency.get("navigation")
+        )
+    else:
+        product_concurrency = raw_concurrency
+    rate_policy = dict(task.input.get("rate_policy") or {})
+    rule_limits = _workbench_run_rule_limits(task)
+    raw_max_navigation = raw_limits.get("max_navigation")
+    raw_max_sitemaps = raw_limits.get("max_sitemaps")
+    raw_delay = raw_limits.get("fetch_delay_ms")
+    if raw_delay is None:
+        raw_delay = rate_policy.get("delay_ms")
+    limits = {
+        "max_urls": raw_limits.get("max_urls"),
+        "max_products": raw_limits.get("max_products"),
+        "max_seconds": raw_limits.get("max_seconds"),
+        "max_attempts": int(raw_limits.get("max_attempts", 2) or 2),
+        "max_navigation": (
+            int(raw_max_navigation)
+            if raw_max_navigation is not None
+            else rule_limits.get("max_navigation")
+        ),
+        "max_sitemaps": (
+            int(raw_max_sitemaps)
+            if raw_max_sitemaps is not None
+            else rule_limits.get("max_sitemaps")
+        ),
+        "concurrency": (
+            int(product_concurrency)
+            if product_concurrency is not None
+            else rate_policy.get("concurrency")
+        ),
+        "per_domain_rps": rate_policy.get("per_domain_rps"),
+        "delay_ms": int(raw_delay or 0),
+    }
+    run = next(
+        (
+            item
+            for item in store.list_workbench_task_runs()
+            if item.task_id == task.task_id
+        ),
+        None,
+    )
+    definition = store.get_workbench_task_def(run.node_id) if run else None
+    node = store.get_workbench_node(run.node_id) if run else None
+    site_policy = load_policies(store).get(
+        normalize_domain(task.domain_key or task.site_key or ""), {}
+    )
+    can_continue = _workbench_run_can_continue(store, task, result)
+    return {
+        "task_id": task.task_id,
+        "task_type": task.task_type,
+        "collection_mode": (
+            task.input.get("collection_mode")
+            or (definition.collection_mode if definition is not None else None)
+        ),
+        "state": task.state,
+        "outcome": task.outcome,
+        "stop_reason": task.stop_reason,
+        "stop_detail": _workbench_stop_detail(task, counts, result),
+        "counts": counts,
+        "limits": limits,
+        "definition": (
+            {
+                "node_id": definition.node_id,
+                "name": node.name if node else definition.site_key,
+                "collection_mode": definition.collection_mode,
+                "limits": definition.limits,
+            }
+            if definition is not None
+            else None
+        ),
+        "rule_limits": rule_limits,
+        "site_rate_policy": site_policy or None,
+        **can_continue,
     }
 
 
@@ -4794,6 +5056,197 @@ def create_app(
             raise _error("NOT_FOUND", f"unknown task: {task_id}", 404)
         return _attach_run_to_workbench(task, payload.parent_id, payload.name)
 
+    @app.get("/api/workbench/runs/{task_id}/config")
+    def get_workbench_run_config(task_id: str) -> dict[str, Any]:
+        task = store.get_task(task_id)
+        if task is None:
+            raise _error("NOT_FOUND", f"unknown task: {task_id}", 404)
+        return _workbench_run_config_payload(store, root, task)
+
+    @app.patch("/api/workbench/runs/{task_id}/config")
+    def update_workbench_run_config(
+        task_id: str, payload: WorkbenchRunConfigUpdate
+    ) -> dict[str, Any]:
+        task = store.get_task(task_id)
+        if task is None:
+            raise _error("NOT_FOUND", f"unknown task: {task_id}", 404)
+        limits_update = (
+            payload.limits.model_dump(exclude_unset=True) if payload.limits else {}
+        )
+        rate_update = (
+            payload.rate.model_dump(exclude_unset=True) if payload.rate else {}
+        )
+        for key in ("max_attempts",):
+            if key in limits_update and limits_update[key] is None:
+                raise _error(
+                    "INVALID_LIMITS", f"{key} cannot be empty", 422
+                )
+        for key in ("concurrency", "per_domain_rps", "delay_ms"):
+            if key in rate_update and rate_update[key] is None:
+                raise _error(
+                    "INVALID_LIMITS", f"{key} cannot be empty", 422
+                )
+        merged_limits = dict(task.limits)
+        for key in (
+            "max_urls",
+            "max_products",
+            "max_seconds",
+            "max_navigation",
+            "max_sitemaps",
+        ):
+            if key in limits_update:
+                value = limits_update[key]
+                merged_limits[key] = None if value is None else int(value)
+        if "max_attempts" in limits_update:
+            merged_limits["max_attempts"] = int(limits_update["max_attempts"])
+        merged_input = dict(task.input)
+        merged_rate = dict(task.input.get("rate_policy") or {})
+        run_changed = any(
+            key in limits_update
+            for key in (
+                "max_urls",
+                "max_products",
+                "max_seconds",
+                "max_attempts",
+                "max_navigation",
+                "max_sitemaps",
+            )
+        )
+        resume_required = False
+        if "concurrency" in rate_update:
+            value = int(rate_update["concurrency"])
+            merged_limits["concurrency"] = {
+                "navigation": value,
+                "product": value,
+            }
+            merged_rate["concurrency"] = value
+            run_changed = True
+            resume_required = resume_required or task.state == "RUNNING"
+        if "per_domain_rps" in rate_update:
+            value = round(float(rate_update["per_domain_rps"]), 3)
+            merged_rate["per_domain_rps"] = value
+            run_changed = True
+            resume_required = resume_required or task.state == "RUNNING"
+        if "delay_ms" in rate_update:
+            value = int(rate_update["delay_ms"])
+            merged_limits["fetch_delay_ms"] = value
+            merged_rate["delay_ms"] = value
+            run_changed = True
+            resume_required = resume_required or task.state == "RUNNING"
+        if merged_rate:
+            merged_input["rate_policy"] = merged_rate
+        run = next(
+            (
+                item
+                for item in store.list_workbench_task_runs()
+                if item.task_id == task_id
+            ),
+            None,
+        )
+        definition = store.get_workbench_task_def(run.node_id) if run else None
+        editable_states = {"QUEUED", "RUNNING", "PAUSED", "PAUSING"}
+        continued = False
+        applied_run = False
+        warnings: list[str] = []
+        if payload.action == "continue":
+            result = _load_result(root, task_id)
+            can_continue = _workbench_run_can_continue(store, task, result)
+            if task.state != "FINISHED" or not can_continue["can_continue"]:
+                raise _error(
+                    "TASK_NOT_CONTINUABLE",
+                    "该运行没有可续采的剩余工作，或当前状态不允许续采",
+                    409,
+                )
+            try:
+                updated = store.continue_task(
+                    task_id,
+                    limits=merged_limits,
+                    input=merged_input,
+                    reset_navigation=payload.reset_discovery,
+                )
+            except TaskTransitionError as exc:
+                raise _error("TASK_NOT_CONTINUABLE", str(exc), 409) from exc
+            continued = True
+            applied_run = True
+            if payload.reset_discovery:
+                warnings.append(
+                    "已重置发现项；续采会重新请求入口、分类或 sitemap。"
+                )
+            warnings.append("续采已排入队列，保留此前已采结果。")
+        elif task.state in editable_states:
+            if run_changed:
+                store.update_task(
+                    task_id,
+                    limits=merged_limits,
+                    input=merged_input,
+                )
+                applied_run = True
+            updated = store.get_task(task_id) or task
+            if resume_required:
+                warnings.append(
+                    "并发、每域 RPS 和请求间隔会在暂停并继续后生效。"
+                )
+            if task.state == "RUNNING" and any(
+                key in limits_update
+                for key in ("max_navigation", "max_sitemaps")
+            ):
+                warnings.append(
+                    "发现上限已写入账本；已经结束的入口不会自动重跑，需要续采或下次运行重新发现。"
+                )
+        elif definition is not None:
+            updated = task
+            warnings.append("历史运行限额不变；新参数只用于之后的运行。")
+        else:
+            raise _error(
+                "TASK_NOT_EDITABLE",
+                "该运行已结束且未关联任务定义，不能修改运行配置",
+                409,
+            )
+        definition_updated = False
+        if payload.sync_definition and definition is not None:
+            definition_limits = dict(definition.limits)
+            for key in LIMIT_KEYS:
+                if key in limits_update:
+                    definition_limits[key] = merged_limits.get(key)
+            if "concurrency" in rate_update:
+                definition_limits["concurrency"] = int(rate_update["concurrency"])
+            if "per_domain_rps" in rate_update:
+                definition_limits["per_domain_rps"] = round(
+                    float(rate_update["per_domain_rps"]), 3
+                )
+            if "delay_ms" in rate_update:
+                definition_limits["delay_ms"] = int(rate_update["delay_ms"])
+            try:
+                store.update_workbench_task(
+                    definition.node_id,
+                    utc_now(),
+                    limits=definition_limits,
+                )
+                definition_updated = True
+            except (KeyError, ValueError) as exc:
+                if applied_run:
+                    warnings.append(f"运行已保存，但任务定义同步失败：{exc}")
+                else:
+                    raise _error("TASK_NOT_EDITABLE", str(exc), 409) from exc
+        elif payload.sync_definition:
+            warnings.append("该运行未加入任务树，未同步任务定义。")
+        if (applied_run or definition_updated) and any(
+            key in limits_update and limits_update[key] is None
+            for key in ("max_products", "max_seconds", "max_urls")
+        ):
+            warnings.append("本次保存已取消对应预算上限。")
+        summary = _summary(store, updated, root)
+        return {
+            "task": summary,
+            "applied": {
+                "run": applied_run,
+                "definition": definition_updated,
+                "continued": continued,
+                "resume_required": resume_required,
+            },
+            "warnings": warnings,
+        }
+
     def _ensure_default_workbench_group() -> tuple[WorkbenchNode, bool]:
         nodes = store.list_workbench_nodes()
         existing = next(
@@ -4909,17 +5362,62 @@ def create_app(
         rule_path = (rules / definition.rule_path).resolve()
         if not rule_path.is_file():
             raise _error("INVALID_RULE", "rule package file is missing", 409)
-        limits = definition.limits or {}
+        definition_limits = dict(definition.limits or {})
+        policy = load_collection_policy(store)
+        if definition.collection_mode == "formal":
+            base_limits = formal_collection_limits(policy)
+        else:
+            base_limits = {
+                "max_urls": 100,
+                "max_products": 20,
+                "max_seconds": 180,
+            }
+        effective_limits = {
+            key: (
+                definition_limits[key]
+                if key in definition_limits
+                else base_limits[key]
+            )
+            for key in ("max_urls", "max_products", "max_seconds")
+        }
+        rate_policy = {
+            **default_rate_overrides(policy),
+            **load_policies(store).get(
+                normalize_domain(definition.domain), {}
+            ),
+        }
+        raw_concurrency = definition_limits.get("concurrency")
+        if isinstance(raw_concurrency, dict):
+            raw_concurrency = raw_concurrency.get(
+                "product", raw_concurrency.get("navigation")
+            )
+        if raw_concurrency is not None:
+            rate_policy["concurrency"] = int(raw_concurrency)
+        if definition_limits.get("per_domain_rps") is not None:
+            rate_policy["per_domain_rps"] = float(
+                definition_limits["per_domain_rps"]
+            )
+        if definition_limits.get("delay_ms") is not None:
+            rate_policy["delay_ms"] = int(definition_limits["delay_ms"])
+        max_attempts = definition_limits.get("max_attempts")
+        if max_attempts is None:
+            max_attempts = rate_policy.get("max_attempts", 2)
         try:
             task = build_task(
                 rule_path=rule_path,
                 task_id=f"web-{uuid.uuid4().hex[:12]}",
                 task_type=definition.task_type,
-                max_urls=limits.get("max_urls", 100),
-                max_products=limits.get("max_products", 20),
-                max_seconds=limits.get("max_seconds", 180),
-                max_attempts=limits.get("max_attempts", 2),
+                max_urls=effective_limits["max_urls"],
+                max_products=effective_limits["max_products"],
+                max_seconds=effective_limits["max_seconds"],
+                max_attempts=int(max_attempts),
                 proxy=definition.proxy,
+                concurrency=rate_policy.get("concurrency"),
+                delay_ms=rate_policy.get("delay_ms"),
+                retry_backoff_ms=rate_policy.get("backoff_ms"),
+                rate_policy=rate_policy,
+                max_navigation=definition_limits.get("max_navigation"),
+                max_sitemaps=definition_limits.get("max_sitemaps"),
             )
         except (RuleError, ContractError) as exc:
             raise _error("INVALID_RULE", str(exc), 400) from exc
@@ -4940,7 +5438,8 @@ def create_app(
                 "node_id": node_id,
                 "rule_id": definition.rule_id,
                 "rule_version": definition.rule_version,
-                "limits": limits,
+                "limits": effective_limits,
+                "rate_policy": rate_policy,
             },
             ensure_ascii=False,
             sort_keys=True,

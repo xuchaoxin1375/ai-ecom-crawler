@@ -366,7 +366,7 @@ runtime:
 - `frontend/` 构建后由 FastAPI 在根路径提供 React 前端，静态资源挂在 `/assets/`。入口是 `http://127.0.0.1:<port>/#/workbench`，任务入口是 `/#/tasks`，构建记录是 `/#/builds`。前端未构建时，`/` 返回 503 `UI_NOT_BUILT`，提示先构建 `frontend/dist`。
 - 托管 worker 在服务生命周期内执行 `QUEUED` 任务；服务退出时先停止领取新任务，再等待已启动任务结束。
 - `--no-worker` 时创建／启动的任务保持 `QUEUED`，需要另跑 `ecom-crawler worker`；设计门已于 2026-11-22 通过，A16 1280 已于 2026-11-23 验收；四引擎跨浏览器已自验，真实 Safari／读屏未测。
-- 证据：`tests/test_web.py` 覆盖健康、规则目录、列表筛选、详情、items 分页、创建幂等、控制转移、归档／还原、SSE、导出白名单和错误码；`tests/test_feedback.py` 覆盖质量反馈创建幂等、终态守卫、查询／筛选、分诊和 422 envelope；`tests/test_workbench.py` 覆盖目录/任务定义、启动运行映射、最近任务、非终止移除 409、恢复、批次导入去重、定义属性编辑、同级排序和历史运行加入；任务页的筛选、导出、归档和反馈逻辑由 `src/features/tasks/task.test.ts` 与浏览器实机走查覆盖。
+- 证据：`tests/test_web.py` 覆盖健康、规则目录、列表筛选、详情、items 分页、创建幂等、控制转移、归档／还原、SSE、导出白名单和错误码；`tests/test_feedback.py` 覆盖质量反馈创建幂等、终态守卫、查询／筛选、分诊和 422 envelope；`tests/test_workbench.py` 覆盖目录/任务定义、启动运行映射、最近任务、非终止移除 409、恢复、批次导入去重、定义属性编辑、同级排序和历史运行加入；`tests/test_run_config.py` 覆盖运行配置读取／保存、定义同步、预算耗尽原地续采、导航重置、工作台启动策略、预算硬上限和跨重启计时。任务页的筛选、导出、归档和反馈逻辑由 `src/features/tasks/task.test.ts` 与浏览器实机走查覆盖；运行配置页签由 `src/features/workbench/WorkbenchRunConfigPanel.test.tsx` 覆盖；搜索框一键清空由 `src/components/ui/SearchInput.test.tsx` 和工作台页面测试覆盖。
 
 ## 输入契约
 

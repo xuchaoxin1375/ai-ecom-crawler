@@ -7,7 +7,6 @@ import {
   Copy,
   ExternalLink,
   Info,
-  Search,
   TriangleAlert,
   X,
 } from "lucide-react";
@@ -23,7 +22,7 @@ import type { TaskEventItem } from "../../lib/api";
 import { cn } from "../../lib/cn";
 import { Button } from "../../components/ui/Button";
 import { ErrorNotice } from "../../components/ui/ErrorNotice";
-import { Input } from "../../components/ui/Input";
+import { SearchInput } from "../../components/ui/SearchInput";
 import type { ToastTone } from "../../components/ui/Toast";
 import { useTaskEventLog } from "./useTaskEventLog";
 import {
@@ -412,20 +411,17 @@ export function WorkbenchLogView({ taskId, active, showToast }: WorkbenchLogView
             </option>
           ))}
         </select>
-        <div className="relative min-w-40 flex-1">
-          <Search
-            className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-ink-3"
-            size={12}
-            aria-hidden="true"
-          />
-          <Input
-            className="h-6 pl-7 text-[11px]"
-            value={query}
-            placeholder="搜索 URL、事件或错误"
-            aria-label="搜索运行日志"
-            onChange={(event) => setQuery(event.target.value)}
-          />
-        </div>
+        <SearchInput
+          className="min-w-40 flex-1"
+          density="sm"
+          inputClassName="h-6 text-[11px]"
+          value={query}
+          placeholder="搜索 URL、事件或错误"
+          aria-label="搜索运行日志"
+          onChange={(event) => setQuery(event.target.value)}
+          onClear={() => setQuery("")}
+          clearLabel="清除运行日志搜索"
+        />
         <Button
           size="sm"
           variant="ghost"

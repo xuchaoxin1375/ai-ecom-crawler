@@ -7,7 +7,6 @@ import {
   Plus,
   RefreshCw,
   Save,
-  Search,
   Star,
   Trash2,
 } from "lucide-react";
@@ -30,6 +29,7 @@ import { EmptyState } from "../../components/ui/EmptyState";
 import { ErrorNotice } from "../../components/ui/ErrorNotice";
 import { InlineNotice } from "../../components/ui/InlineNotice";
 import { Input, Select } from "../../components/ui/Input";
+import { SearchInput } from "../../components/ui/SearchInput";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { formatNumber, formatTime, type Tone } from "../../lib/format";
 import { modelRef, probeErrorLabels } from "./modelHealth";
@@ -959,20 +959,14 @@ function ModelSettingsForm({ config, refreshing, onRefresh }: ModelSettingsFormP
         </div>
         <div className="space-y-3 px-4 py-4">
           <div className="space-y-3">
-            <div className="relative">
-              <Search
-                size={15}
-                aria-hidden="true"
-                className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-ink-3"
-              />
-              <Input
-                aria-label="搜索可用模型"
-                className="pl-9"
-                placeholder="搜索供应商、模型或标签"
-                value={modelSearch}
-                onChange={(event) => updateSearch(event.target.value)}
-              />
-            </div>
+            <SearchInput
+              aria-label="搜索可用模型"
+              value={modelSearch}
+              placeholder="搜索供应商、模型或标签"
+              onChange={(event) => updateSearch(event.target.value)}
+              onClear={() => updateSearch("")}
+              clearLabel="清除可用模型搜索"
+            />
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               <Select
                 aria-label="按供应商筛选"

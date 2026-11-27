@@ -1014,6 +1014,94 @@ class TaskStore:
             target="QUEUED",
         )
 
+    def continue_task(
+        self,
+        task_id: str,
+        *,
+        limits: dict[str, Any],
+        input: dict[str, Any],
+        reset_navigation: bool,
+    ) -> Task:
+        """Requeue a budget-exhausted task in place, keeping accepted work.
+
+        Only ``FINISHED``, unarchived tasks can continue.  The caller has
+        already decided whether pending work or a discovery truncation makes a
+        continuation meaningful; this method additionally requires pending
+        work unless navigation items are reset.
+        """
+        now = utc_now()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                row = connection.execute(
+                    "SELECT * FROM tasks WHERE task_id = ?", (task_id,)
+                ).fetchone()
+                if row is None:
+                    raise TaskNotFoundError(f"unknown task: {task_id}")
+                if row["archived_at"] is not None:
+                    raise TaskTransitionError(
+                        f"cannot continue archived task {task_id}"
+                    )
+                if row["state"] != "FINISHED":
+                    raise TaskTransitionError(
+                        f"cannot continue task {task_id} in state {row['state']}"
+                    )
+                pending = connection.execute(
+                    "SELECT COUNT(*) AS count FROM task_items "
+                    "WHERE task_id = ? AND state IN ('PENDING', 'IN_FLIGHT')",
+                    (task_id,),
+                ).fetchone()
+                if int(pending["count"]) == 0 and not reset_navigation:
+                    raise TaskTransitionError(
+                        f"task {task_id} has no pending work to continue"
+                    )
+                counters = json_loads(row["counters_json"], {}) or {}
+                if not isinstance(counters, dict):
+                    counters = {}
+                counters.pop("discovery_limit", None)
+                counters["run_seconds"] = 0
+                counters["continued_at"] = now
+                connection.execute(
+                    """
+                    UPDATE tasks
+                    SET state = 'QUEUED', outcome = NULL, stop_reason = NULL,
+                        finished_at = NULL, limits_json = ?, input_json = ?,
+                        counters_json = ?, lease_owner = NULL,
+                        lease_expires_at = NULL, lease_heartbeat_at = NULL,
+                        updated_at = ?
+                    WHERE task_id = ?
+                    """,
+                    (
+                        json_dumps(limits),
+                        json_dumps(input),
+                        json_dumps(counters),
+                        now,
+                        task_id,
+                    ),
+                )
+                if reset_navigation:
+                    connection.execute(
+                        """
+                        UPDATE task_items
+                        SET state = 'PENDING', attempts = 0,
+                            failure_class = NULL, updated_at = ?
+                        WHERE task_id = ? AND item_type = 'navigation'
+                        """,
+                        (now, task_id),
+                    )
+                connection.execute(
+                    "DELETE FROM workbench_recent_dismissals WHERE task_id = ?",
+                    (task_id,),
+                )
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+        task = self.get_task(task_id)
+        if task is None:
+            raise TaskNotFoundError(f"unknown task: {task_id}")
+        return task
+
     def request_cancel(self, task_id: str) -> Task:
         """Cancel a task; running work first moves to CANCELLING."""
         return self._transition(

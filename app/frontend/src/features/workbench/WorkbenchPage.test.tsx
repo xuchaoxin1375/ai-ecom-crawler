@@ -6,6 +6,7 @@ import type {
   TaskSummary,
   WorkbenchNode,
   WorkbenchRecentPage,
+  WorkbenchRunConfig,
   WorkbenchTreePayload,
 } from "../../lib/api";
 import { renderPage } from "../../test/renderPage";
@@ -105,6 +106,48 @@ const recent: WorkbenchRecentPage = {
     },
   ],
 };
+const runConfig: WorkbenchRunConfig = {
+  task_id: "web-1",
+  task_type: "product",
+  collection_mode: "formal",
+  state: "RUNNING",
+  outcome: null,
+  stop_reason: null,
+  stop_detail: null,
+  counts: {
+    processed_products: 12,
+    product_candidates: 30,
+    pending_products: 18,
+    valid_products: 10,
+    failed_products: 2,
+  },
+  limits: {
+    max_urls: null,
+    max_products: 10000,
+    max_seconds: 3600,
+    max_attempts: 2,
+    max_navigation: 100,
+    max_sitemaps: 4,
+    concurrency: 1,
+    per_domain_rps: null,
+    delay_ms: 0,
+  },
+  definition: {
+    node_id: "n-1",
+    name: "fixture.example",
+    collection_mode: "formal",
+    limits: {},
+  },
+  rule_limits: { max_navigation: 100, max_sitemaps: 4 },
+  site_rate_policy: { concurrency: 4, per_domain_rps: 4 },
+  can_continue: false,
+  continue_hint: null,
+  reset_discovery: false,
+  pending_products: 18,
+  pending_navigation: 0,
+  discovery_truncated: false,
+};
+
 function systemInfo(readOnly = false): SystemInfo {
   return {
     status: "ok",
@@ -119,6 +162,9 @@ function systemInfo(readOnly = false): SystemInfo {
       auth_required: false,
       token_configured: false,
       token_updated_at: null,
+      dev_no_auth_setting: false,
+      dev_no_auth_active: false,
+      dev_no_auth_forced: false,
       session_ttl_seconds: 30 * 24 * 60 * 60,
       allowed_hosts: [],
       urls: ["http://127.0.0.1:8877/next/"],
@@ -290,6 +336,9 @@ function stubFetch(
       return Response.json(systemInfo(systemReadOnly));
     }
     if (path === "/api/workbench/recent") return Response.json(recentPage);
+    if (path === "/api/workbench/runs/web-1/config") {
+      return Response.json(runConfig);
+    }
     if (path === "/api/tasks/web-1/events/history") {
       return Response.json({
         items: [{ ts: date, event: "task_started", url: "https://fixture.example/" }],
@@ -454,6 +503,54 @@ it("selects recent runs and switches the bottom pane tabs", async () => {
   expect(screen.getByText("规则")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("tab", { name: "文件与导出" }));
   expect(screen.getByRole("link", { name: /下载当前任务导出包/ })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("tab", { name: "运行配置" }));
+  const budgetToggle = await screen.findByRole("checkbox", {
+    name: "启用有限预算",
+  });
+  expect(budgetToggle).not.toBeChecked();
+  fireEvent.click(budgetToggle);
+  expect(await screen.findByLabelText("最大商品数")).toHaveValue(10000);
+  expect(screen.getByText(/待采/)).toHaveTextContent("待采 18");
+});
+
+it("opens run config from the recent run menu", async () => {
+  stubFetch();
+  renderPage("/workbench", { pathname: "/workbench" }, <WorkbenchPage />);
+
+  const more = await screen.findByRole("button", { name: /更多 web-1 操作/ });
+  fireEvent.pointerDown(more, { button: 0, ctrlKey: false });
+  fireEvent.click(await screen.findByRole("menuitem", { name: "运行配置" }));
+  expect(screen.getByRole("tab", { name: "运行配置" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  const budgetToggle = await screen.findByRole("checkbox", {
+    name: "启用有限预算",
+  });
+  expect(budgetToggle).not.toBeChecked();
+  fireEvent.click(budgetToggle);
+  expect(await screen.findByLabelText("最大商品数")).toHaveValue(10000);
+});
+
+it("clears workbench search inputs from the inline button", async () => {
+  stubFetch();
+  renderPage("/workbench", { pathname: "/workbench" }, <WorkbenchPage />);
+
+  const treeSearch = await screen.findByRole("searchbox", {
+    name: "搜索任务树",
+  });
+  fireEvent.change(treeSearch, { target: { value: "fixture" } });
+  fireEvent.click(await screen.findByRole("button", { name: "清除任务树搜索" }));
+  expect(treeSearch).toHaveValue("");
+  expect(treeSearch).toHaveFocus();
+
+  const recentSearch = screen.getByRole("searchbox", {
+    name: "搜索最近任务",
+  });
+  fireEvent.change(recentSearch, { target: { value: "web" } });
+  fireEvent.click(await screen.findByRole("button", { name: "清除最近任务搜索" }));
+  expect(recentSearch).toHaveValue("");
+  expect(recentSearch).toHaveFocus();
 });
 
 it("resizes and collapses the workbench panels", async () => {

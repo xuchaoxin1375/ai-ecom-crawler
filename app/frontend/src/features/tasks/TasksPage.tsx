@@ -20,7 +20,6 @@ import {
   Play,
   RefreshCw,
   RotateCcw,
-  Search,
 } from "lucide-react";
 import {
   archiveTask,
@@ -46,7 +45,8 @@ import { useDelayedFlag } from "../../lib/liveRefresh";
 import { rememberListReturn, useListReturnRestore } from "../../lib/listReturn";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
-import { Checkbox, Input, Select } from "../../components/ui/Input";
+import { Checkbox, Select } from "../../components/ui/Input";
+import { SearchInput } from "../../components/ui/SearchInput";
 import { DataTable, type DataTableColumn } from "../../components/ui/DataTable";
 import { TableDisplayOptions } from "../../components/ui/TableDisplayOptions";
 import {
@@ -80,10 +80,10 @@ const PAGE_SIZE = 30;
 
 function FilterField({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <label className="flex flex-col gap-1">
+    <div className="flex flex-col gap-1">
       <span className="text-xs font-medium text-ink-3">{label}</span>
       {children}
-    </label>
+    </div>
   );
 }
 
@@ -718,6 +718,7 @@ export function TasksPage() {
           <FilterField label="状态">
             <Select
               className="w-32"
+              aria-label="按状态筛选"
               value={state}
               onChange={(event) => updateParams({ state: event.target.value })}
             >
@@ -732,6 +733,7 @@ export function TasksPage() {
           <FilterField label="类型">
             <Select
               className="w-32"
+              aria-label="按类型筛选"
               value={taskType}
               onChange={(event) => updateParams({ type: event.target.value })}
             >
@@ -744,36 +746,41 @@ export function TasksPage() {
           </FilterField>
 
           <FilterField label="站点 ID">
-            <Input
+            <SearchInput
               className="w-40"
               value={siteDraft}
               placeholder="example.fr"
+              aria-label="按站点 ID 筛选"
               onChange={(event) => setSiteDraft(event.target.value)}
               onBlur={() => commitText("site", siteDraft.trim())}
               onKeyDown={(event) => {
                 if (event.key === "Enter") commitText("site", siteDraft.trim());
               }}
+              onClear={() => {
+                setSiteDraft("");
+                commitText("site", "");
+              }}
+              clearLabel="清除站点 ID 筛选"
             />
           </FilterField>
 
           <FilterField label="搜索当前页">
-            <div className="relative w-48">
-              <Search
-                className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-3"
-                size={15}
-                aria-hidden="true"
-              />
-              <Input
-                className="pl-8"
-                value={queryDraft}
-                placeholder="任务或站点"
-                onChange={(event) => setQueryDraft(event.target.value)}
-                onBlur={() => commitText("q", queryDraft.trim())}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") commitText("q", queryDraft.trim());
-                }}
-              />
-            </div>
+            <SearchInput
+              className="w-48"
+              value={queryDraft}
+              placeholder="任务或站点"
+              aria-label="搜索当前页任务"
+              onChange={(event) => setQueryDraft(event.target.value)}
+              onBlur={() => commitText("q", queryDraft.trim())}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") commitText("q", queryDraft.trim());
+              }}
+              onClear={() => {
+                setQueryDraft("");
+                commitText("q", "");
+              }}
+              clearLabel="清除当前页搜索"
+            />
           </FilterField>
 
           <div className="flex h-9 items-center gap-2">

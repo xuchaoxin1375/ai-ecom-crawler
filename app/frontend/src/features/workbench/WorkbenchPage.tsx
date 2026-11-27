@@ -34,7 +34,7 @@ import {
   Plus,
   RefreshCw,
   RotateCcw,
-  Search,
+  SlidersHorizontal,
   Trash2,
   X,
 } from "lucide-react";
@@ -67,6 +67,7 @@ import {
   type WorkbenchAttachUnassignedResult,
   type WorkbenchNode,
   type WorkbenchRecentItem,
+  type WorkbenchRunConfigResult,
   type WorkbenchTaskCreateRequest,
   type WorkbenchTaskUpdateRequest,
 } from "../../lib/api";
@@ -89,7 +90,7 @@ import { ProductPreviewDialog } from "../sites/ProductPreviewDialog";
 import { PreviewSettingsButton } from "../sites/PreviewSettingsButton";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
-import { Input } from "../../components/ui/Input";
+import { SearchInput } from "../../components/ui/SearchInput";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { ErrorNotice } from "../../components/ui/ErrorNotice";
 import { RowActionsMenu, type RowActionItem } from "../../components/ui/DropdownMenu";
@@ -103,6 +104,7 @@ import {
 } from "./WorkbenchBatchDialogs";
 import { WorkbenchGroupDialog } from "./WorkbenchGroupDialog";
 import { WorkbenchLogView } from "./WorkbenchLogView";
+import { WorkbenchRunConfigPanel } from "./WorkbenchRunConfigPanel";
 import { WorkbenchTaskDialog } from "./WorkbenchTaskDialog";
 import { WorkbenchTreeToggle } from "./WorkbenchTreeToggle";
 import { useWorkbenchTreeCollapsed } from "./workbenchTreeState";
@@ -318,9 +320,9 @@ export function WorkbenchPage() {
     ),
   );
   const [bottomCollapsed, setBottomCollapsed] = useState(false);
-  const [bottomTab, setBottomTab] = useState<"logs" | "data" | "detail" | "files">(
-    "logs",
-  );
+  const [bottomTab, setBottomTab] = useState<
+    "logs" | "data" | "detail" | "config" | "files"
+  >("logs");
   const [previewItem, setPreviewItem] = useState<TaskItem | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [treeMenu, setTreeMenu] = useState<{
@@ -1201,6 +1203,20 @@ export function WorkbenchPage() {
     }
   }
 
+  async function handleRunConfigSaved(result: WorkbenchRunConfigResult) {
+    await refreshWorkbench();
+    const message = result.applied.continued
+      ? "已排入队列，保留此前已采结果。"
+      : result.applied.definition && !result.applied.run
+        ? "已保存到任务定义；历史运行限额不变。"
+        : "运行配置已保存。";
+    const warnings = result.warnings.filter(Boolean);
+    showToast(
+      result.applied.continued || result.applied.run ? "success" : "info",
+      warnings.length > 0 ? `${message} ${warnings.join(" ")}` : message,
+    );
+  }
+
   async function dismissItem(item: WorkbenchRecentItem) {
     if (readOnly) {
       showToast("error", "只读预览不能移除最近任务。");
@@ -1571,29 +1587,16 @@ export function WorkbenchPage() {
                 </Button>
               </div>
             </div>
-            <div className="relative border-t border-line px-2 py-1.5">
-              <Search
-                className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-ink-3"
-                size={13}
-                aria-hidden="true"
-              />
-              <Input
-                className="h-7 pl-7 pr-7 text-xs"
+            <div className="border-t border-line px-2 py-1.5">
+              <SearchInput
+                density="sm"
                 value={treeSearch}
                 onChange={(event) => setTreeSearch(event.target.value)}
+                onClear={() => setTreeSearch("")}
+                clearLabel="清除任务树搜索"
                 placeholder="搜索目录或任务"
                 aria-label="搜索任务树"
               />
-              {treeSearch ? (
-                <button
-                  type="button"
-                  className="absolute right-3 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-control text-ink-3 hover:bg-surface-muted hover:text-ink"
-                  aria-label="清除任务树搜索"
-                  onClick={() => setTreeSearch("")}
-                >
-                  <X size={12} aria-hidden="true" />
-                </button>
-              ) : null}
             </div>
           </div>
           {treeError ? (
@@ -1900,24 +1903,23 @@ export function WorkbenchPage() {
                   仅已结束可移除
                 </span>
                 <div className="ml-auto flex flex-wrap items-center gap-1.5">
-                  <div className="relative w-44 sm:w-56">
-                    <Search
-                      className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-3"
-                      size={13}
-                      aria-hidden="true"
-                    />
-                    <Input
-                      className="h-7 pl-8 text-xs"
-                      value={queryDraft}
-                      placeholder="搜索任务、站点或位置"
-                      aria-label="搜索最近任务"
-                      onChange={(event) => setQueryDraft(event.target.value)}
-                      onBlur={() => setQueryValue(queryDraft.trim())}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") setQueryValue(queryDraft.trim());
-                      }}
-                    />
-                  </div>
+                  <SearchInput
+                    className="w-44 sm:w-56"
+                    density="sm"
+                    value={queryDraft}
+                    placeholder="搜索任务、站点或位置"
+                    aria-label="搜索最近任务"
+                    onChange={(event) => setQueryDraft(event.target.value)}
+                    onBlur={() => setQueryValue(queryDraft.trim())}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") setQueryValue(queryDraft.trim());
+                    }}
+                    onClear={() => {
+                      setQueryDraft("");
+                      setQueryValue("");
+                    }}
+                    clearLabel="清除最近任务搜索"
+                  />
                   <Button
                     size="sm"
                     variant="ghost"
@@ -2140,6 +2142,16 @@ export function WorkbenchPage() {
                                 : []),
                             ],
                             [
+                              {
+                                key: "run-config",
+                                label: "运行配置",
+                                icon: <SlidersHorizontal size={14} />,
+                                onSelect: () => {
+                                  selectRecent(item);
+                                  setBottomTab("config");
+                                  setBottomCollapsed(false);
+                                },
+                              },
                               ...(item.node_id
                                 ? [
                                     {
@@ -2472,6 +2484,7 @@ export function WorkbenchPage() {
                     ["logs", "运行日志", "日志"],
                     ["data", "实时数据", "数据"],
                     ["detail", "任务详情", "详情"],
+                    ["config", "运行配置", "配置"],
                     ["files", "文件与导出", "文件"],
                   ] as const
                 ).map(([value, label, shortLabel]) => (
@@ -2758,6 +2771,13 @@ export function WorkbenchPage() {
                   </div>
                 )}
               </div>
+            ) : bottomTab === "config" ? (
+              <WorkbenchRunConfigPanel
+                key={selectedTaskId ?? "none"}
+                taskId={selectedTaskId}
+                readOnly={readOnly}
+                onSaved={(result) => void handleRunConfigSaved(result)}
+              />
             ) : (
               <div
                 role="tabpanel"
@@ -2987,6 +3007,16 @@ export function WorkbenchPage() {
                     const second: WorkbenchMenuItem[] = [];
                     if (run) {
                       second.push(
+                        {
+                          key: "run-config",
+                          label: "运行配置",
+                          icon: <SlidersHorizontal size={14} />,
+                          onSelect: () => {
+                            selectNode(node);
+                            setBottomTab("config");
+                            setBottomCollapsed(false);
+                          },
+                        },
                         {
                           key: "open",
                           label: "打开任务详情",

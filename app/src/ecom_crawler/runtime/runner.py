@@ -108,6 +108,8 @@ class TaskRunner:
         self._robots_status = 0
         self._robots_sitemaps: list[str] = []
         self._started_monotonic = time.monotonic()
+        self._run_seconds_base = float(task.counters.get("run_seconds") or 0)
+        self._last_budget_checkpoint = self._started_monotonic
         self._stop_reason = "NATURAL_END"
         self._stop_detail = "entry-page sample exhausted"
         target = task.input.get("target_entry")
@@ -125,26 +127,7 @@ class TaskRunner:
             re.compile(pattern)
             for pattern in rule.discovery.get("product_url_patterns", [])
         ]
-        discovery_limits = rule.discovery.get("limits", {})
-        self._max_navigation = max(
-            1,
-            int(
-                task.limits.get(
-                    "max_navigation", discovery_limits.get("max_navigation", 100)
-                )
-            ),
-        )
-        sitemap_limits = [
-            int(source.get("max_sitemaps", discovery_limits.get("max_sitemaps", 50)))
-            for source in rule.sources
-            if source.get("type") == "sitemap"
-        ]
-        self._max_sitemaps = max(
-            1,
-            min(sitemap_limits)
-            if sitemap_limits
-            else int(discovery_limits.get("max_sitemaps", 50)),
-        )
+        self._refresh_discovery_caps()
         self._shopify = ShopifyProductSource.from_rule(rule)
         self._shopify_stats: dict[str, Any] = (
             {
@@ -287,9 +270,11 @@ class TaskRunner:
                     return "CANCELLED"
                 if current.state == "PAUSED":
                     return "PAUSED"
+                self._refresh_task_limits(current)
+                self._checkpoint_run_seconds()
                 if self._budget_exceeded():
                     self._stop_reason = "BUDGET_EXHAUSTED"
-                    self._stop_detail = "task budget exhausted"
+                    self._stop_detail = self._budget_stop_detail()
                     self._drain(futures)
                     return "FINISHED"
 
@@ -322,9 +307,11 @@ class TaskRunner:
                 return "CANCELLED"
             if current.state == "PAUSED":
                 return "PAUSED"
+            self._refresh_task_limits(current)
+            self._checkpoint_run_seconds()
             if self._budget_exceeded():
                 self._stop_reason = "BUDGET_EXHAUSTED"
-                self._stop_detail = "task budget exhausted"
+                self._stop_detail = self._budget_stop_detail()
                 return "FINISHED"
 
             items = self.store.claim_items(self.task.task_id, 1, lease=self.lease)
@@ -1853,24 +1840,145 @@ class TaskRunner:
             limit = min(limit, self._shopify.fallback_concurrency)
         return limit
 
+    def _refresh_discovery_caps(self) -> None:
+        discovery_limits = self.rule.discovery.get("limits", {})
+        raw_navigation = self.task.limits.get("max_navigation")
+        self._max_navigation = max(
+            1,
+            int(
+                raw_navigation
+                if raw_navigation is not None
+                else discovery_limits.get("max_navigation", 100)
+            ),
+        )
+        raw_sitemaps = self.task.limits.get("max_sitemaps")
+        if raw_sitemaps is not None:
+            self._max_sitemaps = max(1, int(raw_sitemaps))
+            return
+        sitemap_limits = [
+            int(source.get("max_sitemaps", discovery_limits.get("max_sitemaps", 50)))
+            for source in self.rule.sources
+            if source.get("type") == "sitemap"
+        ]
+        self._max_sitemaps = max(
+            1,
+            min(sitemap_limits)
+            if sitemap_limits
+            else int(discovery_limits.get("max_sitemaps", 50)),
+        )
+
+    def _refresh_task_limits(self, current: Task) -> None:
+        if current.limits == self.task.limits:
+            return
+        self.task.limits = dict(current.limits)
+        self._refresh_discovery_caps()
+        self._event(
+            "task_limits_updated",
+            limits={
+                "max_urls": self.task.limits.get("max_urls"),
+                "max_products": self.task.limits.get("max_products"),
+                "max_seconds": self.task.limits.get("max_seconds"),
+                "max_attempts": self.task.limits.get("max_attempts"),
+                "max_navigation": self._max_navigation,
+                "max_sitemaps": self._max_sitemaps,
+            },
+        )
+
+    def _elapsed_run_seconds(self) -> float:
+        return max(
+            0.0,
+            self._run_seconds_base + (time.monotonic() - self._started_monotonic),
+        )
+
+    def _persist_run_seconds(self) -> None:
+        self.task.counters["run_seconds"] = round(self._elapsed_run_seconds(), 3)
+        self.store.update_task(
+            self.task.task_id,
+            lease=self.lease,
+            counters=self.task.counters,
+        )
+
+    def _checkpoint_run_seconds(self) -> None:
+        now = time.monotonic()
+        if now - self._last_budget_checkpoint < 15:
+            return
+        self._last_budget_checkpoint = now
+        try:
+            self._persist_run_seconds()
+        except LeaseLostError:
+            raise
+        except Exception:
+            logger.debug("run seconds checkpoint failed", exc_info=True)
+
     def _budget_exceeded(self) -> bool:
         max_seconds = self.task.limits.get("max_seconds")
-        if max_seconds is not None and time.monotonic() - self._started_monotonic >= float(
-            max_seconds
-        ):
+        if max_seconds is not None and self._elapsed_run_seconds() >= float(max_seconds):
             return True
         max_requests = self.task.limits.get("max_requests")
         if max_requests is not None:
             requests = int(getattr(self.fetcher, "requests", 0))
             if requests >= int(max_requests):
                 return True
+        limit_key = (
+            "max_urls"
+            if getattr(self.task, "task_type", "product") == "discovery"
+            else "max_products"
+        )
+        limit = self.task.limits.get(limit_key)
+        if limit is not None:
+            counts = self.store.item_counts(self.task.task_id, "product")
+            pending = counts.get("PENDING", 0) + counts.get("IN_FLIGHT", 0)
+            if pending > 0:
+                processed = (
+                    counts.get("DONE", 0)
+                    + counts.get("EXCLUDED", 0)
+                    + counts.get("FAILED", 0)
+                )
+                if processed >= int(limit):
+                    return True
         return False
+
+    def _budget_stop_detail(self) -> str:
+        max_seconds = self.task.limits.get("max_seconds")
+        elapsed = self._elapsed_run_seconds()
+        if max_seconds is not None and elapsed >= float(max_seconds):
+            return (
+                f"任务时长达到上限（已用 {elapsed:.0f} 秒 / "
+                f"上限 {float(max_seconds):.0f} 秒）"
+            )
+        max_requests = self.task.limits.get("max_requests")
+        if max_requests is not None:
+            requests = int(getattr(self.fetcher, "requests", 0))
+            if requests >= int(max_requests):
+                return f"请求数达到上限（{requests}/{int(max_requests)}）"
+        limit_key = (
+            "max_urls"
+            if getattr(self.task, "task_type", "product") == "discovery"
+            else "max_products"
+        )
+        limit = self.task.limits.get(limit_key)
+        if limit is not None:
+            counts = self.store.item_counts(self.task.task_id, "product")
+            processed = (
+                counts.get("DONE", 0)
+                + counts.get("EXCLUDED", 0)
+                + counts.get("FAILED", 0)
+            )
+            label = "URL 数" if limit_key == "max_urls" else "商品数"
+            return f"{label}达到上限（{processed}/{int(limit)}）"
+        return "任务预算耗尽"
 
     def _settle(self, control: str) -> None:
         self.store.assert_lease(self.lease)
         if control == "PAUSED":
+            self.task.counters["run_seconds"] = round(
+                self._elapsed_run_seconds(), 3
+            )
             self.store.update_task(
-                self.task.task_id, lease=self.lease, state="PAUSED"
+                self.task.task_id,
+                lease=self.lease,
+                state="PAUSED",
+                counters=self.task.counters,
             )
             self._write_progress()
             self._event("task_paused")
@@ -1930,6 +2038,10 @@ class TaskRunner:
             self.task.input.get("collection_mode") != "formal"
             or task_result["counts"].get("valid_products", 0) > 0
         )
+        counters = dict(task_result["counts"])
+        counters["run_seconds"] = round(self._elapsed_run_seconds(), 3)
+        if "discovery_limit" in self.task.counters:
+            counters["discovery_limit"] = self.task.counters["discovery_limit"]
         self.store.update_task(
             self.task.task_id,
             lease=self.lease,
@@ -1937,7 +2049,7 @@ class TaskRunner:
             state=state,
             outcome=outcome,
             stop_reason=stop_reason,
-            counters=task_result["counts"],
+            counters=counters,
             finished_at=finished_at,
         )
         if self.task.batch_id and self.task.site_key:
