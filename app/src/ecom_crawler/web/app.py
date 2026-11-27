@@ -990,7 +990,17 @@ def _workbench_recent_payload(
             }
         )
         items.append(summary)
-    return {"total": total, "items": items, "counts": counts}
+    unassigned_total = sum(
+        1
+        for task in tasks
+        if task.task_id not in dismissals and task.task_id not in node_by_task
+    )
+    return {
+        "total": total,
+        "items": items,
+        "counts": counts,
+        "unassigned_total": unassigned_total,
+    }
 
 
 def _item_payload(item: WorkItem) -> dict[str, Any]:
@@ -4371,13 +4381,12 @@ def create_app(
             raise _error("INVALID_TASK", str(exc), 400) from exc
         return {"definition": _workbench_definition_payload(updated)}
 
-    @app.post("/api/workbench/runs/{task_id}/attach")
-    def attach_workbench_run(
-        task_id: str, payload: WorkbenchRunAttachRequest
+    def _attach_run_to_workbench(
+        task: Task,
+        parent_id: str | None,
+        name: str | None = None,
     ) -> dict[str, Any]:
-        task = store.get_task(task_id)
-        if task is None:
-            raise _error("NOT_FOUND", f"unknown task: {task_id}", 404)
+        task_id = task.task_id
         existing_run = next(
             (run for run in store.list_workbench_task_runs() if run.task_id == task_id),
             None,
@@ -4389,10 +4398,10 @@ def create_app(
                 "created": False,
                 "attached": False,
             }
-        if payload.parent_id:
-            parent = store.get_workbench_node(payload.parent_id)
+        if parent_id:
+            parent = store.get_workbench_node(parent_id)
             if parent is None:
-                raise _error("NOT_FOUND", f"unknown workbench parent: {payload.parent_id}", 404)
+                raise _error("NOT_FOUND", f"unknown workbench parent: {parent_id}", 404)
             if parent.node_type != "group":
                 raise _error("INVALID_PARENT", "parent must be a workbench group", 409)
         site_key = task.site_key or task.domain_key or task.plan_id
@@ -4455,9 +4464,7 @@ def create_app(
             raise _error("RULE_SITE_MISMATCH", "站点域名与规则包不匹配", 422)
         batch = store.get_batch(task.batch_id) if task.batch_id else None
         batch_site = (
-            store.get_batch_site(task.batch_id, site_key)
-            if task.batch_id
-            else None
+            store.get_batch_site(task.batch_id, site_key) if task.batch_id else None
         )
         raw_input = (batch_site.input_value or "").strip() if batch_site else ""
         input_url = (
@@ -4473,15 +4480,13 @@ def create_app(
         mode = task.input.get("collection_mode")
         now = utc_now()
         siblings = [
-            node
-            for node in store.list_workbench_nodes()
-            if node.parent_id == payload.parent_id
+            node for node in store.list_workbench_nodes() if node.parent_id == parent_id
         ]
         node = WorkbenchNode(
             node_id=f"n-{uuid.uuid4().hex[:12]}",
             node_type="task",
-            name=(payload.name or site_key).strip(),
-            parent_id=payload.parent_id,
+            name=(name or site_key).strip(),
+            parent_id=parent_id,
             sort_order=max((item.sort_order for item in siblings), default=-1) + 1,
             created_at=now,
             updated_at=now,
@@ -4517,6 +4522,106 @@ def create_app(
             "node_id": node.node_id,
             "created": True,
             "attached": True,
+        }
+
+    @app.post("/api/workbench/runs/{task_id}/attach")
+    def attach_workbench_run(
+        task_id: str, payload: WorkbenchRunAttachRequest
+    ) -> dict[str, Any]:
+        task = store.get_task(task_id)
+        if task is None:
+            raise _error("NOT_FOUND", f"unknown task: {task_id}", 404)
+        return _attach_run_to_workbench(task, payload.parent_id, payload.name)
+
+    def _ensure_default_workbench_group() -> tuple[WorkbenchNode, bool]:
+        nodes = store.list_workbench_nodes()
+        existing = next(
+            (
+                node
+                for node in nodes
+                if node.node_type == "group" and node.name == "Default"
+            ),
+            None,
+        )
+        if existing is not None:
+            return existing, False
+        siblings = [node for node in nodes if node.parent_id is None]
+        now = utc_now()
+        node = WorkbenchNode(
+            node_id=f"g-{uuid.uuid4().hex[:12]}",
+            node_type="group",
+            name="Default",
+            parent_id=None,
+            sort_order=max((item.sort_order for item in siblings), default=-1) + 1,
+            created_at=now,
+            updated_at=now,
+        )
+        try:
+            created = store.create_workbench_group(node)
+        except ValueError as exc:
+            raise _error("CONFLICT", str(exc), 409) from exc
+        return created, True
+
+    @app.post("/api/workbench/defaults/attach-unassigned")
+    def attach_unassigned_workbench_runs() -> dict[str, Any]:
+        mapped = {run.task_id for run in store.list_workbench_task_runs()}
+        dismissed = store.list_workbench_dismissals()
+        tasks = [
+            task
+            for task in store.list_tasks()
+            if task.archived_at is None
+            and task.task_id not in mapped
+            and task.task_id not in dismissed
+        ]
+        existing_default = next(
+            (
+                node
+                for node in store.list_workbench_nodes()
+                if node.node_type == "group" and node.name == "Default"
+            ),
+            None,
+        )
+        if not tasks:
+            return {
+                "default_group": (
+                    {
+                        "node_id": existing_default.node_id,
+                        "name": existing_default.name,
+                        "created": False,
+                    }
+                    if existing_default is not None
+                    else None
+                ),
+                "processed": 0,
+                "attached": [],
+                "skipped": [],
+            }
+        default_group, created_group = _ensure_default_workbench_group()
+        attached: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+        for task in tasks:
+            try:
+                result = _attach_run_to_workbench(task, default_group.node_id, None)
+                attached.append({**result, "site_key": task.site_key or task.domain_key})
+            except HTTPException as exc:
+                detail = exc.detail if isinstance(exc.detail, dict) else {}
+                skipped.append(
+                    {
+                        "task_id": task.task_id,
+                        "site_key": task.site_key or task.domain_key,
+                        "code": detail.get("code") or "ATTACH_FAILED",
+                        "reason": detail.get("message") or str(exc.detail),
+                    }
+                )
+        return {
+            "default_group": {
+                "node_id": default_group.node_id,
+                "name": default_group.name,
+                "created": created_group,
+            },
+            "processed": len(tasks),
+            "attached": attached,
+            "skipped": skipped,
         }
 
     @app.post("/api/workbench/tasks/{node_id}/start", status_code=202)

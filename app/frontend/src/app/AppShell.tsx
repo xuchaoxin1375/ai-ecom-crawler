@@ -24,7 +24,6 @@ import {
 } from "lucide-react";
 import { getHealth, getSystemInfo } from "../lib/api";
 import { cn } from "../lib/cn";
-import { WorkbenchTreeToggle } from "../features/workbench/WorkbenchTreeToggle";
 
 const SIDEBAR_KEY = "ecom.sidebar.pinned";
 const SIDEBAR_EXPANDED = 248;
@@ -104,18 +103,18 @@ function SidebarLink({
 function SidebarGroup({
   label,
   expanded,
-  first = false,
+  showLabel = true,
   children,
 }: {
   label: string;
   expanded: boolean;
-  first?: boolean;
+  showLabel?: boolean;
   children: ReactNode;
 }) {
   return (
     <div className="relative grid gap-0.5" role="group" aria-label={label}>
-      <div className="relative h-7" aria-hidden={!expanded || undefined}>
-        {!first ? (
+      {showLabel ? (
+        <div className="relative h-7" aria-hidden={!expanded || undefined}>
           <span
             aria-hidden="true"
             className={cn(
@@ -125,18 +124,18 @@ function SidebarGroup({
               expanded ? "opacity-0" : "opacity-100",
             )}
           />
-        ) : null}
-        <p
-          className={cn(
-            "pointer-events-none absolute inset-x-0 top-0 px-2.5 pb-1 pt-2 text-[10px] font-semibold tracking-[0.08em] text-ink-3 uppercase transition-opacity",
-            SIDEBAR_DURATION,
-            SIDEBAR_EASE_SOFT,
-            expanded ? "opacity-100" : "opacity-0",
-          )}
-        >
-          {label}
-        </p>
-      </div>
+          <p
+            className={cn(
+              "pointer-events-none absolute inset-x-0 top-0 px-2.5 pb-1 pt-2 text-[10px] font-semibold tracking-[0.08em] text-ink-3 uppercase transition-opacity",
+              SIDEBAR_DURATION,
+              SIDEBAR_EASE_SOFT,
+              expanded ? "opacity-100" : "opacity-0",
+            )}
+          >
+            {label}
+          </p>
+        </div>
+      ) : null}
       {children}
     </div>
   );
@@ -563,7 +562,7 @@ export function AppShell() {
         <div className="flex h-full flex-col">
           <nav className="flex-1 overflow-y-auto px-3 py-4" aria-label="主导航">
             <div className="space-y-1">
-              <SidebarGroup label="采集工作台" expanded={visualOpen} first>
+              <SidebarGroup label="采集工作台" expanded={visualOpen} showLabel={false}>
                 <SidebarLink
                   to="/workbench"
                   icon={<ListTree size={17} />}
@@ -573,11 +572,6 @@ export function AppShell() {
                     if (!pinned) setFocused(false);
                   }}
                 />
-                {isWorkbench ? (
-                  <div className={visualOpen ? "pl-5" : undefined}>
-                    <WorkbenchTreeToggle expanded={visualOpen} />
-                  </div>
-                ) : null}
                 <SidebarLink
                   to="/tasks"
                   icon={<ListTodo size={17} />}
@@ -698,7 +692,7 @@ export function AppShell() {
             </div>
             <nav className="flex-1 overflow-y-auto px-3 py-4" aria-label="主导航">
               <div className="space-y-1">
-                <SidebarGroup label="采集工作台" expanded first>
+                <SidebarGroup label="采集工作台" expanded showLabel={false}>
                   <SidebarLink
                     to="/workbench"
                     icon={<ListTree size={17} />}

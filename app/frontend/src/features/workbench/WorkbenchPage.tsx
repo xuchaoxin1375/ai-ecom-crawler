@@ -40,6 +40,7 @@ import {
   X,
 } from "lucide-react";
 import {
+  attachUnassignedWorkbenchRuns,
   attachWorkbenchRun,
   cancelTask,
   createBatch,
@@ -65,6 +66,7 @@ import {
   updateWorkbenchTask,
   type BatchDraftRequest,
   type TaskItem,
+  type WorkbenchAttachUnassignedResult,
   type WorkbenchNode,
   type WorkbenchRecentItem,
   type WorkbenchTaskCreateRequest,
@@ -94,9 +96,12 @@ import {
 } from "./WorkbenchBatchDialogs";
 import { WorkbenchGroupDialog } from "./WorkbenchGroupDialog";
 import { WorkbenchTaskDialog } from "./WorkbenchTaskDialog";
+import { WorkbenchTreeToggle } from "./WorkbenchTreeToggle";
 import { useWorkbenchTreeCollapsed } from "./workbenchTreeState";
+import { planWorkbenchPath } from "./workbenchTreePath";
 import {
   WorkbenchConfirmDialog,
+  WorkbenchDefaultAttachDialog,
   WorkbenchMoveDialog,
   WorkbenchRenameDialog,
 } from "./WorkbenchNodeDialogs";
@@ -145,6 +150,30 @@ function persistLayout(key: string, value: number): void {
     window.localStorage.setItem(key, String(Math.round(value)));
   } catch {
     // Layout persistence is a convenience; private mode must not block resizing.
+  }
+}
+
+async function createPathGroups(
+  segments: string[],
+  baseParentId: string | null,
+  createdIds: string[],
+): Promise<string | null> {
+  let parentId = baseParentId;
+  for (const segment of segments) {
+    const response = await createWorkbenchGroup({ name: segment, parent_id: parentId });
+    parentId = response.node.node_id;
+    createdIds.push(parentId);
+  }
+  return parentId;
+}
+
+async function removeCreatedPathGroups(ids: string[]): Promise<void> {
+  for (const nodeId of [...ids].reverse()) {
+    try {
+      await dissolveWorkbenchGroup(nodeId);
+    } catch {
+      // Best effort: a leftover empty group is visible and can be dissolved manually.
+    }
   }
 }
 
@@ -312,6 +341,11 @@ export function WorkbenchPage() {
   const [dissolveNode, setDissolveNode] = useState<WorkbenchNode | null>(null);
   const [editNode, setEditNode] = useState<WorkbenchNode | null>(null);
   const [attachRun, setAttachRun] = useState<WorkbenchRecentItem | null>(null);
+  const [defaultDialogOpen, setDefaultDialogOpen] = useState(false);
+  const [defaultBusy, setDefaultBusy] = useState(false);
+  const [defaultError, setDefaultError] = useState("");
+  const [defaultResult, setDefaultResult] =
+    useState<WorkbenchAttachUnassignedResult | null>(null);
   const [nodeDialogError, setNodeDialogError] = useState("");
   const [nodeActionBusy, setNodeActionBusy] = useState(false);
   const [draggedNodeId, setDraggedNodeId] = useState<string | null>(null);
@@ -354,6 +388,12 @@ export function WorkbenchPage() {
   });
 
   const nodes = useMemo(() => treeQuery.data?.nodes ?? [], [treeQuery.data]);
+  const defaultGroupId = useMemo(
+    () =>
+      nodes.find((node) => node.node_type === "group" && node.name === "Default")
+        ?.node_id ?? null,
+    [nodes],
+  );
   const paths = useMemo(() => nodePaths(nodes), [nodes]);
   const recentItems = recentQuery.data?.items ?? [];
   const selectedNode = nodes.find((node) => node.node_id === selectedNodeId) ?? null;
@@ -402,6 +442,7 @@ export function WorkbenchPage() {
     queued: 0,
     removed: 0,
   };
+  const unassignedTotal = recentQuery.data?.unassigned_total ?? 0;
   const validCount = recentItems.reduce(
     (sum, item) => sum + Number(item.counts?.valid_products || 0),
     0,
@@ -500,19 +541,19 @@ export function WorkbenchPage() {
   }
 
   function openTaskDialogAt(parentId: string | null) {
-    setDialogParentId(parentId);
+    setDialogParentId(parentId ?? defaultGroupId);
     setDialogError("");
     setTaskDialogOpen(true);
   }
 
   function openImportBatchAt(parentId: string | null) {
-    setDialogParentId(parentId);
+    setDialogParentId(parentId ?? defaultGroupId);
     setDialogError("");
     setImportBatchDialogOpen(true);
   }
 
   function openNewBatchAt(parentId: string | null) {
-    setDialogParentId(parentId);
+    setDialogParentId(parentId ?? defaultGroupId);
     setDialogError("");
     setNewBatchDialogOpen(true);
   }
@@ -857,43 +898,103 @@ export function WorkbenchPage() {
     ]);
   }
 
-  async function createGroup(values: { name: string; parentId: string | null }) {
+  async function createGroup(
+    values: { name: string; parentId: string | null },
+    options: { nested: boolean },
+  ) {
     if (readOnly) {
       showToast("error", "只读预览不能创建目录。");
       return;
     }
+    const plan = planWorkbenchPath(nodes, values.name, values.parentId, options.nested);
+    if (!plan.ok) {
+      setDialogError(plan.error);
+      return;
+    }
     setFormBusy("group");
     setDialogError("");
+    const createdIds: string[] = [];
+    let leafCreated = false;
     try {
+      const parentId = await createPathGroups(
+        plan.missingGroups,
+        plan.parentId,
+        createdIds,
+      );
       const response = await createWorkbenchGroup({
-        name: values.name,
-        parent_id: values.parentId,
+        name: plan.leafName,
+        parent_id: parentId,
       });
+      leafCreated = true;
       setGroupDialogOpen(false);
       setSelectedNodeId(response.node.node_id);
       await refreshWorkbench();
-      showToast("success", "目录已创建。");
+      showToast(
+        "success",
+        plan.missingGroups.length
+          ? `多级目录「${plan.segments.join(" / ")}」已创建。`
+          : "目录已创建。",
+      );
     } catch (error) {
+      if (!leafCreated && createdIds.length) {
+        await removeCreatedPathGroups(createdIds);
+      }
+      if (createdIds.length) {
+        await refreshWorkbench().catch(() => undefined);
+      }
       setDialogError(errorText(error));
     } finally {
       setFormBusy("");
     }
   }
 
-  async function createTask(values: WorkbenchTaskCreateRequest) {
+  async function createTask(
+    values: WorkbenchTaskCreateRequest,
+    options: { nested: boolean },
+  ) {
     if (readOnly) {
       showToast("error", "只读预览不能创建任务。");
       return;
     }
+    let parentId = values.parent_id ?? null;
+    let name = values.name;
+    const plan = values.name?.trim()
+      ? planWorkbenchPath(nodes, values.name, parentId, options.nested)
+      : null;
+    if (plan && !plan.ok) {
+      setDialogError(plan.error);
+      return;
+    }
     setFormBusy("task");
     setDialogError("");
+    const createdIds: string[] = [];
+    let leafCreated = false;
     try {
-      const response = await createWorkbenchTask(values);
+      if (plan?.ok) {
+        parentId = await createPathGroups(
+          plan.missingGroups,
+          plan.parentId,
+          createdIds,
+        );
+        name = plan.leafName;
+      }
+      const response = await createWorkbenchTask({
+        ...values,
+        name,
+        parent_id: parentId,
+      });
+      leafCreated = true;
       setTaskDialogOpen(false);
       setSelectedNodeId(response.node.node_id);
       await refreshWorkbench();
       showToast("success", `任务定义「${response.node.name}」已创建。`);
     } catch (error) {
+      if (!leafCreated && createdIds.length) {
+        await removeCreatedPathGroups(createdIds);
+      }
+      if (createdIds.length) {
+        await refreshWorkbench().catch(() => undefined);
+      }
       setDialogError(errorText(error));
     } finally {
       setFormBusy("");
@@ -1002,6 +1103,40 @@ export function WorkbenchPage() {
       setDialogError(errorText(error));
     } finally {
       setFormBusy("");
+    }
+  }
+
+  function openDefaultDialog() {
+    if (readOnly) return;
+    setDefaultError("");
+    setDefaultResult(null);
+    setDefaultDialogOpen(true);
+  }
+
+  async function attachUnassignedToDefault() {
+    if (readOnly) return;
+    setDefaultBusy(true);
+    setDefaultError("");
+    try {
+      const response = await attachUnassignedWorkbenchRuns();
+      setDefaultResult(response);
+      await refreshWorkbench();
+      const attachedCount = response.attached.filter((item) => item.attached).length;
+      const skippedCount = response.skipped.length;
+      if (attachedCount > 0) {
+        showToast(
+          "success",
+          `已归入 ${attachedCount} 个运行到 Default${skippedCount ? `，跳过 ${skippedCount} 个` : ""}。`,
+        );
+      } else if (skippedCount > 0) {
+        showToast("error", `没有归入运行；${skippedCount} 个运行需要处理。`);
+      } else {
+        showToast("info", "没有未加入任务树的运行。");
+      }
+    } catch (error) {
+      setDefaultError(errorText(error));
+    } finally {
+      setDefaultBusy(false);
     }
   }
 
@@ -1219,7 +1354,7 @@ export function WorkbenchPage() {
           onDrop={(event) => handleNodeDrop(event, node)}
           onContextMenu={(event) => openNodeMenu(event, node)}
           className={cn(
-            "group flex min-w-0 items-center gap-1 rounded-control pr-1 text-sm",
+            "group relative flex min-w-0 items-center gap-1 rounded-control pr-1 text-sm",
             selected
               ? "bg-accent-soft text-accent"
               : "text-ink-2 hover:bg-surface-muted",
@@ -1230,6 +1365,16 @@ export function WorkbenchPage() {
           )}
           style={{ paddingLeft: 4 + depth * 14 }}
         >
+          {depth > 0
+            ? Array.from({ length: depth }, (_, index) => (
+                <span
+                  key={`guide-${index}`}
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-y-0 w-px bg-line-strong/60"
+                  style={{ left: 11 + index * 14 }}
+                />
+              ))
+            : null}
           {isGroup ? (
             <button
               type="button"
@@ -1506,7 +1651,7 @@ export function WorkbenchPage() {
             </div>
           ) : null}
           <div
-            className="min-h-0 flex-1 overflow-y-auto px-1.5 py-1.5"
+            className="min-h-0 flex-1 overflow-y-auto py-1.5 pl-1.5 pr-5"
             onContextMenu={(event) => {
               if ((event.target as HTMLElement).closest("[data-tree-row]")) return;
               event.preventDefault();
@@ -1605,9 +1750,13 @@ export function WorkbenchPage() {
           </div>
         </aside>
 
-        {!treeCollapsed ? (
+        {treeCollapsed ? (
+          <div className="relative hidden w-4 shrink-0 border-r border-line bg-surface xl:block">
+            <WorkbenchTreeToggle className="right-0 translate-x-1/2" />
+          </div>
+        ) : (
           /* Window splitter pattern: separator must be focusable to support keyboard resize. */
-          <>
+          <div className="relative hidden w-px shrink-0 xl:block">
             {/* eslint-disable jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/no-noninteractive-tabindex */}
             <div
               role="separator"
@@ -1618,20 +1767,20 @@ export function WorkbenchPage() {
               aria-valuemin={TREE_PANE.min}
               aria-valuemax={TREE_PANE.max}
               aria-valuenow={Math.round(treeWidth)}
-              className="group relative hidden w-px shrink-0 cursor-col-resize bg-line focus-visible:bg-accent focus-visible:outline-none xl:block"
+              className="absolute inset-y-0 left-0 w-px cursor-col-resize bg-line focus-visible:bg-accent focus-visible:outline-none"
               onPointerDown={startTreeResize}
               onKeyDown={handleTreeSplitterKey}
               onDoubleClick={resetTreeWidth}
             >
               <span
-                className="absolute -left-3 top-0 h-full w-7 cursor-col-resize"
+                className="absolute -left-2 top-0 h-full w-3 cursor-col-resize"
                 aria-hidden="true"
               />
-              <span className="absolute left-1/2 top-1/2 h-10 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-line-strong opacity-60 transition-colors group-hover:bg-accent group-hover:opacity-100" />
             </div>
             {/* eslint-enable jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/no-noninteractive-tabindex */}
-          </>
-        ) : null}
+            <WorkbenchTreeToggle className="left-1/2 -translate-x-1/2" />
+          </div>
+        )}
 
         <div
           ref={paneRef}
@@ -1874,6 +2023,30 @@ export function WorkbenchPage() {
               </div>
             ) : null}
 
+            {scope !== "removed" && unassignedTotal > 0 ? (
+              <div className="flex flex-wrap items-center gap-2 border-b border-line bg-info-soft px-2.5 py-1.5 text-[11px] text-info">
+                <FolderInput size={13} aria-hidden="true" />
+                <span>
+                  <b className="tabular">{formatNumber(unassignedTotal)}</b>{" "}
+                  个运行未加入任务树
+                </span>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="ml-auto h-6 px-2 text-[11px]"
+                  disabled={readOnly}
+                  title={
+                    readOnly
+                      ? "只读预览不能归入目录"
+                      : "创建或复用 Default，把未加入任务树的运行挂进去"
+                  }
+                  onClick={openDefaultDialog}
+                >
+                  归入 Default
+                </Button>
+              </div>
+            ) : null}
+
             {recentError ? (
               <div className="p-4">
                 <ErrorNotice
@@ -1915,7 +2088,7 @@ export function WorkbenchPage() {
                     <table className="w-full min-w-[700px] table-fixed text-left text-sm">
                       <thead className="bg-surface-muted text-[11px] font-medium text-ink-3">
                         <tr>
-                          <th className="w-[32px] px-2 py-2">
+                          <th className="w-[44px] py-2 pl-5 pr-2">
                             <input
                               type="checkbox"
                               className="h-3.5 w-3.5 cursor-pointer accent-accent"
@@ -2078,7 +2251,7 @@ export function WorkbenchPage() {
                               onClick={() => selectRecent(item)}
                             >
                               <td
-                                className="px-2 py-2"
+                                className="py-2 pl-5 pr-2"
                                 onClick={(event) => event.stopPropagation()}
                               >
                                 <input
@@ -3024,6 +3197,24 @@ export function WorkbenchPage() {
         />
       ) : null}
 
+      {defaultDialogOpen ? (
+        <WorkbenchDefaultAttachDialog
+          open
+          unassignedTotal={unassignedTotal}
+          result={defaultResult}
+          busy={defaultBusy}
+          error={defaultError}
+          onOpenChange={(open) => {
+            setDefaultDialogOpen(open);
+            if (!open) {
+              setDefaultError("");
+              setDefaultResult(null);
+            }
+          }}
+          onConfirm={() => void attachUnassignedToDefault()}
+        />
+      ) : null}
+
       {groupDialogOpen ? (
         <WorkbenchGroupDialog
           open
@@ -3035,7 +3226,7 @@ export function WorkbenchPage() {
             setGroupDialogOpen(open);
             if (!open) setDialogError("");
           }}
-          onSubmit={(values) => void createGroup(values)}
+          onSubmit={(values, options) => void createGroup(values, options)}
         />
       ) : null}
       {taskDialogOpen ? (
@@ -3050,7 +3241,7 @@ export function WorkbenchPage() {
             setTaskDialogOpen(open);
             if (!open) setDialogError("");
           }}
-          onSubmit={(values) => void createTask(values)}
+          onSubmit={(values, options) => void createTask(values, options)}
         />
       ) : null}
       {editNode ? (
@@ -3106,6 +3297,7 @@ export function WorkbenchPage() {
           open
           item={attachRun}
           nodes={nodes}
+          initialParentId={defaultGroupId}
           busy={formBusy === "attach"}
           error={dialogError}
           onOpenChange={(open) => {

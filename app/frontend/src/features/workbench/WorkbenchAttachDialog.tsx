@@ -29,6 +29,7 @@ interface WorkbenchAttachDialogProps {
   open: boolean;
   item: WorkbenchRecentItem;
   nodes: WorkbenchNode[];
+  initialParentId?: string | null;
   busy?: boolean;
   error?: string;
   onOpenChange: (open: boolean) => void;
@@ -39,12 +40,13 @@ export function WorkbenchAttachDialog({
   open,
   item,
   nodes,
+  initialParentId = null,
   busy = false,
   error = "",
   onOpenChange,
   onSubmit,
 }: WorkbenchAttachDialogProps) {
-  const [parentId, setParentId] = useState("");
+  const [parentId, setParentId] = useState(initialParentId ?? "");
   const [name, setName] = useState(item.site_key || item.definition_name || "");
   const groups = useMemo(() => {
     const paths = nodePaths(nodes);

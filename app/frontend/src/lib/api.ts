@@ -371,6 +371,29 @@ export interface WorkbenchRecentPage {
     queued: number;
     removed: number;
   };
+  unassigned_total?: number;
+}
+
+export interface WorkbenchAttachUnassignedResult {
+  default_group: {
+    node_id: string;
+    name: string;
+    created: boolean;
+  } | null;
+  processed: number;
+  attached: Array<{
+    task_id: string;
+    node_id: string;
+    created: boolean;
+    attached: boolean;
+    site_key: string | null;
+  }>;
+  skipped: Array<{
+    task_id: string;
+    site_key: string | null;
+    code: string;
+    reason: string;
+  }>;
 }
 
 export interface RuleCatalogEntry {
@@ -1650,6 +1673,14 @@ export function attachWorkbenchRun(
     `/api/workbench/runs/${encodeURIComponent(taskId)}/attach`,
     "POST",
     body,
+  );
+}
+
+export function attachUnassignedWorkbenchRuns(): Promise<WorkbenchAttachUnassignedResult> {
+  return sendJson<WorkbenchAttachUnassignedResult>(
+    "/api/workbench/defaults/attach-unassigned",
+    "POST",
+    {},
   );
 }
 

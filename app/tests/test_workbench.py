@@ -450,6 +450,88 @@ class WorkbenchApiTests(unittest.TestCase):
         self.assertFalse(again.json()["created"])
         self.assertFalse(again.json()["attached"])
 
+    def test_attach_unassigned_runs_creates_default_and_reuses_definitions(self) -> None:
+        first_id = self.create_generic_task("default-attach-1")
+        second_id = self.create_generic_task("default-attach-2")
+        for task_id in (first_id, second_id):
+            self.store.update_task(
+                task_id, site_key="fixture.example", domain_key="www.fixture.example"
+            )
+
+        before = self.client.get(
+            "/api/workbench/recent", params={"scope": "recent", "limit": 10}
+        )
+        self.assertEqual(before.status_code, 200, before.text)
+        self.assertEqual(before.json()["unassigned_total"], 2)
+
+        attached = self.client.post("/api/workbench/defaults/attach-unassigned")
+        self.assertEqual(attached.status_code, 200, attached.text)
+        body = attached.json()
+        self.assertEqual(body["processed"], 2)
+        self.assertEqual(len(body["attached"]), 2)
+        self.assertEqual(body["skipped"], [])
+        self.assertEqual(body["default_group"]["name"], "Default")
+        self.assertTrue(body["default_group"]["created"])
+        node_ids = {item["node_id"] for item in body["attached"]}
+        self.assertEqual(len(node_ids), 1)
+        self.assertEqual(
+            sum(1 for item in body["attached"] if item["created"]),
+            1,
+        )
+
+        tree = self.client.get("/api/workbench/tree").json()["nodes"]
+        default = next(
+            node
+            for node in tree
+            if node["node_id"] == body["default_group"]["node_id"]
+        )
+        self.assertEqual(default["node_type"], "group")
+        self.assertEqual(default["task_count"], 1)
+        children = [node for node in tree if node["parent_id"] == default["node_id"]]
+        self.assertEqual(len(children), 1)
+        self.assertEqual(children[0]["node_id"], next(iter(node_ids)))
+
+        after = self.client.get(
+            "/api/workbench/recent", params={"scope": "recent", "limit": 10}
+        )
+        self.assertEqual(after.json()["unassigned_total"], 0)
+        self.assertTrue(
+            all(item["node_id"] for item in after.json()["items"])
+        )
+        again = self.client.post("/api/workbench/defaults/attach-unassigned")
+        self.assertEqual(again.status_code, 200, again.text)
+        self.assertEqual(again.json()["processed"], 0)
+        self.assertEqual(
+            again.json()["default_group"]["node_id"],
+            body["default_group"]["node_id"],
+        )
+
+    def test_attach_unassigned_skips_rule_mismatch(self) -> None:
+        first_id = self.create_generic_task("default-attach-skip-1")
+        second_id = self.create_generic_task("default-attach-skip-2")
+        for index, task_id in enumerate((first_id, second_id)):
+            self.store.update_task(
+                task_id,
+                site_key=f"other{index}.example",
+                domain_key=f"other{index}.example",
+            )
+
+        response = self.client.post("/api/workbench/defaults/attach-unassigned")
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(body["processed"], 2)
+        self.assertEqual(body["attached"], [])
+        self.assertEqual(len(body["skipped"]), 2)
+        self.assertEqual(
+            {item["code"] for item in body["skipped"]},
+            {"RULE_SITE_MISMATCH"},
+        )
+
+        remaining = self.client.get(
+            "/api/workbench/recent", params={"scope": "recent", "limit": 10}
+        )
+        self.assertEqual(remaining.json()["unassigned_total"], 2)
+
     def test_duplicate_site_and_bad_parent_are_rejected(self) -> None:
         self.create_task_node()
         duplicate = self.client.post(

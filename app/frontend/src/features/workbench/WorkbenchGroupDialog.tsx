@@ -4,7 +4,14 @@ import { useMemo, useState } from "react";
 import type { WorkbenchNode } from "../../lib/api";
 import { Button } from "../../components/ui/Button";
 import { ErrorNotice } from "../../components/ui/ErrorNotice";
-import { Input, Select } from "../../components/ui/Input";
+import { Checkbox, Input, Select } from "../../components/ui/Input";
+import {
+  MAX_CREATE_PATH_LENGTH,
+  MAX_TREE_NAME_LENGTH,
+  persistNestedPathEnabled,
+  planWorkbenchPath,
+  readNestedPathEnabled,
+} from "./workbenchTreePath";
 
 function nodePaths(nodes: WorkbenchNode[]): Map<string, string> {
   const byId = new Map(nodes.map((node) => [node.node_id, node]));
@@ -32,7 +39,10 @@ interface WorkbenchGroupDialogProps {
   busy?: boolean;
   error?: string;
   onOpenChange: (open: boolean) => void;
-  onSubmit: (values: { name: string; parentId: string | null }) => void;
+  onSubmit: (
+    values: { name: string; parentId: string | null },
+    options: { nested: boolean },
+  ) => void;
 }
 
 export function WorkbenchGroupDialog({
@@ -46,8 +56,20 @@ export function WorkbenchGroupDialog({
 }: WorkbenchGroupDialogProps) {
   const [name, setName] = useState("");
   const [parentId, setParentId] = useState(initialParentId ?? "");
+  const [nestedPathEnabled, setNestedPathEnabled] = useState(readNestedPathEnabled);
   const [localError, setLocalError] = useState("");
   const paths = useMemo(() => nodePaths(nodes), [nodes]);
+  const trimmedName = name.trim();
+  const pathPlan = useMemo(
+    () =>
+      trimmedName
+        ? planWorkbenchPath(nodes, trimmedName, parentId || null, nestedPathEnabled)
+        : null,
+    [nestedPathEnabled, nodes, parentId, trimmedName],
+  );
+  const parentPath = parentId ? (paths.get(parentId) ?? "") : "";
+  const hasPathError = Boolean(pathPlan && !pathPlan.ok);
+  const hasPathPreview = Boolean(pathPlan?.ok && pathPlan.segments.length > 1);
   const groups = nodes
     .filter((node) => node.node_type === "group")
     .sort((left, right) =>
@@ -63,8 +85,15 @@ export function WorkbenchGroupDialog({
       setLocalError("目录名称不能为空");
       return;
     }
+    if (pathPlan && !pathPlan.ok) {
+      setLocalError("");
+      return;
+    }
     setLocalError("");
-    onSubmit({ name: trimmed, parentId: parentId || null });
+    onSubmit(
+      { name: trimmed, parentId: parentId || null },
+      { nested: nestedPathEnabled },
+    );
   }
 
   return (
@@ -120,9 +149,20 @@ export function WorkbenchGroupDialog({
               <Input
                 id="workbench-group-name"
                 value={name}
-                maxLength={80}
-                placeholder="如 法国 / 纺织 / 2026-11"
-                aria-invalid={Boolean(localError)}
+                maxLength={
+                  nestedPathEnabled ? MAX_CREATE_PATH_LENGTH : MAX_TREE_NAME_LENGTH
+                }
+                placeholder={
+                  nestedPathEnabled
+                    ? "如 法国 / 纺织 / 2026-11"
+                    : "如 法国 纺织 2026-11"
+                }
+                aria-invalid={Boolean(localError) || hasPathError}
+                aria-describedby={
+                  hasPathError || hasPathPreview
+                    ? "workbench-group-path-hint"
+                    : undefined
+                }
                 onChange={(event) => {
                   setName(event.target.value);
                   setLocalError("");
@@ -131,6 +171,35 @@ export function WorkbenchGroupDialog({
                   if (event.key === "Enter") submit();
                 }}
               />
+              <div className="mt-2 flex items-start gap-2 text-xs text-ink-2">
+                <Checkbox
+                  id="workbench-group-nested-path"
+                  className="mt-0.5"
+                  checked={nestedPathEnabled}
+                  onChange={(event) => {
+                    setNestedPathEnabled(event.target.checked);
+                    persistNestedPathEnabled(event.target.checked);
+                    setLocalError("");
+                  }}
+                />
+                <label className="min-w-0" htmlFor="workbench-group-nested-path">
+                  使用 <code className="font-mono">/</code> 创建多级目录
+                  <span className="mt-0.5 block text-[11px] leading-5 text-ink-3">
+                    例如 法国 / 纺织 / 2026-11；已存在的同名目录会复用。
+                  </span>
+                </label>
+              </div>
+              <div id="workbench-group-path-hint">
+                {pathPlan && !pathPlan.ok ? (
+                  <p className="mt-1 text-xs text-danger">{pathPlan.error}</p>
+                ) : pathPlan && pathPlan.segments.length > 1 ? (
+                  <p className="mt-1 text-[11px] leading-5 text-ink-3">
+                    将创建：
+                    {parentPath ? `${parentPath} / ` : ""}
+                    {pathPlan.segments.join(" / ")}
+                  </p>
+                ) : null}
+              </div>
               {localError ? (
                 <p className="mt-1 text-xs text-danger">{localError}</p>
               ) : null}

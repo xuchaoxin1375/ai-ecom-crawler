@@ -10,7 +10,14 @@ import type {
 } from "../../lib/api";
 import { Button } from "../../components/ui/Button";
 import { ErrorNotice } from "../../components/ui/ErrorNotice";
-import { Input, Select, Textarea } from "../../components/ui/Input";
+import { Checkbox, Input, Select, Textarea } from "../../components/ui/Input";
+import {
+  MAX_CREATE_PATH_LENGTH,
+  MAX_TREE_NAME_LENGTH,
+  persistNestedPathEnabled,
+  planWorkbenchPath,
+  readNestedPathEnabled,
+} from "./workbenchTreePath";
 
 function nodePaths(nodes: WorkbenchNode[]): Map<string, string> {
   const byId = new Map(nodes.map((node) => [node.node_id, node]));
@@ -41,7 +48,7 @@ interface WorkbenchTaskDialogProps {
   busy?: boolean;
   error?: string;
   onOpenChange: (open: boolean) => void;
-  onSubmit: (values: WorkbenchTaskCreateRequest) => void;
+  onSubmit: (values: WorkbenchTaskCreateRequest, options: { nested: boolean }) => void;
   onSubmitUpdate?: (values: WorkbenchTaskUpdateRequest) => void;
 }
 
@@ -62,6 +69,7 @@ export function WorkbenchTaskDialog({
   const [name, setName] = useState("");
   const [inputUrl, setInputUrl] = useState(definition?.input_url ?? "");
   const [parentId, setParentId] = useState(initialParentId ?? "");
+  const [nestedPathEnabled, setNestedPathEnabled] = useState(readNestedPathEnabled);
   const [taskType, setTaskType] = useState<"product" | "discovery">(
     definition?.task_type === "discovery" ? "discovery" : "product",
   );
@@ -90,6 +98,17 @@ export function WorkbenchTaskDialog({
   const [localError, setLocalError] = useState("");
 
   const paths = useMemo(() => nodePaths(nodes), [nodes]);
+  const trimmedName = name.trim();
+  const namePlan = useMemo(
+    () =>
+      !editing && trimmedName
+        ? planWorkbenchPath(nodes, trimmedName, parentId || null, nestedPathEnabled)
+        : null,
+    [editing, nestedPathEnabled, nodes, parentId, trimmedName],
+  );
+  const parentPath = parentId ? (paths.get(parentId) ?? "") : "";
+  const hasPathError = Boolean(namePlan && !namePlan.ok);
+  const hasPathPreview = Boolean(namePlan?.ok && namePlan.segments.length > 1);
   const groups = nodes
     .filter((node) => node.node_type === "group")
     .sort((left, right) =>
@@ -150,6 +169,10 @@ export function WorkbenchTaskDialog({
       setLocalError("采集限制必须是大于 0 的数字");
       return;
     }
+    if (!editing && namePlan && !namePlan.ok) {
+      setLocalError("");
+      return;
+    }
     setLocalError("");
     const common = {
       collection_mode: collectionMode,
@@ -186,15 +209,18 @@ export function WorkbenchTaskDialog({
     const parsedUrl = new URL(
       /^[a-z][a-z0-9+.-]*:\/\//i.test(url) ? url : `https://${url}`,
     );
-    onSubmit({
-      ...update,
-      rule_id: selectedRule.rule_id,
-      rule_version: selectedRule.rule_version,
-      task_type: taskType,
-      name: name.trim() || null,
-      input_url: parsedUrl.toString(),
-      parent_id: parentId || null,
-    });
+    onSubmit(
+      {
+        ...update,
+        rule_id: selectedRule.rule_id,
+        rule_version: selectedRule.rule_version,
+        task_type: taskType,
+        name: name.trim() || null,
+        input_url: parsedUrl.toString(),
+        parent_id: parentId || null,
+      },
+      { nested: nestedPathEnabled },
+    );
   }
 
   return (
@@ -299,8 +325,22 @@ export function WorkbenchTaskDialog({
                     <Input
                       id="workbench-task-name"
                       value={name}
-                      maxLength={80}
-                      placeholder="默认使用域名"
+                      maxLength={
+                        nestedPathEnabled
+                          ? MAX_CREATE_PATH_LENGTH
+                          : MAX_TREE_NAME_LENGTH
+                      }
+                      placeholder={
+                        nestedPathEnabled
+                          ? "默认使用域名；可用 / 指定目录"
+                          : "默认使用域名"
+                      }
+                      aria-invalid={hasPathError || undefined}
+                      aria-describedby={
+                        hasPathError || hasPathPreview
+                          ? "workbench-task-path-hint"
+                          : undefined
+                      }
                       onChange={(event) => setName(event.target.value)}
                     />
                   </div>
@@ -323,6 +363,37 @@ export function WorkbenchTaskDialog({
                         </option>
                       ))}
                     </Select>
+                  </div>
+                  <div className="sm:col-span-2">
+                    <div className="flex items-start gap-2 text-xs text-ink-2">
+                      <Checkbox
+                        id="workbench-task-nested-path"
+                        className="mt-0.5"
+                        checked={nestedPathEnabled}
+                        onChange={(event) => {
+                          setNestedPathEnabled(event.target.checked);
+                          persistNestedPathEnabled(event.target.checked);
+                          setLocalError("");
+                        }}
+                      />
+                      <label className="min-w-0" htmlFor="workbench-task-nested-path">
+                        使用 <code className="font-mono">/</code> 创建多级目录
+                        <span className="mt-0.5 block text-[11px] leading-5 text-ink-3">
+                          例如 法国 / 纺织 / fixture.example；最后一段作为任务名称。
+                        </span>
+                      </label>
+                    </div>
+                    <div id="workbench-task-path-hint">
+                      {namePlan && !namePlan.ok ? (
+                        <p className="mt-1 text-xs text-danger">{namePlan.error}</p>
+                      ) : namePlan && namePlan.segments.length > 1 ? (
+                        <p className="mt-1 text-[11px] leading-5 text-ink-3">
+                          将创建：
+                          {parentPath ? `${parentPath} / ` : ""}
+                          {namePlan.segments.join(" / ")}（最后一段为任务名称）
+                        </p>
+                      ) : null}
+                    </div>
                   </div>
                 </>
               )}

@@ -6613,6 +6613,26 @@
         "summary": "Start Task"
       }
     },
+    "/api/workbench/defaults/attach-unassigned": {
+      "post": {
+        "operationId": "attach_unassigned_workbench_runs_api_workbench_defaults_attach_unassigned_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Attach Unassigned Workbench Runs Api Workbench Defaults Attach Unassigned Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Attach Unassigned Workbench Runs"
+      }
+    },
     "/api/workbench/groups": {
       "post": {
         "operationId": "create_workbench_group_api_workbench_groups_post",

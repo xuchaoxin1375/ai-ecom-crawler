@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type {
   RuleCatalog,
@@ -260,11 +260,16 @@ afterEach(() => {
   window.localStorage.clear();
 });
 
-function stubFetch(systemReadOnly = false, recentPage: WorkbenchRecentPage = recent) {
+function stubFetch(
+  systemReadOnly = false,
+  recentPage: WorkbenchRecentPage = recent,
+  treePage: WorkbenchTreePayload = tree,
+) {
+  let createdGroupCount = 0;
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const path = url.split("?")[0];
-    if (path === "/api/workbench/tree") return Response.json(tree);
+    if (path === "/api/workbench/tree") return Response.json(treePage);
     if (path === "/api/rules") return Response.json(rules);
     if (path === "/api/system") {
       return Response.json(systemInfo(systemReadOnly));
@@ -299,6 +304,65 @@ function stubFetch(systemReadOnly = false, recentPage: WorkbenchRecentPage = rec
             readiness: "ready",
           },
         ],
+      });
+    }
+    if (
+      path === "/api/workbench/defaults/attach-unassigned" &&
+      init?.method === "POST"
+    ) {
+      return Response.json({
+        default_group: {
+          node_id: "g-default",
+          name: "Default",
+          created: true,
+        },
+        processed: 1,
+        attached: [
+          {
+            task_id: "web-1",
+            node_id: "n-default",
+            created: true,
+            attached: true,
+            site_key: "fixture.example",
+          },
+        ],
+        skipped: [],
+      });
+    }
+    if (path === "/api/workbench/groups" && init?.method === "POST") {
+      const body = JSON.parse(String(init.body)) as {
+        name: string;
+        parent_id?: string | null;
+      };
+      createdGroupCount += 1;
+      return Response.json({
+        node: {
+          node_id: `g-created-${createdGroupCount}`,
+          node_type: "group",
+          parent_id: body.parent_id ?? null,
+          name: body.name,
+          sort_order: 0,
+          created_at: date,
+          updated_at: date,
+        },
+      });
+    }
+    if (path === "/api/workbench/tasks" && init?.method === "POST") {
+      const body = JSON.parse(String(init.body)) as {
+        name?: string | null;
+        parent_id?: string | null;
+      };
+      return Response.json({
+        node: {
+          node_id: "n-created",
+          node_type: "task",
+          parent_id: body.parent_id ?? null,
+          name: body.name ?? "fixture.example",
+          sort_order: 0,
+          created_at: date,
+          updated_at: date,
+        },
+        definition: { ...definition, ...body },
       });
     }
     if (path === "/api/workbench/import-batch" && init?.method === "POST") {
@@ -387,9 +451,9 @@ it("resizes and collapses the workbench panels", async () => {
   fireEvent.keyDown(treeSplitter, { key: "ArrowRight" });
   expect(treeSplitter).toHaveAttribute("aria-valuenow", "296");
 
-  act(() => setWorkbenchTreeCollapsed(true));
+  fireEvent.click(screen.getByRole("button", { name: "收起任务目录" }));
   expect(treePanel).toHaveClass("xl:hidden");
-  act(() => setWorkbenchTreeCollapsed(false));
+  fireEvent.click(screen.getByRole("button", { name: "展开任务目录" }));
   expect(treePanel).not.toHaveClass("xl:hidden");
 
   const bottomSplitter = screen.getByRole("separator", {
@@ -555,6 +619,63 @@ it("attaches an unlinked run to the task tree", async () => {
   );
 });
 
+it("offers a confirmed one-time move of unassigned runs into Default", async () => {
+  const unlinked: WorkbenchRecentPage = {
+    ...recent,
+    unassigned_total: 1,
+    items: [{ ...recent.items[0], node_id: null, path: null }],
+  };
+  const fetchMock = stubFetch(false, unlinked);
+  renderPage("/workbench", { pathname: "/workbench" }, <WorkbenchPage />);
+
+  expect(await screen.findByText(/个运行未加入任务树/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "归入 Default" }));
+  const dialog = await screen.findByRole("dialog", { name: "归入 Default 目录" });
+  expect(within(dialog).getByText(/当前有/)).toHaveTextContent(
+    "当前有 1 条未加入任务树的运行",
+  );
+  fireEvent.click(within(dialog).getByRole("button", { name: "归入 Default" }));
+  await waitFor(() =>
+    expect(
+      fetchMock.mock.calls.some(([url]) =>
+        String(url).includes("/api/workbench/defaults/attach-unassigned"),
+      ),
+    ).toBe(true),
+  );
+  await waitFor(() =>
+    expect(within(dialog).getByText(/已处理/)).toHaveTextContent(
+      /已处理 1 条：\s*归入 1 条，跳过 0 条/,
+    ),
+  );
+  expect(within(dialog).getByText("关闭")).toBeInTheDocument();
+});
+
+it("defaults new tasks to the Default directory when available", async () => {
+  const defaultTree: WorkbenchTreePayload = {
+    nodes: [
+      ...nodes,
+      {
+        node_id: "g-default",
+        node_type: "group",
+        parent_id: null,
+        name: "Default",
+        sort_order: 1,
+        created_at: date,
+        updated_at: date,
+      },
+    ],
+  };
+  stubFetch(false, recent, defaultTree);
+  renderPage("/workbench", { pathname: "/workbench" }, <WorkbenchPage />);
+
+  const treePanel = await screen.findByLabelText("任务目录");
+  await within(treePanel).findByText("Default");
+  fireEvent.click(screen.getByRole("button", { name: "新建" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: "新建单个任务" }));
+  const dialog = await screen.findByRole("dialog", { name: "新建单个任务" });
+  expect(within(dialog).getByLabelText("目标目录")).toHaveValue("g-default");
+});
+
 it("starts a task definition and opens the create dialogs", async () => {
   const fetchMock = stubFetch();
   renderPage("/workbench", { pathname: "/workbench" }, <WorkbenchPage />);
@@ -575,6 +696,78 @@ it("starts a task definition and opens the create dialogs", async () => {
   fireEvent.click(screen.getByRole("button", { name: "新建" }));
   fireEvent.click(await screen.findByRole("menuitem", { name: "新建目录" }));
   expect(await screen.findByRole("dialog", { name: "新建目录" })).toBeInTheDocument();
+});
+
+it("creates nested groups from a slash-separated name", async () => {
+  const fetchMock = stubFetch();
+  renderPage("/workbench", { pathname: "/workbench" }, <WorkbenchPage />);
+
+  fireEvent.click(await screen.findByRole("button", { name: "新建" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: "新建目录" }));
+  const dialog = await screen.findByRole("dialog", { name: "新建目录" });
+  fireEvent.change(within(dialog).getByLabelText(/目录名称/), {
+    target: { value: "法国 / 纺织 / 2026-11" },
+  });
+  expect(
+    within(dialog).getByText(/将创建：法国 \/ 纺织 \/ 2026-11/),
+  ).toBeInTheDocument();
+
+  fireEvent.click(within(dialog).getByRole("button", { name: "创建目录" }));
+  await waitFor(() => {
+    const groupCalls = fetchMock.mock.calls.filter(
+      ([url]) => String(url) === "/api/workbench/groups",
+    );
+    expect(groupCalls).toHaveLength(3);
+  });
+  const bodies = fetchMock.mock.calls
+    .filter(([url]) => String(url) === "/api/workbench/groups")
+    .map(([, init]) => JSON.parse(String(init?.body)));
+  expect(bodies).toEqual([
+    { name: "法国", parent_id: null },
+    { name: "纺织", parent_id: "g-created-1" },
+    { name: "2026-11", parent_id: "g-created-2" },
+  ]);
+});
+
+it("creates intermediate groups for a nested task name", async () => {
+  const fetchMock = stubFetch();
+  renderPage("/workbench", { pathname: "/workbench" }, <WorkbenchPage />);
+
+  fireEvent.click(await screen.findByRole("button", { name: "新建" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: "新建单个任务" }));
+  const dialog = await screen.findByRole("dialog", { name: "新建单个任务" });
+  fireEvent.change(within(dialog).getByLabelText(/站点 URL/), {
+    target: { value: "https://fixture.example/" },
+  });
+  fireEvent.change(within(dialog).getByLabelText("显示名称"), {
+    target: { value: "法国/纺织/fixture.example" },
+  });
+  expect(
+    within(dialog).getByText(/将创建：法国 \/ 纺织 \/ fixture\.example/),
+  ).toBeInTheDocument();
+
+  fireEvent.click(within(dialog).getByRole("button", { name: "创建任务" }));
+  await waitFor(() => {
+    const taskCalls = fetchMock.mock.calls.filter(
+      ([url]) => String(url) === "/api/workbench/tasks",
+    );
+    expect(taskCalls).toHaveLength(1);
+  });
+  const bodies = fetchMock.mock.calls
+    .filter(
+      ([url]) =>
+        String(url) === "/api/workbench/groups" ||
+        String(url) === "/api/workbench/tasks",
+    )
+    .map(([, init]) => JSON.parse(String(init?.body)));
+  expect(bodies[0]).toEqual({ name: "法国", parent_id: null });
+  expect(bodies[1]).toEqual({ name: "纺织", parent_id: "g-created-1" });
+  expect(bodies[2]).toEqual(
+    expect.objectContaining({
+      name: "fixture.example",
+      parent_id: "g-created-2",
+    }),
+  );
 });
 
 it("opens create actions from a tree node context menu", async () => {

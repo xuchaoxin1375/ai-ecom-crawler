@@ -11,8 +11,8 @@ afterEach(() => {
   setWorkbenchTreeCollapsed(false);
 });
 
-it("toggles the workbench tree from the sidebar control", () => {
-  render(<WorkbenchTreeToggle expanded />);
+it("toggles the workbench tree from the panel edge control", () => {
+  render(<WorkbenchTreeToggle />);
 
   const collapse = screen.getByRole("button", { name: "收起任务目录" });
   expect(collapse).toHaveAttribute("aria-expanded", "true");
