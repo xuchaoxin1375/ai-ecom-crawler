@@ -123,6 +123,106 @@ class JsonLdProductSelectionTests(unittest.TestCase):
         self.assertEqual(chosen["name"], "Example Pack")
 
 
+class ProductGroupJsonLdTests(unittest.TestCase):
+    def _plan(self) -> dict:
+        return {
+            "site": {"locale": "en-GB"},
+            "extract": {
+                "fields": {
+                    "name": {
+                        "fallbacks": [
+                            {"type": "json_ld", "path": "name", "label": "name"}
+                        ]
+                    },
+                    "price.amount": {
+                        "fallbacks": [
+                            {
+                                "type": "json_ld",
+                                "path": "hasVariant.offers.price",
+                                "label": "variant_min",
+                                "take": "min_positive",
+                            }
+                        ]
+                    },
+                    "price.currency": {
+                        "fallbacks": [
+                            {
+                                "type": "json_ld",
+                                "path": "hasVariant.0.offers.priceCurrency",
+                                "label": "variant_currency",
+                            }
+                        ]
+                    },
+                    "primary_image_url": {
+                        "fallbacks": [
+                            {
+                                "type": "json_ld",
+                                "path": "image",
+                                "label": "image",
+                            }
+                        ]
+                    },
+                }
+            },
+        }
+
+    def test_group_variant_min_price_and_currency(self) -> None:
+        group = {
+            "@context": "https://schema.org",
+            "@type": "ProductGroup",
+            "name": "Brandon Sofa",
+            "image": "https://example.test/sofa.jpg",
+            "brand": {"@type": "Brand", "name": "Sits"},
+            "hasVariant": [
+                {
+                    "@type": "Product",
+                    "name": "Brandon Sofa",
+                    "offers": {"price": "1232.00", "priceCurrency": "GBP"},
+                },
+                {
+                    "@type": "Product",
+                    "name": "Brandon Sofa",
+                    "offers": {"price": "858.00", "priceCurrency": "GBP"},
+                },
+            ],
+        }
+        body = (
+            "<html><head><script type='application/ld+json'>"
+            + json.dumps(group)
+            + "</script></head><body></body></html>"
+        )
+        product = extract_product(
+            HtmlPage(body, "https://example.test/sofas/brandon"),
+            self._plan(),
+        )
+        self.assertEqual(product.values["name"], "Brandon Sofa")
+        self.assertEqual(product.values["price.amount"], 858)
+        self.assertEqual(product.values["price.currency"], "GBP")
+
+    def test_iso_8859_1_json_ld_script_is_readable(self) -> None:
+        name = "Café" + "\x92" + "s Chair"
+        payload = (
+            '{"@context":"https://schema.org","@type":"Product",'
+            '"name":"'
+            + name
+            + '","image":"https://example.test/chair.jpg",'
+            '"offers":{"price":"19.00","priceCurrency":"GBP"}}'
+        )
+        body = (
+            "<html><head><meta charset='iso-8859-1'>"
+            "<script type='application/ld+json'>"
+            + payload
+            + "</script></head><body><h1>"
+            + name
+            + "</h1></body></html>"
+        ).encode("latin-1")
+        page = HtmlPage(body, "https://example.test/products/chair")
+        product = page.json_ld_product()
+        assert product is not None
+        self.assertEqual(product["name"], name)
+        self.assertEqual(page.first("h1").text_content(), name)
+
+
 class ComposeDescriptionTests(unittest.TestCase):
     HTML = """
     <html><head>

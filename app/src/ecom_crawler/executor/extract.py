@@ -77,13 +77,17 @@ class HtmlPage:
 
     def __init__(self, body: bytes | str, url: str) -> None:
         self.url = url
-        parser = lxml_html.HTMLParser(recover=True, encoding="utf-8")
+        # Let lxml honour the document's declared charset (for example
+        # iso-8859-1).  Forcing UTF-8 makes script/text access raise
+        # UnicodeDecodeError on otherwise valid legacy pages.
+        parser = lxml_html.HTMLParser(recover=True)
         try:
             payload = body.encode("utf-8") if isinstance(body, str) else body
             self.tree = lxml_html.document_fromstring(payload, parser=parser)
         except (etree.ParserError, ValueError):
             self.tree = lxml_html.document_fromstring("<html></html>", parser=parser)
         self._json_ld_product: dict[str, Any] | None | bool = False
+        self._json_ld_group: dict[str, Any] | None | bool = False
 
     def css(self, selector: str) -> list[etree._Element]:
         try:
@@ -117,6 +121,24 @@ class HtmlPage:
         product = min(candidates, key=product_rank, default=None)
         self._json_ld_product = product
         return product
+
+    def json_ld_group(self) -> dict[str, Any] | None:
+        """Return the ProductGroup node when it carries variant offers."""
+        if self._json_ld_group is not False:
+            return self._json_ld_group  # type: ignore[return-value]
+        group: dict[str, Any] | None = None
+        for node in _iter_json_ld(self.tree):
+            node_type = node.get("@type")
+            types = [node_type] if isinstance(node_type, str) else node_type
+            if (
+                isinstance(types, list)
+                and "ProductGroup" in types
+                and isinstance(node.get("hasVariant"), list)
+            ):
+                group = node
+                break
+        self._json_ld_group = group
+        return group
 
 
 def _iter_json_ld(tree: etree._Element) -> list[dict[str, Any]]:
@@ -287,7 +309,13 @@ def _extract_json_ld(
     product = page.json_ld_product()
     if product is None:
         return None
-    values = _resolve_json_path(product, str(fallback["path"]).split("."))
+    path = str(fallback["path"])
+    node = product
+    if path.startswith("hasVariant"):
+        group = page.json_ld_group()
+        if group is not None:
+            node = group
+    values = _resolve_json_path(node, path.split("."))
     if not values:
         return None
     take = fallback.get("take")
