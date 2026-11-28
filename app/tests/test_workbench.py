@@ -255,6 +255,27 @@ class WorkbenchApiTests(unittest.TestCase):
             )
         )
 
+    def seed_rule_version(self, version: str) -> tuple[str, str]:
+        rule_path = self.rules_dir / f"fixture-{version}.yaml"
+        rule_path.write_text(
+            RULE_TEMPLATE.replace("__BASE__", "https://fixture.example").replace(
+                '"2026.11.21-1"', f'"{version}"'
+            ),
+            encoding="utf-8",
+        )
+        digest = hashlib.sha256(rule_path.read_bytes()).hexdigest()
+        self.store.create_rule_version(
+            RuleVersion(
+                rule_id="fixture-local",
+                rule_version=version,
+                sha256=digest,
+                path=rule_path.name,
+                status="candidate",
+                created_at=utc_now(),
+            )
+        )
+        return digest, rule_path.name
+
     def create_generic_task(self, request_id: str) -> str:
         created = self.client.post(
             "/api/tasks",
@@ -368,6 +389,53 @@ class WorkbenchApiTests(unittest.TestCase):
         history = self.client.get(f"/api/tasks/{task['task_id']}/events/history")
         self.assertEqual(history.status_code, 200, history.text)
         self.assertEqual(history.json()["items"], [])
+
+    def test_start_keeps_definition_rule_when_site_pointer_changes(self) -> None:
+        self.seed_active_rule("fixture.example")
+        _, node_id = self.create_task_node()
+        digest, _ = self.seed_rule_version("2026.11.21-2")
+        self.store.activate_rule(
+            site_key="fixture.example",
+            rule_id="fixture-local",
+            rule_version="2026.11.21-2",
+            sha256=digest,
+            expected_active_version="2026.11.21-1",
+            request_id="activate-for-workbench-start",
+            action="activate",
+        )
+
+        started = self.client.post(f"/api/workbench/tasks/{node_id}/start")
+        self.assertEqual(started.status_code, 202, started.text)
+        task_id = started.json()["task"]["task_id"]
+        task = self.store.get_task(task_id)
+        assert task is not None
+        self.assertEqual(task.plan_version, "2026.11.21-1")
+        self.assertEqual(task.rule_path, str(self.rules_dir / "fixture.yaml"))
+        summary = self.client.get(f"/api/tasks/{task_id}").json()
+        self.assertEqual(summary["rule"]["active_version"], "2026.11.21-2")
+        self.assertTrue(summary["rule"]["stale"])
+
+        self.store.update_task(task_id, state="FINISHED", outcome="COMPLETED")
+        self.store.activate_rule(
+            site_key="fixture.example",
+            rule_id="fixture-local",
+            rule_version="2026.11.21-1",
+            sha256=self.store.get_rule_version(
+                "fixture-local", "2026.11.21-1"
+            ).sha256,
+            expected_active_version="2026.11.21-2",
+            request_id="rollback-for-workbench-start",
+            action="rollback",
+        )
+        second = self.client.post(f"/api/workbench/tasks/{node_id}/start")
+        self.assertEqual(second.status_code, 202, second.text)
+        second_task = self.store.get_task(second.json()["task"]["task_id"])
+        assert second_task is not None
+        self.assertEqual(second_task.plan_version, "2026.11.21-1")
+        second_summary = self.client.get(
+            f"/api/tasks/{second_task.task_id}"
+        ).json()
+        self.assertFalse(second_summary["rule"]["stale"])
 
     def test_clone_task_definition_can_copy_rule_version(self) -> None:
         _, node_id = self.create_task_node()

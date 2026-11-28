@@ -1143,6 +1143,7 @@ class BatchApiTests(unittest.TestCase):
         self.store.update_task(
             task_id, input={**task.input, "feedback_id": "feedback-first-result"},
             state="FINISHED", outcome="COMPLETED",
+            finished_at="2026-11-28T12:00:00Z",
         )
         self.store.create_feedback(QualityFeedback(
             feedback_id="feedback-first-result", request_id="test-first-result",
@@ -1166,6 +1167,8 @@ class BatchApiTests(unittest.TestCase):
         before, row = result_source()
         self.assertIsNone(before)
         self.assertEqual((row["task_id"], row["export_status"], row["files"]), (None, "awaiting_review", []))
+        self.assertIsNone(row["delivery_source"])
+        self.assertIsNone(row["rule_version"])
         self.assertEqual(self.client.get(f"/api/tasks/{task_id}/export").status_code, 200)
 
         adopted = self.client.post(
@@ -1175,6 +1178,18 @@ class BatchApiTests(unittest.TestCase):
         self.assertEqual(adopted.status_code, 200, adopted.text)
         after, row = result_source()
         self.assertEqual((after, row["task_id"], row["export_status"]), (task_id, task_id, "complete"))
+        self.assertEqual(row["delivery_task_id"], task_id)
+        self.assertEqual(row["delivery_source"], "adopted")
+        self.assertEqual(row["rule_id"], task.plan_id)
+        self.assertEqual(row["rule_version"], task.plan_version)
+        self.assertEqual(row["finished_at"], "2026-11-28T12:00:00Z")
+
+        response = self.client.get(f"{path}/export")
+        with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+            header = archive.read("sites.csv").decode("utf-8-sig").splitlines()[0]
+        self.assertIn("delivery_source", header)
+        self.assertIn("rule_version", header)
+        self.assertIn("finished_at", header)
 
     def test_export_manifest_and_site_files(self) -> None:
         batch = self._create()["batch"]
@@ -1280,6 +1295,10 @@ class BatchApiTests(unittest.TestCase):
         )
         self.assertEqual(ready["export_status"], "complete")
         self.assertEqual(ready["counts"]["valid_products"], 1)
+        self.assertEqual(ready["delivery_source"], "current")
+        stored = self.store.get_task(task_id)
+        assert stored is not None
+        self.assertEqual(ready["rule_version"], stored.plan_version)
         self.assertEqual(manifest["batch"]["counts"]["failed"], 0)
         self.assertEqual(manifest["batch"]["valid_products"], 1)
         self.assertEqual(self.client.get(f"/api/batches/{batch_id}").json()["counts"]["failed"], 1)

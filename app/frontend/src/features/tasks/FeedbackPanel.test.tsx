@@ -1,4 +1,4 @@
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { FeedbackRecord, TaskSummary } from "../../lib/api";
 import { renderPage } from "../../test/renderPage";
@@ -201,6 +201,157 @@ it("marks feedback created after a repair as not included", async () => {
     "/builds/build-9",
   );
   expect(screen.getByRole("button", { name: "启动修复" })).toBeDisabled();
+});
+
+it("shows the old and rerun rule versions and adopts the rerun result", async () => {
+  const rerunFeedback: FeedbackRecord = {
+    ...feedback,
+    feedback_id: "fb-rerun",
+    status: "RERUN_PENDING",
+    repair_build_id: "build-2",
+    rerun_task_id: "web-rerun",
+    triage_source: "repair",
+  };
+  const rerunTask: TaskSummary = {
+    ...task,
+    task_id: "web-rerun",
+    plan_version: "2",
+    state: "FINISHED",
+    outcome: "COMPLETED",
+    counts: { valid_products: 5, failed_products: 0 },
+    finished_at: "2026-11-24T11:10:00Z",
+  };
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    const path = url.split("?")[0];
+    if (path === "/api/tasks/web-1/feedback") {
+      return Response.json({ total: 1, items: [rerunFeedback] });
+    }
+    if (path === "/api/tasks/web-rerun") {
+      return Response.json(rerunTask);
+    }
+    if (path === "/api/feedback/fb-rerun/resolve" && init?.method === "POST") {
+      return Response.json({
+        feedback: {
+          ...rerunFeedback,
+          status: "RESOLVED",
+          resolution: "RESOLVED",
+        },
+      });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderPage("*", "/tasks/web-1", <FeedbackPanel task={task} />);
+
+  expect(await screen.findByText("结果对照")).toBeVisible();
+  expect(
+    screen.getByText(
+      (_, element) =>
+        element?.tagName === "CODE" && element.textContent === "fixture-rule@1",
+    ),
+  ).toBeInTheDocument();
+  expect(
+    await screen.findByText(
+      (_, element) =>
+        element?.tagName === "CODE" && element.textContent === "fixture-rule@2",
+    ),
+  ).toBeInTheDocument();
+  expect(await screen.findByText("待采用")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "采用复跑结果" }));
+
+  await waitFor(() =>
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, init]) =>
+          String(url).endsWith("/api/feedback/fb-rerun/resolve") &&
+          init?.method === "POST" &&
+          String(init.body).includes("RESOLVED"),
+      ),
+    ).toBe(true),
+  );
+});
+
+it("marks a rerun as already adopted when it is the batch delivery", async () => {
+  const rerunFeedback: FeedbackRecord = {
+    ...feedback,
+    feedback_id: "fb-adopted",
+    status: "RERUN_PENDING",
+    rerun_task_id: "web-rerun",
+  };
+  const rerunTask: TaskSummary = {
+    ...task,
+    task_id: "web-rerun",
+    plan_version: "2",
+    state: "FINISHED",
+    outcome: "COMPLETED",
+    finished_at: "2026-11-24T11:10:00Z",
+  };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      const path = url.split("?")[0];
+      if (path === "/api/tasks/web-1/feedback") {
+        return Response.json({ total: 1, items: [rerunFeedback] });
+      }
+      if (path === "/api/tasks/web-rerun") {
+        return Response.json(rerunTask);
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }),
+  );
+
+  renderPage(
+    "*",
+    "/tasks/web-1",
+    <FeedbackPanel task={task} deliveryTaskId="web-rerun" />,
+  );
+
+  expect(await screen.findByText("已用于当前交付")).toBeVisible();
+  expect(await screen.findByRole("button", { name: "确认并关闭反馈" })).toBeVisible();
+});
+
+it("keeps the rerun comparison visible after adoption", async () => {
+  const closed: FeedbackRecord = {
+    ...feedback,
+    feedback_id: "fb-closed",
+    status: "RESOLVED",
+    resolution: "RESOLVED",
+    rerun_task_id: "web-rerun",
+  };
+  const rerunTask: TaskSummary = {
+    ...task,
+    task_id: "web-rerun",
+    plan_version: "2",
+    state: "FINISHED",
+    outcome: "COMPLETED",
+    finished_at: "2026-11-24T11:10:00Z",
+  };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      const path = url.split("?")[0];
+      if (path === "/api/tasks/web-1/feedback") {
+        return Response.json({ total: 1, items: [closed] });
+      }
+      if (path === "/api/tasks/web-rerun") {
+        return Response.json(rerunTask);
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }),
+  );
+
+  renderPage(
+    "*",
+    "/tasks/web-1",
+    <FeedbackPanel task={task} deliveryTaskId="web-rerun" />,
+  );
+
+  expect(await screen.findByText("结果对照")).toBeVisible();
+  expect(await screen.findByText("已用于当前交付")).toBeVisible();
+  expect(
+    screen.queryByRole("button", { name: "确认并关闭反馈" }),
+  ).not.toBeInTheDocument();
 });
 
 it("links an awaiting-activation feedback to its repair build", async () => {

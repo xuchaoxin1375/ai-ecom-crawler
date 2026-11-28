@@ -7892,6 +7892,13 @@ def create_app(
                     export_status = "partial"
                 else:
                     export_status = "failed"
+                delivery_source = None
+                if task is not None:
+                    delivery_source = (
+                        "adopted"
+                        if task.input.get("feedback_id") or task.input.get("feedback_ids")
+                        else "current"
+                    )
                 manifest_sites.append(
                     {
                         "site_key": site.site_key,
@@ -7900,6 +7907,12 @@ def create_app(
                         "readiness": site.readiness,
                         "note": site.note,
                         "task_id": task.task_id if task else None,
+                        "delivery_task_id": site.delivery_task_id,
+                        "delivery_source": delivery_source,
+                        "rule_id": task.plan_id if task else None,
+                        "rule_version": task.plan_version if task else None,
+                        "rule_sha256": task.rule_sha256 if task else None,
+                        "finished_at": task.finished_at if task else None,
                         "current_task_id": site.task_id,
                         "current_task_state": current.state if current else None,
                         "collection_mode": (task.input.get("collection_mode") if task else None),
@@ -7939,6 +7952,10 @@ def create_app(
                     "domain",
                     "readiness",
                     "task_id",
+                    "delivery_source",
+                    "rule_id",
+                    "rule_version",
+                    "finished_at",
                     "task_state",
                     "outcome",
                     "export_status",
@@ -7955,6 +7972,10 @@ def create_app(
                         item["domain"],
                         item["readiness"],
                         item["task_id"] or "",
+                        item["delivery_source"] or "",
+                        item["rule_id"] or "",
+                        item["rule_version"] or "",
+                        item["finished_at"] or "",
                         item["task_state"] or "",
                         item["outcome"] or "",
                         item["export_status"],

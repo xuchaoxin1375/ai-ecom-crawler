@@ -46,6 +46,7 @@ import {
 
 interface FeedbackPanelProps {
   task: TaskSummary;
+  deliveryTaskId?: string | null;
 }
 
 function requestId(prefix: string): string {
@@ -64,11 +65,19 @@ function parseSamples(value: string): string[] {
 
 interface FeedbackCardProps {
   feedback: FeedbackRecord;
+  task: TaskSummary;
   taskActive: boolean;
+  deliveryTaskId: string | null;
   onChanged: () => void;
 }
 
-function FeedbackCard({ feedback, taskActive, onChanged }: FeedbackCardProps) {
+function FeedbackCard({
+  feedback,
+  task,
+  taskActive,
+  deliveryTaskId,
+  onChanged,
+}: FeedbackCardProps) {
   const queryClient = useQueryClient();
   const location = useLocation();
   const [triageOpen, setTriageOpen] = useState(false);
@@ -81,7 +90,8 @@ function FeedbackCard({ feedback, taskActive, onChanged }: FeedbackCardProps) {
   const [actionBusy, setActionBusy] = useState("");
   const [actionError, setActionError] = useState("");
   const [actionMessage, setActionMessage] = useState("");
-  const rerunId = feedback.status === "RERUN_PENDING" ? feedback.rerun_task_id : null;
+  const rerunId = feedback.rerun_task_id;
+  const rerunClosed = ["RESOLVED", "WONTFIX"].includes(feedback.status);
   const rerun = useQuery({
     queryKey: ["task", rerunId],
     queryFn: ({ signal }) => getTask(rerunId!, signal),
@@ -89,6 +99,10 @@ function FeedbackCard({ feedback, taskActive, onChanged }: FeedbackCardProps) {
     refetchInterval: (query) =>
       ["FINISHED", "CANCELLED"].includes(query.state.data?.state ?? "") ? false : 2500,
   });
+  const rerunReady =
+    rerun.data?.state === "FINISHED" && rerun.data.outcome === "COMPLETED";
+  const rerunAdopted = Boolean(rerunId && deliveryTaskId === rerunId);
+  const sourceFinished = formatTime(task.finished_at ?? feedback.created_at);
 
   const ruleRepair =
     feedback.status === "TRIAGED"
@@ -171,7 +185,13 @@ function FeedbackCard({ feedback, taskActive, onChanged }: FeedbackCardProps) {
         note: resolution === "RESOLVED" && rerunId ? "用户采用复跑结果" : undefined,
       });
       setActionMessage(
-        resolution === "RESOLVED" ? "反馈已标记为已解决。" : "反馈已标记为不处理。",
+        resolution === "WONTFIX"
+          ? "反馈已标记为不处理。"
+          : rerunId
+            ? rerunAdopted
+              ? "这条反馈已关闭；当前批次继续使用这次复跑结果。"
+              : "已采用复跑结果并关闭反馈；批次交付和站点下载已切换到这次复跑。"
+            : "反馈已标记为已解决。",
       );
       refresh();
     } catch (exc) {
@@ -282,6 +302,70 @@ function FeedbackCard({ feedback, taskActive, onChanged }: FeedbackCardProps) {
         ) : null}
       </div>
 
+      {rerunId ? (
+        <div className="mx-4 mb-3 rounded-control border border-line bg-surface-muted/50 px-3 py-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-xs font-semibold text-ink">结果对照</span>
+            {rerunAdopted ? (
+              <Badge tone="success" dot={false}>
+                已用于当前交付
+              </Badge>
+            ) : rerunClosed ? (
+              <Badge tone="neutral" dot={false}>
+                非当前交付
+              </Badge>
+            ) : rerunReady ? (
+              <Badge tone="info" dot={false}>
+                待采用
+              </Badge>
+            ) : (
+              <Badge tone="neutral" dot={false}>
+                复跑中
+              </Badge>
+            )}
+          </div>
+          <dl className="mt-2 grid gap-1.5 text-xs leading-5 sm:grid-cols-2">
+            <div className="min-w-0">
+              <dt className="text-ink-3">原结果</dt>
+              <dd className="break-words text-ink-2">
+                <code className="font-mono text-[11px]">
+                  {task.plan_id}@{task.plan_version}
+                </code>
+                <span className="text-ink-3"> · 结束 {sourceFinished}</span>
+              </dd>
+            </div>
+            <div className="min-w-0">
+              <dt className="text-ink-3">复跑结果</dt>
+              <dd className="break-words text-ink-2">
+                {rerun.data ? (
+                  <>
+                    <code className="font-mono text-[11px]">
+                      {rerun.data.plan_id}@{rerun.data.plan_version}
+                    </code>
+                    <span className="text-ink-3">
+                      {" "}
+                      · {rerun.data.state === "FINISHED" ? "结束" : "状态"}{" "}
+                      {formatTime(rerun.data.finished_at ?? rerun.data.updated_at)}
+                    </span>
+                  </>
+                ) : (
+                  "正在读取复跑结果…"
+                )}
+              </dd>
+            </div>
+          </dl>
+          <p className="mt-1.5 text-[11px] leading-5 text-ink-3">
+            {rerunAdopted
+              ? "这次复跑已是批次当前交付；其他关联反馈可继续逐条确认。"
+              : rerunClosed
+                ? "这条反馈已关闭；这次复跑不是当前批次交付。"
+                : rerunReady
+                  ? "采用后批次导出和站点下载切换到这次复跑；旧运行仍保留为历史证据。"
+                  : "复跑使用当前生效规则；成功完成后才可逐条采用。"}
+          </p>
+        </div>
+      ) : null}
+
       {actionError ? (
         <div className="px-4 pb-3">
           <ErrorNotice title="操作失败" message={actionError} compact />
@@ -375,8 +459,7 @@ function FeedbackCard({ feedback, taskActive, onChanged }: FeedbackCardProps) {
               ) : null}
             </>
           ) : null}
-          {(rerun.data?.state === "FINISHED" && rerun.data.outcome === "COMPLETED") ||
-          runtimeBusiness ? (
+          {rerunReady || runtimeBusiness ? (
             <Button
               size="sm"
               variant="primary"
@@ -386,7 +469,9 @@ function FeedbackCard({ feedback, taskActive, onChanged }: FeedbackCardProps) {
               {actionBusy === "RESOLVED"
                 ? "提交中…"
                 : rerunId
-                  ? "采用复跑结果"
+                  ? rerunAdopted
+                    ? "确认并关闭反馈"
+                    : "采用复跑结果"
                   : "标记解决"}
             </Button>
           ) : null}
@@ -766,7 +851,7 @@ function MergeRepairDialog({
   );
 }
 
-export function FeedbackPanel({ task }: FeedbackPanelProps) {
+export function FeedbackPanel({ task, deliveryTaskId = null }: FeedbackPanelProps) {
   const location = useLocation();
   const queryClient = useQueryClient();
   const feedbackId = useRef(requestId("fb-request"));
@@ -995,7 +1080,9 @@ export function FeedbackPanel({ task }: FeedbackPanelProps) {
             <FeedbackCard
               key={feedback.feedback_id}
               feedback={feedback}
+              task={task}
               taskActive={taskActive}
+              deliveryTaskId={deliveryTaskId}
               onChanged={() => {
                 void queryClient.invalidateQueries({
                   queryKey: ["task", task.task_id],

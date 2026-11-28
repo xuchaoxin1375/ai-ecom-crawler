@@ -192,6 +192,13 @@ export function TaskDetailPage() {
   const siteRule = site?.rule ?? null;
   const stale = task ? (task.rule?.stale ?? taskRuleIsStale(task, siteRule)) : false;
   const activeVersion = task?.rule?.active_version ?? siteRule?.rule_version;
+  const exportTaskId = site?.export_task_id ?? null;
+  const currentDelivery = Boolean(
+    task && exportTaskId && exportTaskId === task.task_id,
+  );
+  const supersededDelivery = Boolean(
+    task && exportTaskId && exportTaskId !== task.task_id,
+  );
 
   function applyTask(next: TaskSummary) {
     queryClient.setQueryData(["task", taskId], next);
@@ -437,7 +444,7 @@ export function TaskDetailPage() {
 
   const qualityContent = (
     <>
-      <FeedbackPanel task={task} />
+      <FeedbackPanel task={task} deliveryTaskId={site?.delivery_task_id ?? null} />
       {isDiscovery ? (
         <section className="rounded-panel border border-line bg-surface px-4 py-4 sm:px-5">
           <p className="text-xs leading-5 text-ink-3">
@@ -626,6 +633,16 @@ export function TaskDetailPage() {
                   已归档
                 </Badge>
               ) : null}
+              {currentDelivery ? (
+                <Badge tone="success" dot={false}>
+                  当前交付
+                </Badge>
+              ) : null}
+              {supersededDelivery ? (
+                <Badge tone="neutral" dot={false}>
+                  非当前交付
+                </Badge>
+              ) : null}
               {stale && activeVersion ? (
                 <span
                   title={`站点当前规则 ${task.rule?.rule_id ?? task.plan_id}@${activeVersion}`}
@@ -744,6 +761,35 @@ export function TaskDetailPage() {
             {task.plan_id}@{task.plan_version}
           </code>
           。需要复跑后再判断新规则是否改善。
+        </div>
+      ) : null}
+
+      {supersededDelivery && exportTaskId ? (
+        <div
+          className="rounded-panel border border-line bg-surface-muted px-4 py-3 text-sm leading-6 text-ink-2"
+          role="status"
+        >
+          批次当前交付已切换到{" "}
+          <Link
+            className="font-medium text-accent underline"
+            to={`/tasks/${encodeURIComponent(exportTaskId)}`}
+          >
+            {exportTaskId}
+          </Link>
+          {site?.delivery_task ? (
+            <>
+              {" "}
+              ·{" "}
+              <code className="font-mono text-xs">
+                {site.delivery_task.plan_id}@{site.delivery_task.plan_version}
+              </code>
+              <span className="text-ink-3">
+                {" "}
+                · 结束 {formatTime(site.delivery_task.finished_at)}
+              </span>
+            </>
+          ) : null}
+          。此页保留旧运行和证据，不影响历史回查。
         </div>
       ) : null}
 

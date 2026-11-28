@@ -1330,6 +1330,7 @@ export interface BatchSite {
   task_id: string | null;
   task: TaskSummary | null;
   formal_pending?: boolean;
+  delivery_task_id?: string | null;
   delivery_task?: TaskSummary | null;
   export_task_id?: string | null;
   feedback_action?: {

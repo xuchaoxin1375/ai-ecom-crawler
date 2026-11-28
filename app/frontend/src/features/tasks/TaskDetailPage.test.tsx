@@ -27,6 +27,7 @@ const task: TaskSummary = {
 function openTaskPage(
   initial: TaskSummary = task,
   entry: RenderEntry = "/tasks/web-1",
+  batch: unknown = null,
 ) {
   const getTask = vi.fn(() => initial);
   const cancelTask = vi.fn(() =>
@@ -55,6 +56,9 @@ function openTaskPage(
         return cancelTask();
       if (path === "/api/tasks/web-1/items" || path === "/api/tasks/web-1/feedback") {
         return Response.json({ items: [], total: 0 });
+      }
+      if (path === "/api/batches/b-1" && batch) {
+        return Response.json(batch);
       }
       if (path === "/api/tasks/web-1/csv")
         return Response.json({ columns: [], rows: [], total: 0 });
@@ -252,6 +256,46 @@ describe("task detail recovery", () => {
     try {
       const back = await screen.findByRole("link", { name: /返回全部任务/ });
       expect(back).toHaveAttribute("href", "/tasks?state=FINISHED&site=fixture.test");
+    } finally {
+      unmount();
+    }
+  });
+
+  it("marks an older run when the batch delivery points elsewhere", async () => {
+    const newer: TaskSummary = {
+      ...finishedTask,
+      task_id: "web-new",
+      plan_version: "2",
+      finished_at: "2026-11-24T11:10:00Z",
+    };
+    const { unmount } = openTaskPage(
+      { ...finishedTask, batch_id: "b-1" },
+      "/tasks/web-1?view=detail",
+      {
+        batch_id: "b-1",
+        sites: [
+          {
+            site_key: "fixture.test",
+            rule: {
+              rule_id: "fixture-rule",
+              rule_version: "2",
+              path: "fixture.yaml",
+            },
+            delivery_task_id: "web-new",
+            delivery_task: newer,
+            export_task_id: "web-new",
+          },
+        ],
+      },
+    );
+    try {
+      expect(await screen.findByText("非当前交付")).toBeVisible();
+      expect(await screen.findByRole("link", { name: "web-new" })).toHaveAttribute(
+        "href",
+        "/tasks/web-new",
+      );
+      expect(screen.getByText(/批次当前交付已切换/)).toBeVisible();
+      expect(screen.getAllByText("fixture-rule@2").length).toBeGreaterThan(0);
     } finally {
       unmount();
     }
