@@ -21,6 +21,7 @@ import {
   replyBuildDependency,
   replyBuildPermission,
   resumeBuild,
+  rerunFeedback,
   buildTraceUrl,
   type BuildMessages,
   type BuildRepair,
@@ -51,6 +52,7 @@ import { BuildTimeline } from "../sites/BuildTimeline";
 import { useBuildStream } from "../sites/useBuildStream";
 import { RuleCandidateCard } from "../rules/RuleCandidateCard";
 import { RuleEvidence } from "../rules/RuleEvidence";
+import { feedbackStatusLabel, feedbackStatusTone } from "../tasks/task";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
 import { ErrorNotice } from "../../components/ui/ErrorNotice";
@@ -61,6 +63,13 @@ import { ConfirmBatchActionDialog } from "../batches/ConfirmBatchActionDialog";
 
 const INTERRUPTED_CONTINUE_MESSAGE =
   "服务重启后继续：请先检查工作区和已有产物，从中断处完成剩余工作；不要重复已完成的抓取或覆盖已写好的规则。";
+
+function rerunRequestId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return `fb-rerun-${crypto.randomUUID()}`;
+  }
+  return `fb-rerun-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
 
 const BUILD_VIEWS = ["status", "evidence", "repairs", "logs"] as const;
 type BuildView = (typeof BUILD_VIEWS)[number];
@@ -178,6 +187,101 @@ function RepairHistory({ repairs }: { repairs: BuildRepair[] }) {
   );
 }
 
+interface LinkedFeedbackCardProps {
+  build: BuildStatus;
+  busy: boolean;
+  error: string;
+  notice: string;
+  onRerun: () => void;
+}
+
+function LinkedFeedbackCard({
+  build,
+  busy,
+  error,
+  notice,
+  onRerun,
+}: LinkedFeedbackCardProps) {
+  const feedbacks = build.feedbacks ?? [];
+  if (!feedbacks.length) return null;
+  const awaiting = feedbacks.filter((item) => item.status === "AWAITING_RERUN");
+  const rerunTaskId =
+    feedbacks.find((item) => item.rerun_task_id)?.rerun_task_id ?? null;
+  const closed = feedbacks.every((item) =>
+    ["RESOLVED", "WONTFIX"].includes(item.status),
+  );
+  return (
+    <section className="rounded-panel border border-line bg-surface">
+      <div className="border-b border-line px-4 py-4 sm:px-5">
+        <h2 className="text-[17px] leading-6 font-semibold text-ink">关联反馈</h2>
+        <p className="mt-0.5 text-xs leading-5 text-ink-3">
+          本次构建关联 {feedbacks.length} 条反馈；激活后创建一次复跑，结果用于逐条验收。
+        </p>
+      </div>
+      <ul className="divide-y divide-line">
+        {feedbacks.map((item) => (
+          <li key={item.feedback_id} className="space-y-1.5 px-4 py-3 sm:px-5">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge tone={feedbackStatusTone(item.status)} dot={false}>
+                {feedbackStatusLabel(item.status)}
+              </Badge>
+              <Link
+                className="text-sm font-medium text-accent hover:underline"
+                to={`/tasks/${encodeURIComponent(
+                  item.task_id,
+                )}?view=quality&feedback=${encodeURIComponent(item.feedback_id)}`}
+              >
+                查看原反馈
+              </Link>
+              <span className="font-mono text-[11px] text-ink-3">
+                {item.feedback_id} · {item.task_id}
+              </span>
+            </div>
+            <p className="text-sm leading-6 text-ink">{item.expectation}</p>
+          </li>
+        ))}
+      </ul>
+      <div className="flex flex-wrap items-center gap-2 border-t border-line px-4 py-3 sm:px-5">
+        {awaiting.length ? (
+          <Button size="sm" variant="primary" onClick={onRerun} disabled={busy}>
+            {busy ? "创建中…" : `创建复跑（覆盖 ${awaiting.length} 条反馈）`}
+          </Button>
+        ) : rerunTaskId ? (
+          <Link
+            className="text-sm font-medium text-accent underline"
+            to={`/tasks/${encodeURIComponent(rerunTaskId)}`}
+          >
+            查看复跑任务
+          </Link>
+        ) : (
+          <span className="text-xs text-ink-3">
+            {closed ? "本次关联反馈已关闭。" : "激活候选后可以创建复跑。"}
+          </span>
+        )}
+        {awaiting.length ? (
+          <span className="text-xs leading-5 text-ink-3">
+            会创建一个新运行，使用当前生效规则；旧运行和结果保留。
+          </span>
+        ) : rerunTaskId ? (
+          <span className="text-xs leading-5 text-ink-3">
+            复跑完成后，可在各反馈卡逐条采用结果。
+          </span>
+        ) : null}
+      </div>
+      {error ? (
+        <div className="px-4 pb-3 sm:px-5">
+          <ErrorNotice title="创建复跑失败" message={error} compact />
+        </div>
+      ) : null}
+      {notice ? (
+        <p className="mx-4 mb-3 rounded-control border border-success/20 bg-success-soft px-3 py-2 text-xs leading-5 text-success">
+          {notice}
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
 export function BuildDetailPage() {
   const { buildId = "" } = useParams<{ buildId: string }>();
   const location = useLocation();
@@ -204,6 +308,10 @@ export function BuildDetailPage() {
   const [confirmError, setConfirmError] = useState("");
   const [continueDraft, setContinueDraft] = useState("");
   const [continueBusy, setContinueBusy] = useState(false);
+  const [confirmRerun, setConfirmRerun] = useState(false);
+  const [rerunBusy, setRerunBusy] = useState(false);
+  const [rerunError, setRerunError] = useState("");
+  const [rerunNotice, setRerunNotice] = useState("");
   const { refreshing, runRefresh } = useManualRefresh();
 
   const buildQuery = useQuery({
@@ -216,6 +324,8 @@ export function BuildDetailPage() {
     },
   });
   const build: BuildStatus | null = buildQuery.data?.build ?? null;
+  const awaitingFeedbackCount =
+    build?.feedbacks?.filter((item) => item.status === "AWAITING_RERUN").length ?? 0;
 
   const configQuery = useQuery({
     queryKey: ["build-config"],
@@ -321,6 +431,34 @@ export function BuildDetailPage() {
       else setError(message);
     } finally {
       setBusy("");
+    }
+  }
+
+  async function rerunBuildFeedback() {
+    if (!build) return;
+    const awaiting = (build.feedbacks ?? []).filter(
+      (item) => item.status === "AWAITING_RERUN",
+    );
+    if (!awaiting.length) return;
+    setRerunBusy(true);
+    setRerunError("");
+    setRerunNotice("");
+    try {
+      const response = await rerunFeedback(awaiting[0].feedback_id, {
+        request_id: rerunRequestId(),
+      });
+      const count = response.feedbacks?.length ?? awaiting.length;
+      setConfirmRerun(false);
+      setRerunNotice(
+        `复跑任务已创建：${response.task.task_id}（覆盖 ${count} 条反馈）。`,
+      );
+      await buildQuery.refetch();
+      void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+      void queryClient.invalidateQueries({ queryKey: ["workbench-recent"] });
+    } catch (exc) {
+      setRerunError(exc instanceof Error ? exc.message : String(exc));
+    } finally {
+      setRerunBusy(false);
     }
   }
 
@@ -797,6 +935,17 @@ export function BuildDetailPage() {
           }}
         />
       ) : null}
+      <LinkedFeedbackCard
+        build={build}
+        busy={rerunBusy}
+        error={rerunError}
+        notice={rerunNotice}
+        onRerun={() => {
+          setRerunError("");
+          setRerunNotice("");
+          setConfirmRerun(true);
+        }}
+      />
       {factsPanel}
       {eventsPanel}
       {build.state === "FINISHED" && build.outcome === "succeeded" ? (
@@ -1236,6 +1385,21 @@ export function BuildDetailPage() {
           if (!next) setConfirmCancel(false);
         }}
         onConfirm={() => void runControl("cancel")}
+      />
+
+      <ConfirmBatchActionDialog
+        open={confirmRerun}
+        title="创建复跑任务？"
+        description={`会新建一个采集运行，使用当前生效规则，覆盖本次修复关联的 ${awaitingFeedbackCount} 条反馈。`}
+        consequence="旧运行和结果保留；复跑完成后可在各反馈卡逐条采用结果并关闭反馈。"
+        confirmLabel="创建复跑"
+        tone="warning"
+        busy={rerunBusy}
+        error={rerunError}
+        onOpenChange={(next) => {
+          if (!next && !rerunBusy) setConfirmRerun(false);
+        }}
+        onConfirm={() => void rerunBuildFeedback()}
       />
     </div>
   );

@@ -4854,8 +4854,29 @@ def create_app(
         feedback = store.get_feedback(feedback_id)
         if feedback is None:
             raise _error("FEEDBACK_NOT_FOUND", f"unknown feedback: {feedback_id}", 404)
+        linked_ids = [feedback_id]
+        if feedback.repair_build_id:
+            repair_build = store.get_build(feedback.repair_build_id)
+            if repair_build is not None:
+                for candidate in [
+                    repair_build.feedback_id,
+                    *(repair_build.feedback_ids or []),
+                ]:
+                    if candidate and candidate not in linked_ids:
+                        linked_ids.append(candidate)
+        linked_feedbacks = [
+            item
+            for linked_id in linked_ids
+            if (item := store.get_feedback(linked_id)) is not None
+            and item.site_key == feedback.site_key
+            and item.batch_id == feedback.batch_id
+        ]
         request_json = json.dumps(
-            {"feedback_id": feedback_id, **payload.model_dump()},
+            {
+                "feedback_id": feedback_id,
+                "feedback_ids": [item.feedback_id for item in linked_feedbacks],
+                **payload.model_dump(),
+            },
             ensure_ascii=False, sort_keys=True, separators=(",", ":"),
         )
         try:
@@ -4867,6 +4888,7 @@ def create_app(
                 "accepted": True, "created": False,
                 "task": _summary(store, existing, root),
                 "feedback": _feedback_payload(feedback),
+                "feedbacks": _feedback_payloads(store, linked_feedbacks),
             }
         if feedback.status != "AWAITING_RERUN":
             raise _error(
@@ -4874,6 +4896,14 @@ def create_app(
                 f"feedback is {feedback.status}, expected AWAITING_RERUN",
                 409,
             )
+        rerun_feedbacks = [
+            item for item in linked_feedbacks if item.status == "AWAITING_RERUN"
+        ]
+        if feedback.feedback_id not in {
+            item.feedback_id for item in rerun_feedbacks
+        }:
+            rerun_feedbacks.insert(0, feedback)
+        rerun_ids = [item.feedback_id for item in rerun_feedbacks]
         if not feedback.batch_id or not feedback.site_key:
             raise _error(
                 "INVALID_STATE", "feedback has no batch/site; create a task manually", 409
@@ -4920,6 +4950,7 @@ def create_app(
         task.site_key = feedback.site_key
         task.rule_sha256 = active.sha256
         task.input["feedback_id"] = feedback_id
+        task.input["feedback_ids"] = rerun_ids
         task.state = "QUEUED"
         if source is not None:
             task.domain_key = source.domain_key
@@ -4930,7 +4961,11 @@ def create_app(
                 task.input["target_entry"] = entry
         try:
             task, created = store.create_task_idempotent(
-                task, payload.request_id, request_json, feedback_id=feedback_id
+                task,
+                payload.request_id,
+                request_json,
+                feedback_id=feedback_id,
+                feedback_ids=rerun_ids,
             )
         except RequestConflictError as exc:
             raise _error("CONFLICT", str(exc), 409) from exc
@@ -4942,6 +4977,13 @@ def create_app(
             "created": created,
             "task": _summary(store, store.get_task(task.task_id) or task, root),
             "feedback": _feedback_payload(updated),
+            "feedbacks": _feedback_payloads(
+                store,
+                [
+                    store.get_feedback(item.feedback_id) or item
+                    for item in rerun_feedbacks
+                ],
+            ),
         }
 
     @app.post("/api/feedback/{feedback_id}/resolve")

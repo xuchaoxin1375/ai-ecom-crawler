@@ -1058,6 +1058,19 @@ export interface BuildStatus {
   error: string | null;
   rule: RuleRef | null;
   feedback_id?: string | null;
+  feedback_ids?: string[];
+  feedbacks?: Array<{
+    feedback_id: string;
+    task_id: string;
+    status: FeedbackStatus;
+    category: FeedbackCategory;
+    expectation: string;
+    applies_to: "CURRENT_RUN" | "NEXT_RUN";
+    rerun_task_id: string | null;
+    resolution: FeedbackResolution | null;
+    rule_id: string | null;
+    rule_version: string | null;
+  }>;
   source_rule?: { rule_version: string | null; sha256: string | null } | null;
   candidate_rule?: { rule_version: string | null; sha256: string | null } | null;
   error_class?: string | null;
@@ -2237,6 +2250,7 @@ export interface FeedbackRerunResponse {
   created: boolean;
   task: TaskSummary;
   feedback: FeedbackRecord;
+  feedbacks?: FeedbackRecord[];
 }
 
 export function rerunFeedback(

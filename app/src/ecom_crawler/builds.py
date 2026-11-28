@@ -4424,6 +4424,21 @@ correct the rule; a currency or market mismatch fails host validation.
             ),
             "feedback_id": record.feedback_id,
             "feedback_ids": list(record.feedback_ids or []),
+            "feedbacks": [
+                {
+                    "feedback_id": feedback.feedback_id,
+                    "task_id": feedback.task_id,
+                    "status": feedback.status,
+                    "category": feedback.category,
+                    "expectation": feedback.expectation,
+                    "applies_to": feedback.applies_to,
+                    "rerun_task_id": feedback.rerun_task_id,
+                    "resolution": feedback.resolution,
+                    "rule_id": feedback.rule_id,
+                    "rule_version": feedback.rule_version,
+                }
+                for feedback in self._linked_feedbacks(record)
+            ],
             "source_rule": (
                 {
                     "rule_version": record.source_rule_version,

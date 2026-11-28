@@ -2468,6 +2468,14 @@ class BuildWorkflowTests(unittest.TestCase):
                 set(result["feedback_ids"]), {feedback_id, second_feedback_id}
             )
             self.assertEqual(
+                {item["feedback_id"] for item in result["feedbacks"]},
+                {feedback_id, second_feedback_id},
+            )
+            self.assertEqual(
+                {item["status"] for item in result["feedbacks"]},
+                {"AWAITING_ACTIVATION"},
+            )
+            self.assertEqual(
                 {item["feedback_id"] for item in repair.json()["feedbacks"]},
                 {feedback_id, second_feedback_id},
             )
@@ -2594,6 +2602,17 @@ class BuildWorkflowTests(unittest.TestCase):
             rerun_task_id = rerun.json()["task"]["task_id"]
             self.assertEqual(
                 rerun.json()["feedback"]["status"], "RERUN_PENDING"
+            )
+            self.assertEqual(len(rerun.json()["feedbacks"]), 2)
+            for rerun_feedback_id in (feedback_id, second_feedback_id):
+                rerun_feedback = client.get(
+                    f"/api/feedback/{rerun_feedback_id}"
+                ).json()
+                self.assertEqual(rerun_feedback["status"], "RERUN_PENDING")
+                self.assertEqual(rerun_feedback["rerun_task_id"], rerun_task_id)
+            self.assertEqual(
+                self.store.get_task(rerun_task_id).input["feedback_ids"],
+                [feedback_id, second_feedback_id],
             )
             self.assertEqual(
                 self.store.get_task(rerun_task_id).plan_version, "2026.11.23-2"

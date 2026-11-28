@@ -146,7 +146,12 @@ function FeedbackCard({ feedback, taskActive, onChanged }: FeedbackCardProps) {
       const response = await rerunFeedback(feedback.feedback_id, {
         request_id: requestId("fb-rerun"),
       });
-      setActionMessage(`复跑任务已创建：${response.task.task_id}`);
+      const count = response.feedbacks?.length ?? 1;
+      setActionMessage(
+        `复跑任务已创建：${response.task.task_id}${
+          count > 1 ? `（本次修复的 ${count} 条反馈共用）` : ""
+        }`,
+      );
       refresh();
     } catch (exc) {
       setActionError(exc instanceof Error ? exc.message : String(exc));

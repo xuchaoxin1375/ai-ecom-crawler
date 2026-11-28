@@ -77,6 +77,15 @@ async function renderBuild(
     if (path === "/api/sites/fixture.test/rule" && currentSiteRule) {
       return Response.json(currentSiteRule);
     }
+    if (/^\/api\/feedback\/[^/]+\/rerun$/.test(path) && init?.method === "POST") {
+      return Response.json({
+        accepted: true,
+        created: true,
+        task: { task_id: "web-rerun" },
+        feedback: {},
+        feedbacks: [{ feedback_id: "fb-1" }, { feedback_id: "fb-2" }],
+      });
+    }
     if (
       path === "/api/sites/fixture.test/rule/activate" &&
       init?.method === "POST" &&
@@ -372,4 +381,61 @@ it("activates a verified candidate from the build detail", async () => {
     "/api/sites/fixture.test/rule/activate",
     expect.objectContaining({ method: "POST" }),
   );
+});
+
+it("links merged feedback and creates one shared rerun", async () => {
+  const build = buildFixture({
+    state: "FINISHED",
+    outcome: "succeeded",
+    mode: "repair",
+    feedback_id: "fb-1",
+    feedback_ids: ["fb-1", "fb-2"],
+    feedbacks: [
+      {
+        feedback_id: "fb-1",
+        task_id: "web-old-1",
+        status: "AWAITING_RERUN",
+        category: "DESCRIPTION",
+        expectation: "描述应包含规格块",
+        applies_to: "CURRENT_RUN",
+        rerun_task_id: null,
+        resolution: null,
+        rule_id: "fixture-rule",
+        rule_version: "2026.11.27-1",
+      },
+      {
+        feedback_id: "fb-2",
+        task_id: "web-old-2",
+        status: "AWAITING_RERUN",
+        category: "BASIC_FIELDS",
+        expectation: "名称字段缺失",
+        applies_to: "CURRENT_RUN",
+        rerun_task_id: null,
+        resolution: null,
+        rule_id: "fixture-rule",
+        rule_version: "2026.11.27-1",
+      },
+    ],
+  });
+  await renderBuild(build, {
+    available: true,
+    reasoning_capture_enabled: false,
+    max_repair_rounds: 1,
+  });
+
+  expect(await screen.findByRole("heading", { name: "关联反馈" })).toBeVisible();
+  const feedbackLinks = await screen.findAllByRole("link", { name: "查看原反馈" });
+  expect(feedbackLinks).toHaveLength(2);
+  expect(feedbackLinks[0]).toHaveAttribute(
+    "href",
+    "/tasks/web-old-1?view=quality&feedback=fb-1",
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "创建复跑（覆盖 2 条反馈）" }));
+  const dialog = await screen.findByRole("dialog");
+  fireEvent.click(within(dialog).getByRole("button", { name: "创建复跑" }));
+
+  expect(
+    await screen.findByText(/复跑任务已创建：web-rerun（覆盖 2 条反馈）/),
+  ).toBeVisible();
 });

@@ -726,6 +726,7 @@ class TaskStore:
         request_json: str,
         *,
         feedback_id: str | None = None,
+        feedback_ids: list[str] | None = None,
     ) -> tuple[Task, bool]:
         """Insert a task once per request id; return (task, created)."""
         with self._connect() as connection:
@@ -747,14 +748,25 @@ class TaskStore:
                         raise TaskNotFoundError(f"unknown task: {task_id}")
                     return existing, False
                 self._insert_task(connection, task)
-                if feedback_id is not None:
-                    updated = connection.execute(
-                        "UPDATE quality_feedback SET status = 'RERUN_PENDING', rerun_task_id = ?, "
-                        "updated_at = ? WHERE feedback_id = ? AND status = 'AWAITING_RERUN'",
-                        (task.task_id, utc_now(), feedback_id),
+                linked_feedback_ids = list(
+                    dict.fromkeys(
+                        [
+                            *([feedback_id] if feedback_id else []),
+                            *(feedback_ids or []),
+                        ]
                     )
-                    if updated.rowcount != 1:
-                        raise FeedbackTransitionError("feedback no longer awaits a rerun")
+                )
+                if linked_feedback_ids:
+                    for linked_feedback_id in linked_feedback_ids:
+                        updated = connection.execute(
+                            "UPDATE quality_feedback SET status = 'RERUN_PENDING', rerun_task_id = ?, "
+                            "updated_at = ? WHERE feedback_id = ? AND status = 'AWAITING_RERUN'",
+                            (task.task_id, utc_now(), linked_feedback_id),
+                        )
+                        if updated.rowcount != 1:
+                            raise FeedbackTransitionError(
+                                "feedback no longer awaits a rerun"
+                            )
                     linked = connection.execute(
                         "UPDATE batch_sites SET delivery_task_id = COALESCE(delivery_task_id, "
                         "(SELECT t.task_id FROM tasks t WHERE t.task_id = batch_sites.task_id "
