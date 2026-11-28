@@ -475,7 +475,7 @@ function RuntimeSlots({
   }
 
   return (
-    <div className="space-y-2 border-t border-line px-4 py-4 sm:px-6">
+    <div className="min-w-0 space-y-2">
       <div className="flex flex-wrap items-center gap-2">
         <label
           htmlFor={slots.source === "cli" ? undefined : inputId}
@@ -1226,16 +1226,18 @@ export function SystemSettingsPage() {
             hint={`${formatNumber(data.runtime.threads)} 个进程线程`}
           />
         </div>
-        <RuntimeSlots
-          runtime={data.runtime}
-          kind="collection"
-          onRestartRequired={setRestartNotice}
-        />
-        <RuntimeSlots
-          runtime={data.runtime}
-          kind="build"
-          onRestartRequired={setRestartNotice}
-        />
+        <div className="grid gap-6 border-t border-line px-4 py-4 sm:px-6 lg:grid-cols-2">
+          <RuntimeSlots
+            runtime={data.runtime}
+            kind="collection"
+            onRestartRequired={setRestartNotice}
+          />
+          <RuntimeSlots
+            runtime={data.runtime}
+            kind="build"
+            onRestartRequired={setRestartNotice}
+          />
+        </div>
       </section>
 
       <CollectionPolicySettings />
