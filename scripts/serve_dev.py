@@ -778,9 +778,8 @@ def start_command(args: argparse.Namespace) -> int:
         "close_fds": True,
     }
     if os.name == "nt":
-        kwargs["creationflags"] = (
-            subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-        )
+        # A detached Windows venv launcher can give its interpreter a new console.
+        kwargs["creationflags"] = SUBPROCESS_FLAGS | subprocess.CREATE_NEW_PROCESS_GROUP
     else:
         kwargs["start_new_session"] = True
     try:
