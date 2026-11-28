@@ -161,7 +161,12 @@ describe("TaskCsvPreview", () => {
     render(
       <QueryClientProvider client={client}>
         <PreviewSettingsContext.Provider
-          value={{ thumbnailsEnabled: false, realtimeLimit: 50, ready: true }}
+          value={{
+            thumbnailsEnabled: false,
+            realtimeLimit: 50,
+            realtimeBatchSize: 50,
+            ready: true,
+          }}
         >
           <TaskCsvPreview taskId="web-1" live={false} />
         </PreviewSettingsContext.Provider>

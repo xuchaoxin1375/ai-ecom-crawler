@@ -137,6 +137,7 @@ export interface ImageProxySettings {
 export interface PreviewSettings {
   thumbnails_enabled: boolean;
   realtime_limit: number;
+  realtime_batch_size: number;
 }
 
 export interface SystemAccessResponse {

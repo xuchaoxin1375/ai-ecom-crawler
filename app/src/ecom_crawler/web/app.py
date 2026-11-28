@@ -644,7 +644,8 @@ class PreviewSettingsRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     thumbnails_enabled: StrictBool = True
-    realtime_limit: StrictInt = 50
+    realtime_limit: StrictInt = 5
+    realtime_batch_size: StrictInt = 50
 
 
 class SiteRatePolicyRequest(BaseModel):

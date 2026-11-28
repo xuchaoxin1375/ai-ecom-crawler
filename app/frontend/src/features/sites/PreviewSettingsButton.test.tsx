@@ -21,20 +21,24 @@ describe("PreviewSettingsButton", () => {
       service_proxy_configured: false,
     };
     let thumbnailsEnabled = true;
-    let realtimeLimit = 50;
+    let realtimeLimit = 5;
+    let realtimeBatchSize = 50;
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (url === "/api/system/preview-settings") {
         if (init?.method === "PUT") {
           const body = JSON.parse(String(init.body)) as {
             thumbnails_enabled: boolean;
             realtime_limit: number;
+            realtime_batch_size: number;
           };
           thumbnailsEnabled = body.thumbnails_enabled;
           realtimeLimit = body.realtime_limit;
+          realtimeBatchSize = body.realtime_batch_size;
         }
         return Response.json({
           thumbnails_enabled: thumbnailsEnabled,
           realtime_limit: realtimeLimit,
+          realtime_batch_size: realtimeBatchSize,
         });
       }
       if (url === "/api/system/image-proxy" && init?.method === "PUT") {
@@ -69,20 +73,24 @@ describe("PreviewSettingsButton", () => {
 
   it("toggles list thumbnails from the preview dialog", async () => {
     let thumbnailsEnabled = true;
-    let realtimeLimit = 50;
+    let realtimeLimit = 5;
+    let realtimeBatchSize = 50;
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (url === "/api/system/preview-settings") {
         if (init?.method === "PUT") {
           const body = JSON.parse(String(init.body)) as {
             thumbnails_enabled: boolean;
             realtime_limit: number;
+            realtime_batch_size: number;
           };
           thumbnailsEnabled = body.thumbnails_enabled;
           realtimeLimit = body.realtime_limit;
+          realtimeBatchSize = body.realtime_batch_size;
         }
         return Response.json({
           thumbnails_enabled: thumbnailsEnabled,
           realtime_limit: realtimeLimit,
+          realtime_batch_size: realtimeBatchSize,
         });
       }
       return Response.json({
@@ -108,7 +116,8 @@ describe("PreviewSettingsButton", () => {
     );
     expect(JSON.parse(String(put?.[1]?.body))).toEqual({
       thumbnails_enabled: false,
-      realtime_limit: 50,
+      realtime_limit: 5,
+      realtime_batch_size: 50,
     });
   });
 });

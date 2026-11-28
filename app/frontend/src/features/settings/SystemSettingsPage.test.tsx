@@ -96,7 +96,8 @@ function stubFetch(
 ) {
   let current = initial;
   let previewThumbnailsEnabled = true;
-  let previewRealtimeLimit = 50;
+  let previewRealtimeLimit = 5;
+  let previewRealtimeBatchSize = 50;
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     const path = url.split("?")[0];
     if (path === "/api/system" && (!init?.method || init.method === "GET")) {
@@ -107,13 +108,16 @@ function stubFetch(
         const body = JSON.parse(String(init.body)) as {
           thumbnails_enabled: boolean;
           realtime_limit: number;
+          realtime_batch_size: number;
         };
         previewThumbnailsEnabled = body.thumbnails_enabled;
         previewRealtimeLimit = body.realtime_limit;
+        previewRealtimeBatchSize = body.realtime_batch_size;
       }
       return Response.json({
         thumbnails_enabled: previewThumbnailsEnabled,
         realtime_limit: previewRealtimeLimit,
+        realtime_batch_size: previewRealtimeBatchSize,
       });
     }
     if (path === "/api/system/collection-slots" && init?.method === "PUT") {
@@ -598,42 +602,63 @@ describe("system settings", () => {
     );
     expect(JSON.parse(String(put?.[1]?.body))).toEqual({
       thumbnails_enabled: false,
-      realtime_limit: 50,
+      realtime_limit: 5,
+      realtime_batch_size: 50,
     });
   });
 
-  it("saves a preset realtime preview limit", async () => {
+  it("saves a preset initial preview limit", async () => {
     const fetchMock = stubFetch(systemInfo());
     renderPage("/settings", "/settings", <SystemSettingsPage />);
 
-    const select = await screen.findByLabelText("实时数据预览条数");
-    expect(select).toHaveValue("50");
+    const select = await screen.findByLabelText("初始预览条数");
+    expect(select).toHaveValue("5");
     fireEvent.change(select, { target: { value: "10" } });
 
-    await waitFor(() =>
-      expect(screen.getByText(/已设置实时数据预览 10 条/)).toBeVisible(),
-    );
+    await waitFor(() => expect(screen.getByText(/已设置初始预览 10 条/)).toBeVisible());
     const put = fetchMock.mock.calls.find(
       ([url, init]) => url === "/api/system/preview-settings" && init?.method === "PUT",
     );
     expect(JSON.parse(String(put?.[1]?.body))).toEqual({
       thumbnails_enabled: true,
       realtime_limit: 10,
+      realtime_batch_size: 50,
     });
   });
 
-  it("saves a custom realtime preview limit within 10–200", async () => {
+  it("saves a preset scroll batch size", async () => {
     const fetchMock = stubFetch(systemInfo());
     renderPage("/settings", "/settings", <SystemSettingsPage />);
 
-    const select = await screen.findByLabelText("实时数据预览条数");
-    fireEvent.change(select, { target: { value: "custom" } });
-    const input = screen.getByLabelText("自定义实时数据预览条数");
-    fireEvent.change(input, { target: { value: "137" } });
-    fireEvent.click(screen.getByRole("button", { name: "应用" }));
+    const select = await screen.findByLabelText("滚动加载批量");
+    expect(select).toHaveValue("50");
+    fireEvent.change(select, { target: { value: "100" } });
 
     await waitFor(() =>
-      expect(screen.getByText(/已设置实时数据预览 137 条/)).toBeVisible(),
+      expect(screen.getByText(/已设置滚动加载批量 100 条/)).toBeVisible(),
+    );
+    const put = fetchMock.mock.calls.find(
+      ([url, init]) => url === "/api/system/preview-settings" && init?.method === "PUT",
+    );
+    expect(JSON.parse(String(put?.[1]?.body))).toEqual({
+      thumbnails_enabled: true,
+      realtime_limit: 5,
+      realtime_batch_size: 100,
+    });
+  });
+
+  it("saves a custom initial preview limit within 5–200", async () => {
+    const fetchMock = stubFetch(systemInfo());
+    renderPage("/settings", "/settings", <SystemSettingsPage />);
+
+    const select = await screen.findByLabelText("初始预览条数");
+    fireEvent.change(select, { target: { value: "custom" } });
+    const input = screen.getByLabelText("自定义初始预览条数");
+    fireEvent.change(input, { target: { value: "137" } });
+    fireEvent.click(screen.getByRole("button", { name: "应用初始预览条数" }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/已设置初始预览 137 条/)).toBeVisible(),
     );
     const put = fetchMock.mock.calls.find(
       ([url, init]) => url === "/api/system/preview-settings" && init?.method === "PUT",
@@ -641,20 +666,44 @@ describe("system settings", () => {
     expect(JSON.parse(String(put?.[1]?.body))).toEqual({
       thumbnails_enabled: true,
       realtime_limit: 137,
+      realtime_batch_size: 50,
     });
   });
 
-  it("rejects an out-of-range custom realtime preview limit", async () => {
+  it("saves a custom scroll batch size", async () => {
     const fetchMock = stubFetch(systemInfo());
     renderPage("/settings", "/settings", <SystemSettingsPage />);
 
-    const select = await screen.findByLabelText("实时数据预览条数");
+    const select = await screen.findByLabelText("滚动加载批量");
     fireEvent.change(select, { target: { value: "custom" } });
-    const input = screen.getByLabelText("自定义实时数据预览条数");
-    fireEvent.change(input, { target: { value: "9" } });
-    fireEvent.click(screen.getByRole("button", { name: "应用" }));
+    const input = screen.getByLabelText("自定义滚动加载批量");
+    fireEvent.change(input, { target: { value: "80" } });
+    fireEvent.click(screen.getByRole("button", { name: "应用滚动加载批量" }));
 
-    expect(await screen.findByText("请输入 10–200 之间的整数。")).toBeVisible();
+    await waitFor(() =>
+      expect(screen.getByText(/已设置滚动加载批量 80 条/)).toBeVisible(),
+    );
+    const put = fetchMock.mock.calls.find(
+      ([url, init]) => url === "/api/system/preview-settings" && init?.method === "PUT",
+    );
+    expect(JSON.parse(String(put?.[1]?.body))).toEqual({
+      thumbnails_enabled: true,
+      realtime_limit: 5,
+      realtime_batch_size: 80,
+    });
+  });
+
+  it("rejects an out-of-range custom initial preview limit", async () => {
+    const fetchMock = stubFetch(systemInfo());
+    renderPage("/settings", "/settings", <SystemSettingsPage />);
+
+    const select = await screen.findByLabelText("初始预览条数");
+    fireEvent.change(select, { target: { value: "custom" } });
+    const input = screen.getByLabelText("自定义初始预览条数");
+    fireEvent.change(input, { target: { value: "4" } });
+    fireEvent.click(screen.getByRole("button", { name: "应用初始预览条数" }));
+
+    expect(await screen.findByText("请输入 5–200 之间的整数。")).toBeVisible();
     expect(
       fetchMock.mock.calls.some(
         ([url, init]) =>

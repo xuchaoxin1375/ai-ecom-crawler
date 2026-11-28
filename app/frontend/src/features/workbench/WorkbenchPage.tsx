@@ -1,4 +1,5 @@
 import {
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -8,6 +9,8 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
+  type UIEvent as ReactUIEvent,
+  type WheelEvent as ReactWheelEvent,
 } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -52,7 +55,6 @@ import {
   dissolveWorkbenchGroup,
   getRules,
   getSystemInfo,
-  getTaskItems,
   getWorkbenchPendingTargets,
   getWorkbenchRecent,
   getWorkbenchTree,
@@ -147,6 +149,7 @@ import {
 } from "./WorkbenchBatchDialogs";
 import { WorkbenchGroupDialog } from "./WorkbenchGroupDialog";
 import { WorkbenchLogView } from "./WorkbenchLogView";
+import { useRealtimeProductList } from "./useRealtimeProductList";
 import { WorkbenchRunConfigPanel } from "./WorkbenchRunConfigPanel";
 import { WorkbenchTaskDialog } from "./WorkbenchTaskDialog";
 import { WorkbenchTreeToggle } from "./WorkbenchTreeToggle";
@@ -410,6 +413,7 @@ export function WorkbenchPage() {
   const {
     thumbnailsEnabled: previewThumbnailsEnabled,
     realtimeLimit,
+    realtimeBatchSize,
     ready: previewSettingsReady,
   } = usePreviewDisplaySettings();
   const showImageLink = previewSettingsReady && !previewThumbnailsEnabled;
@@ -445,6 +449,8 @@ export function WorkbenchPage() {
     { nodeId: string; position: "before" | "after" | "inside" } | "root" | null
   >(null);
   const paneRef = useRef<HTMLDivElement>(null);
+  const dataScrollRef = useRef<HTMLDivElement>(null);
+  const leftLiveTopRef = useRef(false);
 
   const treeQuery = useQuery({
     queryKey: ["workbench-tree"],
@@ -494,30 +500,12 @@ export function WorkbenchPage() {
     ? `/tasks/${encodeURIComponent(selectedTaskId)}`
     : null;
   const activeSelected = isActiveState(selectedState);
-  const dataQuery = useQuery({
-    queryKey: [
-      "workbench-task-data",
-      selectedTaskId,
-      activeSelected ? "live" : "final",
-      realtimeLimit,
-    ],
-    queryFn: ({ signal }) =>
-      getTaskItems(
-        selectedTaskId as string,
-        "product",
-        realtimeLimit,
-        0,
-        "DONE",
-        "desc",
-        signal,
-        true,
-      ),
-    enabled:
-      Boolean(selectedTaskId) &&
-      bottomTab === "data" &&
-      !bottomCollapsed &&
-      previewSettingsReady,
-    refetchInterval: activeSelected ? 3000 : false,
+  const realtimeData = useRealtimeProductList({
+    taskId: selectedTaskId,
+    active: activeSelected,
+    enabled: bottomTab === "data" && !bottomCollapsed && previewSettingsReady,
+    initialLimit: realtimeLimit,
+    batchSize: realtimeBatchSize,
   });
 
   const { refreshing: treeRefreshing, runRefresh: runTreeRefresh } = useManualRefresh();
@@ -660,6 +648,54 @@ export function WorkbenchPage() {
       actionBusy === `restore:${item.task_id}` ||
       (item.node_id ? actionBusy === `start:${item.node_id}` : false)
     );
+  }
+
+  useEffect(() => {
+    leftLiveTopRef.current = false;
+    if (dataScrollRef.current) dataScrollRef.current.scrollTop = 0;
+  }, [selectedTaskId, realtimeLimit]);
+
+  function showLatest() {
+    leftLiveTopRef.current = false;
+    realtimeData.returnToLatest();
+    if (dataScrollRef.current) dataScrollRef.current.scrollTop = 0;
+  }
+
+  function handleDataScroll(event: ReactUIEvent<HTMLDivElement>) {
+    const element = event.currentTarget;
+    const atTop = element.scrollTop <= 8;
+    if (!atTop) leftLiveTopRef.current = true;
+    if (!realtimeData.browsing && !atTop && realtimeData.hasMore) {
+      realtimeData.pauseFollow();
+    }
+    if (
+      realtimeData.hasMore &&
+      element.scrollHeight - element.scrollTop - element.clientHeight < 120
+    ) {
+      void realtimeData.loadOlder();
+    }
+    if (realtimeData.browsing && leftLiveTopRef.current && atTop) {
+      showLatest();
+    }
+  }
+
+  function handleDataWheel(event: ReactWheelEvent<HTMLDivElement>) {
+    if (event.deltaY < 0) {
+      if (event.currentTarget.scrollTop <= 8 && realtimeData.browsing) {
+        showLatest();
+      }
+      return;
+    }
+    if (!realtimeData.browsing && realtimeData.hasMore) {
+      realtimeData.pauseFollow();
+    }
+    const element = event.currentTarget;
+    if (
+      realtimeData.hasMore &&
+      element.scrollHeight - element.scrollTop - element.clientHeight < 120
+    ) {
+      void realtimeData.loadOlder();
+    }
   }
 
   function openPreview(item: TaskItem, tab: "image" | "description" = "image") {
@@ -2422,7 +2458,7 @@ export function WorkbenchPage() {
     : taskNodeCount;
   const treeError = treeQuery.isError ? errorText(treeQuery.error) : "";
   const recentError = recentQuery.isError ? errorText(recentQuery.error) : "";
-  const taskDataItems: TaskItem[] = dataQuery.data?.items ?? [];
+  const taskDataItems: TaskItem[] = realtimeData.items;
   const selectedLabel = selectedTaskId
     ? selectedRecent?.definition_name || selectedNode?.name || `任务 ${selectedTaskId}`
     : (selectedNode?.name ?? "");
@@ -3150,7 +3186,12 @@ export function WorkbenchPage() {
                     variant="ghost"
                     className="hidden h-7 w-7 shrink-0 px-0 sm:inline-flex"
                     disabled={!selectedTaskId || panelRefreshing}
-                    onClick={() => void runPanelRefresh(() => dataQuery.refetch())}
+                    onClick={() =>
+                      void runPanelRefresh(async () => {
+                        showLatest();
+                        await realtimeData.refetch();
+                      })
+                    }
                     aria-label="刷新实时数据"
                     title="刷新实时数据"
                   >
@@ -3193,23 +3234,54 @@ export function WorkbenchPage() {
               >
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-line px-2.5 py-1.5 text-[11px] text-ink-3">
                   <span>
-                    最近 <b className="text-ink-2 tabular">{taskDataItems.length}</b>{" "}
-                    条有效商品
+                    {realtimeData.browsing ? (
+                      <>
+                        已加载{" "}
+                        <b className="text-ink-2 tabular">
+                          {formatNumber(taskDataItems.length)}
+                        </b>{" "}
+                        / {formatNumber(realtimeData.totalAtStart)} 条
+                      </>
+                    ) : (
+                      <>
+                        最近{" "}
+                        <b className="text-ink-2 tabular">
+                          {formatNumber(taskDataItems.length)}
+                        </b>{" "}
+                        条有效商品
+                      </>
+                    )}
                   </span>
                   <span>
                     共{" "}
                     <b className="text-ink-2 tabular">
-                      {formatNumber(dataQuery.data?.total ?? 0)}
+                      {formatNumber(realtimeData.total)}
                     </b>{" "}
                     条
                   </span>
                   <span>
                     {activeSelected
-                      ? "运行中每 3 秒刷新"
+                      ? realtimeData.browsing
+                        ? "已暂停跟随"
+                        : "运行中每 3 秒刷新"
                       : selectedTaskId
                         ? "已停止刷新"
                         : "未选择运行"}
                   </span>
+                  {!realtimeData.browsing && realtimeData.hasMore ? (
+                    <span className="hidden sm:inline">向下滚动加载更早商品</span>
+                  ) : null}
+                  {realtimeData.browsing ? (
+                    <button
+                      type="button"
+                      className="rounded-control px-1 py-0.5 text-accent hover:bg-accent-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                      onClick={showLatest}
+                    >
+                      {realtimeData.newCount
+                        ? `${formatNumber(realtimeData.newCount)} 条新商品 · 回到最新`
+                        : "回到最新"}
+                    </button>
+                  ) : null}
                   {selectedTaskUrl ? (
                     <Link className="text-accent hover:underline" to={selectedTaskUrl}>
                       打开任务详情
@@ -3225,16 +3297,16 @@ export function WorkbenchPage() {
                   <p className="px-2.5 py-4 text-xs text-ink-3">
                     从左侧或最近任务选择一条运行，查看已采集商品。
                   </p>
-                ) : dataQuery.isError ? (
+                ) : realtimeData.error && taskDataItems.length === 0 ? (
                   <div className="p-2">
                     <ErrorNotice
                       title="读取实时数据失败"
-                      message={errorText(dataQuery.error)}
-                      onRetry={() => void dataQuery.refetch()}
+                      message={realtimeData.error}
+                      onRetry={() => void realtimeData.refetch()}
                       compact
                     />
                   </div>
-                ) : dataQuery.isPending ? (
+                ) : realtimeData.loading ? (
                   <p className="px-2.5 py-4 text-xs text-ink-3" role="status">
                     正在读取商品记录…
                   </p>
@@ -3245,7 +3317,14 @@ export function WorkbenchPage() {
                       : "这次运行没有有效商品。"}
                   </p>
                 ) : (
-                  <div className="min-h-0 flex-1 overflow-auto">
+                  <div
+                    ref={dataScrollRef}
+                    role="region"
+                    aria-label="实时数据商品列表"
+                    className="min-h-0 flex-1 overflow-auto"
+                    onScroll={handleDataScroll}
+                    onWheel={handleDataWheel}
+                  >
                     <table className="w-full min-w-[720px] table-fixed text-left text-xs">
                       <thead className="sticky top-0 z-10 bg-surface-muted text-[10.5px] font-medium text-ink-3">
                         <tr>
@@ -3363,6 +3442,39 @@ export function WorkbenchPage() {
                         })}
                       </tbody>
                     </table>
+                    <div className="flex flex-wrap items-center justify-center gap-2 border-t border-line px-3 py-2 text-[11px] text-ink-3">
+                      {realtimeData.loadingOlder ? (
+                        <span role="status">正在加载更早的商品…</span>
+                      ) : realtimeData.loadError ? (
+                        <>
+                          <span className="text-danger">
+                            加载更早商品失败：{realtimeData.loadError}
+                          </span>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => void realtimeData.loadOlder()}
+                          >
+                            重试
+                          </Button>
+                        </>
+                      ) : realtimeData.hasMore ? (
+                        <>
+                          <span>向下滚动自动加载更早的商品</span>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => void realtimeData.loadOlder()}
+                          >
+                            加载更早的 {realtimeBatchSize} 条
+                          </Button>
+                        </>
+                      ) : (
+                        <span>
+                          已加载全部 {formatNumber(realtimeData.totalAtStart)} 条
+                        </span>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>

@@ -2,7 +2,9 @@
 
 List thumbnails go through the same-origin image endpoint.  Loading every
 thumbnail can be expensive on long product lists, so operators can disable
-list preloading while keeping on-demand image previews available.
+list preloading while keeping on-demand image previews available.  The same
+setting also controls how many products the workbench live panel reads first
+and how many older products each scroll load appends.
 """
 
 from __future__ import annotations
@@ -12,18 +14,35 @@ from collections.abc import Mapping
 from typing import Any
 
 PREVIEW_SETTINGS_SETTING = "preview_settings"
-REALTIME_LIMIT_MIN = 10
+REALTIME_LIMIT_MIN = 5
 REALTIME_LIMIT_MAX = 200
-DEFAULT_REALTIME_LIMIT = 50
+DEFAULT_REALTIME_LIMIT = 5
+DEFAULT_REALTIME_BATCH_SIZE = 50
 DEFAULT_PREVIEW_SETTINGS: dict[str, Any] = {
     "thumbnails_enabled": True,
     "realtime_limit": DEFAULT_REALTIME_LIMIT,
+    "realtime_batch_size": DEFAULT_REALTIME_BATCH_SIZE,
 }
 _FIELDS = set(DEFAULT_PREVIEW_SETTINGS)
 
 
 class PreviewSettingsError(ValueError):
     """The preview display setting is malformed."""
+
+
+def _realtime_value(
+    payload: Mapping[str, Any],
+    key: str,
+    default: int,
+) -> int:
+    value = payload.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise PreviewSettingsError(f"{key} 必须是整数")
+    if not REALTIME_LIMIT_MIN <= value <= REALTIME_LIMIT_MAX:
+        raise PreviewSettingsError(
+            f"{key} 必须在 {REALTIME_LIMIT_MIN}–{REALTIME_LIMIT_MAX} 之间"
+        )
+    return value
 
 
 def validate_preview_settings(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -35,14 +54,19 @@ def validate_preview_settings(payload: Mapping[str, Any]) -> dict[str, Any]:
     thumbnails = payload.get("thumbnails_enabled", True)
     if not isinstance(thumbnails, bool):
         raise PreviewSettingsError("thumbnails_enabled 必须是布尔值")
-    limit = payload.get("realtime_limit", DEFAULT_REALTIME_LIMIT)
-    if isinstance(limit, bool) or not isinstance(limit, int):
-        raise PreviewSettingsError("realtime_limit 必须是整数")
-    if not REALTIME_LIMIT_MIN <= limit <= REALTIME_LIMIT_MAX:
-        raise PreviewSettingsError(
-            f"realtime_limit 必须在 {REALTIME_LIMIT_MIN}–{REALTIME_LIMIT_MAX} 之间"
-        )
-    return {"thumbnails_enabled": thumbnails, "realtime_limit": limit}
+    return {
+        "thumbnails_enabled": thumbnails,
+        "realtime_limit": _realtime_value(
+            payload,
+            "realtime_limit",
+            DEFAULT_REALTIME_LIMIT,
+        ),
+        "realtime_batch_size": _realtime_value(
+            payload,
+            "realtime_batch_size",
+            DEFAULT_REALTIME_BATCH_SIZE,
+        ),
+    }
 
 
 def load_preview_settings(store: Any) -> dict[str, Any]:

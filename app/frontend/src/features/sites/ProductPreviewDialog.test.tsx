@@ -100,7 +100,12 @@ describe("ProductPreviewDialog", () => {
 
     render(
       <PreviewSettingsContext.Provider
-        value={{ thumbnailsEnabled: false, realtimeLimit: 50, ready: true }}
+        value={{
+          thumbnailsEnabled: false,
+          realtimeLimit: 50,
+          realtimeBatchSize: 50,
+          ready: true,
+        }}
       >
         <ProductPreviewDialog
           open

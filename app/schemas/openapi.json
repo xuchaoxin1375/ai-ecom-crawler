@@ -1891,8 +1891,13 @@
       "PreviewSettingsRequest": {
         "additionalProperties": false,
         "properties": {
-          "realtime_limit": {
+          "realtime_batch_size": {
             "default": 50,
+            "title": "Realtime Batch Size",
+            "type": "integer"
+          },
+          "realtime_limit": {
+            "default": 5,
             "title": "Realtime Limit",
             "type": "integer"
           },

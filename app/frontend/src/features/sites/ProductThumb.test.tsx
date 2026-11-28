@@ -7,7 +7,12 @@ describe("ProductThumb", () => {
   it("loads the proxied image when list thumbnails are enabled", () => {
     const { container } = render(
       <PreviewSettingsContext.Provider
-        value={{ thumbnailsEnabled: true, realtimeLimit: 50, ready: true }}
+        value={{
+          thumbnailsEnabled: true,
+          realtimeLimit: 50,
+          realtimeBatchSize: 50,
+          ready: true,
+        }}
       >
         <ProductThumb
           src="https://images.example.test/a.jpg"
@@ -25,7 +30,12 @@ describe("ProductThumb", () => {
   it("shows a clickable placeholder without requesting an image when disabled", () => {
     const { container } = render(
       <PreviewSettingsContext.Provider
-        value={{ thumbnailsEnabled: false, realtimeLimit: 50, ready: true }}
+        value={{
+          thumbnailsEnabled: false,
+          realtimeLimit: 50,
+          realtimeBatchSize: 50,
+          ready: true,
+        }}
       >
         <ProductThumb src="https://images.example.test/a.jpg" alt="示例商品" />
       </PreviewSettingsContext.Provider>,
@@ -40,7 +50,12 @@ describe("ProductThumb", () => {
   it("waits for the server preference before loading an image", () => {
     const { container } = render(
       <PreviewSettingsContext.Provider
-        value={{ thumbnailsEnabled: true, realtimeLimit: 50, ready: false }}
+        value={{
+          thumbnailsEnabled: true,
+          realtimeLimit: 50,
+          realtimeBatchSize: 50,
+          ready: false,
+        }}
       >
         <ProductThumb src="https://images.example.test/a.jpg" alt="示例商品" />
       </PreviewSettingsContext.Provider>,

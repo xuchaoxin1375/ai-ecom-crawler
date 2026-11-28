@@ -409,6 +409,7 @@ function stubFetch(
   recentPage: WorkbenchRecentPage = recent,
   treePage: WorkbenchTreePayload = tree,
   pendingPage: WorkbenchPendingTargets = emptyPending,
+  doneItems: Array<typeof productItem> = [productItem],
 ) {
   let createdGroupCount = 0;
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -434,8 +435,15 @@ function stubFetch(
     }
     if (path === "/api/tasks/web-1/items") {
       const params = new URL(url, "http://localhost").searchParams;
-      const items = params.get("state") === "DONE" ? [productItem] : [pendingItem];
-      return Response.json({ total: items.length, items });
+      if (params.get("state") !== "DONE") {
+        return Response.json({ total: 1, items: [pendingItem] });
+      }
+      const limit = Number(params.get("limit") ?? 50);
+      const offset = Number(params.get("offset") ?? 0);
+      return Response.json({
+        total: doneItems.length,
+        items: doneItems.slice(offset, offset + limit),
+      });
     }
     if (path === "/api/batches" && init?.method !== "POST") {
       return Response.json({ total: 1, items: [batch] });
@@ -736,7 +744,12 @@ it("uses the configured realtime preview limit", async () => {
     "/workbench",
     { pathname: "/workbench" },
     <PreviewSettingsContext.Provider
-      value={{ thumbnailsEnabled: true, realtimeLimit: 137, ready: true }}
+      value={{
+        thumbnailsEnabled: true,
+        realtimeLimit: 137,
+        realtimeBatchSize: 50,
+        ready: true,
+      }}
     >
       <WorkbenchPage />
     </PreviewSettingsContext.Provider>,
@@ -754,6 +767,65 @@ it("uses the configured realtime preview limit", async () => {
   const params = new URL(String(itemsCall?.[0]), "http://localhost").searchParams;
   expect(params.get("limit")).toBe("137");
   expect(params.get("include_description")).toBe("true");
+});
+
+it("loads older products on wheel and returns to the live tail", async () => {
+  const doneItems = Array.from({ length: 6 }, (_, index) => ({
+    ...productItem,
+    item_id: `item-${index + 1}`,
+    url: `https://fixture.example/p/${index + 1}`,
+    result: {
+      ...productItem.result,
+      product_preview: {
+        ...productItem.result.product_preview,
+        name: `Fixture product ${index + 1}`,
+      },
+    },
+  }));
+  const fetchMock = stubFetch(false, recent, tree, emptyPending, doneItems);
+  renderPage(
+    "/workbench",
+    { pathname: "/workbench" },
+    <PreviewSettingsContext.Provider
+      value={{
+        thumbnailsEnabled: true,
+        realtimeLimit: 5,
+        realtimeBatchSize: 50,
+        ready: true,
+      }}
+    >
+      <WorkbenchPage />
+    </PreviewSettingsContext.Provider>,
+  );
+
+  const recentSection = await screen.findByLabelText("最近任务");
+  fireEvent.click(await within(recentSection).findByText(/web-1/));
+  fireEvent.click(screen.getByRole("tab", { name: "实时数据" }));
+  expect(await screen.findByText("Fixture product 1")).toBeInTheDocument();
+  expect(screen.queryByText("Fixture product 6")).not.toBeInTheDocument();
+
+  fireEvent.wheel(screen.getByRole("region", { name: "实时数据商品列表" }), {
+    deltaY: 120,
+  });
+  expect(await screen.findByText("Fixture product 6")).toBeInTheDocument();
+  expect(screen.getByRole("tabpanel", { name: "实时数据" }).textContent).toContain(
+    "已加载 6 / 6 条",
+  );
+
+  const olderCall = fetchMock.mock.calls.find(([url]) => {
+    const text = String(url);
+    return text.includes("/api/tasks/web-1/items?") && text.includes("offset=5");
+  });
+  expect(olderCall).toBeDefined();
+  const params = new URL(String(olderCall?.[0]), "http://localhost").searchParams;
+  expect(params.get("limit")).toBe("50");
+  expect(params.get("include_description")).toBe("true");
+
+  fireEvent.click(screen.getByRole("button", { name: /回到最新/ }));
+  await waitFor(() =>
+    expect(screen.queryByText("Fixture product 6")).not.toBeInTheDocument(),
+  );
+  expect(screen.getByText("Fixture product 1")).toBeInTheDocument();
 });
 
 it("shows live product data and runtime log lines", async () => {

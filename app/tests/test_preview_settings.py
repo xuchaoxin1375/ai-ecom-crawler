@@ -27,22 +27,39 @@ class PreviewSettingsTests(unittest.TestCase):
         self.assertEqual(validate_preview_settings({}), DEFAULT_PREVIEW_SETTINGS)
         self.assertEqual(
             validate_preview_settings({"thumbnails_enabled": False}),
-            {"thumbnails_enabled": False, "realtime_limit": 50},
+            {
+                "thumbnails_enabled": False,
+                "realtime_limit": 5,
+                "realtime_batch_size": 50,
+            },
         )
         self.assertEqual(
             validate_preview_settings(
-                {"thumbnails_enabled": True, "realtime_limit": 137}
+                {
+                    "thumbnails_enabled": True,
+                    "realtime_limit": 137,
+                    "realtime_batch_size": 80,
+                }
             ),
-            {"thumbnails_enabled": True, "realtime_limit": 137},
+            {
+                "thumbnails_enabled": True,
+                "realtime_limit": 137,
+                "realtime_batch_size": 80,
+            },
         )
-        for limit in (10, 200):
-            self.assertEqual(
-                validate_preview_settings({"realtime_limit": limit})["realtime_limit"],
-                limit,
-            )
-        for limit in (9, 201, 0, -1, True, "50", 50.0, None):
-            with self.subTest(limit=limit), self.assertRaises(PreviewSettingsError):
-                validate_preview_settings({"realtime_limit": limit})
+        for key in ("realtime_limit", "realtime_batch_size"):
+            for value in (5, 200):
+                with self.subTest(key=key, value=value):
+                    self.assertEqual(
+                        validate_preview_settings({key: value})[key],
+                        value,
+                    )
+            for value in (4, 201, 0, -1, True, "50", 50.0, None):
+                with (
+                    self.subTest(key=key, value=value),
+                    self.assertRaises(PreviewSettingsError),
+                ):
+                    validate_preview_settings({key: value})
         with self.assertRaises(PreviewSettingsError):
             validate_preview_settings({"thumbnails_enabled": "no"})
         with self.assertRaises(PreviewSettingsError):
@@ -66,28 +83,47 @@ class PreviewSettingsApiTests(unittest.TestCase):
     def test_preview_settings_round_trip_and_validation(self) -> None:
         self.assertEqual(
             self.client.get("/api/system/preview-settings").json(),
-            {"thumbnails_enabled": True, "realtime_limit": 50},
+            {
+                "thumbnails_enabled": True,
+                "realtime_limit": 5,
+                "realtime_batch_size": 50,
+            },
         )
         saved = self.client.put(
             "/api/system/preview-settings",
-            json={"thumbnails_enabled": False, "realtime_limit": 137},
+            json={
+                "thumbnails_enabled": False,
+                "realtime_limit": 137,
+                "realtime_batch_size": 80,
+            },
         )
         self.assertEqual(saved.status_code, 200, saved.text)
         self.assertEqual(
             saved.json(),
-            {"thumbnails_enabled": False, "realtime_limit": 137},
+            {
+                "thumbnails_enabled": False,
+                "realtime_limit": 137,
+                "realtime_batch_size": 80,
+            },
         )
         self.assertEqual(
             self.client.get("/api/system/preview-settings").json(),
-            {"thumbnails_enabled": False, "realtime_limit": 137},
+            {
+                "thumbnails_enabled": False,
+                "realtime_limit": 137,
+                "realtime_batch_size": 80,
+            },
         )
         for payload in (
-            {"thumbnails_enabled": "no", "realtime_limit": 50},
-            {"thumbnails_enabled": True, "realtime_limit": 9},
+            {"thumbnails_enabled": "no", "realtime_limit": 5},
+            {"thumbnails_enabled": True, "realtime_limit": 4},
             {"thumbnails_enabled": True, "realtime_limit": 201},
             {"thumbnails_enabled": True, "realtime_limit": True},
             {"thumbnails_enabled": True, "realtime_limit": "50"},
             {"thumbnails_enabled": True, "realtime_limit": 50.5},
+            {"thumbnails_enabled": True, "realtime_batch_size": 4},
+            {"thumbnails_enabled": True, "realtime_batch_size": 201},
+            {"thumbnails_enabled": True, "realtime_batch_size": False},
         ):
             with self.subTest(payload=payload):
                 rejected = self.client.put(
@@ -99,20 +135,25 @@ class PreviewSettingsApiTests(unittest.TestCase):
             "/api/system/preview-settings",
             json={
                 "thumbnails_enabled": True,
-                "realtime_limit": 50,
+                "realtime_limit": 5,
+                "realtime_batch_size": 50,
                 "unexpected": 1,
             },
         )
         self.assertEqual(unknown.status_code, 422)
 
-    def test_legacy_stored_value_keeps_default_limit(self) -> None:
+    def test_legacy_stored_values_get_new_defaults(self) -> None:
         TaskStore(self.db_path).set_setting(
             PREVIEW_SETTINGS_SETTING,
-            '{"thumbnails_enabled": false}',
+            '{"thumbnails_enabled": false, "realtime_limit": 50}',
         )
         self.assertEqual(
             self.client.get("/api/system/preview-settings").json(),
-            {"thumbnails_enabled": False, "realtime_limit": 50},
+            {
+                "thumbnails_enabled": False,
+                "realtime_limit": 50,
+                "realtime_batch_size": 50,
+            },
         )
 
     def test_corrupt_stored_value_falls_back_to_default(self) -> None:
