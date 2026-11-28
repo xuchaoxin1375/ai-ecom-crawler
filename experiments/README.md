@@ -37,3 +37,4 @@
 - `harness/`：构建 harness 的适配与依赖安装冒烟说明。
 - `bennytex-full-2026-11-23/`：bennytex 全量目录实验的规则、构建记录和结论；CSV 与结果在证据库。
 - `ui-workbench-drafts/`：工作台三窗格布局草稿（A–D），静态 HTML 原型与对比说明，不接后端。
+- `d08/run-analysis-prototype/`：任务详情「运行分析」Tab 的首版静态原型；生产实现已加入请求遥测和合图/分图，原型保留作布局对照。

@@ -40,6 +40,7 @@ from .fetcher import DomainLimiter
 from .models import FetchResult
 from .resources import register_path, register_process, terminate_process
 from .store import TaskStore
+from .telemetry import RequestRecorder, utc_now_ms
 
 DEFAULT_PROFILE_NAME = "browser-profile"
 CHALLENGE_TITLE_MARKERS = (
@@ -145,6 +146,7 @@ class BrowserConfig:
 class BrowserFetcher:
     """Fetch rendered HTML through a locally launched Chromium/Chrome."""
 
+    engine = "browser"
     thread_affine = True
 
     def __init__(
@@ -163,6 +165,7 @@ class BrowserFetcher:
         context: Any | None = None,
         page: Any | None = None,
         playwright: Any | None = None,
+        recorder: RequestRecorder | None = None,
     ) -> None:
         self.store = store
         self.task_id = task_id
@@ -187,6 +190,7 @@ class BrowserFetcher:
         self._resources_disabled = False
         self.requests = 0
         self.retries = 0
+        self.recorder = recorder
 
     # ------------------------------------------------------------------
     # Fetch API
@@ -225,9 +229,11 @@ class BrowserFetcher:
             self.requests += 1
             if attempt > 1:
                 self.retries += 1
+            started_at = utc_now_ms()
+            started = time.monotonic()
             try:
                 with self._lock:
-                    return self._navigate(
+                    result = self._navigate(
                         url,
                         options,
                         advance=advance,
@@ -235,10 +241,60 @@ class BrowserFetcher:
                     )
             except Exception as exc:  # noqa: BLE001 - transport / browser boundary
                 last_error = f"{type(exc).__name__}: {exc}"
+                self._record_request(
+                    started_at,
+                    url,
+                    item_type,
+                    attempt,
+                    0,
+                    started,
+                    error=last_error,
+                )
                 self._recover_if_dead()
                 if attempt < self.max_attempts:
                     self._backoff(attempt)
+                continue
+            self._record_request(
+                started_at,
+                url,
+                item_type,
+                attempt,
+                result.status,
+                started,
+                bytes_=len(result.body or b""),
+                error=result.error or "",
+            )
+            return result
         return FetchResult(status=0, url=url, error=last_error)
+
+    def _record_request(
+        self,
+        started_at: str,
+        url: str,
+        item_type: str | None,
+        attempt: int,
+        status: int,
+        started: float,
+        *,
+        bytes_: int = 0,
+        error: str = "",
+    ) -> None:
+        if self.recorder is None:
+            return
+        payload: dict[str, Any] = {
+            "ts": started_at,
+            "attempt": attempt,
+            "engine": self.engine,
+            "url": url,
+            "status": status,
+            "duration_ms": round((time.monotonic() - started) * 1000, 1),
+            "bytes": bytes_,
+        }
+        if item_type:
+            payload["item_type"] = item_type
+        if error:
+            payload["error"] = error[:300]
+        self.recorder.record(payload)
 
     @property
     def browser_launched(self) -> bool:

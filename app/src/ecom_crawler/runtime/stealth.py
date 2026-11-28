@@ -29,10 +29,11 @@ from typing import Any, Self
 from urllib.parse import urlparse
 
 from .browser import is_challenge_title
-from .fetcher import DomainLimiter, UnsupportedAdvanceError
+from .fetcher import DomainLimiter, UnsupportedAdvanceError, retry_after_seconds
 from .models import FetchResult
 from .resources import register_path
 from .store import TaskStore
+from .telemetry import RequestRecorder, utc_now_ms
 
 DEFAULT_PROFILE_NAME = "stealth-profile"
 DEFAULT_TIMEOUT_MS = 240_000
@@ -118,6 +119,7 @@ class StealthFetcher:
         backoff_ms: int = 1000,
         session: Any | None = None,
         started: bool = False,
+        recorder: RequestRecorder | None = None,
     ) -> None:
         self.store = store
         self.task_id = task_id
@@ -133,6 +135,7 @@ class StealthFetcher:
         self._started = started or session is not None
         self._warmed = False
         self._lock = threading.Lock()
+        self.recorder = recorder
         self._profile_dir = self.out_root / task_id / self.config.profile_name
         self._profile_resource = f"stealth-profile:{task_id}"
 
@@ -141,6 +144,8 @@ class StealthFetcher:
         for attempt in range(1, self.max_attempts + 1):
             if self.limiter is not None:
                 self.limiter.wait(url)
+            started_at = utc_now_ms()
+            started = time.monotonic()
             try:
                 self._ensure_started()
                 self.requests += 1
@@ -149,6 +154,15 @@ class StealthFetcher:
                 status, final_url, body, headers = self._fetch_once(url)
             except Exception as exc:  # noqa: BLE001 - transport / browser / challenge
                 last_error = f"{type(exc).__name__}: {exc}"
+                self._record_request(
+                    started_at,
+                    url,
+                    item_type,
+                    attempt,
+                    0,
+                    started,
+                    error=last_error,
+                )
                 if attempt < self.max_attempts:
                     self._sleep_backoff(attempt)
                     continue
@@ -163,6 +177,17 @@ class StealthFetcher:
                 )
             except AttributeError:
                 content_type = ""
+            retry_after = retry_after_seconds(headers) if status == 429 else None
+            self._record_request(
+                started_at,
+                url,
+                item_type,
+                attempt,
+                status,
+                started,
+                bytes_=len(body),
+                retry_after=retry_after,
+            )
             title = _response_title(body)
             challenge = is_challenge_title(title)
             meta: dict[str, Any] = {
@@ -181,6 +206,38 @@ class StealthFetcher:
                 meta=meta,
             )
         return FetchResult(status=0, url=url, error=last_error)
+
+    def _record_request(
+        self,
+        started_at: str,
+        url: str,
+        item_type: str | None,
+        attempt: int,
+        status: int,
+        started: float,
+        *,
+        bytes_: int = 0,
+        error: str = "",
+        retry_after: float | None = None,
+    ) -> None:
+        if self.recorder is None:
+            return
+        payload: dict[str, Any] = {
+            "ts": started_at,
+            "attempt": attempt,
+            "engine": "stealth",
+            "url": url,
+            "status": status,
+            "duration_ms": round((time.monotonic() - started) * 1000, 1),
+            "bytes": bytes_,
+        }
+        if item_type:
+            payload["item_type"] = item_type
+        if error:
+            payload["error"] = error[:300]
+        if retry_after is not None:
+            payload["retry_after"] = retry_after
+        self.recorder.record(payload)
 
     def get_listing(
         self,

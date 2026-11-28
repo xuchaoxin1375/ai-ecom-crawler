@@ -89,6 +89,11 @@ from ..rate_policy import (
     normalize_domain,
     validate_policy,
 )
+from ..runtime.analysis import (
+    analysis_etag,
+    analysis_fingerprint,
+    build_analysis_cached,
+)
 from ..runtime.batch import (
     BATCH_COLLECTION_LIMITS,
     normalize_site,
@@ -4648,6 +4653,42 @@ def create_app(
     @app.get("/api/tasks/{task_id}")
     def get_task(task_id: str) -> dict[str, Any]:
         return _summary(store, require_task(task_id), root)
+
+    @app.get("/api/tasks/{task_id}/analysis")
+    def get_task_analysis(
+        task_id: str,
+        request: Request,
+        window_seconds: Annotated[int | None, Query(ge=60, le=30 * 24 * 3600)] = None,
+        bucket_seconds: Annotated[int | None, Query(ge=60, le=3600)] = None,
+    ) -> Response:
+        task = require_task(task_id)
+        result = _current_task_result(task, root)
+        counts = _counts(store, task, result)
+        task_dir = root / task.task_id
+        fingerprint = analysis_fingerprint(
+            task,
+            task_dir,
+            counts=counts,
+            window_seconds=window_seconds,
+            bucket_seconds=bucket_seconds,
+        )
+        etag = analysis_etag(fingerprint)
+        terminal = task.state in {"FINISHED", "CANCELLED"}
+        headers = {
+            "ETag": etag,
+            "Cache-Control": "private, max-age=15" if terminal else "no-store",
+        }
+        if request.headers.get("if-none-match") == etag:
+            return Response(status_code=304, headers=headers)
+        payload = build_analysis_cached(
+            task,
+            task_dir,
+            counts=counts,
+            result=result,
+            window_seconds=window_seconds,
+            bucket_seconds=bucket_seconds,
+        )
+        return JSONResponse(content=payload, headers=headers)
 
     @app.get("/api/tasks/{task_id}/csv")
     def preview_task_csv(

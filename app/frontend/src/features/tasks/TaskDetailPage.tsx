@@ -1,4 +1,11 @@
-import { useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -51,6 +58,12 @@ import { QualityExceptionsSection } from "./QualityExceptionsSection";
 import { TaskItemsSection } from "./TaskItemsSection";
 import { taskRuleIsStale, taskTypeLabel } from "./task";
 import { useTaskStream } from "./useTaskStream";
+
+const RunAnalysisPanel = lazy(() =>
+  import("./analysis/RunAnalysisPanel").then((module) => ({
+    default: module.RunAnalysisPanel,
+  })),
+);
 
 function Fact({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -110,12 +123,13 @@ function DetailSkeleton() {
   );
 }
 
-const TASK_VIEWS = ["data", "quality", "detail"] as const;
+const TASK_VIEWS = ["data", "quality", "analysis", "detail"] as const;
 type TaskView = (typeof TASK_VIEWS)[number];
 
 const TASK_VIEW_LABELS: Record<TaskView, string> = {
   data: "数据明细",
   quality: "质量与验收",
+  analysis: "运行分析",
   detail: "运行明细",
 };
 
@@ -469,6 +483,7 @@ export function TaskDetailPage() {
           (task.counts.valid_products ?? 0) + (task.counts.failed_products ?? 0),
         ),
     quality: formatNumber(quality.length + (task.feedback?.open ?? 0)),
+    analysis: "",
     detail: "",
   };
 
@@ -609,9 +624,27 @@ export function TaskDetailPage() {
     </>
   );
 
+  const analysisContent = (
+    <Suspense
+      fallback={
+        <div
+          className="h-[420px] animate-pulse rounded-panel border border-line bg-surface"
+          aria-busy="true"
+        >
+          <span className="sr-only" role="status">
+            正在加载运行分析…
+          </span>
+        </div>
+      }
+    >
+      <RunAnalysisPanel task={task} />
+    </Suspense>
+  );
+
   const panels: Record<TaskView, ReactNode> = {
     data: dataContent,
     quality: qualityContent,
+    analysis: analysisContent,
     detail: detailContent,
   };
 

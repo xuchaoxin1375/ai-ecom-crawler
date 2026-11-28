@@ -362,6 +362,135 @@ export interface TaskSummary {
 export type TaskRecoveryState =
   "WAITING_FOR_WORKER" | "EXPORT_PENDING" | "RESULT_INCOMPLETE" | "RECOVERED";
 
+export interface AnalysisRequestCounts {
+  total: number;
+  retries: number;
+  errors: number;
+  rate_limited: number;
+}
+
+export interface AnalysisPoint {
+  start: string;
+  end: string;
+  processed: number;
+  valid: number;
+  excluded: number;
+  failed: number;
+  cumulative_processed: number;
+  cumulative_valid: number;
+  cumulative_excluded: number;
+  cumulative_failed: number;
+  requests?: AnalysisRequestCounts;
+  cumulative_requests?: AnalysisRequestCounts;
+  partial?: boolean;
+}
+
+export interface AnalysisScope {
+  task_type: string;
+  state: string;
+  started_at: string | null;
+  finished_at: string | null;
+  run_seconds: number;
+  window_seconds: number | null;
+  bucket_seconds: number;
+  first_bucket_at: string | null;
+  last_bucket_at: string | null;
+  truncated: boolean;
+}
+
+export interface AnalysisSummary {
+  processed: number;
+  valid: number;
+  excluded: number;
+  failed: number;
+  yield_rate: number;
+  failure_rate: number;
+  average_throughput_per_minute: number;
+  recent_throughput_per_minute: number;
+  recent_buckets?: number;
+  discovered_urls: number;
+  product_candidates: number;
+  pending_products: number;
+  coverage: {
+    status: string;
+    label: string;
+    denominator?: number | null;
+    covered?: number | null;
+    denominator_source?: string | null;
+    notes?: string | null;
+  };
+}
+
+export interface AnalysisRequestSummary {
+  available: boolean;
+  reason: string | null;
+  truncated: boolean;
+  total?: number;
+  retries?: number;
+  errors?: number;
+  rate_limited?: number;
+  status_classes?: Record<string, number>;
+  average_per_minute?: number;
+}
+
+export interface AnalysisFailureReason {
+  code: string;
+  label: string;
+  count: number;
+  share: number;
+  sample_url: string | null;
+}
+
+export interface AnalysisFailurePeak {
+  start: string;
+  failed: number;
+}
+
+export interface AnalysisFailures {
+  total: number;
+  by_class: Record<string, number>;
+  by_reason: AnalysisFailureReason[];
+  peaks: AnalysisFailurePeak[];
+}
+
+export interface AnalysisBudget {
+  max_products: number | null;
+  max_seconds: number | null;
+  max_urls: number | null;
+  max_requests: number | null;
+  used_products: number;
+  used_seconds: number;
+  used_urls: number;
+  used_requests: number | null;
+}
+
+export interface AnalysisDiagnostic {
+  code: string;
+  tone: string;
+  title: string;
+  detail: string;
+  action_view: string;
+}
+
+export interface TaskAnalysis {
+  task_id: string;
+  generated_at: string;
+  observed_at: string;
+  scope: AnalysisScope;
+  summary: AnalysisSummary;
+  series: { bucket_seconds: number; points: AnalysisPoint[] };
+  requests: AnalysisRequestSummary;
+  active_intervals: { start: string; end: string }[];
+  failures: AnalysisFailures;
+  budget: AnalysisBudget;
+  data_quality: {
+    level: string;
+    skipped_lines: number;
+    legacy_reasons: boolean;
+  };
+  diagnostics: AnalysisDiagnostic[];
+}
+
 export interface TaskPage {
   total: number;
   items: TaskSummary[];
@@ -1944,6 +2073,20 @@ export function getTasks(
 
 export function getTask(taskId: string, signal?: AbortSignal): Promise<TaskSummary> {
   return getJson<TaskSummary>(`/api/tasks/${encodeURIComponent(taskId)}`, signal);
+}
+
+export function getTaskAnalysis(
+  taskId: string,
+  params: { windowSeconds?: number | null; bucketSeconds?: number | null } = {},
+  signal?: AbortSignal,
+): Promise<TaskAnalysis> {
+  return getJson<TaskAnalysis>(
+    `/api/tasks/${encodeURIComponent(taskId)}/analysis${query({
+      window_seconds: params.windowSeconds ?? undefined,
+      bucket_seconds: params.bucketSeconds ?? undefined,
+    })}`,
+    signal,
+  );
 }
 
 export function getTaskItems(

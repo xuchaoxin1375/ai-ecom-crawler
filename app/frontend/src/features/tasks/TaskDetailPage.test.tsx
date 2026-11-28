@@ -1,6 +1,6 @@
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { TaskSummary } from "../../lib/api";
+import type { TaskAnalysis, TaskSummary } from "../../lib/api";
 import { renderPage, type RenderEntry } from "../../test/renderPage";
 import { TaskDetailPage } from "./TaskDetailPage";
 
@@ -28,6 +28,7 @@ function openTaskPage(
   initial: TaskSummary = task,
   entry: RenderEntry = "/tasks/web-1",
   batch: unknown = null,
+  analysis: TaskAnalysis = analysisFixture,
 ) {
   const getTask = vi.fn(() => initial);
   const cancelTask = vi.fn(() =>
@@ -57,6 +58,9 @@ function openTaskPage(
       if (path === "/api/tasks/web-1/items" || path === "/api/tasks/web-1/feedback") {
         return Response.json({ items: [], total: 0 });
       }
+      if (path === "/api/tasks/web-1/analysis") {
+        return Response.json(analysis);
+      }
       if (path === "/api/batches/b-1" && batch) {
         return Response.json(batch);
       }
@@ -80,6 +84,129 @@ const finishedTask: TaskSummary = {
   outcome: "COMPLETED",
   counts: { valid_products: 20, failed_products: 0, excluded_products: 0 },
   finished_at: "2026-11-24T10:20:00Z",
+};
+
+const analysisFixture: TaskAnalysis = {
+  task_id: "web-1",
+  generated_at: "2026-11-24T10:21:00Z",
+  observed_at: "2026-11-24T10:20:00Z",
+  scope: {
+    task_type: "product",
+    state: "FINISHED",
+    started_at: "2026-11-24T10:00:00Z",
+    finished_at: "2026-11-24T10:20:00Z",
+    run_seconds: 1200,
+    window_seconds: null,
+    bucket_seconds: 60,
+    first_bucket_at: "2026-11-24T10:00:00Z",
+    last_bucket_at: "2026-11-24T10:19:00Z",
+    truncated: false,
+  },
+  summary: {
+    processed: 250,
+    valid: 246,
+    excluded: 0,
+    failed: 4,
+    yield_rate: 0.984,
+    failure_rate: 0.016,
+    average_throughput_per_minute: 12.5,
+    recent_throughput_per_minute: 11.8,
+    recent_buckets: 5,
+    discovered_urls: 260,
+    product_candidates: 250,
+    pending_products: 0,
+    coverage: {
+      status: "PARTIAL",
+      label: "声明来源内 96%",
+      denominator: 260,
+      covered: 250,
+    },
+  },
+  series: {
+    bucket_seconds: 60,
+    points: [
+      {
+        start: "2026-11-24T10:00:00Z",
+        end: "2026-11-24T10:01:00Z",
+        processed: 12,
+        valid: 12,
+        excluded: 0,
+        failed: 0,
+        cumulative_processed: 12,
+        cumulative_valid: 12,
+        cumulative_excluded: 0,
+        cumulative_failed: 0,
+        requests: { total: 14, retries: 1, errors: 0, rate_limited: 0 },
+        cumulative_requests: {
+          total: 14,
+          retries: 1,
+          errors: 0,
+          rate_limited: 0,
+        },
+      },
+      {
+        start: "2026-11-24T10:01:00Z",
+        end: "2026-11-24T10:02:00Z",
+        processed: 10,
+        valid: 9,
+        excluded: 0,
+        failed: 1,
+        cumulative_processed: 22,
+        cumulative_valid: 21,
+        cumulative_excluded: 0,
+        cumulative_failed: 1,
+        requests: { total: 12, retries: 0, errors: 1, rate_limited: 0 },
+        cumulative_requests: {
+          total: 26,
+          retries: 1,
+          errors: 1,
+          rate_limited: 0,
+        },
+      },
+    ],
+  },
+  requests: {
+    available: true,
+    reason: null,
+    truncated: false,
+    total: 26,
+    retries: 1,
+    errors: 1,
+    rate_limited: 0,
+    status_classes: { "2xx": 25, "3xx": 0, "4xx": 1, "5xx": 0, none: 0 },
+    average_per_minute: 1.3,
+  },
+  active_intervals: [{ start: "2026-11-24T10:00:00Z", end: "2026-11-24T10:20:00Z" }],
+  failures: {
+    total: 4,
+    by_class: { permanent: 4 },
+    by_reason: [
+      {
+        code: "validation_error",
+        label: "商品数据校验失败",
+        count: 4,
+        share: 1,
+        sample_url: "https://fixture.test/p/1",
+      },
+    ],
+    peaks: [],
+  },
+  budget: {
+    max_products: 300,
+    max_seconds: 1800,
+    max_urls: 500,
+    max_requests: null,
+    used_products: 250,
+    used_seconds: 1200,
+    used_urls: 260,
+    used_requests: 26,
+  },
+  data_quality: {
+    level: "full",
+    skipped_lines: 0,
+    legacy_reasons: false,
+  },
+  diagnostics: [],
 };
 
 const emptyTask: TaskSummary = {
@@ -162,6 +289,61 @@ describe("task detail recovery", () => {
 
       fireEvent.click(screen.getByRole("tab", { name: /运行明细/ }));
       expect(await screen.findByRole("heading", { name: "任务事实" })).toBeVisible();
+    } finally {
+      unmount();
+    }
+  });
+
+  it("opens run analysis with request series and the accessible data table", async () => {
+    const { unmount } = openTaskPage(finishedTask, "/tasks/web-1?view=analysis");
+    try {
+      expect(await screen.findByRole("tab", { name: /运行分析/ })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+      expect(await screen.findByRole("heading", { name: "产出与失败" })).toBeVisible();
+      expect(screen.getByText("98.4%")).toBeVisible();
+      expect(screen.getByRole("button", { name: /请求/ })).toBeVisible();
+
+      fireEvent.click(screen.getByRole("button", { name: /请求26/ }));
+      const layout = await screen.findByRole("group", { name: "图表布局" });
+      fireEvent.click(within(layout).getByRole("button", { name: "分图" }));
+      expect(within(layout).getByRole("button", { name: "分图" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: /展开数据表/ }));
+      expect(
+        await screen.findByRole("table", { name: /运行分析数据表/ }),
+      ).toBeVisible();
+      expect(screen.getByText("商品数据校验失败")).toBeVisible();
+    } finally {
+      unmount();
+    }
+  });
+
+  it("explains a legacy run without request telemetry", async () => {
+    const legacyAnalysis: TaskAnalysis = {
+      ...analysisFixture,
+      requests: {
+        available: false,
+        reason: "legacy",
+        truncated: false,
+      },
+    };
+    const { unmount } = openTaskPage(
+      finishedTask,
+      "/tasks/web-1?view=analysis",
+      null,
+      legacyAnalysis,
+    );
+    try {
+      expect(await screen.findByText("该运行来自旧版本，没有请求记录。")).toBeVisible();
+      expect(screen.getByRole("button", { name: /请求0/ })).toHaveAttribute(
+        "aria-disabled",
+        "true",
+      );
     } finally {
       unmount();
     }

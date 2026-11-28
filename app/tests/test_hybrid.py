@@ -270,6 +270,19 @@ class HybridRuntimeTests(unittest.TestCase):
             counts = result.task_result["counts"]
             self.assertEqual(counts["valid_products"], 3)
             self.assertEqual(counts["failed_products"], 0)
+            request_rows = [
+                json.loads(line)
+                for line in (result.out_dir / "requests.ndjson")
+                .read_text(encoding="utf-8")
+                .splitlines()
+                if line.strip()
+            ]
+            self.assertEqual(
+                sum(1 for row in request_rows if row.get("item_type") == "product"),
+                3,
+            )
+            self.assertTrue(all(row.get("engine") == "static" for row in request_rows))
+            self.assertTrue(all("status" in row for row in request_rows))
             adapter = result.task_result["runtime"]["adapter"]
             self.assertEqual(adapter["adapter_id"], "fake-adapter")
             self.assertEqual(adapter["discovered"], 3)

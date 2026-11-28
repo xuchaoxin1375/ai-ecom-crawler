@@ -35,6 +35,7 @@ from .runner import (
 )
 from .stealth import StealthConfig, StealthFetcher
 from .store import LeaseLostError, TaskStore
+from .telemetry import RequestRecorder
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +97,9 @@ def _retry_override(
     return max_attempts, backoff_ms
 
 
-def _make_static(context: FetcherContext) -> ScraplingFetcher:
+def _make_static(
+    context: FetcherContext, recorder: RequestRecorder | None = None
+) -> ScraplingFetcher:
     fetch = context.rule.fetch
     manager = FetcherSession(
         impersonate="chrome",
@@ -122,10 +125,13 @@ def _make_static(context: FetcherContext) -> ScraplingFetcher:
         backoff_ms=backoff_ms,
         delay_ms=delay_ms,
         session_manager=manager,
+        recorder=recorder,
     )
 
 
-def _make_browser(context: FetcherContext) -> BrowserFetcher:
+def _make_browser(
+    context: FetcherContext, recorder: RequestRecorder | None = None
+) -> BrowserFetcher:
     max_attempts, backoff_ms = _retry_values(context.rule)
     max_attempts, backoff_ms = _retry_override(
         context, max_attempts, backoff_ms
@@ -145,10 +151,13 @@ def _make_browser(context: FetcherContext) -> BrowserFetcher:
         lease_token=context.lease.token,
         max_attempts=max_attempts,
         backoff_ms=backoff_ms,
+        recorder=recorder,
     )
 
 
-def _make_stealth(context: FetcherContext) -> StealthFetcher:
+def _make_stealth(
+    context: FetcherContext, recorder: RequestRecorder | None = None
+) -> StealthFetcher:
     max_attempts, backoff_ms = _retry_values(context.rule)
     max_attempts, backoff_ms = _retry_override(
         context, max_attempts, backoff_ms
@@ -165,6 +174,7 @@ def _make_stealth(context: FetcherContext) -> StealthFetcher:
         lease_token=context.lease.token,
         max_attempts=max_attempts,
         backoff_ms=backoff_ms,
+        recorder=recorder,
     )
 
 
@@ -172,41 +182,47 @@ def _make_stealth(context: FetcherContext) -> StealthFetcher:
 def default_fetcher(context: FetcherContext) -> Iterator[Any]:
     default, overrides = engine_plan(context.rule)
     engines = {default, *overrides.values()}
-    if engines == {"static"}:
-        fetcher = _make_static(context)
-        try:
-            yield fetcher
-        finally:
-            fetcher.close()
-        return
-    if engines == {"browser"}:
-        fetcher = _make_browser(context)
-        try:
-            yield fetcher
-        finally:
-            fetcher.close()
-        return
-    if engines == {"stealth"}:
-        fetcher = _make_stealth(context)
-        try:
-            yield fetcher
-        finally:
-            fetcher.close()
-        return
-    builders: dict[str, Callable[[], Any]] = {
-        "static": lambda: _make_static(context),
-        "browser": lambda: _make_browser(context),
-        "stealth": lambda: _make_stealth(context),
-    }
-    hybrid = HybridFetcher(
-        default_engine=default,
-        overrides=overrides,
-        builders=builders,
+    recorder = RequestRecorder(
+        Path(context.out_root) / context.task.task_id / "requests.ndjson"
     )
     try:
-        yield hybrid
+        if engines == {"static"}:
+            fetcher = _make_static(context, recorder)
+            try:
+                yield fetcher
+            finally:
+                fetcher.close()
+            return
+        if engines == {"browser"}:
+            fetcher = _make_browser(context, recorder)
+            try:
+                yield fetcher
+            finally:
+                fetcher.close()
+            return
+        if engines == {"stealth"}:
+            fetcher = _make_stealth(context, recorder)
+            try:
+                yield fetcher
+            finally:
+                fetcher.close()
+            return
+        builders: dict[str, Callable[[], Any]] = {
+            "static": lambda: _make_static(context, recorder),
+            "browser": lambda: _make_browser(context, recorder),
+            "stealth": lambda: _make_stealth(context, recorder),
+        }
+        hybrid = HybridFetcher(
+            default_engine=default,
+            overrides=overrides,
+            builders=builders,
+        )
+        try:
+            yield hybrid
+        finally:
+            hybrid.close()
     finally:
-        hybrid.close()
+        recorder.close()
 
 
 class Worker:

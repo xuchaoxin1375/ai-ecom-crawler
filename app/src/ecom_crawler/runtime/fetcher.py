@@ -10,6 +10,7 @@ from typing import Any, Self
 from urllib.parse import urlparse
 
 from .models import FetchResult
+from .telemetry import RequestRecorder, utc_now_ms
 
 logger = logging.getLogger(__name__)
 
@@ -176,6 +177,7 @@ class ScraplingFetcher:
         backoff_ms: int = 1000,
         delay_ms: int = 0,
         session_manager: Any | None = None,
+        recorder: RequestRecorder | None = None,
     ) -> None:
         self.session = session
         self.limiter = limiter
@@ -188,6 +190,7 @@ class ScraplingFetcher:
         self.rate_limit_events = 0
         self.last_retry_after: float | None = None
         self._session_manager = session_manager
+        self.recorder = recorder
 
     def get(self, url: str, *, item_type: str | None = None) -> FetchResult:
         last_error = ""
@@ -199,6 +202,8 @@ class ScraplingFetcher:
             self.requests += 1
             if attempt > 1:
                 self.retries += 1
+            started_at = utc_now_ms()
+            started = time.monotonic()
             try:
                 response = self.session.get(
                     url,
@@ -208,6 +213,15 @@ class ScraplingFetcher:
                 )
             except Exception as exc:  # noqa: BLE001 - transport / TLS / timeout
                 last_error = f"{type(exc).__name__}: {exc}"
+                self._record_request(
+                    started_at,
+                    url,
+                    item_type,
+                    attempt,
+                    0,
+                    started,
+                    error=last_error,
+                )
                 if attempt < self.max_attempts:
                     self._sleep_backoff(attempt)
                     continue
@@ -228,6 +242,7 @@ class ScraplingFetcher:
                 )
             except AttributeError:
                 content_type = ""
+            retry_after = None
             if status == 429:
                 retry_after = retry_after_seconds(headers)
                 self.rate_limit_events += 1
@@ -235,21 +250,31 @@ class ScraplingFetcher:
                     self.last_retry_after = retry_after
                 if self.limiter is not None:
                     self.limiter.penalize(url, retry_after)
-                if attempt < self.max_attempts:
-                    if self.limiter is None:
-                        wait = min(
-                            max(
-                                retry_after or 0.0,
-                                self.backoff * (2 ** (attempt - 1)),
-                            ),
-                            30.0,
-                        )
-                        if wait > 0:
-                            time.sleep(wait)
-                    elif retry_after is None:
-                        self._sleep_backoff(attempt)
-                    continue
-            elif 500 <= status < 600 and attempt < self.max_attempts:
+            self._record_request(
+                started_at,
+                url,
+                item_type,
+                attempt,
+                status,
+                started,
+                bytes_=len(body),
+                retry_after=retry_after,
+            )
+            if status == 429 and attempt < self.max_attempts:
+                if self.limiter is None:
+                    wait = min(
+                        max(
+                            retry_after or 0.0,
+                            self.backoff * (2 ** (attempt - 1)),
+                        ),
+                        30.0,
+                    )
+                    if wait > 0:
+                        time.sleep(wait)
+                elif retry_after is None:
+                    self._sleep_backoff(attempt)
+                continue
+            if 500 <= status < 600 and attempt < self.max_attempts:
                 self._sleep_backoff(attempt)
                 continue
             if self.limiter is not None and 200 <= status < 400:
@@ -261,6 +286,38 @@ class ScraplingFetcher:
                 meta={"content_type": content_type},
             )
         return FetchResult(status=0, url=url, error=last_error)
+
+    def _record_request(
+        self,
+        started_at: str,
+        url: str,
+        item_type: str | None,
+        attempt: int,
+        status: int,
+        started: float,
+        *,
+        bytes_: int = 0,
+        error: str = "",
+        retry_after: float | None = None,
+    ) -> None:
+        if self.recorder is None:
+            return
+        payload: dict[str, Any] = {
+            "ts": started_at,
+            "attempt": attempt,
+            "engine": "static",
+            "url": url,
+            "status": status,
+            "duration_ms": round((time.monotonic() - started) * 1000, 1),
+            "bytes": bytes_,
+        }
+        if item_type:
+            payload["item_type"] = item_type
+        if error:
+            payload["error"] = error[:300]
+        if retry_after is not None:
+            payload["retry_after"] = retry_after
+        self.recorder.record(payload)
 
     def get_listing(
         self,

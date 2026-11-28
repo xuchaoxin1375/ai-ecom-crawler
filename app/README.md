@@ -318,7 +318,7 @@ runtime:
 
 - 规则包：YAML manifest；`rule_id`／`rule_version` 必须与任务一致；声明式支持 `entry_links`、`sitemap`、`listing`、`html_index`、`public_json` 来源；hybrid 还支持 `discovery.sources[].type=adapter`。
 - 账本：`--db` 指向的 SQLite 文件，记录任务、工作项、状态、尝试次数和失败分类。
-- 输出：`<out-root>/<task-id>/` 下有 `task-result.json`、`products.jsonl`、`urls.csv`、`events.ndjson` 等运行时产物；product 任务另有 `app-run/` 和 `export/`。
+- 输出：`<out-root>/<task-id>/` 下有 `task-result.json`、`products.jsonl`、`urls.csv`、`events.ndjson`、`requests.ndjson` 等运行时产物；product 任务另有 `app-run/` 和 `export/`。`requests.ndjson` 是抓取尝试遥测，默认上限 200,000 行或 64 MiB，不进入导出 zip。
 - 当前是单进程运行时；静态 HTML、浏览器渲染、SQLite 租约、资源回收、`load_more`／`infinite_scroll` 和 hybrid adapter discovery 已接入；跨进程资源配额和 adapter 浏览器实例回收未接入；跨机租约为 v1 外。
 
 ## 控制面（submit / worker / pause / resume / cancel）
@@ -364,7 +364,7 @@ runtime:
 - `serve` 用 FastAPI 托管 `/api/*` 和 `static/`，默认 `127.0.0.1:8765`；非回环 `--host` 必须同时配置访问密钥或已有密钥哈希，浏览器使用登录页和会话 Cookie，命令行 Basic 兼容，并按回环、本机地址／主机名和 `--allow-host` 校验 Host。`--rules-dir` 指向受管规则包目录。
 - 默认启动托管 worker，持有 `<db>.worker.lock`。任务槽位取显式 `--max-tasks`、账本保存值或应用默认 1；`--no-worker` 只跳过托管 worker，写接口仍可用，便于另跑 `worker`。
 - `--read-only` 用于只读预览：要求账本已存在，不启动 worker，不运行构建启动对账／关闭调度，拒绝所有写请求（403 `READ_ONLY`），并以 SQLite `mode=ro` 加 `PRAGMA query_only=ON` 打开账本。`/api/health` 返回 `read_only=true`、`worker=read-only`、`builds_readable=true`、`builds_available=false`；构建历史可读，构建写操作为 403。
-- 只读 API：`GET /api/health`、`GET /api/system`、`GET /api/rules`、`GET /api/tasks`（支持 `state`、`task_type`、`batch_id`、`site_key`、`include_archived`、`sort`、`order`）、`GET /api/tasks/{id}`、`GET /api/tasks/{id}/items?kind=url|product`、`GET /api/tasks/{id}/export`；质量反馈：`GET /api/tasks/{id}/feedback`、`GET /api/feedback`、`GET /api/feedback/{id}`；批次与构建：`GET /api/batches`、`/api/batches/{id}`、`/api/builds`、`/api/builds/config`、`/api/builds/{id}`、`/api/builds/{id}/messages`、`/api/builds/{id}/events`、`/api/builds/{id}/trace`；模型池：`PUT`／`DELETE /api/builds/config/models`、`POST /api/builds/models/check`。
+- 只读 API：`GET /api/health`、`GET /api/system`、`GET /api/rules`、`GET /api/tasks`（支持 `state`、`task_type`、`batch_id`、`site_key`、`include_archived`、`sort`、`order`）、`GET /api/tasks/{id}`、`GET /api/tasks/{id}/analysis`（单次运行聚合，支持 `window_seconds`、`bucket_seconds` 和 `ETag`）、`GET /api/tasks/{id}/items?kind=url|product`、`GET /api/tasks/{id}/export`；质量反馈：`GET /api/tasks/{id}/feedback`、`GET /api/feedback`、`GET /api/feedback/{id}`；批次与构建：`GET /api/batches`、`/api/batches/{id}`、`/api/builds`、`/api/builds/config`、`/api/builds/{id}`、`/api/builds/{id}/messages`、`/api/builds/{id}/events`、`/api/builds/{id}/trace`；模型池：`PUT`／`DELETE /api/builds/config/models`、`POST /api/builds/models/check`。
 - 写 API：`PUT /api/system/access`、`POST /api/system/access/token`；`POST /api/tasks`（`DRAFT` + `request_id` 幂等）、`start`、`pause`、`resume`、`cancel`、`archive`、`restore`；质量反馈：`POST /api/tasks/{id}/feedback`（终态或排队／运行／暂停中均可）、`POST /api/feedback/bundle`（合并预检）、`POST /api/feedback/{id}/triage`、`POST /api/feedback/{id}/repair`（可带 `feedback_ids` 合并修复）、`POST /api/feedback/{id}/rerun`（同一修复构建的关联反馈共用一个复跑）；批次与构建：`POST /api/batches`、`/api/batches/{id}/import|start|pause|cancel|archive|restore`、`/api/batches/{id}/sites/{site_key}/build`、`/api/builds/{id}/pause|resume|cancel|continue`、`/api/builds/{id}/permissions|dependencies/{request_id}`；数据清理：`GET /api/workbench/nodes/{id}/cleanup-preview`、`POST /api/workbench/nodes/{id}/delete`、`GET /api/tasks/{id}/cleanup-preview`、`POST /api/tasks/{id}/purge`；规则退役与版本清理：`POST /api/sites/{site_key}/rule/retire`、`GET /api/rules/{rule_id}/versions/{rule_version}/cleanup-preview`、`POST /api/rules/{rule_id}/versions/{rule_version}/purge`；任务克隆：`GET /api/workbench/tasks/{id}/clone-preview`、`POST /api/workbench/tasks/{id}/clone`。
 - `GET /api/openapi.json` 暴露 FastAPI OpenAPI；提交快照为 `app/schemas/openapi.json`，用 `python -m uv run --project app python app/tools/export_openapi.py` 重新生成，`tests/test_feedback.py` 会校验快照。前端用 `openapi-typescript` 从 `../schemas/openapi.json` 生成类型，不手写第二份接口契约；生成物不手改。
 - `GET /api/tasks/{id}/events` 是 SSE：连接先发 `snapshot`，再转发 `events.ndjson` 增量，终态发 `end`；断线重连以快照为准。
@@ -437,6 +437,7 @@ runtime:
 | `records.jsonl` | 内部规范化记录；含变体级价格／库存／SKU 和字段来源，CSV 是它的 9 列投影 |
 | `diagnostics/excluded.jsonl` | 业务排除记录，保留 `source_url`、`reason` 和观察价 |
 | `diagnostics/failed.jsonl` | 技术失败记录，保留 `source_url`、`reason` 和明细 |
+| `requests.ndjson` | 抓取尝试遥测，保留开始时间、尝试次数、引擎、状态、耗时、字节和错误；有行数／字节上限，不进入导出 zip |
 
 CSV 对以 `=`、`+`、`-`、`@` 开头的文本单元格加单引号，防止表格软件公式注入；机器消费时需要按约定还原。
 
