@@ -437,6 +437,52 @@ class WorkbenchApiTests(unittest.TestCase):
         ).json()
         self.assertFalse(second_summary["rule"]["stale"])
 
+    def test_start_rejects_market_mismatch_before_enqueue(self) -> None:
+        _, node_id = self.create_task_node()
+        patched = self.client.patch(
+            f"/api/workbench/tasks/{node_id}", json={"market": "US"}
+        )
+        self.assertEqual(patched.status_code, 200, patched.text)
+        started = self.client.post(f"/api/workbench/tasks/{node_id}/start")
+        self.assertEqual(started.status_code, 409, started.text)
+        self.assertEqual(
+            started.json()["error"]["code"], "SITE_MARKET_MISMATCH"
+        )
+        self.assertIn("市场不匹配", started.json()["error"]["message"])
+        self.assertEqual(self.store.list_workbench_task_runs(), [])
+
+    def test_start_rejects_changed_rule_file_hash_before_enqueue(self) -> None:
+        self.seed_active_rule("fixture.example")
+        _, node_id = self.create_task_node()
+        rule_path = self.rules_dir / "fixture.yaml"
+        rule_path.write_text(
+            rule_path.read_text(encoding="utf-8") + "\n# changed after binding\n",
+            encoding="utf-8",
+        )
+        started = self.client.post(f"/api/workbench/tasks/{node_id}/start")
+        self.assertEqual(started.status_code, 409, started.text)
+        self.assertEqual(started.json()["error"]["code"], "RULE_HASH_MISMATCH")
+        self.assertIn("哈希与账本不一致", started.json()["error"]["message"])
+        self.assertEqual(self.store.list_workbench_task_runs(), [])
+
+    def test_start_rejects_changed_rule_version_before_enqueue(self) -> None:
+        self.seed_active_rule("fixture.example")
+        _, node_id = self.create_task_node()
+        rule_path = self.rules_dir / "fixture.yaml"
+        rule_path.write_text(
+            rule_path.read_text(encoding="utf-8").replace(
+                '"2026.11.21-1"', '"2026.11.21-9"'
+            ),
+            encoding="utf-8",
+        )
+        started = self.client.post(f"/api/workbench/tasks/{node_id}/start")
+        self.assertEqual(started.status_code, 409, started.text)
+        self.assertEqual(
+            started.json()["error"]["code"], "RULE_VERSION_MISMATCH"
+        )
+        self.assertIn("规则文件为", started.json()["error"]["message"])
+        self.assertEqual(self.store.list_workbench_task_runs(), [])
+
     def test_clone_task_definition_can_copy_rule_version(self) -> None:
         _, node_id = self.create_task_node()
         source_rule = self.rules_dir / "fixture.yaml"

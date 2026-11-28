@@ -6984,6 +6984,40 @@ def create_app(
         rule_path = (rules / definition.rule_path).resolve()
         if not rule_path.is_file():
             raise _error("INVALID_RULE", "rule package file is missing", 409)
+        try:
+            package = load_rule(rule_path)
+        except (RuleError, ContractError) as exc:
+            raise _error("INVALID_RULE", str(exc), 409) from exc
+        if (
+            package.rule_id != definition.rule_id
+            or package.rule_version != definition.rule_version
+        ):
+            raise _error(
+                "RULE_VERSION_MISMATCH",
+                "规则文件为 "
+                f"{package.rule_id}@{package.rule_version}，"
+                f"任务定义绑定 {definition.rule_id}@{definition.rule_version}",
+                409,
+            )
+        actual_sha256 = hashlib.sha256(rule_path.read_bytes()).hexdigest()
+        version = store.get_rule_version(
+            definition.rule_id, definition.rule_version
+        )
+        if version is not None and actual_sha256 != version.sha256:
+            raise _error(
+                "RULE_HASH_MISMATCH",
+                f"规则文件哈希与账本不一致：{definition.rule_id}@"
+                f"{definition.rule_version}",
+                409,
+            )
+        rule_market = normalize_market(package.site.get("market"))
+        task_market = normalize_market(definition.market)
+        if rule_market and task_market and rule_market != task_market:
+            raise _error(
+                "SITE_MARKET_MISMATCH",
+                f"市场不匹配：规则 {rule_market}，任务 {task_market}",
+                409,
+            )
         definition_limits = dict(definition.limits or {})
         policy = load_collection_policy(store)
         if definition.collection_mode == "formal":
