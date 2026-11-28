@@ -12,8 +12,10 @@ from fastapi.testclient import TestClient
 
 from ecom_crawler.runtime.batch import site_identity, target_key
 from ecom_crawler.runtime.models import (
+    QualityFeedback,
     RuleVersion,
     SiteRule,
+    Task,
     WorkbenchNode,
     WorkbenchTaskDef,
     WorkItem,
@@ -22,7 +24,12 @@ from ecom_crawler.runtime.models import (
 from ecom_crawler.runtime.rule import load_rule
 from ecom_crawler.runtime.store import TaskStore
 from ecom_crawler.runtime.worker import Worker
-from ecom_crawler.web.app import create_app
+from ecom_crawler.web.app import (
+    _cached_task_result,
+    _load_result,
+    _workbench_run_can_continue,
+    create_app,
+)
 from tests.test_execution import RULE_TEMPLATE, fixture_server
 
 CLIENT_HEADERS = {
@@ -71,6 +78,53 @@ class WorkbenchStoreTests(unittest.TestCase):
             ),
             ("fixture.example", "https://fixture.example/list?p=2", "FR"),
         )
+
+    def test_feedback_summaries_batch_latest_and_open_counts(self) -> None:
+        self.store.create_feedback(
+            QualityFeedback(
+                feedback_id="fb-1",
+                request_id="req-1",
+                task_id="task-1",
+                category="OTHER",
+                expectation="first",
+                created_at="2026-01-01T00:00:00Z",
+            )
+        )
+        self.store.create_feedback(
+            QualityFeedback(
+                feedback_id="fb-2",
+                request_id="req-2",
+                task_id="task-1",
+                category="OTHER",
+                expectation="resolved",
+                status="RESOLVED",
+                created_at="2026-01-02T00:00:00Z",
+            )
+        )
+        self.store.create_feedback(
+            QualityFeedback(
+                feedback_id="fb-3",
+                request_id="req-3",
+                task_id="task-2",
+                category="OTHER",
+                expectation="wontfix",
+                status="WONTFIX",
+                created_at="2026-01-03T00:00:00Z",
+            )
+        )
+
+        summaries = self.store.feedback_summaries(["task-1", "task-2", "task-3"])
+
+        self.assertEqual(
+            summaries["task-1"],
+            {"open": 1, "latest_id": "fb-2", "latest_status": "RESOLVED"},
+        )
+        self.assertEqual(
+            summaries["task-2"],
+            {"open": 0, "latest_id": "fb-3", "latest_status": "WONTFIX"},
+        )
+        self.assertNotIn("task-3", summaries)
+        self.assertEqual(self.store.feedback_summaries([]), {})
 
     def test_workbench_tables_are_created_for_existing_ledgers(self) -> None:
         with self.store._connect() as connection:
@@ -389,6 +443,68 @@ class WorkbenchApiTests(unittest.TestCase):
         history = self.client.get(f"/api/tasks/{task['task_id']}/events/history")
         self.assertEqual(history.status_code, 200, history.text)
         self.assertEqual(history.json()["items"], [])
+
+    def test_task_result_cache_keeps_only_list_fields_and_reloads_changed_file(
+        self,
+    ) -> None:
+        task_id = "web-result-cache"
+        run_dir = self.out_root / task_id
+        run_dir.mkdir()
+        result_path = run_dir / "task-result.json"
+        result_path.write_text(
+            json.dumps(
+                {
+                    "counts": {"valid_products": 1},
+                    "pricing": {"rows": 5000},
+                }
+            ),
+            encoding="utf-8",
+        )
+        _cached_task_result.cache_clear()
+
+        first = _load_result(self.out_root, task_id)
+        second = _load_result(self.out_root, task_id)
+
+        self.assertEqual(first, {"counts": {"valid_products": 1}})
+        self.assertEqual(second, first)
+        self.assertGreaterEqual(_cached_task_result.cache_info().hits, 1)
+
+        result_path.write_text(
+            json.dumps(
+                {
+                    "counts": {"valid_products": 2},
+                    "pricing": {"rows": 5000},
+                    "note": "changed size invalidates the cache",
+                }
+            ),
+            encoding="utf-8",
+        )
+        self.assertEqual(
+            _load_result(self.out_root, task_id),
+            {"counts": {"valid_products": 2}},
+        )
+
+    def test_can_continue_skips_item_queries_for_ineligible_runs(self) -> None:
+        class NoItemCounts:
+            def item_counts(self, *args: object, **kwargs: object) -> dict[str, int]:
+                raise AssertionError("ineligible runs must not query task items")
+
+        task = Task(
+            task_id="web-no-continue",
+            plan_id="fixture-local",
+            plan_version="2026.11.28-1",
+            task_type="product",
+            state="FINISHED",
+            outcome="COMPLETED",
+            stop_reason="NATURAL_END",
+        )
+
+        result = _workbench_run_can_continue(NoItemCounts(), task, {})  # type: ignore[arg-type]
+
+        self.assertFalse(result["can_continue"])
+        self.assertEqual(result["pending_products"], 0)
+        self.assertEqual(result["pending_navigation"], 0)
+        self.assertIsNone(result["continue_hint"])
 
     def test_start_keeps_definition_rule_when_site_pointer_changes(self) -> None:
         self.seed_active_rule("fixture.example")

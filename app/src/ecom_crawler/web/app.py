@@ -948,15 +948,50 @@ def _feedback_bundle(
     }
 
 
-def _load_result(out_root: Path, task_id: str) -> dict[str, Any]:
-    path = out_root / task_id / "task-result.json"
-    if not path.is_file():
-        return {}
+_RESULT_VIEW_KEYS = (
+    "counts",
+    "coverage",
+    "quality_exceptions",
+    "content_audit",
+    "recovery",
+    "stop_detail",
+    "stop_detail_code",
+    "stop_evidence",
+    "language_check",
+)
+
+
+@lru_cache(maxsize=256)
+def _cached_task_result(
+    path_text: str, _mtime_ns: int, _size: int
+) -> dict[str, Any]:
+    """Cache only the result fields the web layer reads.
+
+    ``task-result.json`` can be large (pricing rows are much bigger than the
+    list counters), so keeping the whole parsed payload would retain hundreds
+    of MB. The cache key carries mtime and size, matching the product index
+    pattern, so a replaced result file is re-read on the next request.
+    """
+
+    path = Path(path_text)
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
-    return payload if isinstance(payload, dict) else {}
+    if not isinstance(payload, dict):
+        return {}
+    return {key: payload[key] for key in _RESULT_VIEW_KEYS if key in payload}
+
+
+def _load_result(out_root: Path, task_id: str) -> dict[str, Any]:
+    path = out_root / task_id / "task-result.json"
+    try:
+        stat = path.stat()
+    except OSError:
+        return {}
+    if not path.is_file():
+        return {}
+    return _cached_task_result(str(path), stat.st_mtime_ns, stat.st_size)
 
 
 def _task_output_dir(out_root: Path, task_id: str) -> Path:
@@ -1459,9 +1494,21 @@ def _counts(store: TaskStore, task: Task, result: dict[str, Any]) -> dict[str, i
     return counts
 
 
-def _summary(store: TaskStore, task: Task, out_root: Path) -> dict[str, Any]:
+def _summary(
+    store: TaskStore,
+    task: Task,
+    out_root: Path,
+    *,
+    site_rules: dict[str, SiteRule] | None = None,
+    feedback_summaries: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     result = _current_task_result(task, out_root)
-    site_rule = store.get_site_rule(task.site_key or task.plan_id)
+    site_key = task.site_key or task.plan_id
+    site_rule = (
+        site_rules.get(site_key)
+        if site_rules is not None
+        else store.get_site_rule(site_key)
+    )
     active_version = site_rule.rule_version if site_rule else None
     active_sha256 = site_rule.sha256 if site_rule else None
     if site_rule is None:
@@ -1472,13 +1519,25 @@ def _summary(store: TaskStore, task: Task, out_root: Path) -> dict[str, Any]:
         stale = True
     else:
         stale = None
-    feedback, _ = store.list_feedback(task_id=task.task_id, limit=50)
-    open_feedback = [
-        item
-        for item in feedback
-        if item.status not in {"RESOLVED", "WONTFIX"}
-    ]
-    latest_feedback = feedback[0] if feedback else None
+    if feedback_summaries is None:
+        feedback, _ = store.list_feedback(task_id=task.task_id, limit=50)
+        open_feedback = [
+            item
+            for item in feedback
+            if item.status not in {"RESOLVED", "WONTFIX"}
+        ]
+        latest_feedback = feedback[0] if feedback else None
+        feedback_payload = {
+            "open": len(open_feedback),
+            "latest_id": latest_feedback.feedback_id if latest_feedback else None,
+            "latest_status": latest_feedback.status if latest_feedback else None,
+        }
+    else:
+        feedback_payload = feedback_summaries.get(task.task_id) or {
+            "open": 0,
+            "latest_id": None,
+            "latest_status": None,
+        }
     counts = _counts(store, task, result)
     continuation = _workbench_run_can_continue(store, task, result)
     return {
@@ -1513,11 +1572,7 @@ def _summary(store: TaskStore, task: Task, out_root: Path) -> dict[str, Any]:
             "active_sha256": active_sha256,
             "stale": stale,
         },
-        "feedback": {
-            "open": len(open_feedback),
-            "latest_id": latest_feedback.feedback_id if latest_feedback else None,
-            "latest_status": latest_feedback.status if latest_feedback else None,
-        },
+        "feedback": feedback_payload,
         "archived_at": task.archived_at,
         "created_at": task.created_at,
         "updated_at": task.updated_at,
@@ -1662,27 +1717,35 @@ def _workbench_run_can_continue(
         and task.archived_at is None
         and not task.input.get("cloned_from")
     )
-    products = store.item_counts(task.task_id, "product")
-    navigation = store.item_counts(task.task_id, "navigation")
-    pending_products = products.get("PENDING", 0) + products.get("IN_FLIGHT", 0)
-    pending_navigation = navigation.get("PENDING", 0) + navigation.get(
-        "IN_FLIGHT", 0
-    )
     stop_detail = str(result.get("stop_detail") or "")
     discovery_limit = str(task.counters.get("discovery_limit") or "")
     discovery_truncated = bool(discovery_limit) or any(
         marker in stop_detail for marker in _RUN_DISCOVERY_DETAIL_MARKERS
     )
     cloned_snapshot = bool(task.input.get("cloned_from"))
-    can_continue = (
-        eligible
-        and (pending_products + pending_navigation > 0 or discovery_truncated)
+    if not eligible:
+        # Most recent runs are not eligible. Avoid two per-task item-count
+        # queries just to prove that a completed or active run cannot continue.
+        return {
+            "can_continue": False,
+            "continue_hint": (
+                "这是克隆的数据快照，不能续采；请从克隆任务定义启动新运行。"
+                if cloned_snapshot
+                else None
+            ),
+            "reset_discovery": discovery_truncated,
+            "pending_products": 0,
+            "pending_navigation": 0,
+            "discovery_truncated": discovery_truncated,
+        }
+    products = store.item_counts(task.task_id, "product")
+    navigation = store.item_counts(task.task_id, "navigation")
+    pending_products = products.get("PENDING", 0) + products.get("IN_FLIGHT", 0)
+    pending_navigation = navigation.get("PENDING", 0) + navigation.get(
+        "IN_FLIGHT", 0
     )
+    can_continue = pending_products + pending_navigation > 0 or discovery_truncated
     hints: list[str] = []
-    if cloned_snapshot:
-        hints.append(
-            "这是克隆的数据快照，不能续采；请从克隆任务定义启动新运行。"
-        )
     if pending_products:
         valid = int((result.get("counts") or {}).get("valid_products") or 0)
         if not valid:
@@ -2004,13 +2067,22 @@ def _workbench_recent_payload(
     total = len(rows)
     page = rows[offset : offset + limit]
 
+    page_task_ids = [task.task_id for _, task in page]
+    site_rules = {rule.site_key: rule for rule in store.list_site_rules()}
+    feedback_by_task = store.feedback_summaries(page_task_ids)
     items: list[dict[str, Any]] = []
     for _, task in page:
         node_id = node_by_task.get(task.task_id)
         node = nodes_by_id.get(node_id or "")
         definition = definitions.get(node_id or "")
         batch = batches.get(task.batch_id or "")
-        summary = _summary(store, task, root)
+        summary = _summary(
+            store,
+            task,
+            root,
+            site_rules=site_rules,
+            feedback_summaries=feedback_by_task,
+        )
         summary.update(
             {
                 "node_id": node_id,

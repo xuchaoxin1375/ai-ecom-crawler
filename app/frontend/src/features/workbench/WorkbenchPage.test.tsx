@@ -631,6 +631,48 @@ it("sorts recent runs from the table header and updates the sort badge", async (
   expect(screen.getByText("任务 ↑")).toBeInTheDocument();
 });
 
+it("switches recent runs to the field view with separate single-line columns", async () => {
+  stubFetch();
+  renderPage("/workbench", { pathname: "/workbench" }, <WorkbenchPage />);
+
+  fireEvent.click(await screen.findByRole("button", { name: "字段" }));
+
+  const table = await screen.findByRole("table", { name: "最近任务列表" });
+  expect(
+    within(table).getByRole("button", { name: "按「模式」排序" }),
+  ).toBeInTheDocument();
+  expect(
+    within(table).getByRole("button", { name: "按「目录」排序" }),
+  ).toBeInTheDocument();
+  expect(
+    within(table).getByRole("button", { name: "按「运行」排序" }),
+  ).toBeInTheDocument();
+  expect(
+    within(table).getByRole("button", { name: "按「已处理」排序" }),
+  ).toBeInTheDocument();
+  expect(
+    within(table).getByRole("button", { name: "按「候选」排序" }),
+  ).toBeInTheDocument();
+  expect(screen.getByText("字段视图 · 左右滚动查看更多字段")).toBeInTheDocument();
+
+  const row = within(table).getAllByRole("row")[1];
+  expect(row).toHaveTextContent("产品 · 正式");
+  expect(row).toHaveTextContent("英国");
+  expect(row).toHaveTextContent("web-1");
+  expect(row).toHaveTextContent("12");
+  expect(row).toHaveTextContent("30");
+  expect(row).toHaveTextContent("10");
+  expect(row).toHaveTextContent("2");
+  expect(window.localStorage.getItem("ecom.table.workbench-recent.view.v1")).toBe(
+    "fields",
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "标准" }));
+  expect(
+    screen.queryByRole("button", { name: "按「模式」排序" }),
+  ).not.toBeInTheDocument();
+});
+
 it("selects recent runs and switches the bottom pane tabs", async () => {
   stubFetch();
   renderPage("/workbench", { pathname: "/workbench" }, <WorkbenchPage />);

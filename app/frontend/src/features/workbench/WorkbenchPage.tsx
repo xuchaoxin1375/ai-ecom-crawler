@@ -126,7 +126,7 @@ import { RowActionsMenu, type RowActionItem } from "../../components/ui/Dropdown
 import { TableDisplayOptions } from "../../components/ui/TableDisplayOptions";
 import {
   TableViewToggle,
-  densityViewOptions,
+  type TableViewOption,
 } from "../../components/ui/TableViewToggle";
 import { useTablePreferences } from "../../components/ui/tablePreferences";
 import { Toast, useToast } from "../../components/ui/Toast";
@@ -169,6 +169,30 @@ const ACTIVE_TASK_STATES = new Set([
   "PAUSED",
   "CANCELLING",
 ]);
+
+/** States whose progress can change without a user action; PAUSED is static. */
+const LIVE_TASK_STATES = new Set(["QUEUED", "RUNNING", "PAUSING", "CANCELLING"]);
+
+type RecentView = "standard" | "fields";
+
+const RECENT_VIEW_KEY = "ecom.table.workbench-recent.view.v1";
+const RECENT_VIEW_OPTIONS: readonly TableViewOption<RecentView>[] = [
+  { value: "standard", label: "标准", title: "标准视图：多行合并详情" },
+  { value: "fields", label: "字段", title: "字段视图：单行、按字段拆列" },
+];
+
+function readRecentView(): RecentView {
+  try {
+    const stored = localStorage.getItem(RECENT_VIEW_KEY);
+    if (stored === "standard" || stored === "fields") return stored;
+    // Preserve the old compact summary as the field view during migration.
+    return localStorage.getItem("ecom.table.workbench-recent.density.v1") === "compact"
+      ? "fields"
+      : "standard";
+  } catch {
+    return "standard";
+  }
+}
 
 const TREE_PANE = { min: 220, max: 460, default: 280, step: 16 };
 const TOP_PANE = { min: 35, max: 75, default: 58, step: 4 };
@@ -455,7 +479,20 @@ export function WorkbenchPage() {
   const treeQuery = useQuery({
     queryKey: ["workbench-tree"],
     queryFn: ({ signal }) => getWorkbenchTree(signal),
-    refetchInterval: 5000,
+    refetchInterval: (query) => {
+      const treeNodes = query.state.data?.nodes ?? [];
+      const live = treeNodes.some(
+        (node) =>
+          Boolean(node.current_run && LIVE_TASK_STATES.has(node.current_run.state)) ||
+          Boolean(
+            node.build &&
+            ["QUEUED", "RUNNING", "PAUSED", "CANCEL_REQUESTED"].includes(
+              node.build.state,
+            ),
+          ),
+      );
+      return live ? 5000 : 15000;
+    },
   });
   const rulesQuery = useQuery({
     queryKey: ["rules"],
@@ -470,7 +507,11 @@ export function WorkbenchPage() {
     queryKey: ["workbench-recent", scope, queryValue],
     queryFn: ({ signal }) =>
       getWorkbenchRecent({ scope, q: queryValue || undefined }, signal),
-    refetchInterval: 3000,
+    refetchInterval: (query) => {
+      const items = query.state.data?.items ?? [];
+      const live = items.some((item) => LIVE_TASK_STATES.has(item.state));
+      return live || scope === "running" ? 3000 : 10000;
+    },
     placeholderData: (previous) => previous,
   });
   const pendingQuery = useQuery({
@@ -1872,7 +1913,7 @@ export function WorkbenchPage() {
     ].filter((group) => group.length > 0);
   }
 
-  const recentColumns: DataTableColumn<WorkbenchRecentItem>[] = [
+  const standardRecentColumns: DataTableColumn<WorkbenchRecentItem>[] = [
     {
       key: "select",
       label: "选择",
@@ -2203,20 +2244,252 @@ export function WorkbenchPage() {
     },
   ];
 
-  const recentTable = useTablePreferences({
+  function recentColumn(key: string): DataTableColumn<WorkbenchRecentItem> {
+    const column = standardRecentColumns.find((item) => item.key === key);
+    if (!column) throw new Error(`unknown recent column: ${key}`);
+    return column;
+  }
+
+  const fieldTaskColumn: DataTableColumn<WorkbenchRecentItem> = {
+    key: "task",
+    header: "任务",
+    label: "任务",
+    width: 220,
+    minWidth: 140,
+    maxWidth: 420,
+    hideable: false,
+    sortable: true,
+    sortValue: (item) =>
+      (item.definition_name || item.site_key || item.task_id).toLocaleLowerCase(),
+    cell: (item) => {
+      const title = item.definition_name || item.site_key || item.task_id;
+      return (
+        <span
+          className="block truncate font-semibold text-ink"
+          title={`${title} · ${item.task_id}`}
+        >
+          {title}
+        </span>
+      );
+    },
+  };
+  const fieldModeColumn: DataTableColumn<WorkbenchRecentItem> = {
+    key: "mode",
+    header: "模式",
+    label: "模式",
+    width: 88,
+    minWidth: 70,
+    maxWidth: 140,
+    hideable: true,
+    sortable: true,
+    sortValue: (item) => definitionTag(item),
+    cell: (item) => (
+      <span className="whitespace-nowrap text-xs text-ink-3">
+        {definitionTag(item)}
+      </span>
+    ),
+  };
+  const fieldLocationColumn: DataTableColumn<WorkbenchRecentItem> = {
+    key: "location",
+    header: "目录",
+    label: "目录",
+    width: 160,
+    minWidth: 100,
+    maxWidth: 280,
+    hideable: true,
+    sortable: true,
+    sortValue: (item) =>
+      (item.path || (item.node_id ? "根目录" : "未加入任务树")).toLocaleLowerCase(),
+    cell: (item) => {
+      const location = item.path || (item.node_id ? "根目录" : "未加入任务树");
+      return (
+        <span className="block truncate text-xs text-ink-3" title={location}>
+          {location}
+        </span>
+      );
+    },
+  };
+  const fieldRunColumn: DataTableColumn<WorkbenchRecentItem> = {
+    key: "run",
+    header: "运行",
+    label: "运行",
+    width: 150,
+    minWidth: 110,
+    maxWidth: 240,
+    hideable: true,
+    sortable: true,
+    sortValue: (item) => item.task_id,
+    cell: (item) => (
+      <span
+        className="block truncate font-mono text-[11px] text-ink-3"
+        title={item.task_id}
+      >
+        {item.task_id}
+      </span>
+    ),
+  };
+  const fieldProcessedColumn: DataTableColumn<WorkbenchRecentItem> = {
+    key: "processed",
+    header: "已处理",
+    label: "已处理",
+    width: 84,
+    minWidth: 68,
+    maxWidth: 160,
+    align: "right",
+    hideable: true,
+    sortable: true,
+    sortValue: (item) => progressFor(item).processed,
+    cell: (item) => (
+      <span className="text-sm tabular text-ink">
+        {formatNumber(progressFor(item).processed)}
+      </span>
+    ),
+  };
+  const fieldCandidatesColumn: DataTableColumn<WorkbenchRecentItem> = {
+    key: "candidates",
+    header: "候选",
+    label: "候选",
+    width: 84,
+    minWidth: 68,
+    maxWidth: 160,
+    align: "right",
+    hideable: true,
+    sortable: true,
+    sortValue: (item) => progressFor(item).total,
+    cell: (item) => {
+      const total = progressFor(item).total;
+      return (
+        <span className="text-sm tabular text-ink-2">
+          {total ? formatNumber(total) : "—"}
+        </span>
+      );
+    },
+  };
+  const fieldValidColumn: DataTableColumn<WorkbenchRecentItem> = {
+    key: "valid",
+    header: "有效",
+    label: "有效",
+    width: 76,
+    minWidth: 60,
+    maxWidth: 140,
+    align: "right",
+    hideable: true,
+    sortable: true,
+    sortValue: (item) => Number(item.counts?.valid_products || 0),
+    cell: (item) => (
+      <span className="text-sm font-medium tabular text-ink">
+        {formatNumber(Number(item.counts?.valid_products || 0))}
+      </span>
+    ),
+  };
+  const fieldFailedColumn: DataTableColumn<WorkbenchRecentItem> = {
+    key: "failed",
+    header: "失败",
+    label: "失败",
+    width: 76,
+    minWidth: 60,
+    maxWidth: 140,
+    align: "right",
+    hideable: true,
+    sortable: true,
+    sortValue: (item) => Number(item.counts?.failed_products || 0),
+    cell: (item) => {
+      const failed = Number(item.counts?.failed_products || 0);
+      return (
+        <span
+          className={cn(
+            "text-sm tabular",
+            failed > 0 ? "font-medium text-warning" : "text-ink-3",
+          )}
+        >
+          {formatNumber(failed)}
+        </span>
+      );
+    },
+  };
+  const fieldElapsedColumn: DataTableColumn<WorkbenchRecentItem> = {
+    key: "elapsed",
+    header: "用时",
+    label: "用时",
+    width: 88,
+    minWidth: 72,
+    maxWidth: 160,
+    align: "right",
+    hideable: true,
+    sortable: true,
+    sortValue: (item) => {
+      const start = item.started_at || item.created_at;
+      if (!start) return 0;
+      const startMs = Date.parse(start);
+      const endMs = Date.parse(item.finished_at || item.updated_at || start);
+      if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return 0;
+      return Math.max(0, Math.floor((endMs - startMs) / 1000));
+    },
+    cell: (item) => {
+      const live =
+        item.state === "RUNNING" ||
+        item.state === "PAUSING" ||
+        item.state === "CANCELLING";
+      return (
+        <span className="text-xs tabular whitespace-nowrap text-ink-3">
+          {elapsedLabel(
+            item.started_at || item.created_at,
+            live ? null : item.finished_at || item.updated_at,
+          )}
+        </span>
+      );
+    },
+  };
+
+  const fieldRecentColumns: DataTableColumn<WorkbenchRecentItem>[] = [
+    recentColumn("select"),
+    recentColumn("status"),
+    fieldTaskColumn,
+    fieldModeColumn,
+    fieldLocationColumn,
+    fieldRunColumn,
+    recentColumn("progress"),
+    fieldProcessedColumn,
+    fieldCandidatesColumn,
+    fieldValidColumn,
+    fieldFailedColumn,
+    recentColumn("started"),
+    fieldElapsedColumn,
+    recentColumn("actions"),
+  ];
+
+  const [recentView, setRecentView] = useState<RecentView>(readRecentView);
+  const standardRecentTable = useTablePreferences({
     tableKey: "workbench-recent",
-    columns: recentColumns,
+    columns: standardRecentColumns,
     defaultDensity: "default",
   });
+  const fieldRecentTable = useTablePreferences({
+    tableKey: "workbench-recent-fields",
+    columns: fieldRecentColumns,
+    defaultDensity: "compact",
+  });
+  const recentTable = recentView === "fields" ? fieldRecentTable : standardRecentTable;
   const recentSort = recentTable.sort;
   const recentSortColumn = recentSort
-    ? recentColumns.find((column) => column.key === recentSort.key)
+    ? recentTable.allColumns.find((column) => column.key === recentSort.key)
     : undefined;
   const recentSortBadge = recentSort
     ? `${recentSortColumn?.label ?? "自定义"} ${
         recentSort.direction === "asc" ? "↑" : "↓"
       }`
     : "按启动时间";
+
+  function changeRecentView(next: RecentView) {
+    setRecentView(next);
+    try {
+      localStorage.setItem(RECENT_VIEW_KEY, next);
+    } catch {
+      // The in-memory view still works when storage is unavailable.
+    }
+    standardRecentTable.setSort(null);
+    fieldRecentTable.setSort(null);
+  }
 
   function renderNode(node: WorkbenchNode, depth: number): ReactNode {
     if (visibleNodeIds && !visibleNodeIds.has(node.node_id)) return null;
@@ -2887,12 +3160,12 @@ export function WorkbenchPage() {
                 </span>
                 <div className="ml-auto flex flex-wrap items-center gap-1.5">
                   <TableViewToggle
-                    value={recentTable.density}
-                    options={densityViewOptions}
-                    onChange={recentTable.setDensity}
+                    value={recentView}
+                    options={RECENT_VIEW_OPTIONS}
+                    onChange={changeRecentView}
                   />
                   <TableDisplayOptions
-                    columns={recentColumns}
+                    columns={recentTable.allColumns}
                     visible={recentTable.visible}
                     onToggleColumn={recentTable.toggleColumn}
                     onResetWidths={() => resetRecentWidthsRef.current?.()}
@@ -3013,15 +3286,21 @@ export function WorkbenchPage() {
 
             <div className="min-h-0 flex-1">
               <DataTable
+                key={recentView}
                 caption="最近任务列表"
                 columns={recentTable.visibleColumns}
                 rows={recentTable.sortRows(recentItems)}
                 rowKey={(item) => item.task_id}
-                density={recentTable.density}
+                density={recentView === "fields" ? "compact" : "default"}
                 sort={recentTable.sort}
                 onSort={recentTable.toggleSort}
                 onSortChange={recentTable.setSort}
-                resizeKey="workbench-recent"
+                resizeKey={
+                  recentView === "fields"
+                    ? "workbench-recent-fields"
+                    : "workbench-recent"
+                }
+                fillWidth={recentView !== "fields"}
                 mobileCards
                 cardTitleKey="task"
                 headerTopClassName="top-0"
@@ -3076,6 +3355,9 @@ export function WorkbenchPage() {
                   {formatNumber(recentCounts.running)}
                 </b>
               </span>
+              {recentView === "fields" ? (
+                <span>字段视图 · 左右滚动查看更多字段</span>
+              ) : null}
               <span
                 className="tabular sm:ml-auto"
                 title={
@@ -3083,8 +3365,8 @@ export function WorkbenchPage() {
                     ? `数据最近一次变化：${formatTime(
                         new Date(lastUpdatedAt).toISOString(),
                         true,
-                      )}；页面可见时每 3 秒检查，数据无变化时不更新此时间。`
-                    : "页面可见时每 3 秒检查，数据变化时更新此时间。"
+                      )}；页面可见时运行中每 3 秒、空闲每 10 秒检查，数据无变化时不更新此时间。`
+                    : "页面可见时运行中每 3 秒、空闲每 10 秒检查，数据变化时更新此时间。"
                 }
               >
                 最后更新 {lastUpdated}

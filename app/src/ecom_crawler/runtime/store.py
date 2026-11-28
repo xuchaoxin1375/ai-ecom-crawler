@@ -3830,6 +3830,43 @@ class TaskStore:
             ).fetchall()
         return [_feedback_from_row(row) for row in rows], total
 
+    def feedback_summaries(self, task_ids: list[str]) -> dict[str, dict[str, Any]]:
+        """Return open counts and the latest feedback for many tasks at once.
+
+        The workbench recent list needs nothing more than this summary for each
+        row; querying ``list_feedback`` per task creates a fresh SQLite
+        connection and two statements per row on every poll.
+        """
+
+        ids = list(dict.fromkeys(task_id for task_id in task_ids if task_id))
+        if not ids:
+            return {}
+        placeholders = ", ".join("?" for _ in ids)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT task_id, feedback_id, status
+                FROM quality_feedback
+                WHERE task_id IN ({placeholders})
+                ORDER BY task_id, created_at DESC, feedback_id DESC
+                """,
+                ids,
+            ).fetchall()
+        summaries: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            task_id = str(row["task_id"])
+            summary = summaries.get(task_id)
+            if summary is None:
+                summary = {
+                    "open": 0,
+                    "latest_id": str(row["feedback_id"]),
+                    "latest_status": str(row["status"]),
+                }
+                summaries[task_id] = summary
+            if row["status"] not in {"RESOLVED", "WONTFIX"}:
+                summary["open"] += 1
+        return summaries
+
     def find_active_repair_build(self, site_key: str | None) -> str | None:
         """Return the newest repair build that has not reached a terminal state."""
         if not site_key:
