@@ -1273,7 +1273,20 @@ class WorkbenchApiTests(unittest.TestCase):
             "/api/workbench/import-batch", json={"batch_id": batch_id}
         )
         self.assertEqual(imported.status_code, 200, imported.text)
-        self.assertEqual(imported.json()["counts"]["pending"], 1)
+        self.assertEqual(imported.json()["counts"]["pending"], 0)
+        self.assertEqual(imported.json()["counts"]["added"], 1)
+        definitions = self.store.list_workbench_task_defs()
+        self.assertEqual(len(definitions), 1)
+        self.assertEqual(definitions[0].rule_id, "")
+        tree = self.client.get("/api/workbench/tree").json()
+        draft = next(
+            item
+            for item in tree["nodes"]
+            if item["node_id"] == definitions[0].node_id
+        )
+        self.assertEqual(draft["parent_id"], group_id)
+        self.assertEqual(draft["definition"]["rule_id"], "")
+        self.assertEqual(draft["site_readiness"], "needs_onboarding")
         dismissed = self.client.post(
             f"/api/workbench/pending-targets/{batch_id}/dismiss"
         )
@@ -1288,10 +1301,80 @@ class WorkbenchApiTests(unittest.TestCase):
             json={"batch_id": batch_id, "parent_id": group_id},
         )
         self.assertEqual(restored.status_code, 200, restored.text)
+        self.assertEqual(restored.json()["counts"]["existing"], 1)
         self.assertEqual(
             self.client.get("/api/workbench/pending-targets").json()["total_pending"],
-            1,
+            0,
         )
+        self.assertEqual(len(self.store.list_workbench_task_defs()), 1)
+
+    def test_draft_definition_is_visible_and_binds_when_rule_arrives(self) -> None:
+        group = self.client.post(
+            "/api/workbench/groups", json={"name": "直接入树"}
+        )
+        self.assertEqual(group.status_code, 201, group.text)
+        group_id = group.json()["node"]["node_id"]
+        created = self.client.post(
+            "/api/batches",
+            json={
+                "name": "draft batch",
+                "market": "GB",
+                "sites": ["https://unknown.example/"],
+                "workbench_parent_id": group_id,
+            },
+        )
+        self.assertEqual(created.status_code, 201, created.text)
+        batch_id = created.json()["batch"]["batch_id"]
+        imported = self.client.post(
+            "/api/workbench/import-batch", json={"batch_id": batch_id}
+        )
+        self.assertEqual(imported.status_code, 200, imported.text)
+        definitions = self.store.list_workbench_task_defs()
+        self.assertEqual(len(definitions), 1)
+        draft = definitions[0]
+        self.assertEqual(draft.rule_id, "")
+        self.assertEqual(draft.rule_path, "")
+
+        (self.rules_dir / "unknown.yaml").write_text(
+            RULE_TEMPLATE.replace("__BASE__", "https://unknown.example").replace(
+                'rule_id: "fixture-local"', 'rule_id: "unknown-local"'
+            ),
+            encoding="utf-8",
+        )
+        rule_path = self.rules_dir / "unknown.yaml"
+        sha256 = hashlib.sha256(rule_path.read_bytes()).hexdigest()
+        self.store.create_rule_version(
+            RuleVersion(
+                rule_id="unknown-local",
+                rule_version="2026.11.21-1",
+                sha256=sha256,
+                path="unknown.yaml",
+                status="candidate",
+            )
+        )
+        site = self.store.list_batch_sites(batch_id)[0]
+        self.store.activate_rule(
+            site_key=site.site_key,
+            rule_id="unknown-local",
+            rule_version="2026.11.21-1",
+            sha256=sha256,
+            request_id="test-unknown-activate",
+        )
+        bound = self.client.post(
+            "/api/workbench/import-batch", json={"batch_id": batch_id}
+        )
+        self.assertEqual(bound.status_code, 200, bound.text)
+        self.assertEqual(bound.json()["counts"]["added"], 1)
+        definitions = self.store.list_workbench_task_defs()
+        self.assertEqual(len(definitions), 1)
+        self.assertEqual(definitions[0].rule_id, "unknown-local")
+        self.assertTrue(definitions[0].rule_path)
+
+        started = self.client.post(
+            f"/api/workbench/tasks/{draft.node_id}/start"
+        )
+        self.assertEqual(started.status_code, 202, started.text)
+        self.assertEqual(started.json()["task"]["task_type"], "product")
 
     def test_pending_target_market_conflict_has_no_build_action(self) -> None:
         created = self.client.post(

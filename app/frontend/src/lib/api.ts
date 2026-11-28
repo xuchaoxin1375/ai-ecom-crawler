@@ -407,6 +407,12 @@ export interface WorkbenchRunBrief {
   updated_at: string;
 }
 
+export interface WorkbenchNodeBuild {
+  build_id: string;
+  state: string;
+  outcome: string | null;
+}
+
 export interface WorkbenchNode {
   node_id: string;
   node_type: "group" | "task";
@@ -420,6 +426,8 @@ export interface WorkbenchNode {
   definition?: WorkbenchDefinition | null;
   current_run?: WorkbenchRunBrief | null;
   path?: string | null;
+  site_readiness?: string | null;
+  build?: WorkbenchNodeBuild | null;
 }
 
 export interface WorkbenchTreePayload {
@@ -2153,10 +2161,22 @@ export function attachUnassignedWorkbenchRuns(): Promise<WorkbenchAttachUnassign
   );
 }
 
-export function startWorkbenchTask(
-  nodeId: string,
-): Promise<{ created: boolean; task: TaskSummary; node_id: string }> {
-  return sendJson<{ created: boolean; task: TaskSummary; node_id: string }>(
+export interface WorkbenchStartResponse {
+  created?: boolean;
+  task: TaskSummary | null;
+  node_id?: string;
+  onboarding?: { site_key: string; build_id: string }[];
+  build?: {
+    build_id: string;
+    state: string;
+    outcome: string | null;
+    error?: string | null;
+    rule?: unknown;
+  } | null;
+}
+
+export function startWorkbenchTask(nodeId: string): Promise<WorkbenchStartResponse> {
+  return sendJson<WorkbenchStartResponse>(
     `/api/workbench/tasks/${encodeURIComponent(nodeId)}/start`,
     "POST",
     {},

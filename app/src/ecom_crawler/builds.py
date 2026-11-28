@@ -1346,6 +1346,10 @@ class BuildManager:
         self._dispatching: str | None = None
         self._handled_permissions: dict[str, set[str]] = {}
         self._stopping = threading.Event()
+        # Optional hook used by the web app to bind a newly ready site to an
+        # existing workbench draft.  The callback receives (batch_id, site_key)
+        # and must not raise into the build finalizer.
+        self.on_site_ready: Callable[[str, str], None] | None = None
 
     def _service_for(self, build_id: str) -> BuildService:
         with self._lock:
@@ -3586,6 +3590,8 @@ correct the rule; a currency or market mismatch fails host validation.
                                 + ("；".join(reasons[:2]) or "缺少验证证据")
                             )[:2000],
                         )
+        if auto_activate and activation_matches and site is not None:
+            self._notify_site_ready(record.batch_id, record.site_key)
         self._mark_repair_finished(
             build_id, resolved=validation_status == "PASSED"
         )
@@ -3891,6 +3897,17 @@ correct the rule; a currency or market mismatch fails host validation.
             ]
         )
         return "\n".join(lines)
+
+    def _notify_site_ready(self, batch_id: str, site_key: str) -> None:
+        callback = self.on_site_ready
+        if callback is None:
+            return
+        try:
+            callback(batch_id, site_key)
+        except Exception:
+            logger.exception(
+                "workbench auto-import failed for %s/%s", batch_id, site_key
+            )
 
     def _mark_repair_finished(self, build_id: str, *, resolved: bool) -> None:
         rounds = self._repairs.get(build_id) or []

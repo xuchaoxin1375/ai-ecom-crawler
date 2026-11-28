@@ -532,6 +532,11 @@ export function WorkbenchPage() {
   const startableNodes = nodes.filter(
     (node) =>
       node.node_type === "task" &&
+      Boolean(node.definition?.rule_id) &&
+      !(
+        node.build &&
+        ["QUEUED", "RUNNING", "PAUSED", "CANCEL_REQUESTED"].includes(node.build.state)
+      ) &&
       !(node.current_run && isActiveState(node.current_run.state)),
   );
   const exportTaskId = selectedTaskId ?? selectedRun?.task_id ?? null;
@@ -625,7 +630,9 @@ export function WorkbenchPage() {
     if (!taskId) {
       showToast(
         "info",
-        `「${node.name}」尚未启动，暂无任务详情；请先启动任务，或右键编辑任务定义。`,
+        node.definition && !node.definition.rule_id
+          ? `「${node.name}」尚未接入采集规则；请点击节点右侧的接入按钮，或右键选择「接入并生成规则」。`
+          : `「${node.name}」尚未启动，暂无任务详情；请先启动任务，或右键编辑任务定义。`,
       );
       return;
     }
@@ -1499,9 +1506,18 @@ export function WorkbenchPage() {
     try {
       const response = await startWorkbenchTask(node.node_id);
       setSelectedNodeId(node.node_id);
-      setSelectedTaskId(response.task.task_id);
+      if (response.task) {
+        setSelectedTaskId(response.task.task_id);
+      }
       await refreshWorkbench();
-      showToast("success", `已启动「${node.name}」。`);
+      if (response.build?.build_id) {
+        showToast(
+          "success",
+          `已启动「${node.name}」的接入构建 ${response.build.build_id}。`,
+        );
+      } else {
+        showToast("success", `已启动「${node.name}」。`);
+      }
     } catch (error) {
       showToast("error", `启动失败：${errorText(error)}`);
     } finally {
@@ -2164,8 +2180,25 @@ export function WorkbenchPage() {
     const selected = selectedNodeId === node.node_id;
     const run = node.current_run;
     const runState = run?.state ?? null;
+    const definition = node.definition;
+    const ruleReady = Boolean(definition?.rule_id);
+    const build = node.build;
+    const buildActive = Boolean(
+      build &&
+      ["QUEUED", "RUNNING", "PAUSED", "CANCEL_REQUESTED"].includes(build.state),
+    );
+    const buildCandidate = Boolean(
+      build &&
+      build.state === "FINISHED" &&
+      build.outcome === "succeeded" &&
+      !ruleReady,
+    );
+    const needsOnboarding = !isGroup && !ruleReady;
     const canStart =
-      !isGroup && (!run || (!isActiveState(runState) && runState !== null));
+      !isGroup &&
+      (ruleReady
+        ? !run || (!isActiveState(runState) && runState !== null)
+        : !buildActive && !buildCandidate);
     const dropPosition =
       dropTarget !== "root" && dropTarget?.nodeId === node.node_id
         ? dropTarget.position
@@ -2270,6 +2303,10 @@ export function WorkbenchPage() {
                   <Plus size={11} aria-hidden="true" />
                 </button>
               </>
+            ) : needsOnboarding ? (
+              <span className="ml-auto shrink-0 text-[11px] text-ink-3">
+                {buildActive ? "构建中" : buildCandidate ? "待激活" : "待接入"}
+              </span>
             ) : runState ? (
               <span
                 className={cn(
@@ -2284,19 +2321,44 @@ export function WorkbenchPage() {
               <span className="ml-auto shrink-0 text-[11px] text-ink-3">未启动</span>
             )}
           </button>
-          {!isGroup && canStart ? (
+          {!isGroup && (buildActive || buildCandidate) && build ? (
+            <Link
+              to={`/builds/${encodeURIComponent(build.build_id)}`}
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-ink-3 hover:bg-surface-muted hover:text-accent"
+              aria-label={`查看构建 ${build.build_id}`}
+              title={buildActive ? "接入构建进行中" : "构建已完成，待激活规则"}
+            >
+              <GitBranchPlus size={13} aria-hidden="true" />
+            </Link>
+          ) : !isGroup && canStart ? (
             <button
               type="button"
               className="flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-ink-3 hover:bg-surface-muted hover:text-accent"
-              aria-label={`${run?.can_continue ? "续采" : run ? "新建运行" : "启动"} ${node.name}`}
-              title={run?.can_continue ? "续采此运行" : run ? "新建运行" : "启动任务"}
+              aria-label={
+                needsOnboarding
+                  ? `接入 ${node.name}`
+                  : `${run?.can_continue ? "续采" : run ? "新建运行" : "启动"} ${node.name}`
+              }
+              title={
+                needsOnboarding
+                  ? "接入并生成采集规则"
+                  : run?.can_continue
+                    ? "续采此运行"
+                    : run
+                      ? "新建运行"
+                      : "启动任务"
+              }
               disabled={readOnly || actionBusy === `start:${node.node_id}`}
               onClick={() => {
                 if (run?.can_continue) openRunConfig(run.task_id);
                 else void runNode(node);
               }}
             >
-              <Play size={13} aria-hidden="true" />
+              {needsOnboarding ? (
+                <GitBranchPlus size={13} aria-hidden="true" />
+              ) : (
+                <Play size={13} aria-hidden="true" />
+              )}
             </button>
           ) : null}
           <button
@@ -3556,8 +3618,23 @@ export function WorkbenchPage() {
                     const node = treeMenu.node!;
                     const run = node.current_run;
                     const runState = run?.state ?? null;
-                    const canStart =
-                      !run || (!isActiveState(runState) && runState !== null);
+                    const ruleReady = Boolean(node.definition?.rule_id);
+                    const build = node.build;
+                    const buildActive = Boolean(
+                      build &&
+                      ["QUEUED", "RUNNING", "PAUSED", "CANCEL_REQUESTED"].includes(
+                        build.state,
+                      ),
+                    );
+                    const buildCandidate = Boolean(
+                      build &&
+                      build.state === "FINISHED" &&
+                      build.outcome === "succeeded" &&
+                      !ruleReady,
+                    );
+                    const canStart = ruleReady
+                      ? !run || (!isActiveState(runState) && runState !== null)
+                      : !buildActive && !buildCandidate;
                     const items: WorkbenchMenuItem[] = [];
                     if (run?.can_continue) {
                       items.push({
@@ -3568,11 +3645,28 @@ export function WorkbenchPage() {
                         onSelect: () => openRunConfig(run.task_id),
                       });
                     }
+                    if (!ruleReady && (buildActive || buildCandidate) && build) {
+                      items.push({
+                        key: "view-build",
+                        label: buildActive ? "查看接入构建" : "查看候选规则",
+                        icon: <GitBranchPlus size={14} />,
+                        onSelect: () =>
+                          navigate(`/builds/${encodeURIComponent(build.build_id)}`),
+                      });
+                    }
                     if (canStart) {
                       items.push({
                         key: "start",
-                        label: run ? "新建运行" : "启动任务",
-                        icon: <Play size={14} />,
+                        label: !ruleReady
+                          ? "接入并生成规则"
+                          : run
+                            ? "新建运行"
+                            : "启动任务",
+                        icon: !ruleReady ? (
+                          <GitBranchPlus size={14} />
+                        ) : (
+                          <Play size={14} />
+                        ),
                         disabled: readOnly,
                         onSelect: () => void runNode(node),
                       });

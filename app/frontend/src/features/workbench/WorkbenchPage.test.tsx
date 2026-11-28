@@ -1280,6 +1280,27 @@ it("opens rename and dissolve dialogs from tree menus", async () => {
   ).toBeInTheDocument();
 });
 
+it("shows a rule-less task as a direct draft node with an onboard action", async () => {
+  const draftTree: WorkbenchTreePayload = {
+    nodes: [
+      { ...nodes[0], task_count: 1, running_count: 0 },
+      {
+        ...nodes[1],
+        definition: { ...definition, rule_id: "", rule_version: "" },
+        current_run: null,
+      },
+    ],
+  };
+  stubFetch(false, recent, draftTree);
+  renderPage("/workbench", { pathname: "/workbench" }, <WorkbenchPage />);
+
+  const treePanel = await screen.findByLabelText("任务目录");
+  expect(await within(treePanel).findByText("待接入")).toBeInTheDocument();
+  expect(
+    within(treePanel).getByRole("button", { name: "接入 fixture.example" }),
+  ).toBeInTheDocument();
+});
+
 it("disables write actions in a read-only preview", async () => {
   stubFetch(true);
   renderPage("/workbench", { pathname: "/workbench" }, <WorkbenchPage />);
