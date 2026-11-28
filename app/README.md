@@ -22,6 +22,7 @@
 - 分类过滤、选项合并与 `attributes` 兼容序列化。
 - 9 列业务 CSV、`task-result.json`、内部记录和排除／失败诊断。
 - 计数不变量、`outcome` 推导、`quality_exceptions` 异常索引。
+- 停止证据与语言检查：`ACCESS_DENIED` 记录 `stop_detail_code`（`challenge_unresolved`、`http_401`、`http_403`）和 `stop_evidence`；`LANGUAGE_MISMATCH` 在首次 HTML 导航页和商品页比较 `site.locale` 与实际语言，记录 `language_check` 和可用 `hreflang` 入口，任务详情显示对应标记。
 - `export`、`validate`、`run`、`submit`、`worker`、`pause`、`resume`、`cancel`、`status`、`list` 和 `serve` CLI 子命令。
 - 声明式规则包读取与校验；`entry_links`、`sitemap`、`listing`、`html_index`、`public_json` 发现来源。
 - Shopify JSON 产品源：`schema_version: "1.3"` 的 `product_source: shopify_json` 从 `/products.json` 映射商品字段，描述不足或 JSON 被挡时回退 HTML／discovery；见 [ADR 0020](../docs/adr/0020-shopify-json产品源.md)。
