@@ -3410,9 +3410,15 @@ correct the rule; a currency or market mismatch fails host validation.
         valid = validation["valid_products"]
         failed = validation["failed_products"]
         validation_status = str(validation.get("status") or "FAILED")
+        current_site_rule = self.store.get_site_rule(record.site_key)
         auto_activate = (
-            record.mode == "build" or self.activation_mode == "legacy"
-        ) and validation_status == "PASSED"
+            (record.mode == "build" or self.activation_mode == "legacy")
+            and validation_status == "PASSED"
+            and not (
+                current_site_rule is not None
+                and current_site_rule.retired_at is not None
+            )
+        )
         note_prefix = "已激活方案" if auto_activate else "候选方案"
         reasons = [
             str(reason)
@@ -3434,7 +3440,7 @@ correct the rule; a currency or market mismatch fails host validation.
             missing = "、".join(visual_evidence["missing"][:4])
             note += f"；视觉证据缺失：{missing}"
         activation = self.store.get_activation_by_request(f"{build_id}-activate") if auto_activate else None
-        current = self.store.get_site_rule(record.site_key) if auto_activate else None
+        current = current_site_rule if auto_activate else None
         activation_matches = activation is None or (
             current is not None
             and (current.rule_id, current.rule_version, current.sha256)
@@ -3481,8 +3487,17 @@ correct the rule; a currency or market mismatch fails host validation.
                         repair_build_id=build_id,
                     )
             if record.request.get("auto_collect") and batch is not None and site is not None:
+                current_rule = self.store.get_site_rule(record.site_key)
                 mode = batch.collection_mode
-                if mode in BATCH_COLLECTION_LIMITS and site.build_id == build_id:
+                if (
+                    current_rule is not None
+                    and current_rule.retired_at is not None
+                ):
+                    logger.info(
+                        "skipping automatic collection for retired site %s",
+                        record.site_key,
+                    )
+                elif mode in BATCH_COLLECTION_LIMITS and site.build_id == build_id:
                     collection_policy = load_collection_policy(self.store)
                     limits = (
                         formal_collection_limits(collection_policy)

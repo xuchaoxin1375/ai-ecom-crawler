@@ -466,6 +466,8 @@ class SiteRuleResponse(BaseModel):
     candidates: list[SiteRuleCandidate] = Field(default_factory=list)
     stale_tasks: int = 0
     open_feedback: int = 0
+    retired_at: str | None = None
+    retired_by: str | None = None
 
 
 class RuleActivateRequest(BaseModel):
@@ -493,6 +495,60 @@ class RuleRejectRequest(BaseModel):
     feedback_id: str | None = Field(default=None, max_length=200)
     retry: bool = False
     actor: str | None = Field(default=None, max_length=120)
+
+
+class RuleRetireRequest(BaseModel):
+    request_id: str = Field(min_length=1, max_length=200)
+    expected_active_version: str | None = Field(default=None, max_length=120)
+    expected_active_sha256: str | None = Field(default=None, max_length=64)
+    reason: str | None = Field(default=None, max_length=2000)
+    actor: str | None = Field(default=None, max_length=120)
+
+
+class RuleCleanupRequest(BaseModel):
+    request_id: str = Field(min_length=1, max_length=200)
+    reason: str | None = Field(default=None, max_length=2000)
+    actor: str | None = Field(default=None, max_length=120)
+
+
+class RuleCleanupReferences(BaseModel):
+    tasks: int = 0
+    builds: int = 0
+    builds_active: int = 0
+    feedback: int = 0
+    site_rules: int = 0
+    batch_sites: int = 0
+    workbench_defs: int = 0
+    activations: int = 0
+    child_versions: int = 0
+    samples: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
+
+
+class RuleVersionCleanupPreview(BaseModel):
+    rule_id: str
+    rule_version: str
+    sha256: str
+    status: str
+    path: str
+    file_exists: bool
+    bytes: int
+    references: RuleCleanupReferences
+    blockers: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    can_purge: bool
+
+
+class RuleCleanupResult(BaseModel):
+    purged: bool
+    cleanup_id: str
+    rule_id: str
+    rule_version: str
+    sha256: str
+    path: str
+    bytes: int
+    file_removed: bool
+    residual_path: str | None = None
+    references: RuleCleanupReferences
 
 
 class BatchCreateRequest(BaseModel):
@@ -1039,6 +1095,165 @@ def _workbench_clone_preview(
         "can_copy_data": data_error is None,
         "rule_blockers": [rule_error] if rule_error else [],
         "data_blockers": [data_error] if data_error else [],
+    }
+
+
+def _retired_site_rule(
+    store: TaskStore, *, site_key: str | None = None, rule_id: str | None = None
+) -> SiteRule | None:
+    for site_rule in store.list_site_rules():
+        if not site_rule.retired_at:
+            continue
+        if site_key and site_rule.site_key == site_key:
+            return site_rule
+        if rule_id and site_rule.rule_id == rule_id:
+            return site_rule
+    return None
+
+
+def _rule_cleanup_blockers(references: dict[str, Any]) -> list[str]:
+    blockers: list[str] = []
+    if references.get("tasks"):
+        blockers.append(f"仍有 {references['tasks']} 个任务引用")
+    if references.get("builds_active"):
+        blockers.append(f"有 {references['builds_active']} 个进行中的构建引用")
+    if references.get("feedback"):
+        blockers.append(f"仍有 {references['feedback']} 条反馈引用")
+    if references.get("site_rules"):
+        blockers.append(f"仍是 {references['site_rules']} 个站点的当前规则")
+    if references.get("batch_sites"):
+        blockers.append(f"仍有 {references['batch_sites']} 个批次站点指向")
+    if references.get("workbench_defs"):
+        blockers.append(f"仍有 {references['workbench_defs']} 个任务定义指向")
+    if references.get("activations"):
+        blockers.append(f"激活审计引用 {references['activations']} 条")
+    if references.get("child_versions"):
+        blockers.append(f"有 {references['child_versions']} 个新版本以它为父版本")
+    return blockers
+
+
+def _rule_cleanup_preview(
+    store: TaskStore,
+    rules_dir: Path | None,
+    rule_id: str,
+    rule_version: str,
+) -> dict[str, Any]:
+    version = store.get_rule_version(rule_id, rule_version)
+    if version is None:
+        raise KeyError(f"unknown rule version: {rule_id}@{rule_version}")
+    references = store.rule_version_references(
+        rule_id, rule_version, version.sha256
+    )
+    blockers: list[str] = []
+    warnings: list[str] = []
+    if version.status not in {"candidate", "rejected"}:
+        blockers.append(
+            f"当前状态为 {version.status}，只允许清理 candidate/rejected 版本"
+        )
+    blockers.extend(_rule_cleanup_blockers(references))
+    file_exists = False
+    file_bytes = 0
+    if rules_dir is None or not rules_dir.is_dir():
+        blockers.append("未配置规则目录")
+    else:
+        root = rules_dir.resolve()
+        try:
+            path = (root / version.path).resolve()
+        except OSError:
+            path = None
+        if path is None or not path.is_relative_to(root):
+            blockers.append("规则文件不在规则目录内")
+        else:
+            file_exists = path.is_file()
+            if file_exists:
+                try:
+                    file_bytes = path.stat().st_size
+                    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+                except OSError:
+                    digest = None
+                if digest is None:
+                    blockers.append("规则文件无法读取")
+                elif digest != version.sha256:
+                    blockers.append("规则文件哈希与账本不一致")
+            else:
+                warnings.append("规则文件已缺失，清理只移除账本记录")
+    if references.get("builds") and not references.get("builds_active"):
+        warnings.append(
+            f"{references['builds']} 个已结束构建保留版本号和哈希；"
+            "构建详情会显示规则版本已清理"
+        )
+    return {
+        "rule_id": version.rule_id,
+        "rule_version": version.rule_version,
+        "sha256": version.sha256,
+        "status": version.status,
+        "path": version.path,
+        "file_exists": file_exists,
+        "bytes": file_bytes,
+        "references": references,
+        "blockers": blockers,
+        "warnings": warnings,
+        "can_purge": not blockers,
+    }
+
+
+def _resolve_rule_path(
+    rules_dir: Path | None, relative: str
+) -> Path | None:
+    if rules_dir is None or not rules_dir.is_dir():
+        return None
+    root = rules_dir.resolve()
+    try:
+        path = (root / relative).resolve()
+    except OSError:
+        return None
+    return path if path.is_relative_to(root) else None
+
+
+def _finish_rule_cleanup(
+    store: TaskStore, cleanup: dict[str, Any], rules_dir: Path | None
+) -> dict[str, Any]:
+    path = _resolve_rule_path(rules_dir, str(cleanup["path"]))
+    residual_path = None
+    file_removed = path is None
+    if path is not None:
+        if not path.exists():
+            file_removed = True
+        else:
+            try:
+                digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            except OSError:
+                digest = None
+            if digest != cleanup["sha256"]:
+                residual_path = str(path)
+                file_removed = False
+            else:
+                try:
+                    path.unlink()
+                    file_removed = True
+                except OSError:
+                    residual_path = str(path)
+                    file_removed = False
+    updated = store.update_rule_cleanup_file(
+        cleanup["cleanup_id"],
+        file_removed=file_removed,
+        residual_path=residual_path,
+    )
+    return _rule_cleanup_payload(updated)
+
+
+def _rule_cleanup_payload(cleanup: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "purged": True,
+        "cleanup_id": cleanup["cleanup_id"],
+        "rule_id": cleanup["rule_id"],
+        "rule_version": cleanup["rule_version"],
+        "sha256": cleanup["sha256"],
+        "path": cleanup["path"],
+        "bytes": cleanup["bytes"],
+        "file_removed": cleanup["file_removed"],
+        "residual_path": cleanup["residual_path"],
+        "references": cleanup["references"],
     }
 
 
@@ -2259,6 +2474,8 @@ def create_app(
                 code = "RULE_NOT_CANDIDATE"
             elif "not a superseded" in text or "expected superseded" in text:
                 code = "RULE_NOT_ACTIVE"
+            elif "already retired" in text:
+                code = "RULE_RETIRED"
             elif "already exists" in text:
                 code = "RULE_VERSION_CONFLICT"
             elif "rule_id mismatch" in text:
@@ -2429,6 +2646,8 @@ def create_app(
             candidates=candidate_payloads,
             stale_tasks=stale_tasks,
             open_feedback=open_feedback,
+            retired_at=active.retired_at if active else None,
+            retired_by=active.retired_by if active else None,
         )
 
     def require_file_hash(version: RuleVersion) -> None:
@@ -2775,6 +2994,11 @@ def create_app(
         """
         active = store.get_site_rule(site_key)
         if active is not None:
+            if active.retired_at:
+                return (
+                    None,
+                    f"站点规则已停用：{active.rule_id}@{active.rule_version}",
+                )
             entry = find_rule_entry(
                 active.rule_id, active.rule_version, entries, active.sha256
             )
@@ -3894,6 +4118,15 @@ def create_app(
             )
         except (RuleError, ContractError) as exc:
             raise _error("INVALID_RULE", str(exc), 400) from exc
+        retired = _retired_site_rule(
+            store, site_key=task.site_key, rule_id=task.plan_id
+        )
+        if retired is not None:
+            raise _error(
+                "SITE_RULE_RETIRED",
+                f"站点规则已停用：{retired.rule_id}@{retired.rule_version}",
+                409,
+            )
         request_json = json.dumps(
             payload.model_dump(),
             ensure_ascii=False,
@@ -4479,6 +4712,12 @@ def create_app(
         active = ensure_site_rule(feedback.site_key)
         if active is None:
             raise _error("RULE_NOT_ACTIVE", "site has no active rule", 409)
+        if active.retired_at:
+            raise _error(
+                "SITE_RULE_RETIRED",
+                f"站点规则已停用：{active.rule_id}@{active.rule_version}",
+                409,
+            )
         busy = site_busy(feedback.site_key)
         if busy:
             raise _error("SITE_BUSY", "site has active work", 409, busy)
@@ -4648,6 +4887,75 @@ def create_app(
             raise rule_error(exc) from exc
         return rule_version_payload(version)
 
+    @app.get(
+        "/api/rules/{rule_id}/versions/{rule_version}/cleanup-preview",
+        response_model=RuleVersionCleanupPreview,
+    )
+    def get_rule_cleanup_preview(
+        rule_id: str, rule_version: str
+    ) -> RuleVersionCleanupPreview:
+        try:
+            return RuleVersionCleanupPreview.model_validate(
+                _rule_cleanup_preview(store, rules, rule_id, rule_version)
+            )
+        except KeyError as exc:
+            raise _error("RULE_NOT_FOUND", str(exc), 404) from exc
+
+    @app.post(
+        "/api/rules/{rule_id}/versions/{rule_version}/purge",
+        response_model=RuleCleanupResult,
+    )
+    def purge_rule_version(
+        rule_id: str,
+        rule_version: str,
+        payload: RuleCleanupRequest,
+    ) -> RuleCleanupResult:
+        existing = store.get_rule_cleanup_by_request(payload.request_id)
+        if existing is not None:
+            if (
+                existing["rule_id"] != rule_id
+                or existing["rule_version"] != rule_version
+            ):
+                raise _error(
+                    "RULE_CLEANUP_CONFLICT",
+                    "request ID belongs to another rule cleanup",
+                    409,
+                )
+            return RuleCleanupResult.model_validate(
+                _finish_rule_cleanup(store, existing, rules)
+            )
+        try:
+            preview = _rule_cleanup_preview(store, rules, rule_id, rule_version)
+        except KeyError as exc:
+            raise _error("RULE_NOT_FOUND", str(exc), 404) from exc
+        if not preview["can_purge"]:
+            raise _error(
+                "RULE_CLEANUP_BLOCKED",
+                "规则版本仍被引用，不能清理",
+                409,
+                {"blockers": preview["blockers"]},
+            )
+        version = store.get_rule_version(rule_id, rule_version)
+        if version is None:
+            raise _error("RULE_NOT_FOUND", "rule version disappeared", 404)
+        try:
+            cleanup = store.purge_rule_version(
+                rule_id,
+                rule_version,
+                request_id=payload.request_id,
+                sha256=version.sha256,
+                path=version.path,
+                bytes_count=int(preview["bytes"]),
+                references=preview["references"],
+                actor=payload.actor or "local-user",
+                reason=payload.reason,
+            )
+        except RuleVersionError as exc:
+            raise rule_error(exc) from exc
+        return RuleCleanupResult.model_validate(
+            _finish_rule_cleanup(store, cleanup, rules)
+        )
+
     @app.get("/api/sites/{site_key}/rule", response_model=SiteRuleResponse)
     def read_site_rule(site_key: str) -> SiteRuleResponse:
         return site_rule_payload(site_key)
@@ -4813,6 +5121,66 @@ def create_app(
             "target": {
                 "rule_version": target.rule_version,
                 "sha256": target.sha256,
+            },
+        }
+
+    @app.post("/api/sites/{site_key}/rule/retire")
+    def retire_site_rule(
+        site_key: str, payload: RuleRetireRequest
+    ) -> dict[str, Any]:
+        existing = store.get_activation_by_request(payload.request_id)
+        if existing is not None:
+            if (
+                existing.site_key != site_key
+                or existing.action != "retire"
+                or (
+                    payload.expected_active_version is not None
+                    and existing.to_version != payload.expected_active_version
+                )
+            ):
+                raise _error(
+                    "ACTIVATION_CONFLICT",
+                    "request ID belongs to another rule retirement",
+                    409,
+                )
+            return {
+                "retired": True,
+                "site": site_rule_payload(site_key).model_dump(),
+                "previous": {
+                    "rule_version": existing.from_version,
+                    "sha256": existing.from_sha256,
+                },
+            }
+        builds = store.list_builds(
+            site_key=site_key, states=ACTIVE_BUILD_STATES, limit=1
+        )
+        if builds:
+            raise _error(
+                "SITE_BUSY",
+                "site has an active build; wait or cancel it before retiring the rule",
+                409,
+                {"build_id": builds[0].build_id, "build_state": builds[0].state},
+            )
+        active = store.get_site_rule(site_key)
+        if active is None:
+            raise _error("RULE_NOT_ACTIVE", "site has no active rule", 409)
+        try:
+            _site_rule, activation = store.retire_site_rule(
+                site_key=site_key,
+                request_id=payload.request_id,
+                expected_active_version=payload.expected_active_version,
+                expected_active_sha256=payload.expected_active_sha256,
+                reason=payload.reason,
+                actor=payload.actor or "local-user",
+            )
+        except RuleVersionError as exc:
+            raise rule_error(exc) from exc
+        return {
+            "retired": True,
+            "site": site_rule_payload(site_key).model_dump(),
+            "previous": {
+                "rule_version": activation.from_version,
+                "sha256": activation.from_sha256,
             },
         }
 
@@ -5268,6 +5636,7 @@ def create_app(
         created_rule: Path | None = None
         created_data: Path | None = None
         cloned_task: Task | None = None
+        rule_version_record: RuleVersion | None = None
         try:
             rules_root = rules.resolve()
             new_rule_path = rule.path.resolve().relative_to(rules_root).as_posix()
@@ -5289,11 +5658,22 @@ def create_app(
                     copied_rule.resolve().relative_to(rules_root).as_posix()
                 )
                 new_rule_version = version
+                rule_digest = hashlib.sha256(copied_rule.read_bytes()).hexdigest()
+                rule_version_record = RuleVersion(
+                    rule_id=rule.rule_id,
+                    rule_version=version,
+                    sha256=rule_digest,
+                    path=new_rule_path,
+                    status="candidate",
+                    parent_version=rule.rule_version,
+                    notes=f"任务克隆实验版本，克隆自 {node.name}",
+                )
                 rule_payload = {
                     "rule_id": rule.rule_id,
                     "rule_version": version,
                     "path": new_rule_path,
                     "status": "candidate",
+                    "sha256": rule_digest,
                 }
             if source_task is not None:
                 cloned_task = _clone_task_snapshot(
@@ -5359,6 +5739,7 @@ def create_app(
                 copy_items_from=(
                     source_task.task_id if source_task is not None else None
                 ),
+                rule_version=rule_version_record,
             )
         except ValueError as exc:
             if created_data is not None and created_data.exists():
@@ -5903,6 +6284,15 @@ def create_app(
         definition = store.get_workbench_task_def(node_id)
         if definition is None:
             raise _error("NOT_FOUND", f"unknown workbench task: {node_id}", 404)
+        retired = _retired_site_rule(
+            store, site_key=definition.site_key, rule_id=definition.rule_id
+        )
+        if retired is not None:
+            raise _error(
+                "SITE_RULE_RETIRED",
+                f"站点规则已停用：{retired.rule_id}@{retired.rule_version}",
+                409,
+            )
         runs = [
             run for run in store.list_workbench_task_runs() if run.node_id == node_id
         ]
@@ -6576,6 +6966,20 @@ def create_app(
                         **item,
                         "reason": READINESS_SKIP.get(
                             site.readiness, f"站点状态为 {site.readiness}"
+                        ),
+                    }
+                )
+                continue
+            retired = _retired_site_rule(
+                store, site_key=site.site_key, rule_id=site.rule_id
+            )
+            if retired is not None:
+                skipped.append(
+                    {
+                        **item,
+                        "reason": (
+                            "站点规则已停用："
+                            f"{retired.rule_id}@{retired.rule_version}"
                         ),
                     }
                 )

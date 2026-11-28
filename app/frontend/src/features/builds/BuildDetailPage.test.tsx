@@ -348,6 +348,8 @@ it("activates a verified candidate from the build detail", async () => {
     ],
     stale_tasks: 0,
     open_feedback: 0,
+    retired_at: null,
+    retired_by: null,
   };
   const fetchMock = await renderBuild(
     build,

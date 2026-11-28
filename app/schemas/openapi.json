@@ -1845,6 +1845,170 @@
         "title": "RuleActivateRequest",
         "type": "object"
       },
+      "RuleCleanupReferences": {
+        "properties": {
+          "activations": {
+            "default": 0,
+            "title": "Activations",
+            "type": "integer"
+          },
+          "batch_sites": {
+            "default": 0,
+            "title": "Batch Sites",
+            "type": "integer"
+          },
+          "builds": {
+            "default": 0,
+            "title": "Builds",
+            "type": "integer"
+          },
+          "builds_active": {
+            "default": 0,
+            "title": "Builds Active",
+            "type": "integer"
+          },
+          "child_versions": {
+            "default": 0,
+            "title": "Child Versions",
+            "type": "integer"
+          },
+          "feedback": {
+            "default": 0,
+            "title": "Feedback",
+            "type": "integer"
+          },
+          "samples": {
+            "additionalProperties": {
+              "items": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "title": "Samples",
+            "type": "object"
+          },
+          "site_rules": {
+            "default": 0,
+            "title": "Site Rules",
+            "type": "integer"
+          },
+          "tasks": {
+            "default": 0,
+            "title": "Tasks",
+            "type": "integer"
+          },
+          "workbench_defs": {
+            "default": 0,
+            "title": "Workbench Defs",
+            "type": "integer"
+          }
+        },
+        "title": "RuleCleanupReferences",
+        "type": "object"
+      },
+      "RuleCleanupRequest": {
+        "properties": {
+          "actor": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "request_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id"
+        ],
+        "title": "RuleCleanupRequest",
+        "type": "object"
+      },
+      "RuleCleanupResult": {
+        "properties": {
+          "bytes": {
+            "title": "Bytes",
+            "type": "integer"
+          },
+          "cleanup_id": {
+            "title": "Cleanup Id",
+            "type": "string"
+          },
+          "file_removed": {
+            "title": "File Removed",
+            "type": "boolean"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "purged": {
+            "title": "Purged",
+            "type": "boolean"
+          },
+          "references": {
+            "$ref": "#/components/schemas/RuleCleanupReferences"
+          },
+          "residual_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Residual Path"
+          },
+          "rule_id": {
+            "title": "Rule Id",
+            "type": "string"
+          },
+          "rule_version": {
+            "title": "Rule Version",
+            "type": "string"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "purged",
+          "cleanup_id",
+          "rule_id",
+          "rule_version",
+          "sha256",
+          "path",
+          "bytes",
+          "file_removed",
+          "references"
+        ],
+        "title": "RuleCleanupResult",
+        "type": "object"
+      },
       "RuleRejectRequest": {
         "properties": {
           "actor": {
@@ -1902,6 +2066,69 @@
           }
         },
         "title": "RuleRejectRequest",
+        "type": "object"
+      },
+      "RuleRetireRequest": {
+        "properties": {
+          "actor": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor"
+          },
+          "expected_active_sha256": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Active Sha256"
+          },
+          "expected_active_version": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Active Version"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "request_id": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id"
+        ],
+        "title": "RuleRetireRequest",
         "type": "object"
       },
       "RuleRollbackRequest": {
@@ -1965,6 +2192,72 @@
           "request_id"
         ],
         "title": "RuleRollbackRequest",
+        "type": "object"
+      },
+      "RuleVersionCleanupPreview": {
+        "properties": {
+          "blockers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Blockers",
+            "type": "array"
+          },
+          "bytes": {
+            "title": "Bytes",
+            "type": "integer"
+          },
+          "can_purge": {
+            "title": "Can Purge",
+            "type": "boolean"
+          },
+          "file_exists": {
+            "title": "File Exists",
+            "type": "boolean"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "references": {
+            "$ref": "#/components/schemas/RuleCleanupReferences"
+          },
+          "rule_id": {
+            "title": "Rule Id",
+            "type": "string"
+          },
+          "rule_version": {
+            "title": "Rule Version",
+            "type": "string"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "rule_id",
+          "rule_version",
+          "sha256",
+          "status",
+          "path",
+          "file_exists",
+          "bytes",
+          "references",
+          "can_purge"
+        ],
+        "title": "RuleVersionCleanupPreview",
         "type": "object"
       },
       "RuleVersionListResponse": {
@@ -2343,6 +2636,28 @@
             "default": 0,
             "title": "Open Feedback",
             "type": "integer"
+          },
+          "retired_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retired At"
+          },
+          "retired_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retired By"
           },
           "rule_id": {
             "anyOf": [
@@ -5652,6 +5967,112 @@
         "summary": "Get Rule Version"
       }
     },
+    "/api/rules/{rule_id}/versions/{rule_version}/cleanup-preview": {
+      "get": {
+        "operationId": "get_rule_cleanup_preview_api_rules__rule_id__versions__rule_version__cleanup_preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "title": "Rule Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "rule_version",
+            "required": true,
+            "schema": {
+              "title": "Rule Version",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuleVersionCleanupPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Rule Cleanup Preview"
+      }
+    },
+    "/api/rules/{rule_id}/versions/{rule_version}/purge": {
+      "post": {
+        "operationId": "purge_rule_version_api_rules__rule_id__versions__rule_version__purge_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "title": "Rule Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "rule_version",
+            "required": true,
+            "schema": {
+              "title": "Rule Version",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuleCleanupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuleCleanupResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Purge Rule Version"
+      }
+    },
     "/api/rules/{rule_id}/versions/{rule_version}/reject": {
       "post": {
         "operationId": "reject_rule_version_api_rules__rule_id__versions__rule_version__reject_post",
@@ -5798,6 +6219,57 @@
           }
         },
         "summary": "Activate Site Rule"
+      }
+    },
+    "/api/sites/{site_key}/rule/retire": {
+      "post": {
+        "operationId": "retire_site_rule_api_sites__site_key__rule_retire_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "site_key",
+            "required": true,
+            "schema": {
+              "title": "Site Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuleRetireRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Retire Site Rule Api Sites  Site Key  Rule Retire Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retire Site Rule"
       }
     },
     "/api/sites/{site_key}/rule/rollback": {

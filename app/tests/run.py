@@ -24,6 +24,7 @@ GROUPS = {
         "test_feedback",
         "test_image_proxy",
         "test_migrate_rules",
+        "test_rule_lifecycle",
         "test_workbench",
         "test_run_config",
         "test_system_metrics",

@@ -921,6 +921,48 @@ export interface SiteRuleResponse {
   candidates: SiteRuleCandidate[];
   stale_tasks: number;
   open_feedback: number;
+  retired_at: string | null;
+  retired_by: string | null;
+}
+
+export interface RuleCleanupReferences {
+  tasks: number;
+  builds: number;
+  builds_active: number;
+  feedback: number;
+  site_rules: number;
+  batch_sites: number;
+  workbench_defs: number;
+  activations: number;
+  child_versions: number;
+  samples: Record<string, Array<Record<string, unknown>>>;
+}
+
+export interface RuleVersionCleanupPreview {
+  rule_id: string;
+  rule_version: string;
+  sha256: string;
+  status: RuleVersionRecord["status"];
+  path: string;
+  file_exists: boolean;
+  bytes: number;
+  references: RuleCleanupReferences;
+  blockers: string[];
+  warnings: string[];
+  can_purge: boolean;
+}
+
+export interface RuleCleanupResult {
+  purged: boolean;
+  cleanup_id: string;
+  rule_id: string;
+  rule_version: string;
+  sha256: string;
+  path: string;
+  bytes: number;
+  file_removed: boolean;
+  residual_path: string | null;
+  references: RuleCleanupReferences;
 }
 
 export interface RuleActivationResponse {
@@ -2194,6 +2236,19 @@ export function getSiteRule(
   );
 }
 
+export function getRuleVersion(
+  ruleId: string,
+  ruleVersion: string,
+  signal?: AbortSignal,
+): Promise<RuleVersionRecord> {
+  return getJson<RuleVersionRecord>(
+    `/api/rules/${encodeURIComponent(ruleId)}/versions/${encodeURIComponent(
+      ruleVersion,
+    )}`,
+    signal,
+  );
+}
+
 export function activateSiteRule(
   siteKey: string,
   body: {
@@ -2238,6 +2293,53 @@ export function rejectRuleVersion(
     `/api/rules/${encodeURIComponent(ruleId)}/versions/${encodeURIComponent(
       ruleVersion,
     )}/reject`,
+    "POST",
+    body,
+  );
+}
+
+export function retireSiteRule(
+  siteKey: string,
+  body: {
+    request_id: string;
+    expected_active_version?: string | null;
+    expected_active_sha256?: string | null;
+    reason?: string | null;
+  },
+): Promise<{
+  retired: boolean;
+  site: SiteRuleResponse;
+  previous: { rule_version: string | null; sha256: string | null };
+}> {
+  return sendJson(
+    `/api/sites/${encodeURIComponent(siteKey)}/rule/retire`,
+    "POST",
+    body,
+  );
+}
+
+export function getRuleVersionCleanup(
+  ruleId: string,
+  ruleVersion: string,
+  signal?: AbortSignal,
+): Promise<RuleVersionCleanupPreview> {
+  return getJson<RuleVersionCleanupPreview>(
+    `/api/rules/${encodeURIComponent(ruleId)}/versions/${encodeURIComponent(
+      ruleVersion,
+    )}/cleanup-preview`,
+    signal,
+  );
+}
+
+export function purgeRuleVersion(
+  ruleId: string,
+  ruleVersion: string,
+  body: { request_id: string; reason?: string | null },
+): Promise<RuleCleanupResult> {
+  return sendJson<RuleCleanupResult>(
+    `/api/rules/${encodeURIComponent(ruleId)}/versions/${encodeURIComponent(
+      ruleVersion,
+    )}/purge`,
     "POST",
     body,
   );

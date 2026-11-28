@@ -281,6 +281,13 @@ class WorkbenchApiTests(unittest.TestCase):
         self.assertEqual(rule.rule_id, "fixture-local")
         self.assertEqual(rule.rule_version, payload["rule"]["rule_version"])
         self.assertEqual(rule.raw.get("status"), "candidate")
+        ledger_version = self.store.get_rule_version(
+            "fixture-local", payload["rule"]["rule_version"]
+        )
+        self.assertIsNotNone(ledger_version)
+        self.assertEqual(ledger_version.status, "candidate")
+        self.assertEqual(ledger_version.parent_version, "2026.11.21-1")
+        self.assertEqual(ledger_version.path, payload["rule"]["path"])
 
         tree = self.client.get("/api/workbench/tree").json()["nodes"]
         source_node = next(item for item in tree if item["node_id"] == node_id)

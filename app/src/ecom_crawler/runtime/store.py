@@ -286,6 +286,8 @@ CREATE TABLE IF NOT EXISTS site_rules (
     rule_version TEXT NOT NULL,
     sha256 TEXT NOT NULL,
     path TEXT NOT NULL,
+    retired_at TEXT,
+    retired_by TEXT,
     updated_at TEXT NOT NULL
 );
 
@@ -309,6 +311,25 @@ CREATE TABLE IF NOT EXISTS rule_activations (
 
 CREATE INDEX IF NOT EXISTS idx_rule_activations_site
     ON rule_activations(site_key, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS rule_cleanups (
+    cleanup_id TEXT PRIMARY KEY,
+    request_id TEXT NOT NULL UNIQUE,
+    rule_id TEXT NOT NULL,
+    rule_version TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    path TEXT NOT NULL,
+    bytes INTEGER NOT NULL DEFAULT 0,
+    references_json TEXT NOT NULL DEFAULT '{}',
+    actor TEXT NOT NULL,
+    reason TEXT,
+    file_removed INTEGER NOT NULL DEFAULT 0,
+    residual_path TEXT,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_rule_cleanups_rule
+    ON rule_cleanups(rule_id, rule_version, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS task_items (
     task_id TEXT NOT NULL,
@@ -581,6 +602,15 @@ class TaskStore:
                 "CREATE INDEX IF NOT EXISTS idx_builds_feedback "
                 "ON builds(feedback_id, created_at DESC)"
             )
+            site_rule_columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(site_rules)")
+            }
+            for column in ("retired_at", "retired_by"):
+                if column not in site_rule_columns:
+                    connection.execute(
+                        f"ALTER TABLE site_rules ADD COLUMN {column} TEXT"
+                    )
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS idx_tasks_rule_sha "
                 "ON tasks(rule_sha256)"
@@ -2054,6 +2084,7 @@ class TaskStore:
         *,
         source_task: Task | None = None,
         copy_items_from: str | None = None,
+        rule_version: RuleVersion | None = None,
     ) -> WorkbenchNode:
         """Create a task definition clone and optionally a copied historical run.
 
@@ -2114,6 +2145,32 @@ class TaskStore:
                         definition.updated_at,
                     ),
                 )
+                if rule_version is not None:
+                    connection.execute(
+                        """
+                        INSERT INTO rule_versions (
+                            rule_id, rule_version, sha256, parent_version, status,
+                            source_build_id, source_feedback_id, path, created_at,
+                            activated_at, activated_by, reviewed_by, reviewed_at, notes
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            rule_version.rule_id,
+                            rule_version.rule_version,
+                            rule_version.sha256,
+                            rule_version.parent_version,
+                            rule_version.status,
+                            rule_version.source_build_id,
+                            rule_version.source_feedback_id,
+                            rule_version.path,
+                            rule_version.created_at,
+                            rule_version.activated_at,
+                            rule_version.activated_by,
+                            rule_version.reviewed_by,
+                            rule_version.reviewed_at,
+                            rule_version.notes,
+                        ),
+                    )
                 if source_task is not None:
                     self._insert_task(connection, source_task)
                     connection.execute(
@@ -3670,6 +3727,13 @@ class TaskStore:
             ).fetchone()
         return _site_rule_from_row(row) if row else None
 
+    def list_site_rules(self) -> list[SiteRule]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM site_rules ORDER BY site_key"
+            ).fetchall()
+        return [_site_rule_from_row(row) for row in rows]
+
     def bind_verified_site_rule(self, rule: SiteRule) -> SiteRule | None:
         with self._connect() as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -3708,13 +3772,16 @@ class TaskStore:
             connection.execute(
                 """
                 INSERT INTO site_rules (
-                    site_key, rule_id, rule_version, sha256, path, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    site_key, rule_id, rule_version, sha256, path,
+                    retired_at, retired_by, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(site_key) DO UPDATE SET
                     rule_id = excluded.rule_id,
                     rule_version = excluded.rule_version,
                     sha256 = excluded.sha256,
                     path = excluded.path,
+                    retired_at = excluded.retired_at,
+                    retired_by = excluded.retired_by,
                     updated_at = excluded.updated_at
                 """,
                 (
@@ -3723,6 +3790,8 @@ class TaskStore:
                     site_rule.rule_version,
                     site_rule.sha256,
                     site_rule.path,
+                    site_rule.retired_at,
+                    site_rule.retired_by,
                     site_rule.updated_at,
                 ),
             )
@@ -3898,13 +3967,16 @@ class TaskStore:
                 connection.execute(
                     """
                     INSERT INTO site_rules (
-                        site_key, rule_id, rule_version, sha256, path, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?)
+                        site_key, rule_id, rule_version, sha256, path,
+                        retired_at, retired_by, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, NULL, NULL, ?)
                     ON CONFLICT(site_key) DO UPDATE SET
                         rule_id = excluded.rule_id,
                         rule_version = excluded.rule_version,
                         sha256 = excluded.sha256,
                         path = excluded.path,
+                        retired_at = NULL,
+                        retired_by = NULL,
                         updated_at = excluded.updated_at
                     """,
                     (site_key, rule_id, rule_version, sha256, target.path, now),
@@ -4003,6 +4075,127 @@ class TaskStore:
             raise RuleVersionError("site rule pointer was not written")
         return site_rule, activation
 
+    def retire_site_rule(
+        self,
+        *,
+        site_key: str,
+        request_id: str,
+        expected_active_version: str | None = None,
+        expected_active_sha256: str | None = None,
+        reason: str | None = None,
+        actor: str = "local-user",
+    ) -> tuple[SiteRule, RuleActivation]:
+        now = utc_now()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                existing_row = connection.execute(
+                    "SELECT * FROM rule_activations WHERE request_id = ?",
+                    (request_id,),
+                ).fetchone()
+                current_row = connection.execute(
+                    "SELECT * FROM site_rules WHERE site_key = ?", (site_key,)
+                ).fetchone()
+                if current_row is None:
+                    raise RuleVersionError(f"site has no active rule: {site_key}")
+                current = _site_rule_from_row(current_row)
+                if existing_row is not None:
+                    existing = _rule_activation_from_row(existing_row)
+                    if (
+                        existing.site_key != site_key
+                        or existing.action != "retire"
+                        or existing.to_version != current.rule_version
+                    ):
+                        raise RuleActivationConflictError(
+                            "retirement request already exists with different targets"
+                        )
+                    connection.commit()
+                    return current, existing
+                if current.retired_at is not None:
+                    raise RuleVersionError(
+                        f"site rule is already retired: {site_key}"
+                    )
+                if expected_active_version is not None and (
+                    current.rule_version != expected_active_version
+                ):
+                    raise RuleActivationConflictError(
+                        "expected active version does not match current pointer"
+                    )
+                if expected_active_sha256 is not None and (
+                    current.sha256 != expected_active_sha256
+                ):
+                    raise RuleActivationConflictError(
+                        "expected active hash does not match current pointer"
+                    )
+                connection.execute(
+                    "UPDATE site_rules SET retired_at = ?, retired_by = ?, "
+                    "updated_at = ? WHERE site_key = ?",
+                    (now, actor, now, site_key),
+                )
+                connection.execute(
+                    """
+                    UPDATE rule_versions SET status = 'retired'
+                    WHERE rule_id = ? AND rule_version = ? AND status != 'retired'
+                    AND NOT EXISTS (
+                        SELECT 1 FROM site_rules s
+                        WHERE s.rule_id = rule_versions.rule_id
+                        AND s.rule_version = rule_versions.rule_version
+                        AND s.site_key != ? AND s.retired_at IS NULL
+                    )
+                    """,
+                    (current.rule_id, current.rule_version, site_key),
+                )
+                activation = RuleActivation(
+                    activation_id=f"act-{uuid.uuid4().hex[:12]}",
+                    request_id=request_id,
+                    site_key=site_key,
+                    rule_id=current.rule_id,
+                    action="retire",
+                    from_version=current.rule_version,
+                    from_sha256=current.sha256,
+                    to_version=current.rule_version,
+                    to_sha256=current.sha256,
+                    reason=reason,
+                    actor=actor,
+                    created_at=now,
+                )
+                connection.execute(
+                    """
+                    INSERT INTO rule_activations (
+                        activation_id, request_id, site_key, rule_id, action,
+                        from_version, from_sha256, to_version, to_sha256,
+                        reason, actor, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        activation.activation_id,
+                        activation.request_id,
+                        activation.site_key,
+                        activation.rule_id,
+                        activation.action,
+                        activation.from_version,
+                        activation.from_sha256,
+                        activation.to_version,
+                        activation.to_sha256,
+                        activation.reason,
+                        activation.actor,
+                        activation.created_at,
+                    ),
+                )
+                connection.commit()
+            except sqlite3.IntegrityError as exc:
+                connection.rollback()
+                raise RuleActivationConflictError(
+                    "retirement request already exists"
+                ) from exc
+            except Exception:
+                connection.rollback()
+                raise
+        updated = self.get_site_rule(site_key)
+        if updated is None:
+            raise RuleVersionError("site rule pointer disappeared after retirement")
+        return updated, activation
+
     def reject_rule_version(
         self,
         rule_id: str,
@@ -4065,6 +4258,281 @@ class TaskStore:
         if updated is None:
             raise RuleVersionError("rule version not found after reject")
         return updated
+
+    @staticmethod
+    def _rule_version_references(
+        connection: sqlite3.Connection,
+        rule_id: str,
+        rule_version: str,
+        sha256: str,
+    ) -> dict[str, Any]:
+        def count(sql: str, values: tuple[Any, ...]) -> int:
+            return int(connection.execute(sql, values).fetchone()[0])
+
+        tasks = count(
+            "SELECT COUNT(*) FROM tasks WHERE "
+            "(plan_id = ? AND plan_version = ?) OR rule_sha256 = ?",
+            (rule_id, rule_version, sha256),
+        )
+        builds = count(
+            "SELECT COUNT(*) FROM builds WHERE rule_id = ? AND "
+            "(rule_version = ? OR source_rule_version = ? OR target_rule_version = ? "
+            "OR source_rule_sha256 = ? OR target_rule_sha256 = ?)",
+            (rule_id, rule_version, rule_version, rule_version, sha256, sha256),
+        )
+        builds_active = count(
+            "SELECT COUNT(*) FROM builds WHERE rule_id = ? AND "
+            "state NOT IN ('FINISHED', 'CANCELLED') AND "
+            "(rule_version = ? OR source_rule_version = ? OR target_rule_version = ? "
+            "OR source_rule_sha256 = ? OR target_rule_sha256 = ?)",
+            (rule_id, rule_version, rule_version, rule_version, sha256, sha256),
+        )
+        feedback = count(
+            "SELECT COUNT(*) FROM quality_feedback WHERE rule_id = ? AND "
+            "(rule_version = ? OR rule_sha256 = ?)",
+            (rule_id, rule_version, sha256),
+        )
+        site_rules = count(
+            "SELECT COUNT(*) FROM site_rules WHERE rule_id = ? AND "
+            "(rule_version = ? OR sha256 = ?)",
+            (rule_id, rule_version, sha256),
+        )
+        batch_sites = count(
+            "SELECT COUNT(*) FROM batch_sites WHERE rule_id = ? AND rule_version = ?",
+            (rule_id, rule_version),
+        )
+        workbench_defs = count(
+            "SELECT COUNT(*) FROM workbench_task_defs WHERE rule_id = ? "
+            "AND rule_version = ?",
+            (rule_id, rule_version),
+        )
+        activations = count(
+            "SELECT COUNT(*) FROM rule_activations WHERE rule_id = ? AND "
+            "(from_version = ? OR to_version = ? OR from_sha256 = ? OR to_sha256 = ?)",
+            (rule_id, rule_version, rule_version, sha256, sha256),
+        )
+        child_versions = count(
+            "SELECT COUNT(*) FROM rule_versions WHERE rule_id = ? AND "
+            "parent_version = ? AND rule_version != ?",
+            (rule_id, rule_version, rule_version),
+        )
+        samples = {
+            "tasks": [
+                dict(row)
+                for row in connection.execute(
+                    "SELECT task_id FROM tasks WHERE "
+                    "(plan_id = ? AND plan_version = ?) OR rule_sha256 = ? LIMIT 5",
+                    (rule_id, rule_version, sha256),
+                )
+            ],
+            "builds": [
+                dict(row)
+                for row in connection.execute(
+                    "SELECT build_id, state FROM builds WHERE rule_id = ? AND "
+                    "(rule_version = ? OR source_rule_version = ? OR target_rule_version = ? "
+                    "OR source_rule_sha256 = ? OR target_rule_sha256 = ?) LIMIT 5",
+                    (rule_id, rule_version, rule_version, rule_version, sha256, sha256),
+                )
+            ],
+            "feedback": [
+                dict(row)
+                for row in connection.execute(
+                    "SELECT feedback_id, status FROM quality_feedback WHERE rule_id = ? AND "
+                    "(rule_version = ? OR rule_sha256 = ?) LIMIT 5",
+                    (rule_id, rule_version, sha256),
+                )
+            ],
+            "site_rules": [
+                dict(row)
+                for row in connection.execute(
+                    "SELECT site_key FROM site_rules WHERE rule_id = ? AND "
+                    "(rule_version = ? OR sha256 = ?) LIMIT 5",
+                    (rule_id, rule_version, sha256),
+                )
+            ],
+            "batch_sites": [
+                dict(row)
+                for row in connection.execute(
+                    "SELECT batch_id, site_key FROM batch_sites WHERE "
+                    "rule_id = ? AND rule_version = ? LIMIT 5",
+                    (rule_id, rule_version),
+                )
+            ],
+            "workbench_defs": [
+                dict(row)
+                for row in connection.execute(
+                    "SELECT d.node_id, n.name FROM workbench_task_defs d "
+                    "JOIN workbench_nodes n ON n.node_id = d.node_id "
+                    "WHERE d.rule_id = ? AND d.rule_version = ? LIMIT 5",
+                    (rule_id, rule_version),
+                )
+            ],
+            "activations": [
+                dict(row)
+                for row in connection.execute(
+                    "SELECT activation_id, action FROM rule_activations WHERE rule_id = ? AND "
+                    "(from_version = ? OR to_version = ? OR from_sha256 = ? OR to_sha256 = ?) "
+                    "LIMIT 5",
+                    (rule_id, rule_version, rule_version, sha256, sha256),
+                )
+            ],
+            "child_versions": [
+                dict(row)
+                for row in connection.execute(
+                    "SELECT rule_version FROM rule_versions WHERE rule_id = ? AND "
+                    "parent_version = ? AND rule_version != ? LIMIT 5",
+                    (rule_id, rule_version, rule_version),
+                )
+            ],
+        }
+        return {
+            "tasks": tasks,
+            "builds": builds,
+            "builds_active": builds_active,
+            "feedback": feedback,
+            "site_rules": site_rules,
+            "batch_sites": batch_sites,
+            "workbench_defs": workbench_defs,
+            "activations": activations,
+            "child_versions": child_versions,
+            "samples": samples,
+        }
+
+    def rule_version_references(
+        self, rule_id: str, rule_version: str, sha256: str
+    ) -> dict[str, Any]:
+        with self._connect() as connection:
+            return self._rule_version_references(
+                connection, rule_id, rule_version, sha256
+            )
+
+    def get_rule_cleanup_by_request(self, request_id: str) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM rule_cleanups WHERE request_id = ?", (request_id,)
+            ).fetchone()
+        return _rule_cleanup_from_row(row) if row else None
+
+    def purge_rule_version(
+        self,
+        rule_id: str,
+        rule_version: str,
+        *,
+        request_id: str,
+        sha256: str,
+        path: str = "",
+        bytes_count: int = 0,
+        references: dict[str, Any] | None = None,
+        actor: str = "local-user",
+        reason: str | None = None,
+    ) -> dict[str, Any]:
+        now = utc_now()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                existing_row = connection.execute(
+                    "SELECT * FROM rule_cleanups WHERE request_id = ?",
+                    (request_id,),
+                ).fetchone()
+                if existing_row is not None:
+                    existing = _rule_cleanup_from_row(existing_row)
+                    if (
+                        existing["rule_id"] != rule_id
+                        or existing["rule_version"] != rule_version
+                    ):
+                        raise RuleVersionError(
+                            "cleanup request already exists with different targets"
+                        )
+                    connection.commit()
+                    return existing
+                version_row = connection.execute(
+                    "SELECT * FROM rule_versions WHERE rule_id = ? AND rule_version = ?",
+                    (rule_id, rule_version),
+                ).fetchone()
+                if version_row is None:
+                    raise RuleVersionError(
+                        f"unknown rule version: {rule_id}@{rule_version}"
+                    )
+                version = _rule_version_from_row(version_row)
+                if version.sha256 != sha256:
+                    raise RuleVersionError("rule version hash does not match ledger")
+                if version.status not in {"candidate", "rejected"}:
+                    raise RuleVersionError(
+                        f"rule version is {version.status}; only candidate or rejected "
+                        "versions can be purged"
+                    )
+                current_refs = self._rule_version_references(
+                    connection, rule_id, rule_version, sha256
+                )
+                blockers = _rule_cleanup_blockers(current_refs)
+                if blockers:
+                    raise RuleVersionError("; ".join(blockers))
+                cleanup = {
+                    "cleanup_id": f"rc-{uuid.uuid4().hex[:12]}",
+                    "request_id": request_id,
+                    "rule_id": rule_id,
+                    "rule_version": rule_version,
+                    "sha256": sha256,
+                    "path": path or version.path,
+                    "bytes": int(bytes_count),
+                    "references": references or current_refs,
+                    "actor": actor,
+                    "reason": reason,
+                    "file_removed": False,
+                    "residual_path": None,
+                    "created_at": now,
+                }
+                connection.execute(
+                    """
+                    INSERT INTO rule_cleanups (
+                        cleanup_id, request_id, rule_id, rule_version, sha256,
+                        path, bytes, references_json, actor, reason, file_removed,
+                        residual_path, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?)
+                    """,
+                    (
+                        cleanup["cleanup_id"],
+                        cleanup["request_id"],
+                        cleanup["rule_id"],
+                        cleanup["rule_version"],
+                        cleanup["sha256"],
+                        cleanup["path"],
+                        cleanup["bytes"],
+                        json_dumps(cleanup["references"]),
+                        cleanup["actor"],
+                        cleanup["reason"],
+                        cleanup["created_at"],
+                    ),
+                )
+                connection.execute(
+                    "DELETE FROM rule_versions WHERE rule_id = ? AND rule_version = ?",
+                    (rule_id, rule_version),
+                )
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+        return cleanup
+
+    def update_rule_cleanup_file(
+        self,
+        cleanup_id: str,
+        *,
+        file_removed: bool,
+        residual_path: str | None,
+    ) -> dict[str, Any]:
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE rule_cleanups SET file_removed = ?, residual_path = ? "
+                "WHERE cleanup_id = ?",
+                (1 if file_removed else 0, residual_path, cleanup_id),
+            )
+            row = connection.execute(
+                "SELECT * FROM rule_cleanups WHERE cleanup_id = ?", (cleanup_id,)
+            ).fetchone()
+        if row is None:
+            raise RuleVersionError(f"unknown rule cleanup: {cleanup_id}")
+        return _rule_cleanup_from_row(row)
 
     def update_feedback(self, feedback_id: str, **fields: Any) -> QualityFeedback:
         allowed = {
@@ -4577,13 +5045,55 @@ def _rule_version_from_row(row: sqlite3.Row) -> RuleVersion:
     )
 
 
+def _rule_cleanup_blockers(references: dict[str, Any]) -> list[str]:
+    blockers: list[str] = []
+    if references.get("tasks"):
+        blockers.append(f"仍有 {references['tasks']} 个任务引用")
+    if references.get("builds_active"):
+        blockers.append(f"有 {references['builds_active']} 个进行中的构建引用")
+    if references.get("feedback"):
+        blockers.append(f"仍有 {references['feedback']} 条反馈引用")
+    if references.get("site_rules"):
+        blockers.append(f"仍是 {references['site_rules']} 个站点的当前规则")
+    if references.get("batch_sites"):
+        blockers.append(f"仍有 {references['batch_sites']} 个批次站点指向")
+    if references.get("workbench_defs"):
+        blockers.append(f"仍有 {references['workbench_defs']} 个任务定义指向")
+    if references.get("activations"):
+        blockers.append(f"激活审计引用 {references['activations']} 条")
+    if references.get("child_versions"):
+        blockers.append(f"有 {references['child_versions']} 个新版本以它为父版本")
+    return blockers
+
+
+def _rule_cleanup_from_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "cleanup_id": row["cleanup_id"],
+        "request_id": row["request_id"],
+        "rule_id": row["rule_id"],
+        "rule_version": row["rule_version"],
+        "sha256": row["sha256"],
+        "path": row["path"],
+        "bytes": int(row["bytes"]),
+        "references": json_loads(row["references_json"], {}),
+        "actor": row["actor"],
+        "reason": row["reason"],
+        "file_removed": bool(row["file_removed"]),
+        "residual_path": row["residual_path"],
+        "created_at": row["created_at"],
+    }
+
+
 def _site_rule_from_row(row: sqlite3.Row) -> SiteRule:
+    keys = row.keys()
     return SiteRule(
         site_key=row["site_key"],
         rule_id=row["rule_id"],
         rule_version=row["rule_version"],
         sha256=row["sha256"],
         path=row["path"],
+        retired_at=row["retired_at"] if "retired_at" in keys else None,
+        retired_by=row["retired_by"] if "retired_by" in keys else None,
         updated_at=row["updated_at"],
     )
 

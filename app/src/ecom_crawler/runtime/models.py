@@ -228,7 +228,7 @@ FEEDBACK_TRIAGE = {"RULE_REPAIR", "RUNTIME", "BUSINESS", "DUPLICATE"}
 FEEDBACK_RESOLUTIONS = {"RESOLVED", "WONTFIX", "DUPLICATE"}
 
 RULE_VERSION_STATUSES = {"candidate", "active", "superseded", "rejected", "retired"}
-RULE_ACTIONS = {"activate", "rollback"}
+RULE_ACTIONS = {"activate", "rollback", "retire"}
 
 
 @dataclass
@@ -391,6 +391,8 @@ class SiteRule:
     rule_version: str
     sha256: str
     path: str
+    retired_at: str | None = None
+    retired_by: str | None = None
     updated_at: str = field(default_factory=utc_now)
 
 
