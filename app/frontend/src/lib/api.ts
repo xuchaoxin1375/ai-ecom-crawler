@@ -731,6 +731,7 @@ export interface FeedbackRecord {
   expectation: string;
   note: string | null;
   scope: string;
+  applies_to: "CURRENT_RUN" | "NEXT_RUN";
   status: FeedbackStatus;
   triage: FeedbackTriage | null;
   triage_note: string | null;
@@ -746,6 +747,7 @@ export interface FeedbackRecord {
   updated_at: string;
   closed_at: string | null;
   rule: { rule_id: string; rule_version: string | null; sha256: string | null } | null;
+  active_repair_build_id: string | null;
 }
 
 export interface FeedbackListResponse {
@@ -2139,6 +2141,20 @@ export function getTaskFeedback(
   );
 }
 
+export function getFeedbackList(
+  filters: {
+    task_id?: string;
+    batch_id?: string;
+    site_key?: string;
+    status?: string;
+    limit?: number;
+    offset?: number;
+  },
+  signal?: AbortSignal,
+): Promise<FeedbackListResponse> {
+  return getJson<FeedbackListResponse>(`/api/feedback${query(filters)}`, signal);
+}
+
 export function createTaskFeedback(
   taskId: string,
   body: FeedbackCreateRequest,
@@ -2163,6 +2179,7 @@ export function triageFeedback(
 
 export interface FeedbackRepairRequest {
   request_id: string;
+  feedback_ids?: string[];
   reason?: string | null;
   max_products?: number;
   max_seconds?: number;
@@ -2174,6 +2191,7 @@ export interface FeedbackRepairResponse {
   accepted: boolean;
   build: BuildStatus;
   feedback: FeedbackRecord;
+  feedbacks?: FeedbackRecord[];
 }
 
 export function repairFeedback(
@@ -2185,6 +2203,23 @@ export function repairFeedback(
     "POST",
     body,
   );
+}
+
+export interface FeedbackBundleResponse {
+  can_repair: boolean;
+  site_key: string | null;
+  batch_id: string | null;
+  rule: { rule_id: string; rule_version: string | null; sha256: string | null } | null;
+  items: FeedbackRecord[];
+  blockers: { feedback_id: string; reason: string }[];
+}
+
+export function getFeedbackBundle(
+  feedbackIds: string[],
+): Promise<FeedbackBundleResponse> {
+  return sendJson<FeedbackBundleResponse>("/api/feedback/bundle", "POST", {
+    feedback_ids: feedbackIds,
+  });
 }
 
 export interface FeedbackRerunRequest {

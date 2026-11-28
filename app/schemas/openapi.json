@@ -836,6 +836,103 @@
         "title": "CreateTaskRequest",
         "type": "object"
       },
+      "FeedbackBundleBlocker": {
+        "properties": {
+          "feedback_id": {
+            "title": "Feedback Id",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feedback_id",
+          "reason"
+        ],
+        "title": "FeedbackBundleBlocker",
+        "type": "object"
+      },
+      "FeedbackBundleRequest": {
+        "properties": {
+          "feedback_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "minItems": 1,
+            "title": "Feedback Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "feedback_ids"
+        ],
+        "title": "FeedbackBundleRequest",
+        "type": "object"
+      },
+      "FeedbackBundleResponse": {
+        "properties": {
+          "batch_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batch Id"
+          },
+          "blockers": {
+            "items": {
+              "$ref": "#/components/schemas/FeedbackBundleBlocker"
+            },
+            "title": "Blockers",
+            "type": "array"
+          },
+          "can_repair": {
+            "title": "Can Repair",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FeedbackRecord"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "rule": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FeedbackRuleRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "site_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Site Key"
+          }
+        },
+        "required": [
+          "can_repair",
+          "items",
+          "blockers"
+        ],
+        "title": "FeedbackBundleResponse",
+        "type": "object"
+      },
       "FeedbackCreateRequest": {
         "properties": {
           "category": {
@@ -957,6 +1054,26 @@
       },
       "FeedbackRecord": {
         "properties": {
+          "active_repair_build_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Repair Build Id"
+          },
+          "applies_to": {
+            "default": "CURRENT_RUN",
+            "enum": [
+              "CURRENT_RUN",
+              "NEXT_RUN"
+            ],
+            "title": "Applies To",
+            "type": "string"
+          },
           "batch_id": {
             "anyOf": [
               {
@@ -1253,6 +1370,14 @@
               }
             ],
             "title": "Capture Reasoning"
+          },
+          "feedback_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "title": "Feedback Ids",
+            "type": "array"
           },
           "max_input_tokens": {
             "anyOf": [
@@ -5501,6 +5626,44 @@
           }
         },
         "summary": "List Feedback"
+      }
+    },
+    "/api/feedback/bundle": {
+      "post": {
+        "operationId": "bundle_feedback_api_feedback_bundle_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeedbackBundleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedbackBundleResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Bundle Feedback"
       }
     },
     "/api/feedback/{feedback_id}": {

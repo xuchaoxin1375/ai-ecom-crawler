@@ -184,6 +184,7 @@ CREATE TABLE IF NOT EXISTS builds (
     rule_path TEXT,
     mode TEXT NOT NULL DEFAULT 'build',
     feedback_id TEXT,
+    feedback_ids_json TEXT NOT NULL DEFAULT '[]',
     request_id TEXT,
     request_json TEXT NOT NULL DEFAULT '{}',
     source_rule_version TEXT,
@@ -230,6 +231,7 @@ CREATE TABLE IF NOT EXISTS quality_feedback (
     expectation TEXT NOT NULL,
     note TEXT,
     scope TEXT NOT NULL DEFAULT 'Task-scoped review.',
+    applies_to TEXT NOT NULL DEFAULT 'CURRENT_RUN',
     status TEXT NOT NULL,
     triage TEXT,
     triage_note TEXT,
@@ -594,6 +596,10 @@ class TaskStore:
                     connection.execute(
                         f"ALTER TABLE builds ADD COLUMN {column} TEXT NOT NULL DEFAULT '{{}}'"
                     )
+            if "feedback_ids_json" not in build_columns:
+                connection.execute(
+                    "ALTER TABLE builds ADD COLUMN feedback_ids_json TEXT NOT NULL DEFAULT '[]'"
+                )
             connection.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_builds_request "
                 "ON builds(request_id) WHERE request_id IS NOT NULL"
@@ -611,6 +617,15 @@ class TaskStore:
                     connection.execute(
                         f"ALTER TABLE site_rules ADD COLUMN {column} TEXT"
                     )
+            feedback_columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(quality_feedback)")
+            }
+            if "applies_to" not in feedback_columns:
+                connection.execute(
+                    "ALTER TABLE quality_feedback "
+                    "ADD COLUMN applies_to TEXT NOT NULL DEFAULT 'CURRENT_RUN'"
+                )
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS idx_tasks_rule_sha "
                 "ON tasks(rule_sha256)"
@@ -3162,14 +3177,15 @@ class TaskStore:
                     INSERT INTO builds (
                         build_id, batch_id, site_key, state, outcome, workspace,
                         session_id, model_json, proxy, error, rule_id, rule_version,
-                        rule_path, mode, feedback_id, request_id, request_json,
+                        rule_path, mode, feedback_id, feedback_ids_json,
+                        request_id, request_json,
                         source_rule_version, source_rule_sha256,
                         target_rule_version, target_rule_sha256, error_class,
                         change_summary_json, validation_json, evidence_sha256,
                         created_at, updated_at, started_at, finished_at
                     ) VALUES (
                         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                     )
                     """,
                     (
@@ -3188,6 +3204,7 @@ class TaskStore:
                         build.rule_path,
                         build.mode,
                         build.feedback_id,
+                        json_dumps(build.feedback_ids or []),
                         build.request_id,
                         json_dumps(build.request or {}),
                         build.source_rule_version,
@@ -3539,12 +3556,12 @@ class TaskStore:
                     INSERT INTO quality_feedback (
                         feedback_id, request_id, task_id, batch_id, site_key,
                         rule_id, rule_version, rule_sha256, category, samples_json,
-                        expectation, note, scope, status, triage, triage_note,
-                        triage_source, duplicate_of, repair_build_id, rerun_task_id,
-                        resolution, resolution_note, created_by, resolved_by,
-                        created_at, updated_at, closed_at, request_json
+                        expectation, note, scope, applies_to, status, triage,
+                        triage_note, triage_source, duplicate_of, repair_build_id,
+                        rerun_task_id, resolution, resolution_note, created_by,
+                        resolved_by, created_at, updated_at, closed_at, request_json
                     ) VALUES (
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                     )
                     """,
@@ -3562,6 +3579,7 @@ class TaskStore:
                         feedback.expectation,
                         feedback.note,
                         feedback.scope,
+                        feedback.applies_to,
                         feedback.status,
                         feedback.triage,
                         feedback.triage_note,
@@ -3639,6 +3657,22 @@ class TaskStore:
                 (*values, max(1, int(limit)), max(0, int(offset))),
             ).fetchall()
         return [_feedback_from_row(row) for row in rows], total
+
+    def find_active_repair_build(self, site_key: str | None) -> str | None:
+        """Return the newest repair build that has not reached a terminal state."""
+        if not site_key:
+            return None
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT build_id FROM builds
+                WHERE site_key = ? AND mode = 'repair'
+                    AND state NOT IN ('FINISHED', 'CANCELLED')
+                ORDER BY created_at DESC LIMIT 1
+                """,
+                (site_key,),
+            ).fetchone()
+        return str(row["build_id"]) if row else None
 
     def create_rule_version(self, version: RuleVersion) -> RuleVersion:
         with self._connect() as connection:
@@ -3877,6 +3911,7 @@ class TaskStore:
         expected_active_version: str | None = None,
         expected_active_sha256: str | None = None,
         feedback_id: str | None = None,
+        feedback_ids: list[str] | None = None,
         request_id: str,
         reason: str | None = None,
         actor: str = "local-user",
@@ -4004,11 +4039,19 @@ class TaskStore:
                         site_key,
                     ),
                 )
-                linked_feedback = (feedback_id or target.source_feedback_id) if action == "activate" else None
-                if linked_feedback:
+                linked_feedback: list[str] = []
+                if action == "activate":
+                    for candidate in [
+                        *(feedback_ids or []),
+                        feedback_id,
+                        target.source_feedback_id,
+                    ]:
+                        if candidate and candidate not in linked_feedback:
+                            linked_feedback.append(candidate)
+                for linked in linked_feedback:
                     feedback = connection.execute(
                         "SELECT * FROM quality_feedback WHERE feedback_id = ?",
-                        (linked_feedback,),
+                        (linked,),
                     ).fetchone()
                     if feedback is not None:
                         if feedback["site_key"] != site_key:
@@ -4022,7 +4065,7 @@ class TaskStore:
                                 SET status = 'AWAITING_RERUN', updated_at = ?
                                 WHERE feedback_id = ?
                                 """,
-                                (now, linked_feedback),
+                                (now, linked),
                             )
                 activation = RuleActivation(
                     activation_id=f"act-{uuid.uuid4().hex[:12]}",
@@ -4678,6 +4721,7 @@ def _feedback_from_row(row: sqlite3.Row) -> QualityFeedback:
         expectation=row["expectation"],
         note=row["note"],
         scope=row["scope"],
+        applies_to=row["applies_to"] or "CURRENT_RUN",
         status=row["status"],
         triage=row["triage"],
         triage_note=row["triage_note"],
@@ -4966,6 +5010,11 @@ def _build_from_row(row: sqlite3.Row) -> BuildRecord:
         rule_path=row["rule_path"],
         mode=row["mode"],
         feedback_id=row["feedback_id"],
+        feedback_ids=[
+            str(value)
+            for value in (json_loads(row["feedback_ids_json"], []) or [])
+            if str(value).strip()
+        ],
         request_id=row["request_id"],
         request=json_loads(row["request_json"], {}),
         source_rule_version=row["source_rule_version"],

@@ -2424,19 +2424,53 @@ class BuildWorkflowTests(unittest.TestCase):
             )
             self.assertEqual(feedback.status_code, 201, feedback.text)
             feedback_id = feedback.json()["feedback"]["feedback_id"]
+            second_feedback = client.post(
+                "/api/tasks/task-existing/feedback",
+                json={
+                    "request_id": "fb-2",
+                    "category": "DESCRIPTION",
+                    "samples": ["https://example.fr/p/1"],
+                    "expectation": "specs block is still missing",
+                },
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(second_feedback.status_code, 201, second_feedback.text)
+            second_feedback_id = second_feedback.json()["feedback"]["feedback_id"]
 
             repair = client.post(
                 f"/api/feedback/{feedback_id}/repair",
                 json={
                     "request_id": "fb-repair-1",
                     "reason": "merge description blocks",
+                    "feedback_ids": [feedback_id, second_feedback_id],
                 },
                 headers=CLIENT_HEADERS,
             )
             self.assertEqual(repair.status_code, 202, repair.text)
             build_id = repair.json()["build"]["build_id"]
+            late_feedback = client.post(
+                "/api/tasks/task-existing/feedback",
+                json={
+                    "request_id": "fb-late",
+                    "category": "DESCRIPTION",
+                    "samples": ["https://example.fr/p/1"],
+                    "expectation": "another description gap",
+                },
+                headers=CLIENT_HEADERS,
+            )
+            self.assertEqual(late_feedback.status_code, 201, late_feedback.text)
+            self.assertEqual(
+                late_feedback.json()["feedback"]["active_repair_build_id"], build_id
+            )
             result = self._wait_ready(client, build_id)
             self.assertEqual(result["outcome"], "succeeded", result)
+            self.assertEqual(
+                set(result["feedback_ids"]), {feedback_id, second_feedback_id}
+            )
+            self.assertEqual(
+                {item["feedback_id"] for item in repair.json()["feedbacks"]},
+                {feedback_id, second_feedback_id},
+            )
             listing = client.get(
                 "/api/builds?site_key=example.fr&limit=10"
             ).json()["builds"]
@@ -2449,6 +2483,10 @@ class BuildWorkflowTests(unittest.TestCase):
 
             pending = client.get(f"/api/feedback/{feedback_id}").json()
             self.assertEqual(pending["status"], "AWAITING_ACTIVATION")
+            self.assertEqual(
+                client.get(f"/api/feedback/{second_feedback_id}").json()["status"],
+                "AWAITING_ACTIVATION",
+            )
             batch_before = client.get("/api/batches/b-1").json()
             site_before = next(
                 item
@@ -2522,6 +2560,10 @@ class BuildWorkflowTests(unittest.TestCase):
             self.assertTrue(activated.json()["activated"])
             self.assertEqual(
                 client.get(f"/api/feedback/{feedback_id}").json()["status"],
+                "AWAITING_RERUN",
+            )
+            self.assertEqual(
+                client.get(f"/api/feedback/{second_feedback_id}").json()["status"],
                 "AWAITING_RERUN",
             )
             active_after = client.get("/api/sites/example.fr/rule").json()

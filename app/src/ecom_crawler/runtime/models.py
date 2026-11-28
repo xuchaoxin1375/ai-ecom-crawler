@@ -279,6 +279,7 @@ class BuildRecord:
     rule_path: str | None = None
     mode: str = "build"
     feedback_id: str | None = None
+    feedback_ids: list[str] = field(default_factory=list)
     request_id: str | None = None
     request: dict[str, Any] = field(default_factory=dict)
     source_rule_version: str | None = None
@@ -319,6 +320,7 @@ class QualityFeedback:
     samples: list[str] = field(default_factory=list)
     note: str | None = None
     scope: str = "Task-scoped review."
+    applies_to: str = "CURRENT_RUN"
     triage: str | None = None
     triage_note: str | None = None
     triage_source: str | None = None
@@ -343,6 +345,8 @@ class QualityFeedback:
             raise ValueError(f"unsupported feedback triage: {self.triage!r}")
         if self.resolution is not None and self.resolution not in FEEDBACK_RESOLUTIONS:
             raise ValueError(f"unsupported feedback resolution: {self.resolution!r}")
+        if self.applies_to not in {"CURRENT_RUN", "NEXT_RUN"}:
+            raise ValueError(f"unsupported feedback applies_to: {self.applies_to!r}")
 
 
 @dataclass

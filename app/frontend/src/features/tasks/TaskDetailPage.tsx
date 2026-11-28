@@ -809,8 +809,8 @@ export function TaskDetailPage() {
       <ConfirmBatchActionDialog
         open={dialog === "cancel"}
         title="取消这个任务？"
-        description="排队或运行中的任务会停止；已经产生的部分结果保留，可继续导出。"
-        consequence="取消是任务级操作，不会删除任务定义或已有结果；可在任务工作台重新启动。"
+        description="取消是终态：排队或运行中的任务会停止，已产生的部分结果保留，可继续导出。暂停不是取消，暂停后仍然不能启动规则修复。"
+        consequence="取消后可以记录意见并发起修复；新规则激活后需要创建新的运行，旧运行保留为历史结果。"
         confirmLabel="确认取消任务"
         tone="danger"
         busy={busy === "cancel"}

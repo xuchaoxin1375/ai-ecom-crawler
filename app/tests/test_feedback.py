@@ -43,6 +43,7 @@ class FeedbackApiTests(unittest.TestCase):
         self.store = TaskStore(self.db_path)
         self.store.create_task(make_task("task-1"))
         self.store.create_task(make_task("task-running", state="RUNNING"))
+        self.store.create_task(make_task("task-draft", state="DRAFT"))
         self.client = TestClient(
             create_app(self.db_path, self.out_root, self.rules_dir),
             headers=CLIENT_HEADERS,
@@ -103,7 +104,7 @@ class FeedbackApiTests(unittest.TestCase):
         self.assertEqual(conflict.status_code, 409)
         self.assertEqual(conflict.json()["error"]["code"], "CONFLICT")
 
-    def test_create_rejects_active_task_and_invalid_payload(self) -> None:
+    def test_create_allows_running_task_and_rejects_draft(self) -> None:
         active = self.client.post(
             "/api/tasks/task-running/feedback",
             json={
@@ -113,8 +114,24 @@ class FeedbackApiTests(unittest.TestCase):
                 "expectation": "描述应包含规格块",
             },
         )
-        self.assertEqual(active.status_code, 409)
-        self.assertEqual(active.json()["error"]["code"], "INVALID_TASK_STATE")
+        self.assertEqual(active.status_code, 201, active.text)
+        self.assertEqual(active.json()["feedback"]["applies_to"], "NEXT_RUN")
+        self.assertEqual(active.json()["feedback"]["status"], "OPEN")
+
+        draft = self.client.post(
+            "/api/tasks/task-draft/feedback",
+            json={
+                "request_id": "fb-draft",
+                "category": "DESCRIPTION",
+                "samples": ["https://example.fr/products/1"],
+                "expectation": "描述应包含规格块",
+            },
+        )
+        self.assertEqual(draft.status_code, 409)
+        self.assertEqual(draft.json()["error"]["code"], "INVALID_TASK_STATE")
+
+        terminal = self._create("fb-terminal")
+        self.assertEqual(terminal["feedback"]["applies_to"], "CURRENT_RUN")
 
         bad_sample = self.client.post(
             "/api/tasks/task-1/feedback",
@@ -223,6 +240,49 @@ class FeedbackApiTests(unittest.TestCase):
             invalid_duplicate.json()["error"]["code"], "VALIDATION_ERROR"
         )
 
+    def test_bundle_validates_mergeable_feedback(self) -> None:
+        first = self._create("fb-bundle-1")["feedback"]
+        second = self._create(
+            "fb-bundle-2",
+            category="BASIC_FIELDS",
+            expectation="名称和价格字段缺失",
+        )["feedback"]
+        runtime = self._create(
+            "fb-bundle-3",
+            category="ACCESS_RUNTIME",
+            samples=["https://example.fr/products/1"],
+            expectation="站点 403，需要检查出口",
+        )["feedback"]
+
+        merged = self.client.post(
+            "/api/feedback/bundle",
+            json={"feedback_ids": [first["feedback_id"], second["feedback_id"]]},
+        )
+        self.assertEqual(merged.status_code, 200, merged.text)
+        body = merged.json()
+        self.assertTrue(body["can_repair"])
+        self.assertEqual(body["site_key"], "example.fr")
+        self.assertEqual(body["rule"]["rule_id"], "example")
+        self.assertEqual(
+            {item["feedback_id"] for item in body["items"]},
+            {first["feedback_id"], second["feedback_id"]},
+        )
+        self.assertEqual(body["blockers"], [])
+
+        blocked = self.client.post(
+            "/api/feedback/bundle",
+            json={
+                "feedback_ids": [first["feedback_id"], runtime["feedback_id"]]
+            },
+        )
+        self.assertEqual(blocked.status_code, 200, blocked.text)
+        blocked_body = blocked.json()
+        self.assertFalse(blocked_body["can_repair"])
+        self.assertEqual(
+            blocked_body["blockers"][0]["feedback_id"], runtime["feedback_id"]
+        )
+        self.assertIn("访问运行", blocked_body["blockers"][0]["reason"])
+
     def test_openapi_exposes_feedback_contract(self) -> None:
         response = self.client.get("/api/openapi.json")
         self.assertEqual(response.status_code, 200)
@@ -233,6 +293,7 @@ class FeedbackApiTests(unittest.TestCase):
             "/api/feedback",
             "/api/feedback/{feedback_id}",
             "/api/feedback/{feedback_id}/triage",
+            "/api/feedback/bundle",
         ):
             self.assertIn(path, paths)
         components = schema["components"]["schemas"]
@@ -242,6 +303,7 @@ class FeedbackApiTests(unittest.TestCase):
             "FeedbackCreateResponse",
             "FeedbackListResponse",
             "FeedbackTriageResponse",
+            "FeedbackBundleResponse",
         ):
             self.assertIn(name, components)
 

@@ -1,9 +1,20 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
+import * as Dialog from "@radix-ui/react-dialog";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronDown, Send, ShieldAlert, Wrench } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  GitMerge,
+  Send,
+  ShieldAlert,
+  Wrench,
+  X,
+} from "lucide-react";
 import {
   createTaskFeedback,
+  getFeedbackBundle,
+  getFeedbackList,
   getTask,
   getTaskFeedback,
   repairFeedback,
@@ -53,10 +64,11 @@ function parseSamples(value: string): string[] {
 
 interface FeedbackCardProps {
   feedback: FeedbackRecord;
+  taskActive: boolean;
   onChanged: () => void;
 }
 
-function FeedbackCard({ feedback, onChanged }: FeedbackCardProps) {
+function FeedbackCard({ feedback, taskActive, onChanged }: FeedbackCardProps) {
   const queryClient = useQueryClient();
   const location = useLocation();
   const [triageOpen, setTriageOpen] = useState(false);
@@ -87,6 +99,12 @@ function FeedbackCard({ feedback, onChanged }: FeedbackCardProps) {
   const runtimeBusiness =
     feedback.status === "TRIAGED" &&
     (feedback.triage === "RUNTIME" || feedback.triage === "BUSINESS");
+  const repairBlocked = taskActive || Boolean(feedback.active_repair_build_id);
+  const repairBlockedReason = taskActive
+    ? "任务仍在运行；等任务结束或取消后才能启动修复。"
+    : feedback.active_repair_build_id
+      ? "当前修复未包含这条反馈；构建入队后不能追加，等构建结束后可再次发起修复。"
+      : "";
 
   function refresh() {
     void queryClient.invalidateQueries({
@@ -204,6 +222,11 @@ function FeedbackCard({ feedback, onChanged }: FeedbackCardProps) {
                 {feedbackTriageLabel(feedback.triage)}
               </Badge>
             ) : null}
+            {feedback.applies_to === "NEXT_RUN" ? (
+              <Badge tone="info" dot={false}>
+                下一运行生效
+              </Badge>
+            ) : null}
           </div>
           <p className="mt-1 font-mono text-[11px] text-ink-3">
             {feedback.feedback_id} · {formatTime(feedback.created_at)}
@@ -265,6 +288,20 @@ function FeedbackCard({ feedback, onChanged }: FeedbackCardProps) {
         </p>
       ) : null}
 
+      {feedback.active_repair_build_id &&
+      ["OPEN", "TRIAGED"].includes(feedback.status) ? (
+        <p className="mx-4 mb-3 rounded-control border border-warning/20 bg-warning-soft px-3 py-2 text-xs leading-5 text-warning">
+          当前修复未包含这条反馈；构建入队后不能追加。{" "}
+          <Link
+            className="font-medium underline"
+            to={`/builds/${encodeURIComponent(feedback.active_repair_build_id)}`}
+          >
+            查看当前修复
+          </Link>
+          ，构建结束后可再次发起修复。
+        </p>
+      ) : null}
+
       {[
         "OPEN",
         "TRIAGED",
@@ -278,11 +315,15 @@ function FeedbackCard({ feedback, onChanged }: FeedbackCardProps) {
               size="sm"
               variant="primary"
               onClick={() => void startRepair()}
-              disabled={Boolean(actionBusy)}
+              disabled={Boolean(actionBusy) || repairBlocked}
+              title={repairBlockedReason || undefined}
             >
               <Wrench size={13} aria-hidden="true" />
               {actionBusy === "repair" ? "启动中…" : "启动修复"}
             </Button>
+          ) : null}
+          {ruleRepair && repairBlockedReason ? (
+            <span className="text-xs leading-5 text-ink-3">{repairBlockedReason}</span>
           ) : null}
           {feedback.status === "AWAITING_ACTIVATION" ? (
             feedback.repair_build_id ? (
@@ -445,6 +486,281 @@ function FeedbackCard({ feedback, onChanged }: FeedbackCardProps) {
   );
 }
 
+function mergeEligible(feedback: FeedbackRecord): boolean {
+  return (
+    ["OPEN", "TRIAGED"].includes(feedback.status) &&
+    feedback.triage !== "RUNTIME" &&
+    feedback.triage !== "BUSINESS" &&
+    feedback.category !== "ACCESS_RUNTIME" &&
+    feedback.category !== "BUSINESS_EXPECTATION"
+  );
+}
+
+function feedbackRuleKey(feedback: FeedbackRecord): string {
+  return `${feedback.rule?.rule_id ?? ""}@${feedback.rule?.rule_version ?? ""}`;
+}
+
+interface MergeRepairDialogProps {
+  open: boolean;
+  siteKey: string;
+  onOpenChange: (open: boolean) => void;
+  onStarted: (buildId: string, count: number) => void;
+}
+
+function MergeRepairDialog({
+  open,
+  siteKey,
+  onOpenChange,
+  onStarted,
+}: MergeRepairDialogProps) {
+  const queryClient = useQueryClient();
+  const [selected, setSelected] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [blockers, setBlockers] = useState<{ feedback_id: string; reason: string }[]>(
+    [],
+  );
+  const query = useQuery({
+    queryKey: ["site-feedback", siteKey],
+    queryFn: ({ signal }) => getFeedbackList({ site_key: siteKey, limit: 200 }, signal),
+    enabled: open && Boolean(siteKey),
+  });
+  const records = query.data?.items ?? [];
+  const eligible = records.filter(mergeEligible);
+  const anchor = eligible[0] ?? null;
+  const anchorRule = anchor ? feedbackRuleKey(anchor) : "";
+  const mergeableIds = eligible
+    .filter((item) => !anchor || feedbackRuleKey(item) === anchorRule)
+    .map((item) => item.feedback_id);
+
+  function handleOpenChange(next: boolean) {
+    if (!next && !busy) {
+      setSelected([]);
+      setError("");
+      setBlockers([]);
+    }
+    onOpenChange(next);
+  }
+
+  function toggleAll() {
+    setSelected((current) =>
+      current.length === mergeableIds.length ? [] : mergeableIds,
+    );
+  }
+
+  function toggle(feedbackId: string) {
+    setSelected((current) =>
+      current.includes(feedbackId)
+        ? current.filter((item) => item !== feedbackId)
+        : [...current, feedbackId],
+    );
+  }
+
+  async function confirm() {
+    if (!selected.length) {
+      setError("请至少选择一条反馈。");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    setBlockers([]);
+    try {
+      const bundle = await getFeedbackBundle(selected);
+      if (!bundle.can_repair) {
+        setBlockers(bundle.blockers);
+        setError("选中的反馈不能合并到一次修复。");
+        return;
+      }
+      const response = await repairFeedback(selected[0], {
+        request_id: requestId("fb-repair"),
+        feedback_ids: selected,
+      });
+      await queryClient.invalidateQueries({ queryKey: ["site-feedback", siteKey] });
+      await queryClient.invalidateQueries({ queryKey: ["task-feedback"] });
+      await queryClient.invalidateQueries({ queryKey: ["builds"] });
+      setSelected([]);
+      setError("");
+      setBlockers([]);
+      onStarted(response.build.build_id, selected.length);
+      onOpenChange(false);
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : String(exc));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog.Root open={open} onOpenChange={handleOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="animate-overlay-in fixed inset-0 z-50 bg-ink/35" />
+        <Dialog.Content
+          className="animate-dialog-in fixed left-1/2 top-1/2 z-50 max-h-[92vh] w-[min(640px,calc(100vw-24px))] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-overlay border border-line bg-surface shadow-overlay focus:outline-none"
+          tabIndex={-1}
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            document.getElementById("merge-repair-cancel")?.focus();
+          }}
+        >
+          <header className="flex items-start justify-between gap-4 border-b border-line px-4 py-4 sm:px-6">
+            <div className="flex items-start gap-3">
+              <span
+                className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent-soft text-accent"
+                aria-hidden="true"
+              >
+                <GitMerge size={17} />
+              </span>
+              <div>
+                <Dialog.Title className="text-[20px] leading-7 font-semibold tracking-[-0.01em] text-ink">
+                  合并修复反馈
+                </Dialog.Title>
+                <Dialog.Description className="mt-1 text-sm leading-6 text-ink-2">
+                  同一站点、同一规则版本下未启动的反馈可以合并到一次修复构建；构建入队后不能再追加。
+                </Dialog.Description>
+              </div>
+            </div>
+            <Dialog.Close asChild>
+              <button
+                type="button"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-control text-ink-3 hover:bg-surface-muted hover:text-ink"
+                aria-label="关闭合并修复对话框"
+                disabled={busy}
+              >
+                <X size={17} aria-hidden="true" />
+              </button>
+            </Dialog.Close>
+          </header>
+
+          <div className="space-y-4 px-4 py-5 sm:px-6">
+            {query.isPending ? (
+              <p className="text-sm text-ink-3" role="status">
+                正在读取站点反馈…
+              </p>
+            ) : null}
+            {query.isError ? (
+              <ErrorNotice
+                title="读取站点反馈失败"
+                message={
+                  query.error instanceof Error
+                    ? query.error.message
+                    : "无法读取站点反馈。"
+                }
+                compact
+                onRetry={() => void query.refetch()}
+              />
+            ) : null}
+            {!query.isPending && !eligible.length ? (
+              <p className="rounded-control border border-line bg-surface-muted px-3 py-2 text-sm leading-6 text-ink-2">
+                这个站点当前没有可合并的未启动反馈。
+              </p>
+            ) : null}
+
+            {eligible.length ? (
+              <>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs font-medium text-ink-3">
+                    选择的反馈会进入同一次修复
+                  </p>
+                  <Button
+                    size="sm"
+                    type="button"
+                    onClick={toggleAll}
+                    disabled={busy || !mergeableIds.length}
+                  >
+                    {selected.length === mergeableIds.length
+                      ? "清空选择"
+                      : "全选可合并项"}
+                  </Button>
+                </div>
+                <fieldset className="space-y-2">
+                  <legend className="sr-only">选择要合并修复的反馈</legend>
+                  {eligible.map((feedback) => {
+                    const differentRule =
+                      anchor !== null && feedbackRuleKey(feedback) !== anchorRule;
+                    const checked = selected.includes(feedback.feedback_id);
+                    return (
+                      <div
+                        key={feedback.feedback_id}
+                        className={cn(
+                          "flex gap-3 rounded-control border border-line px-3 py-2.5",
+                          checked && "border-accent/40 bg-accent-soft/40",
+                          differentRule && "opacity-60",
+                        )}
+                      >
+                        <input
+                          id={`merge-${feedback.feedback_id}`}
+                          type="checkbox"
+                          className="mt-1 h-4 w-4 shrink-0"
+                          checked={checked}
+                          disabled={differentRule || busy}
+                          aria-label={`合并 ${feedback.feedback_id}：${feedback.expectation}`}
+                          onChange={() => toggle(feedback.feedback_id)}
+                        />
+                        <span className="min-w-0 space-y-1">
+                          <span className="flex flex-wrap items-center gap-2 text-xs text-ink-3">
+                            <span className="font-medium text-ink">
+                              {feedbackCategoryLabel(feedback.category)}
+                            </span>
+                            <span className="font-mono">{feedback.feedback_id}</span>
+                            <span>
+                              {feedback.rule?.rule_id}@{feedback.rule?.rule_version}
+                            </span>
+                          </span>
+                          <span className="block text-sm leading-6 text-ink">
+                            {feedback.expectation}
+                          </span>
+                          <span className="block text-xs leading-5 text-ink-3">
+                            任务 {feedback.task_id}
+                            {differentRule ? " · 规则版本不同，不能合并" : ""}
+                          </span>
+                        </span>
+                      </div>
+                    );
+                  })}
+                </fieldset>
+              </>
+            ) : null}
+
+            {blockers.length ? (
+              <div className="rounded-control border border-danger/25 bg-danger-soft px-3 py-2 text-xs leading-5 text-danger">
+                <p className="font-medium">不能合并的反馈</p>
+                <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                  {blockers.map((blocker) => (
+                    <li key={blocker.feedback_id}>
+                      {blocker.feedback_id}：{blocker.reason}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {error ? <ErrorNotice title="启动失败" message={error} compact /> : null}
+          </div>
+
+          <footer className="flex flex-wrap justify-end gap-2 border-t border-line bg-surface-muted px-4 py-3 sm:px-6">
+            <Button
+              id="merge-repair-cancel"
+              type="button"
+              onClick={() => handleOpenChange(false)}
+              disabled={busy}
+            >
+              取消
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              onClick={() => void confirm()}
+              disabled={busy || !selected.length}
+            >
+              <Wrench size={13} aria-hidden="true" />
+              {busy ? "启动中…" : `启动合并修复（${selected.length}）`}
+            </Button>
+          </footer>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
 export function FeedbackPanel({ task }: FeedbackPanelProps) {
   const location = useLocation();
   const queryClient = useQueryClient();
@@ -457,6 +773,8 @@ export function FeedbackPanel({ task }: FeedbackPanelProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
+  const [savedNote, setSavedNote] = useState("");
+  const [mergeOpen, setMergeOpen] = useState(false);
 
   const query = useQuery({
     queryKey: ["task-feedback", task.task_id],
@@ -496,7 +814,7 @@ export function FeedbackPanel({ task }: FeedbackPanelProps) {
     }
     setBusy(true);
     try {
-      await createTaskFeedback(task.task_id, {
+      const response = await createTaskFeedback(task.task_id, {
         request_id: feedbackId.current,
         category,
         samples: lines,
@@ -511,6 +829,13 @@ export function FeedbackPanel({ task }: FeedbackPanelProps) {
       setNote("");
       setOpen(false);
       setSaved(true);
+      setSavedNote(
+        response.feedback.active_repair_build_id
+          ? `反馈已记录；当前修复 ${response.feedback.active_repair_build_id} 未包含这条意见，构建结束后可再次发起修复。`
+          : taskActive
+            ? "反馈已记录。当前运行继续使用入队时锁定的规则；任务结束或取消后才能启动修复。"
+            : "反馈已记录，可在下方查看和分诊。",
+      );
       feedbackId.current = requestId("fb-request");
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : String(exc));
@@ -525,14 +850,20 @@ export function FeedbackPanel({ task }: FeedbackPanelProps) {
         <div>
           <h2 className="text-[17px] leading-6 font-semibold text-ink">结果验收</h2>
           <p className="mt-0.5 max-w-2xl text-xs leading-5 text-ink-3">
-            记录不达标项不会改变任务状态和计数；反馈按独立账本保存。分诊只决定问题去向，不自动改规则或重新采集。
+            记录问题不会改变任务状态和计数；反馈按独立账本保存。合并修复只处理未启动的反馈，分诊只决定问题去向。
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
           {openCount ? (
             <Badge tone="warning" dot={false}>
               未关闭 {openCount}
             </Badge>
+          ) : null}
+          {task.site_key && openCount ? (
+            <Button size="sm" onClick={() => setMergeOpen(true)}>
+              <GitMerge size={13} aria-hidden="true" />
+              合并修复…
+            </Button>
           ) : null}
           <Button
             size="sm"
@@ -541,7 +872,6 @@ export function FeedbackPanel({ task }: FeedbackPanelProps) {
               setOpen((value) => !value);
               setError("");
             }}
-            disabled={taskActive}
           >
             <ShieldAlert size={13} aria-hidden="true" />
             {open ? "收起" : "记录问题"}
@@ -550,8 +880,8 @@ export function FeedbackPanel({ task }: FeedbackPanelProps) {
       </div>
 
       {taskActive ? (
-        <p className="border-b border-line bg-warning-soft px-5 py-2.5 text-xs leading-5 text-warning">
-          任务尚未结束，暂不能记录反馈；可以先暂停或等待任务完成。
+        <p className="border-b border-line bg-surface-muted px-5 py-2.5 text-xs leading-5 text-ink-2">
+          任务仍在运行：记录的意见不会改变当前运行，当前运行继续使用入队时锁定的规则。要让意见生效，可在任务结束后发起修复；取消任务后也可以修复，已产生的部分结果会保留。
         </p>
       ) : null}
 
@@ -561,7 +891,7 @@ export function FeedbackPanel({ task }: FeedbackPanelProps) {
           role="status"
         >
           <Check size={13} aria-hidden="true" />
-          反馈已记录，可在下方查看和分诊。
+          {savedNote || "反馈已记录，可在下方查看和分诊。"}
         </p>
       ) : null}
 
@@ -660,6 +990,7 @@ export function FeedbackPanel({ task }: FeedbackPanelProps) {
             <FeedbackCard
               key={feedback.feedback_id}
               feedback={feedback}
+              taskActive={taskActive}
               onChanged={() => {
                 void queryClient.invalidateQueries({
                   queryKey: ["task", task.task_id],
@@ -675,6 +1006,26 @@ export function FeedbackPanel({ task }: FeedbackPanelProps) {
             : "还没有反馈。结果不达标时，记录问题分类、样本和期望。"}
         </p>
       )}
+
+      {task.site_key ? (
+        <MergeRepairDialog
+          open={mergeOpen}
+          siteKey={task.site_key}
+          onOpenChange={setMergeOpen}
+          onStarted={(buildId, count) => {
+            setSaved(true);
+            setSavedNote(
+              `已将 ${count} 条反馈合并到修复构建 ${buildId}；构建入队后不能追加，结束后可再发起修复。`,
+            );
+            void queryClient.invalidateQueries({
+              queryKey: ["task-feedback", task.task_id],
+            });
+            void queryClient.invalidateQueries({
+              queryKey: ["site-feedback", task.site_key],
+            });
+          }}
+        />
+      ) : null}
     </section>
   );
 }

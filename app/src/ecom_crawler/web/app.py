@@ -357,6 +357,7 @@ class FeedbackRecord(BaseModel):
     expectation: str
     note: str | None = None
     scope: str
+    applies_to: Literal["CURRENT_RUN", "NEXT_RUN"] = "CURRENT_RUN"
     status: FeedbackStatus
     triage: FeedbackTriage | None = None
     triage_note: str | None = None
@@ -372,6 +373,7 @@ class FeedbackRecord(BaseModel):
     updated_at: str
     closed_at: str | None = None
     rule: FeedbackRuleRef | None = None
+    active_repair_build_id: str | None = None
 
 
 class FeedbackCreateResponse(BaseModel):
@@ -390,6 +392,7 @@ class FeedbackTriageResponse(BaseModel):
 
 class FeedbackRepairRequest(BaseModel):
     request_id: str = Field(min_length=1, max_length=200)
+    feedback_ids: list[str] = Field(default_factory=list, max_length=50)
     model_ref: str | None = Field(default=None, max_length=200)
     reason: str | None = Field(default=None, max_length=2000)
     max_products: int = Field(default=6, ge=1, le=50)
@@ -403,6 +406,24 @@ class FeedbackRepairRequest(BaseModel):
     archive_root: str | None = Field(default=None, max_length=1000)
     archive_max_bytes: int | None = Field(default=None, ge=0)
     capture_reasoning: bool | None = Field(default=None)
+
+
+class FeedbackBundleRequest(BaseModel):
+    feedback_ids: list[str] = Field(min_length=1, max_length=50)
+
+
+class FeedbackBundleBlocker(BaseModel):
+    feedback_id: str
+    reason: str
+
+
+class FeedbackBundleResponse(BaseModel):
+    can_repair: bool
+    site_key: str | None = None
+    batch_id: str | None = None
+    rule: FeedbackRuleRef | None = None
+    items: list[FeedbackRecord]
+    blockers: list[FeedbackBundleBlocker]
 
 
 class FeedbackRerunRequest(BaseModel):
@@ -759,7 +780,9 @@ def _rule_sha256(rules_dir: Path | None, rule_path: str | None) -> str | None:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _feedback_payload(feedback: QualityFeedback) -> FeedbackRecord:
+def _feedback_payload(
+    feedback: QualityFeedback, *, active_repair_build_id: str | None = None
+) -> FeedbackRecord:
     return FeedbackRecord(
         feedback_id=feedback.feedback_id,
         task_id=feedback.task_id,
@@ -770,6 +793,7 @@ def _feedback_payload(feedback: QualityFeedback) -> FeedbackRecord:
         expectation=feedback.expectation,
         note=feedback.note,
         scope=feedback.scope,
+        applies_to=feedback.applies_to,
         status=feedback.status,
         triage=feedback.triage,
         triage_note=feedback.triage_note,
@@ -793,7 +817,117 @@ def _feedback_payload(feedback: QualityFeedback) -> FeedbackRecord:
             if feedback.rule_id
             else None
         ),
+        active_repair_build_id=active_repair_build_id,
     )
+
+
+def _feedback_payloads(
+    store: TaskStore, items: list[QualityFeedback]
+) -> list[FeedbackRecord]:
+    active_by_site: dict[str | None, str | None] = {}
+    payloads = []
+    for item in items:
+        if item.site_key not in active_by_site:
+            active_by_site[item.site_key] = store.find_active_repair_build(item.site_key)
+        payloads.append(
+            _feedback_payload(
+                item,
+                active_repair_build_id=active_by_site[item.site_key],
+            )
+        )
+    return payloads
+
+
+def _feedback_bundle(
+    store: TaskStore, feedback_ids: list[str]
+) -> dict[str, Any]:
+    """Validate a merge request and return eligible records plus blockers."""
+    items: list[QualityFeedback] = []
+    blockers: list[dict[str, str]] = []
+    seen: set[str] = set()
+    reference: QualityFeedback | None = None
+    for feedback_id in feedback_ids:
+        if feedback_id in seen:
+            continue
+        seen.add(feedback_id)
+        feedback = store.get_feedback(feedback_id)
+        if feedback is None:
+            blockers.append({"feedback_id": feedback_id, "reason": "反馈不存在"})
+            continue
+        if feedback.status not in {"OPEN", "TRIAGED"}:
+            blockers.append(
+                {
+                    "feedback_id": feedback_id,
+                    "reason": f"状态为 {feedback.status}，只有未启动的反馈可以合并修复",
+                }
+            )
+            continue
+        if feedback.triage not in {None, "RULE_REPAIR"}:
+            blockers.append(
+                {
+                    "feedback_id": feedback_id,
+                    "reason": f"分诊结论为 {feedback.triage}，不能进入规则修复",
+                }
+            )
+            continue
+        if feedback.category in {"ACCESS_RUNTIME", "BUSINESS_EXPECTATION"}:
+            blockers.append(
+                {
+                    "feedback_id": feedback_id,
+                    "reason": "访问运行或业务预期类反馈不走规则修复",
+                }
+            )
+            continue
+        if not feedback.batch_id or not feedback.site_key:
+            blockers.append(
+                {
+                    "feedback_id": feedback_id,
+                    "reason": "反馈没有批次或站点，无法发起修复构建",
+                }
+            )
+            continue
+        if reference is None:
+            reference = feedback
+        else:
+            if feedback.site_key != reference.site_key:
+                blockers.append(
+                    {
+                        "feedback_id": feedback_id,
+                        "reason": f"属于其他站点：{feedback.site_key}",
+                    }
+                )
+                continue
+            if (feedback.rule_id, feedback.rule_version) != (
+                reference.rule_id,
+                reference.rule_version,
+            ):
+                blockers.append(
+                    {
+                        "feedback_id": feedback_id,
+                        "reason": "规则版本与本次合并的基准反馈不同",
+                    }
+                )
+                continue
+        items.append(feedback)
+    site_key = reference.site_key if reference else None
+    batch_id = reference.batch_id if reference else None
+    rule = (
+        FeedbackRuleRef(
+            rule_id=reference.rule_id,
+            rule_version=reference.rule_version,
+            sha256=reference.rule_sha256,
+        )
+        if reference and reference.rule_id
+        else None
+    )
+    return {
+        "can_repair": bool(items) and not blockers,
+        "site_key": site_key,
+        "batch_id": batch_id,
+        "rule": rule,
+        "items": items,
+        "blockers": blockers,
+    }
 
 
 def _load_result(out_root: Path, task_id: str) -> dict[str, Any]:
@@ -2771,32 +2905,41 @@ def create_app(
                     "VALIDATION_FAILED",
                     "新旧规则回归发现字段退化，不能激活",
                 )
-        linked = feedback_id or target.source_feedback_id
-        if linked:
+        linked_ids = list(
+            dict.fromkeys(
+                [
+                    *([feedback_id] if feedback_id else []),
+                    *([target.source_feedback_id] if target.source_feedback_id else []),
+                    *(build.feedback_ids or []),
+                ]
+            )
+        )
+        for linked in linked_ids:
             feedback = store.get_feedback(linked)
             samples = [
                 str(sample).strip()
                 for sample in (feedback.samples if feedback else [])
                 if str(sample).strip()
             ]
-            if samples:
-                checks = {
-                    sample_key(check.get("sample")): check
-                    for check in (validation.get("issue_checks") or [])
-                    if isinstance(check, dict)
-                }
-                for sample in samples:
-                    check = checks.get(sample_key(sample))
-                    if check is None:
-                        return (
-                            "VALIDATION_REQUIRED",
-                            f"问题样本缺少主机检查：{sample}",
-                        )
-                    if not check.get("passed"):
-                        return (
-                            "VALIDATION_FAILED",
-                            f"问题样本检查未通过：{sample}",
-                        )
+            if not samples:
+                continue
+            checks = {
+                sample_key(check.get("sample")): check
+                for check in (validation.get("issue_checks") or [])
+                if isinstance(check, dict)
+            }
+            for sample in samples:
+                check = checks.get(sample_key(sample))
+                if check is None:
+                    return (
+                        "VALIDATION_REQUIRED",
+                        f"问题样本缺少主机检查：{sample}",
+                    )
+                if not check.get("passed"):
+                    return (
+                        "VALIDATION_FAILED",
+                        f"问题样本检查未通过：{sample}",
+                    )
         return None
 
     @app.middleware("http")
@@ -4404,12 +4547,20 @@ def create_app(
         task_id: str, payload: FeedbackCreateRequest, response: Response
     ) -> FeedbackCreateResponse:
         task = require_task(task_id)
-        if task.state not in {"FINISHED", "CANCELLED"}:
+        if task.state not in {
+            "QUEUED",
+            "RUNNING",
+            "PAUSING",
+            "PAUSED",
+            "FINISHED",
+            "CANCELLED",
+        }:
             raise _error(
                 "INVALID_TASK_STATE",
-                "feedback requires a finished or cancelled task",
+                "feedback requires a queued, running, paused, finished or cancelled task",
                 409,
             )
+        terminal = task.state in {"FINISHED", "CANCELLED"}
         samples = [sample.strip() for sample in payload.samples]
         if any(not sample or not _valid_http_url(sample) for sample in samples):
             raise _error(
@@ -4447,6 +4598,7 @@ def create_app(
             samples=samples,
             note=payload.note,
             scope=payload.scope or "Task-scoped review.",
+            applies_to="CURRENT_RUN" if terminal else "NEXT_RUN",
             created_by=payload.created_by or "local-user",
             created_at=now,
             updated_at=now,
@@ -4459,7 +4611,10 @@ def create_app(
         response.status_code = 201 if created else 200
         return FeedbackCreateResponse(
             created=created,
-            feedback=_feedback_payload(record),
+            feedback=_feedback_payload(
+                record,
+                active_repair_build_id=store.find_active_repair_build(record.site_key),
+            ),
         )
 
     @app.get(
@@ -4481,7 +4636,7 @@ def create_app(
         )
         return FeedbackListResponse(
             total=total,
-            items=[_feedback_payload(item) for item in items],
+            items=_feedback_payloads(store, items),
         )
 
     @app.get("/api/feedback", response_model=FeedbackListResponse)
@@ -4503,7 +4658,7 @@ def create_app(
         )
         return FeedbackListResponse(
             total=total,
-            items=[_feedback_payload(item) for item in items],
+            items=_feedback_payloads(store, items),
         )
 
     @app.get("/api/feedback/{feedback_id}", response_model=FeedbackRecord)
@@ -4511,7 +4666,7 @@ def create_app(
         feedback = store.get_feedback(feedback_id)
         if feedback is None:
             raise _error("FEEDBACK_NOT_FOUND", f"unknown feedback: {feedback_id}", 404)
-        return _feedback_payload(feedback)
+        return _feedback_payloads(store, [feedback])[0]
 
     @app.post(
         "/api/feedback/{feedback_id}/triage",
@@ -4559,6 +4714,18 @@ def create_app(
             raise _error("INVALID_FEEDBACK_STATE", str(exc), 409) from exc
         return FeedbackTriageResponse(feedback=_feedback_payload(feedback))
 
+    @app.post("/api/feedback/bundle", response_model=FeedbackBundleResponse)
+    def bundle_feedback(payload: FeedbackBundleRequest) -> FeedbackBundleResponse:
+        result = _feedback_bundle(store, payload.feedback_ids)
+        return FeedbackBundleResponse(
+            can_repair=result["can_repair"],
+            site_key=result["site_key"],
+            batch_id=result["batch_id"],
+            rule=result["rule"],
+            items=_feedback_payloads(store, result["items"]),
+            blockers=result["blockers"],
+        )
+
     @app.post("/api/feedback/{feedback_id}/repair", status_code=202)
     def repair_feedback(
         feedback_id: str, payload: FeedbackRepairRequest
@@ -4580,73 +4747,66 @@ def create_app(
             raise _error("FEEDBACK_NOT_FOUND", f"unknown feedback: {feedback_id}", 404)
         existing_build = store.get_build_by_request_id(payload.request_id)
         if existing_build is not None:
-            if existing_build.feedback_id != feedback_id:
+            if (
+                existing_build.feedback_id != feedback_id
+                and feedback_id not in (existing_build.feedback_ids or [])
+            ):
                 raise _error(
                     "CONFLICT", "request_id belongs to another feedback", 409
                 )
             return {
                 "accepted": True,
                 "build": build_manager.describe(existing_build.build_id),
-                "feedback": _feedback_payload(
-                    store.get_feedback(feedback_id) or feedback
-                ),
+                "feedback": _feedback_payloads(
+                    store, [store.get_feedback(feedback_id) or feedback]
+                )[0],
             }
-        if feedback.status not in {"OPEN", "TRIAGED"}:
+        feedback_ids = list(
+            dict.fromkeys([feedback_id, *payload.feedback_ids])
+        )
+        bundle = _feedback_bundle(store, feedback_ids)
+        if not bundle["can_repair"]:
             raise _error(
-                "INVALID_FEEDBACK_STATE",
-                f"feedback is {feedback.status}, expected OPEN or TRIAGED",
+                "FEEDBACK_BUNDLE_BLOCKED",
+                "这些反馈不能合并到一次规则修复",
                 409,
+                {"blockers": bundle["blockers"]},
             )
-        if feedback.triage not in {None, "RULE_REPAIR"}:
-            raise _error(
-                "INVALID_FEEDBACK_STATE",
-                f"feedback triage is {feedback.triage}, expected RULE_REPAIR",
-                409,
-            )
-        if feedback.category in {"ACCESS_RUNTIME", "BUSINESS_EXPECTATION"}:
-            raise _error(
-                "INVALID_FEEDBACK_STATE",
-                "runtime/business feedback must be triaged and handled outside rule repair",
-                409,
-            )
-        if not feedback.batch_id or not feedback.site_key:
-            raise _error(
-                "INVALID_STATE",
-                "feedback has no batch/site; use the site build entry instead",
-                409,
-            )
-        task = store.get_task(feedback.task_id)
-        if task is None or task.state not in {"FINISHED", "CANCELLED"}:
-            raise _error(
-                "INVALID_TASK_STATE",
-                "feedback task must be terminal before repair",
-                409,
-            )
-        busy = site_busy(feedback.site_key)
+        items: list[QualityFeedback] = bundle["items"]
+        reference: QualityFeedback = items[0]
+        busy = site_busy(reference.site_key)  # type: ignore[arg-type]
         if busy:
             raise _error("SITE_BUSY", "site has active work", 409, busy)
-        active = build_manager.ensure_site_rule(feedback.site_key)
+        active = build_manager.ensure_site_rule(reference.site_key)  # type: ignore[arg-type]
         if active is None:
             raise _error(
                 "RULE_NOT_ACTIVE",
                 "site has no active rule; use the site build entry",
                 409,
             )
-        batch = store.get_batch(feedback.batch_id)
-        site = store.get_batch_site(feedback.batch_id, feedback.site_key)
+        batch = store.get_batch(reference.batch_id)  # type: ignore[arg-type]
+        site = store.get_batch_site(
+            reference.batch_id, reference.site_key  # type: ignore[arg-type]
+        )
         if batch is None or site is None:
             raise _error("INVALID_STATE", "feedback batch/site no longer exists", 409)
-        store.update_feedback(
-            feedback_id,
-            status="REPAIRING",
-            triage=feedback.triage or "RULE_REPAIR",
-            triage_source=feedback.triage_source or "repair",
-        )
+        reason = (payload.reason or "").strip()
+        if not reason:
+            reason = "；".join(
+                f"{item.feedback_id}: {item.expectation}" for item in items
+            )[:2000]
+        for item in items:
+            store.update_feedback(
+                item.feedback_id,
+                status="REPAIRING",
+                triage=item.triage or "RULE_REPAIR",
+                triage_source=item.triage_source or "repair",
+            )
         try:
             record = build_manager.repair(
                 batch,
                 site,
-                reason=payload.reason or feedback.expectation,
+                reason=reason,
                 max_products=payload.max_products,
                 max_seconds=payload.max_seconds,
                 max_total_seconds=payload.max_total_seconds,
@@ -4658,19 +4818,31 @@ def create_app(
                 archive_root=payload.archive_root,
                 archive_sample_limit=payload.archive_sample_limit,
                 archive_max_bytes=payload.archive_max_bytes,
-                feedback_id=feedback_id,
+                feedback_id=items[0].feedback_id,
+                feedback_ids=[item.feedback_id for item in items],
                 request_id=payload.request_id,
                 model_ref=payload.model_ref,
             )
         except BuildError as exc:
-            store.update_feedback(feedback_id, status="TRIAGED")
+            for item in items:
+                store.update_feedback(item.feedback_id, status="TRIAGED")
             raise _error("BUILD_CONFLICT", str(exc), 409) from exc
-        store.update_feedback(feedback_id, repair_build_id=record.build_id)
-        updated = store.get_feedback(feedback_id) or feedback
+        for item in items:
+            store.update_feedback(
+                item.feedback_id, repair_build_id=record.build_id
+            )
+        updated = store.get_feedback(items[0].feedback_id) or items[0]
         return {
             "accepted": True,
             "build": build_manager.describe(record.build_id),
-            "feedback": _feedback_payload(updated),
+            "feedback": _feedback_payloads(store, [updated])[0],
+            "feedbacks": _feedback_payloads(
+                store,
+                [
+                    store.get_feedback(item.feedback_id) or item
+                    for item in items
+                ],
+            ),
         }
 
     @app.post("/api/feedback/{feedback_id}/rerun", status_code=202)
@@ -5014,6 +5186,20 @@ def create_app(
                 },
             )
         require_file_hash(target)
+        linked_build = (
+            store.get_build(target.source_build_id)
+            if target.source_build_id
+            else None
+        )
+        activation_feedback_ids = list(
+            dict.fromkeys(
+                [
+                    *([payload.feedback_id] if payload.feedback_id else []),
+                    *([target.source_feedback_id] if target.source_feedback_id else []),
+                    *((linked_build.feedback_ids if linked_build else None) or []),
+                ]
+            )
+        )
         try:
             site_rule, activation = store.activate_rule(
                 site_key=site_key,
@@ -5023,6 +5209,7 @@ def create_app(
                 expected_active_version=payload.expected_active_version,
                 expected_active_sha256=payload.expected_active_sha256,
                 feedback_id=payload.feedback_id,
+                feedback_ids=activation_feedback_ids,
                 request_id=payload.request_id,
                 reason=payload.reason,
                 actor=payload.actor or "local-user",

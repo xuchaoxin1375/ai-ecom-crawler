@@ -1511,6 +1511,7 @@ class BuildManager:
         repair: bool = False,
         repair_reason: str | None = None,
         feedback_id: str | None = None,
+        feedback_ids: list[str] | None = None,
         request_id: str | None = None,
         model_ref: str | None = None,
         auto_collect: bool = False,
@@ -1679,6 +1680,14 @@ class BuildManager:
                 "model_selection": selection,
                 "auto_collect": auto_collect,
             }
+            linked_feedback_ids = list(
+                dict.fromkeys(
+                    [
+                        *(feedback_ids or []),
+                        *([feedback_id] if feedback_id else []),
+                    ]
+                )
+            )
             record = BuildRecord(
                 build_id=build_id,
                 batch_id=batch.batch_id,
@@ -1688,7 +1697,8 @@ class BuildManager:
                 proxy=resolved_proxy,
                 workspace=str(self.workspace_root / build_id),
                 mode="repair" if repair else "build",
-                feedback_id=feedback_id,
+                feedback_id=feedback_id or (linked_feedback_ids[0] if linked_feedback_ids else None),
+                feedback_ids=linked_feedback_ids,
                 request_id=request_id,
                 request=request,
                 source_rule_version=site.rule_version if repair else None,
@@ -1724,6 +1734,7 @@ class BuildManager:
         archive_sample_limit: int | None = None,
         archive_max_bytes: int | None = None,
         feedback_id: str | None = None,
+        feedback_ids: list[str] | None = None,
         request_id: str | None = None,
         model_ref: str | None = None,
     ) -> BuildRecord:
@@ -1747,6 +1758,7 @@ class BuildManager:
             repair=True,
             repair_reason=reason,
             feedback_id=feedback_id,
+            feedback_ids=feedback_ids,
             request_id=request_id,
             model_ref=model_ref,
         )
@@ -3140,16 +3152,15 @@ correct the rule; a currency or market mismatch fails host validation.
                         note=f"验证中：{build_id}",
                     )
                 work_dir = Path(session.workspace.root) / "validation"
-                feedback = (
-                    self.store.get_feedback(record.feedback_id)
-                    if record.feedback_id
-                    else None
-                )
-                feedback_samples = [
-                    str(sample).strip()
-                    for sample in (feedback.samples if feedback else [])
-                    if str(sample).strip()
-                ][:5]
+                feedbacks = self._linked_feedbacks(record)
+                feedback_samples = list(
+                    dict.fromkeys(
+                        str(sample).strip()
+                        for feedback in feedbacks
+                        for sample in feedback.samples
+                        if str(sample).strip()
+                    )
+                )[:10]
                 validation_products = max(
                     1, int(record.request.get("max_products") or self.max_products)
                 )
@@ -3281,12 +3292,16 @@ correct the rule; a currency or market mismatch fails host validation.
                 has_parent = record.mode == "repair" or bool(
                     activation.from_version if activation else parent_rule
                 )
-                issue_checks = feedback_issue_checks(
-                    feedback,
-                    product_samples,
-                    rule_currency=rule_currency,
-                    audit_samples=audit.get("samples"),
-                )
+                issue_checks = [
+                    check
+                    for feedback in feedbacks
+                    for check in feedback_issue_checks(
+                        feedback,
+                        product_samples,
+                        rule_currency=rule_currency,
+                        audit_samples=audit.get("samples"),
+                    )
+                ]
                 regression = self._run_regression(
                     record,
                     site,
@@ -3313,6 +3328,9 @@ correct the rule; a currency or market mismatch fails host validation.
                 validation["feedback_samples"] = (
                     feedback_samples if issue_checks else []
                 )
+                validation["feedback_ids"] = [
+                    feedback.feedback_id for feedback in feedbacks
+                ]
                 with self._install_lock:
                     current = self.store.get_build(build_id)
                     if current is None or current.state != "VALIDATING" or self._stopping.is_set():
@@ -3334,14 +3352,14 @@ correct the rule; a currency or market mismatch fails host validation.
                 self._write_trace(
                     build_id, session, validation=validation, error=message
                 )
-                if record.feedback_id:
-                    feedback = self.store.get_feedback(record.feedback_id)
-                    if feedback and feedback.status == "REPAIRING":
-                        self.store.update_feedback(
-                            record.feedback_id,
-                            status="TRIAGED",
-                            triage_note=message[:2000],
-                        )
+                if record.feedback_id or record.feedback_ids:
+                    for feedback in self._linked_feedbacks(record):
+                        if feedback.status == "REPAIRING":
+                            self.store.update_feedback(
+                                feedback.feedback_id,
+                                status="TRIAGED",
+                                triage_note=message[:2000],
+                            )
                 self._release_site(
                     record.batch_id,
                     record.site_key,
@@ -3459,6 +3477,7 @@ correct the rule; a currency or market mismatch fails host validation.
                         expected_active_version=current.rule_version if current else None,
                         expected_active_sha256=current.sha256 if current else None,
                         feedback_id=record.feedback_id,
+                        feedback_ids=record.feedback_ids,
                         request_id=f"{build_id}-activate",
                         reason="host validation passed",
                         actor="build" if record.mode == "build" else "legacy-build",
@@ -3478,14 +3497,14 @@ correct the rule; a currency or market mismatch fails host validation.
                     proxy=record.proxy,
                     note=note,
                 )
-            if record.feedback_id:
-                feedback = self.store.get_feedback(record.feedback_id)
-                if feedback and feedback.status == "REPAIRING":
-                    self.store.update_feedback(
-                        record.feedback_id,
-                        status="AWAITING_RERUN",
-                        repair_build_id=build_id,
-                    )
+            if record.feedback_id or record.feedback_ids:
+                for feedback in self._linked_feedbacks(record):
+                    if feedback.status == "REPAIRING":
+                        self.store.update_feedback(
+                            feedback.feedback_id,
+                            status="AWAITING_RERUN",
+                            repair_build_id=build_id,
+                        )
             if record.request.get("auto_collect") and batch is not None and site is not None:
                 current_rule = self.store.get_site_rule(record.site_key)
                 mode = batch.collection_mode
@@ -3549,23 +3568,24 @@ correct the rule; a currency or market mismatch fails host validation.
                 proxy=record.proxy,
                 note=note,
             )
-            if record.feedback_id:
-                if validation_status == "PASSED":
-                    self.store.update_feedback(
-                        record.feedback_id,
-                        status="AWAITING_ACTIVATION",
-                        repair_build_id=build_id,
-                    )
-                else:
-                    self.store.update_feedback(
-                        record.feedback_id,
-                        status="TRIAGED",
-                        repair_build_id=build_id,
-                        triage_note=(
-                            f"候选验证{validation_status}，未进入待激活："
-                            + ("；".join(reasons[:2]) or "缺少验证证据")
-                        )[:2000],
-                    )
+            if record.feedback_id or record.feedback_ids:
+                for feedback in self._linked_feedbacks(record):
+                    if validation_status == "PASSED":
+                        self.store.update_feedback(
+                            feedback.feedback_id,
+                            status="AWAITING_ACTIVATION",
+                            repair_build_id=build_id,
+                        )
+                    else:
+                        self.store.update_feedback(
+                            feedback.feedback_id,
+                            status="TRIAGED",
+                            repair_build_id=build_id,
+                            triage_note=(
+                                f"候选验证{validation_status}，未进入待激活："
+                                + ("；".join(reasons[:2]) or "缺少验证证据")
+                            )[:2000],
+                        )
         self._mark_repair_finished(
             build_id, resolved=validation_status == "PASSED"
         )
@@ -4204,18 +4224,30 @@ correct the rule; a currency or market mismatch fails host validation.
         self._release_feedback(build_id, message)
 
     def _release_feedback(self, build_id: str, note: str) -> None:
-        """Return a repair feedback to TRIAGED when its build ends early."""
+        """Return linked repair feedback to TRIAGED when its build ends early."""
         record = self.store.get_build(build_id)
-        if record is None or record.mode != "repair" or not record.feedback_id:
+        if record is None or record.mode != "repair":
             return
-        feedback = self.store.get_feedback(record.feedback_id)
-        if feedback is None or feedback.status != "REPAIRING":
-            return
-        self.store.update_feedback(
-            record.feedback_id,
-            status="TRIAGED",
-            triage_note=note[:2000],
-        )
+        for feedback in self._linked_feedbacks(record):
+            if feedback.status != "REPAIRING":
+                continue
+            self.store.update_feedback(
+                feedback.feedback_id,
+                status="TRIAGED",
+                triage_note=note[:2000],
+            )
+
+    def _linked_feedbacks(self, record: BuildRecord) -> list[Any]:
+        """Return the feedback records merged into one repair build."""
+        ids = list(record.feedback_ids or [])
+        if record.feedback_id and record.feedback_id not in ids:
+            ids.insert(0, record.feedback_id)
+        feedbacks = []
+        for feedback_id in ids:
+            feedback = self.store.get_feedback(feedback_id)
+            if feedback is not None:
+                feedbacks.append(feedback)
+        return feedbacks
 
     def _release_site(
         self,
@@ -4391,6 +4423,7 @@ correct the rule; a currency or market mismatch fails host validation.
                 else None
             ),
             "feedback_id": record.feedback_id,
+            "feedback_ids": list(record.feedback_ids or []),
             "source_rule": (
                 {
                     "rule_version": record.source_rule_version,

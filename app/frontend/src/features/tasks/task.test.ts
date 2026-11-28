@@ -60,6 +60,7 @@ function feedback(overrides: Partial<FeedbackRecord> = {}): FeedbackRecord {
     expectation: "描述应包含规格",
     note: null,
     scope: "Task-scoped review.",
+    applies_to: "CURRENT_RUN",
     status: "OPEN",
     triage: null,
     triage_note: null,
@@ -75,6 +76,7 @@ function feedback(overrides: Partial<FeedbackRecord> = {}): FeedbackRecord {
     updated_at: "2026-11-23T10:00:00Z",
     closed_at: null,
     rule: null,
+    active_repair_build_id: null,
     ...overrides,
   };
 }
