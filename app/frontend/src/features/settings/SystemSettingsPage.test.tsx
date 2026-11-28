@@ -95,10 +95,26 @@ function stubFetch(
   } = {},
 ) {
   let current = initial;
+  let previewThumbnailsEnabled = true;
+  let previewRealtimeLimit = 50;
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     const path = url.split("?")[0];
     if (path === "/api/system" && (!init?.method || init.method === "GET")) {
       return Response.json(current);
+    }
+    if (path === "/api/system/preview-settings") {
+      if (init?.method === "PUT") {
+        const body = JSON.parse(String(init.body)) as {
+          thumbnails_enabled: boolean;
+          realtime_limit: number;
+        };
+        previewThumbnailsEnabled = body.thumbnails_enabled;
+        previewRealtimeLimit = body.realtime_limit;
+      }
+      return Response.json({
+        thumbnails_enabled: previewThumbnailsEnabled,
+        realtime_limit: previewRealtimeLimit,
+      });
     }
     if (path === "/api/system/collection-slots" && init?.method === "PUT") {
       const { max_tasks } = JSON.parse(String(init.body)) as {
@@ -563,5 +579,100 @@ describe("system settings", () => {
 
     expect(await screen.findByRole("button", { name: "退出登录" })).toBeDisabled();
     expect(screen.getByText(/本机退出登录不会生效/)).toBeVisible();
+  });
+
+  it("saves the list thumbnail display preference", async () => {
+    const fetchMock = stubFetch(systemInfo());
+    renderPage("/settings", "/settings", <SystemSettingsPage />);
+
+    const toggle = await screen.findByRole("switch", {
+      name: "在列表中加载商品缩略图",
+    });
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(toggle);
+
+    await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "false"));
+    expect(await screen.findByText(/已关闭列表缩略图；列表改为占位块/)).toBeVisible();
+    const put = fetchMock.mock.calls.find(
+      ([url, init]) => url === "/api/system/preview-settings" && init?.method === "PUT",
+    );
+    expect(JSON.parse(String(put?.[1]?.body))).toEqual({
+      thumbnails_enabled: false,
+      realtime_limit: 50,
+    });
+  });
+
+  it("saves a preset realtime preview limit", async () => {
+    const fetchMock = stubFetch(systemInfo());
+    renderPage("/settings", "/settings", <SystemSettingsPage />);
+
+    const select = await screen.findByLabelText("实时数据预览条数");
+    expect(select).toHaveValue("50");
+    fireEvent.change(select, { target: { value: "10" } });
+
+    await waitFor(() =>
+      expect(screen.getByText(/已设置实时数据预览 10 条/)).toBeVisible(),
+    );
+    const put = fetchMock.mock.calls.find(
+      ([url, init]) => url === "/api/system/preview-settings" && init?.method === "PUT",
+    );
+    expect(JSON.parse(String(put?.[1]?.body))).toEqual({
+      thumbnails_enabled: true,
+      realtime_limit: 10,
+    });
+  });
+
+  it("saves a custom realtime preview limit within 10–200", async () => {
+    const fetchMock = stubFetch(systemInfo());
+    renderPage("/settings", "/settings", <SystemSettingsPage />);
+
+    const select = await screen.findByLabelText("实时数据预览条数");
+    fireEvent.change(select, { target: { value: "custom" } });
+    const input = screen.getByLabelText("自定义实时数据预览条数");
+    fireEvent.change(input, { target: { value: "137" } });
+    fireEvent.click(screen.getByRole("button", { name: "应用" }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/已设置实时数据预览 137 条/)).toBeVisible(),
+    );
+    const put = fetchMock.mock.calls.find(
+      ([url, init]) => url === "/api/system/preview-settings" && init?.method === "PUT",
+    );
+    expect(JSON.parse(String(put?.[1]?.body))).toEqual({
+      thumbnails_enabled: true,
+      realtime_limit: 137,
+    });
+  });
+
+  it("rejects an out-of-range custom realtime preview limit", async () => {
+    const fetchMock = stubFetch(systemInfo());
+    renderPage("/settings", "/settings", <SystemSettingsPage />);
+
+    const select = await screen.findByLabelText("实时数据预览条数");
+    fireEvent.change(select, { target: { value: "custom" } });
+    const input = screen.getByLabelText("自定义实时数据预览条数");
+    fireEvent.change(input, { target: { value: "9" } });
+    fireEvent.click(screen.getByRole("button", { name: "应用" }));
+
+    expect(await screen.findByText("请输入 10–200 之间的整数。")).toBeVisible();
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, init]) =>
+          url === "/api/system/preview-settings" && init?.method === "PUT",
+      ),
+    ).toBe(false);
+  });
+
+  it("disables the thumbnail preference in read-only mode", async () => {
+    const info = systemInfo();
+    info.runtime.read_only = true;
+    stubFetch(info);
+    renderPage("/settings", "/settings", <SystemSettingsPage />);
+
+    const toggle = await screen.findByRole("switch", {
+      name: "在列表中加载商品缩略图",
+    });
+    expect(toggle).toBeDisabled();
+    expect(screen.getByText("只读预览不能修改列表与预览设置。")).toBeVisible();
   });
 });

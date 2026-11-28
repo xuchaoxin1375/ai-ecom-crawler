@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { getHealth, getSystemInfo } from "../lib/api";
 import { cn } from "../lib/cn";
+import { PreviewSettingsProvider } from "../lib/previewSettings";
 
 const SIDEBAR_KEY = "ecom.sidebar.pinned";
 const SIDEBAR_EXPANDED = 248;
@@ -782,7 +783,9 @@ export function AppShell() {
             !isWorkbench && "mx-auto max-w-[1560px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8",
           )}
         >
-          <Outlet />
+          <PreviewSettingsProvider>
+            <Outlet />
+          </PreviewSettingsProvider>
         </div>
       </main>
     </div>

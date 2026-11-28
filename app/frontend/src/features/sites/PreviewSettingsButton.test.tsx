@@ -20,7 +20,23 @@ describe("PreviewSettingsButton", () => {
       proxy: null,
       service_proxy_configured: false,
     };
+    let thumbnailsEnabled = true;
+    let realtimeLimit = 50;
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "/api/system/preview-settings") {
+        if (init?.method === "PUT") {
+          const body = JSON.parse(String(init.body)) as {
+            thumbnails_enabled: boolean;
+            realtime_limit: number;
+          };
+          thumbnailsEnabled = body.thumbnails_enabled;
+          realtimeLimit = body.realtime_limit;
+        }
+        return Response.json({
+          thumbnails_enabled: thumbnailsEnabled,
+          realtime_limit: realtimeLimit,
+        });
+      }
       if (url === "/api/system/image-proxy" && init?.method === "PUT") {
         const body = JSON.parse(String(init.body)) as {
           mode: ImageProxySettings["mode"];
@@ -34,7 +50,7 @@ describe("PreviewSettingsButton", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     renderWithQuery(<PreviewSettingsButton />);
-    fireEvent.click(screen.getByRole("button", { name: "预览设置：图片代理" }));
+    fireEvent.click(screen.getByRole("button", { name: "预览设置：图片与列表" }));
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText("预览设置")).toBeInTheDocument();
     const mode = await within(dialog).findByLabelText("取图方式");
@@ -49,5 +65,50 @@ describe("PreviewSettingsButton", () => {
     });
     expect(saved.mode).toBe("specified");
     expect(saved.proxy).toBe("http://127.0.0.1:7890");
+  });
+
+  it("toggles list thumbnails from the preview dialog", async () => {
+    let thumbnailsEnabled = true;
+    let realtimeLimit = 50;
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "/api/system/preview-settings") {
+        if (init?.method === "PUT") {
+          const body = JSON.parse(String(init.body)) as {
+            thumbnails_enabled: boolean;
+            realtime_limit: number;
+          };
+          thumbnailsEnabled = body.thumbnails_enabled;
+          realtimeLimit = body.realtime_limit;
+        }
+        return Response.json({
+          thumbnails_enabled: thumbnailsEnabled,
+          realtime_limit: realtimeLimit,
+        });
+      }
+      return Response.json({
+        mode: "auto",
+        proxy: null,
+        service_proxy_configured: false,
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderWithQuery(<PreviewSettingsButton />);
+    fireEvent.click(screen.getByRole("button", { name: "预览设置：图片与列表" }));
+    const dialog = await screen.findByRole("dialog");
+    const toggle = await within(dialog).findByRole("switch", {
+      name: "在列表中加载商品缩略图",
+    });
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(toggle);
+
+    await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "false"));
+    const put = fetchMock.mock.calls.find(
+      ([url, init]) => url === "/api/system/preview-settings" && init?.method === "PUT",
+    );
+    expect(JSON.parse(String(put?.[1]?.body))).toEqual({
+      thumbnails_enabled: false,
+      realtime_limit: 50,
+    });
   });
 });

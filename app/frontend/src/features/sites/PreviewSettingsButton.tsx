@@ -2,6 +2,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { SlidersHorizontal, X } from "lucide-react";
 import { useState } from "react";
 import { ImageProxyForm } from "../settings/ImageProxyForm";
+import { PreviewDisplayForm } from "../settings/PreviewDisplaySettings";
 import { cn } from "../../lib/cn";
 
 /**
@@ -21,8 +22,8 @@ export function PreviewSettingsButton({ className }: { className?: string }) {
             "inline-flex h-7 items-center gap-1 rounded-full border border-line bg-surface px-2.5 text-[11px] font-medium text-ink-2 hover:bg-surface-muted hover:text-ink",
             className,
           )}
-          title="调整图片代理与预览设置"
-          aria-label="预览设置：图片代理"
+          title="调整图片代理、列表缩略图与实时数据预览"
+          aria-label="预览设置：图片与列表"
         >
           <SlidersHorizontal size={13} aria-hidden="true" />
           预览设置
@@ -37,7 +38,7 @@ export function PreviewSettingsButton({ className }: { className?: string }) {
                 预览设置
               </Dialog.Title>
               <Dialog.Description className="mt-0.5 text-xs leading-5 text-ink-3">
-                调整商品图片的取图出口；保存后当前页立即生效。
+                调整商品图片的取图出口、列表缩略图和实时数据预览条数；保存后当前页立即生效。
               </Dialog.Description>
             </div>
             <Dialog.Close asChild>
@@ -52,9 +53,15 @@ export function PreviewSettingsButton({ className }: { className?: string }) {
           </header>
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
             <ImageProxyForm onSaved={() => setOpen(false)} />
+            <div className="mt-5 border-t border-line pt-4">
+              <p className="mb-3 text-xs leading-5 text-ink-3">
+                列表缩略图和实时数据预览条数与系统设置「列表与预览」共用同一项服务端设置。
+              </p>
+              <PreviewDisplayForm />
+            </div>
             <p className="mt-4 border-t border-line pt-3 text-xs leading-5 text-ink-3">
               描述显示方式（单行／换行）在 CSV
-              表格表头直接切换；这里只调整图片取图设置。
+              表格表头直接切换；这里调整图片取图、列表缩略图和实时数据预览。
             </p>
           </div>
         </Dialog.Content>

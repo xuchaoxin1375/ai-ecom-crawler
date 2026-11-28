@@ -112,6 +112,7 @@ import {
 import { ProductThumb } from "../sites/ProductThumb";
 import { ProductPreviewDialog } from "../sites/ProductPreviewDialog";
 import { PreviewSettingsButton } from "../sites/PreviewSettingsButton";
+import { usePreviewDisplaySettings } from "../../lib/previewSettings";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
 import { DataTable, type DataTableColumn } from "../../components/ui/DataTable";
@@ -406,6 +407,12 @@ export function WorkbenchPage() {
   const [descriptionMode, setDescriptionMode] = useDescriptionMode(
     WORKBENCH_DESCRIPTION_MODE_KEY,
   );
+  const {
+    thumbnailsEnabled: previewThumbnailsEnabled,
+    realtimeLimit,
+    ready: previewSettingsReady,
+  } = usePreviewDisplaySettings();
+  const showImageLink = previewSettingsReady && !previewThumbnailsEnabled;
   const [treeMenu, setTreeMenu] = useState<{
     x: number;
     y: number;
@@ -492,19 +499,24 @@ export function WorkbenchPage() {
       "workbench-task-data",
       selectedTaskId,
       activeSelected ? "live" : "final",
+      realtimeLimit,
     ],
     queryFn: ({ signal }) =>
       getTaskItems(
         selectedTaskId as string,
         "product",
-        50,
+        realtimeLimit,
         0,
         "DONE",
         "desc",
         signal,
         true,
       ),
-    enabled: Boolean(selectedTaskId) && bottomTab === "data" && !bottomCollapsed,
+    enabled:
+      Boolean(selectedTaskId) &&
+      bottomTab === "data" &&
+      !bottomCollapsed &&
+      previewSettingsReady,
     refetchInterval: activeSelected ? 3000 : false,
   });
 
@@ -3257,6 +3269,7 @@ export function WorkbenchPage() {
                                   type="button"
                                   className="flex w-full min-w-0 items-center gap-2 overflow-hidden rounded-control text-left hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
                                   title={`查看大图：${previewName(item)}`}
+                                  aria-label={`查看大图：${previewName(item)}`}
                                   onClick={() => openPreview(item)}
                                 >
                                   <ProductThumb
@@ -3324,14 +3337,26 @@ export function WorkbenchPage() {
                                 {formatTime(item.occurred_at)}
                               </td>
                               <td className="px-2 py-1.5 align-top text-right">
-                                <a
-                                  className="text-[11px] text-accent hover:underline"
-                                  href={item.url}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                >
-                                  来源页
-                                </a>
+                                <div className="flex flex-col items-end gap-0.5">
+                                  {showImageLink && previewImage(item) ? (
+                                    <button
+                                      type="button"
+                                      className="text-[11px] leading-4 text-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                                      aria-label={`预览图片：${previewName(item)}`}
+                                      onClick={() => openPreview(item)}
+                                    >
+                                      图片
+                                    </button>
+                                  ) : null}
+                                  <a
+                                    className="text-[11px] text-accent hover:underline"
+                                    href={item.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                  >
+                                    来源页
+                                  </a>
+                                </div>
                               </td>
                             </tr>
                           );

@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { PreviewSettingsContext } from "../../lib/previewSettings";
 import { TaskCsvPreview } from "./TaskCsvPreview";
 
 function renderWithQuery(ui: React.ReactNode) {
@@ -57,7 +58,7 @@ describe("TaskCsvPreview", () => {
     renderWithQuery(<TaskCsvPreview taskId="web-1" live={false} />);
 
     expect(
-      screen.getByRole("button", { name: "预览设置：图片代理" }),
+      screen.getByRole("button", { name: "预览设置：图片与列表" }),
     ).toBeInTheDocument();
 
     const thumb = await screen.findByRole("button", {
@@ -129,5 +130,53 @@ describe("TaskCsvPreview", () => {
       "true",
     );
     expect(within(dialog).getByText(/CSV 描述第一段/)).toBeInTheDocument();
+  });
+
+  it("shows placeholders and an image link when list thumbnails are disabled", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          task_id: "web-1",
+          state: "FINISHED",
+          live: false,
+          columns: ["name", "primary_image_url", "description_html", "source_url"],
+          rows: [
+            {
+              name: "CSV 商品",
+              primary_image_url: "https://images.example.test/csv.jpg",
+              description_html: "<p>CSV 描述</p>",
+              source_url: "https://example.test/p/1",
+            },
+          ],
+          total: 1,
+          source: "products.csv",
+        }),
+      ),
+    );
+
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: Infinity } },
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <PreviewSettingsContext.Provider
+          value={{ thumbnailsEnabled: false, realtimeLimit: 50, ready: true }}
+        >
+          <TaskCsvPreview taskId="web-1" live={false} />
+        </PreviewSettingsContext.Provider>
+      </QueryClientProvider>,
+    );
+
+    expect(
+      await screen.findByRole("img", { name: "缩略图已关闭，点击查看大图" }),
+    ).toBeInTheDocument();
+    expect(document.querySelector("table img")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "预览图片：CSV 商品" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      within(dialog).queryByRole("group", { name: "商品缩略图" }),
+    ).not.toBeInTheDocument();
+    expect(within(dialog).getByText("CSV 商品")).toBeInTheDocument();
   });
 });

@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { TaskItem } from "../../lib/api";
+import { PreviewSettingsContext } from "../../lib/previewSettings";
 import { ProductPreviewDialog } from "./ProductPreviewDialog";
 
 function product(
@@ -91,5 +92,26 @@ describe("ProductPreviewDialog", () => {
 
     expect(screen.getByText("这是完整描述内容。")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "下一张商品" })).toBeNull();
+  });
+
+  it("hides the thumbnail rail when list thumbnails are disabled", () => {
+    const first = product("p-1", "第一件商品", "https://example.test/1.jpg");
+    const second = product("p-2", "第二件商品", "https://example.test/2.jpg");
+
+    render(
+      <PreviewSettingsContext.Provider
+        value={{ thumbnailsEnabled: false, realtimeLimit: 50, ready: true }}
+      >
+        <ProductPreviewDialog
+          open
+          item={first}
+          items={[first, second]}
+          onOpenChange={() => undefined}
+        />
+      </PreviewSettingsContext.Provider>,
+    );
+
+    expect(screen.queryByRole("group", { name: "商品缩略图" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "下一张商品" })).toBeInTheDocument();
   });
 });

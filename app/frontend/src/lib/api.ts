@@ -134,6 +134,11 @@ export interface ImageProxySettings {
   service_proxy_configured: boolean;
 }
 
+export interface PreviewSettings {
+  thumbnails_enabled: boolean;
+  realtime_limit: number;
+}
+
 export interface SystemAccessResponse {
   access: SystemAccess;
 }
@@ -1643,6 +1648,16 @@ export function setImageProxy(
   settings: Pick<ImageProxySettings, "mode" | "proxy">,
 ): Promise<ImageProxySettings> {
   return sendJson<ImageProxySettings>("/api/system/image-proxy", "PUT", settings);
+}
+
+export function getPreviewSettings(signal?: AbortSignal): Promise<PreviewSettings> {
+  return getJson<PreviewSettings>("/api/system/preview-settings", signal);
+}
+
+export function setPreviewSettings(
+  settings: PreviewSettings,
+): Promise<PreviewSettings> {
+  return sendJson<PreviewSettings>("/api/system/preview-settings", "PUT", settings);
 }
 
 export function setSystemCollectionSlots(

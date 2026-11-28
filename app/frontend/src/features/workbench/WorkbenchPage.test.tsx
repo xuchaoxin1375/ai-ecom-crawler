@@ -11,6 +11,7 @@ import type {
   WorkbenchTreePayload,
 } from "../../lib/api";
 import { renderPage } from "../../test/renderPage";
+import { PreviewSettingsContext } from "../../lib/previewSettings";
 import { WorkbenchPage } from "./WorkbenchPage";
 import { setWorkbenchTreeCollapsed } from "./workbenchTreeState";
 
@@ -729,6 +730,32 @@ it("resizes and collapses the workbench panels", async () => {
   );
 });
 
+it("uses the configured realtime preview limit", async () => {
+  const fetchMock = stubFetch();
+  renderPage(
+    "/workbench",
+    { pathname: "/workbench" },
+    <PreviewSettingsContext.Provider
+      value={{ thumbnailsEnabled: true, realtimeLimit: 137, ready: true }}
+    >
+      <WorkbenchPage />
+    </PreviewSettingsContext.Provider>,
+  );
+
+  const recentSection = await screen.findByLabelText("最近任务");
+  fireEvent.click(await within(recentSection).findByText(/web-1/));
+  fireEvent.click(screen.getByRole("tab", { name: "实时数据" }));
+  expect(await screen.findByText("Fixture product")).toBeInTheDocument();
+
+  const itemsCall = fetchMock.mock.calls.find(([url]) =>
+    String(url).startsWith("/api/tasks/web-1/items?"),
+  );
+  expect(itemsCall).toBeDefined();
+  const params = new URL(String(itemsCall?.[0]), "http://localhost").searchParams;
+  expect(params.get("limit")).toBe("137");
+  expect(params.get("include_description")).toBe("true");
+});
+
 it("shows live product data and runtime log lines", async () => {
   stubFetch();
   renderPage("/workbench", { pathname: "/workbench" }, <WorkbenchPage />);
@@ -744,7 +771,7 @@ it("shows live product data and runtime log lines", async () => {
   expect(screen.getByText("Taille#S|M")).toBeInTheDocument();
 
   expect(
-    screen.getByRole("button", { name: "预览设置：图片代理" }),
+    screen.getByRole("button", { name: "预览设置：图片与列表" }),
   ).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "换行" }));
   expect(screen.getByRole("button", { name: "换行" })).toHaveAttribute(

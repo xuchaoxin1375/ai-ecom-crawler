@@ -1888,6 +1888,23 @@
         "title": "OnboardingBudgetRequest",
         "type": "object"
       },
+      "PreviewSettingsRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "realtime_limit": {
+            "default": 50,
+            "title": "Realtime Limit",
+            "type": "integer"
+          },
+          "thumbnails_enabled": {
+            "default": true,
+            "title": "Thumbnails Enabled",
+            "type": "boolean"
+          }
+        },
+        "title": "PreviewSettingsRequest",
+        "type": "object"
+      },
       "RuleActivateRequest": {
         "properties": {
           "actor": {
@@ -6839,6 +6856,64 @@
           }
         },
         "summary": "Put Image Proxy"
+      }
+    },
+    "/api/system/preview-settings": {
+      "get": {
+        "operationId": "get_preview_settings_api_system_preview_settings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Preview Settings Api System Preview Settings Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Preview Settings"
+      },
+      "put": {
+        "operationId": "put_preview_settings_api_system_preview_settings_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewSettingsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Put Preview Settings Api System Preview Settings Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Preview Settings"
       }
     },
     "/api/tasks": {

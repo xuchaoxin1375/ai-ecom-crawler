@@ -13,6 +13,7 @@ import { ProductPreviewDialog } from "./ProductPreviewDialog";
 import { PreviewSettingsButton } from "./PreviewSettingsButton";
 import { useDescriptionMode } from "./descriptionMode";
 import { htmlToText, previewImage } from "./site";
+import { usePreviewDisplaySettings } from "../../lib/previewSettings";
 
 const PAGE_SIZE = 20;
 
@@ -78,6 +79,9 @@ export function TaskCsvPreview({ taskId, live }: TaskCsvPreviewProps) {
   const [previewTab, setPreviewTab] = useState<"image" | "description">("image");
   const [previewOpen, setPreviewOpen] = useState(false);
   const [descriptionMode, setDescriptionMode] = useDescriptionMode();
+  const { thumbnailsEnabled, ready: previewSettingsReady } =
+    usePreviewDisplaySettings();
+  const showImageLink = previewSettingsReady && !thumbnailsEnabled;
   const { refreshing, runRefresh } = useManualRefresh();
 
   function openPreview(item: TaskItem, tab: "image" | "description") {
@@ -208,23 +212,38 @@ export function TaskCsvPreview({ taskId, live }: TaskCsvPreviewProps) {
                         }
                       >
                         {column === "primary_image_url" && imageUrl(row[column]) ? (
-                          <button
-                            type="button"
-                            className="group relative block h-9 w-9 overflow-hidden rounded-control border border-line bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
-                            title={`查看大图：${String(row.name || "商品")}`}
-                            aria-label={`查看大图：${String(row.name || "商品")}`}
-                            onClick={() => {
-                              const preview = previewItems[index];
-                              if (preview) openPreview(preview, "image");
-                            }}
-                          >
-                            <ProductThumb
-                              src={imageUrl(row[column])}
-                              alt={String(row.name || "商品主图")}
-                              taskId={taskId}
-                              className="h-full w-full transition-transform duration-150 group-hover:scale-105"
-                            />
-                          </button>
+                          <div className="flex flex-col items-start gap-1">
+                            <button
+                              type="button"
+                              className="group relative block h-9 w-9 overflow-hidden rounded-control border border-line bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
+                              title={`查看大图：${String(row.name || "商品")}`}
+                              aria-label={`查看大图：${String(row.name || "商品")}`}
+                              onClick={() => {
+                                const preview = previewItems[index];
+                                if (preview) openPreview(preview, "image");
+                              }}
+                            >
+                              <ProductThumb
+                                src={imageUrl(row[column])}
+                                alt={String(row.name || "商品主图")}
+                                taskId={taskId}
+                                className="h-full w-full transition-transform duration-150 group-hover:scale-105"
+                              />
+                            </button>
+                            {showImageLink ? (
+                              <button
+                                type="button"
+                                className="text-[10px] font-medium leading-4 text-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                                aria-label={`预览图片：${String(row.name || "商品")}`}
+                                onClick={() => {
+                                  const preview = previewItems[index];
+                                  if (preview) openPreview(preview, "image");
+                                }}
+                              >
+                                图片
+                              </button>
+                            ) : null}
+                          </div>
                         ) : column === "primary_image_url" ? (
                           <span className="text-ink-3">—</span>
                         ) : column === "source_url" && imageUrl(row[column]) ? (

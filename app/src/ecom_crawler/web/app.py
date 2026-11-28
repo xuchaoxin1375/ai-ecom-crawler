@@ -39,7 +39,7 @@ from fastapi.responses import (
     StreamingResponse,
 )
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, ValidationError
 
 from .. import __version__
 from ..build_models import ModelPoolError, discover_models, known_models
@@ -69,6 +69,13 @@ from ..image_proxy import (
     validate_image_proxy,
 )
 from ..model import ContractError
+from ..preview_settings import (
+    PREVIEW_SETTINGS_SETTING,
+    PreviewSettingsError,
+    dump_preview_settings,
+    load_preview_settings,
+    validate_preview_settings,
+)
 from ..rate_policy import (
     RATE_LIMIT_MAX_CONCURRENCY,
     RATE_LIMIT_MAX_DELAY_MS,
@@ -631,6 +638,13 @@ class ImageProxyRequest(BaseModel):
 
     mode: Literal["auto", "specified", "direct"] = "auto"
     proxy: str | None = Field(default=None, max_length=500)
+
+
+class PreviewSettingsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    thumbnails_enabled: StrictBool = True
+    realtime_limit: StrictInt = 50
 
 
 class SiteRatePolicyRequest(BaseModel):
@@ -2575,6 +2589,7 @@ def create_app(
     rate_policy_lock = threading.Lock()
     collection_policy_lock = threading.Lock()
     image_proxy_lock = threading.Lock()
+    preview_settings_lock = threading.Lock()
 
     def _image_proxy_payload() -> dict[str, Any]:
         setting = load_image_proxy(store)
@@ -4255,6 +4270,23 @@ def create_app(
         with image_proxy_lock:
             store.set_setting(IMAGE_PROXY_SETTING, dump_image_proxy(setting))
         return _image_proxy_payload()
+
+    @app.get("/api/system/preview-settings")
+    def get_preview_settings() -> dict[str, Any]:
+        return load_preview_settings(store)
+
+    @app.put("/api/system/preview-settings")
+    def put_preview_settings(payload: PreviewSettingsRequest) -> dict[str, Any]:
+        try:
+            setting = validate_preview_settings(payload.model_dump())
+        except PreviewSettingsError as exc:
+            raise _error("VALIDATION_ERROR", str(exc), 422) from exc
+        with preview_settings_lock:
+            store.set_setting(
+                PREVIEW_SETTINGS_SETTING,
+                dump_preview_settings(setting),
+            )
+        return load_preview_settings(store)
 
     def _slots_payload(setting: str, current: int, override: bool) -> dict[str, Any]:
         if override:

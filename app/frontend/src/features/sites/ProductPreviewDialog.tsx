@@ -26,6 +26,7 @@ import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
 import { cn } from "../../lib/cn";
 import { imageProxyUrl } from "../../lib/media";
+import { usePreviewDisplaySettings } from "../../lib/previewSettings";
 import {
   htmlToText,
   missingReasonsText,
@@ -147,6 +148,10 @@ export function ProductPreviewDialog({
   onOpenChange,
 }: ProductPreviewDialogProps) {
   const gallery = items?.length ? items : item ? [item] : [];
+  const { thumbnailsEnabled, ready: previewSettingsReady } =
+    usePreviewDisplaySettings();
+  const galleryVisible =
+    previewSettingsReady && thumbnailsEnabled && gallery.length > 1;
   const [selectedId, setSelectedId] = useState(
     item?.item_id ?? gallery[0]?.item_id ?? "",
   );
@@ -493,7 +498,7 @@ export function ProductPreviewDialog({
             )}
           </div>
 
-          {gallery.length > 1 ? (
+          {galleryVisible ? (
             <div className="shrink-0 border-t border-line bg-surface-muted/60 px-3 py-2">
               <div
                 className="flex items-center gap-2 overflow-x-auto pb-1"
@@ -547,7 +552,9 @@ export function ProductPreviewDialog({
               </p>
             ) : (
               <p className="hidden text-[10.5px] text-ink-3 sm:block">
-                点击缩略图切换商品；←／→ 切换，双击图片缩放
+                {galleryVisible
+                  ? "点击缩略图切换商品；←／→ 切换，双击图片缩放"
+                  : "←／→ 切换，双击图片缩放"}
               </p>
             )}
           </footer>
