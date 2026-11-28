@@ -68,12 +68,34 @@
         "NATURAL_END",
         "BUDGET_EXHAUSTED",
         "ACCESS_DENIED",
+        "LANGUAGE_MISMATCH",
         "QUALITY_BLOCKED",
         "ENVIRONMENT_ERROR",
         "PLAN_ERROR",
         "USER_CANCELLED",
         "OTHER"
       ]
+    },
+    "stop_detail_code": {
+      "type": ["string", "null"],
+      "enum": [
+        "challenge_unresolved",
+        "http_401",
+        "http_403",
+        "rate_limit_exhausted",
+        "access_boundary",
+        "language_mismatch",
+        "soft_block_suspected",
+        null
+      ]
+    },
+    "stop_evidence": {
+      "type": ["object", "null"],
+      "additionalProperties": true
+    },
+    "language_check": {
+      "type": ["object", "null"],
+      "additionalProperties": true
     },
     "started_at": {
       "type": "string",

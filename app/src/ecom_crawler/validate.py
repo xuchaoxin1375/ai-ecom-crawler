@@ -50,7 +50,12 @@ REQUIRED_RESULT_FIELDS = (
     "business_acceptance",
     "quality_exceptions",
 )
-ERROR_STOP_REASONS = {"ENVIRONMENT_ERROR", "PLAN_ERROR", "ACCESS_DENIED"}
+ERROR_STOP_REASONS = {
+    "ENVIRONMENT_ERROR",
+    "PLAN_ERROR",
+    "ACCESS_DENIED",
+    "LANGUAGE_MISMATCH",
+}
 
 
 def validate_task_result(result: Any) -> list[str]:

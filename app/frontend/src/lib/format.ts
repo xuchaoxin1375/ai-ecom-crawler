@@ -56,12 +56,23 @@ const STOP_REASON_LABELS: Record<string, string> = {
   NATURAL_END: "自然结束",
   BUDGET_EXHAUSTED: "预算耗尽",
   ACCESS_DENIED: "访问被拒绝",
+  LANGUAGE_MISMATCH: "语言与目标不一致",
   QUALITY_BLOCKED: "质量问题阻断",
   ENVIRONMENT_ERROR: "环境错误",
   PLAN_ERROR: "规则包错误",
   USER_CANCELLED: "用户取消",
   ADAPTER_FAILED: "适配器失败",
   OTHER: "其他原因",
+};
+
+const STOP_DETAIL_CODE_LABELS: Record<string, string> = {
+  challenge_unresolved: "反爬挑战未通过",
+  http_401: "需要登录或授权",
+  http_403: "访问被拒绝（403）",
+  rate_limit_exhausted: "限流耗尽",
+  access_boundary: "访问边界受限",
+  language_mismatch: "语言与预期不一致",
+  soft_block_suspected: "疑似软拦截",
 };
 
 export function taskStateLabel(state: string | null | undefined): string {
@@ -77,6 +88,11 @@ export function outcomeLabel(outcome: string | null | undefined): string {
 export function stopReasonLabel(reason: string | null | undefined): string {
   if (!reason) return "—";
   return STOP_REASON_LABELS[reason] ?? reason;
+}
+
+export function stopDetailCodeLabel(code: string | null | undefined): string {
+  if (!code) return "";
+  return STOP_DETAIL_CODE_LABELS[code] ?? code;
 }
 
 export function taskRecoveryLabel(state: string | null | undefined): string {

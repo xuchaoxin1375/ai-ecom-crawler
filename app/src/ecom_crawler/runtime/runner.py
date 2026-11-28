@@ -57,10 +57,91 @@ ADAPTER_SAFETY_SECONDS = 7 * 24 * 3600
 
 
 class StopTask(Exception):
-    def __init__(self, reason: str, detail: str) -> None:
+    def __init__(
+        self,
+        reason: str,
+        detail: str,
+        *,
+        detail_code: str | None = None,
+        evidence: dict[str, Any] | None = None,
+        failure_class: str = "permanent",
+    ) -> None:
         super().__init__(detail)
         self.reason = reason
         self.detail = detail
+        self.detail_code = detail_code
+        self.evidence = dict(evidence or {})
+        self.failure_class = failure_class
+
+
+def _language_tag(value: Any) -> str:
+    return str(value or "").strip().replace("_", "-")
+
+
+def _primary_language(value: Any) -> str:
+    tag = _language_tag(value).lower()
+    return tag.split("-", 1)[0] if tag else ""
+
+
+def _detect_document_language(
+    page: HtmlPage, meta: dict[str, Any]
+) -> tuple[str, str]:
+    for key in ("content_language", "content-language"):
+        value = meta.get(key)
+        if value:
+            return _language_tag(value), "content_language"
+    try:
+        values = page.tree.xpath("//html/@lang")
+    except Exception:  # noqa: BLE001 - malformed documents must not stop a task
+        values = []
+    if values:
+        return _language_tag(values[0]), "html_lang"
+    try:
+        values = page.tree.xpath(
+            "//meta[translate(@http-equiv, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', "
+            "'abcdefghijklmnopqrstuvwxyz')='content-language']/@content"
+        )
+    except Exception:  # noqa: BLE001
+        values = []
+    if values:
+        return _language_tag(values[0]), "meta_content_language"
+    try:
+        values = page.tree.xpath(
+            "//meta[translate(@property, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', "
+            "'abcdefghijklmnopqrstuvwxyz')='og:locale']/@content"
+        )
+    except Exception:  # noqa: BLE001
+        values = []
+    if values:
+        return _language_tag(values[0]), "og_locale"
+    return "", ""
+
+
+def _document_alternates(page: HtmlPage, base_url: str) -> list[dict[str, str]]:
+    alternates: list[dict[str, str]] = []
+    try:
+        links = page.tree.xpath(
+            "//link[contains(concat(' ', normalize-space(@rel), ' '), ' alternate ')]"
+            "[@hreflang][@href]"
+        )
+    except Exception:  # noqa: BLE001
+        return alternates
+    for link in links:
+        hreflang = _language_tag(link.get("hreflang"))
+        href = (link.get("href") or "").strip()
+        if not hreflang or not href:
+            continue
+        alternates.append(
+            {"hreflang": hreflang, "url": urljoin(base_url, href)}
+        )
+        if len(alternates) >= 50:
+            break
+    return alternates
+
+
+def _url_language_prefix(url: str) -> str:
+    first = urlparse(url).path.strip("/").split("/", 1)[0]
+    return first if re.fullmatch(r"[A-Za-z]{2}(?:[-_][A-Za-z]{2})?", first) else ""
 
 
 class AdapterError(RuntimeError):
@@ -110,6 +191,10 @@ class TaskRunner:
         self._last_budget_checkpoint = self._started_monotonic
         self._stop_reason = "NATURAL_END"
         self._stop_detail = "declared discovery sources exhausted"
+        self._stop_detail_code: str | None = None
+        self._stop_evidence: dict[str, Any] = {}
+        self._language_checked_types: set[str] = set()
+        self._language_check: dict[str, Any] | None = None
         target = task.input.get("target_entry")
         self._target_product = target if target_entry_mode(rule, target) == "product" else None
         if self._target_product:
@@ -190,7 +275,14 @@ class TaskRunner:
         except StopTask as exc:
             self._stop_reason = exc.reason
             self._stop_detail = exc.detail
-            self._event("task_stopping", reason=exc.reason, detail=exc.detail)
+            self._stop_detail_code = exc.detail_code
+            self._stop_evidence = dict(exc.evidence)
+            self._event(
+                "task_stopping",
+                reason=exc.reason,
+                detail=exc.detail,
+                detail_code=exc.detail_code,
+            )
         except AdapterError as exc:
             self._stop_reason = "ADAPTER_FAILED"
             self._stop_detail = f"{exc.reason}: {exc.detail}"
@@ -233,17 +325,15 @@ class TaskRunner:
                         try:
                             state, result = future.result()
                         except StopTask as exc:
+                            self._stop_reason = exc.reason
+                            self._stop_detail = exc.detail
+                            self._stop_detail_code = exc.detail_code
+                            self._stop_evidence = dict(exc.evidence)
                             self._finish_item(
                                 item,
                                 "FAILED",
-                                {
-                                    "reason": exc.reason.lower(),
-                                    "failure_class": "blocked",
-                                    "detail": exc.detail,
-                                },
+                                self._stop_result(exc),
                             )
-                            self._stop_reason = exc.reason
-                            self._stop_detail = exc.detail
                             self._drain(futures)
                             return "FINISHED"
                         except LeaseLostError:
@@ -330,17 +420,11 @@ class TaskRunner:
             try:
                 state, result = self._process_item(item)
             except StopTask as exc:
-                self._finish_item(
-                    item,
-                    "FAILED",
-                    {
-                        "reason": exc.reason.lower(),
-                        "failure_class": "blocked",
-                        "detail": exc.detail,
-                    },
-                )
+                self._finish_item(item, "FAILED", self._stop_result(exc))
                 self._stop_reason = exc.reason
                 self._stop_detail = exc.detail
+                self._stop_detail_code = exc.detail_code
+                self._stop_evidence = dict(exc.evidence)
                 return "FINISHED"
             except LeaseLostError:
                 raise
@@ -365,14 +449,12 @@ class TaskRunner:
             except StopTask as exc:
                 self._stop_reason = exc.reason
                 self._stop_detail = exc.detail
+                self._stop_detail_code = exc.detail_code
+                self._stop_evidence = dict(exc.evidence)
                 self._finish_item(
                     item,
                     "FAILED",
-                    {
-                        "reason": exc.reason.lower(),
-                        "failure_class": "blocked",
-                        "detail": exc.detail,
-                    },
+                    self._stop_result(exc),
                     accept=not reject,
                 )
             except LeaseLostError:
@@ -446,17 +528,33 @@ class TaskRunner:
         if item.item_type == "navigation" and item.discovered_from == "shopify_json":
             return self._process_shopify_json(item, result)
         if result.meta.get("challenge_suspected"):
-            raise StopTask("ACCESS_DENIED", f"challenge page for {item.url}")
+            code = "challenge_unresolved"
+            raise StopTask(
+                "ACCESS_DENIED",
+                f"challenge page for {item.url}",
+                detail_code=code,
+                evidence=self._access_evidence(item, result, code),
+                failure_class="blocked",
+            )
         if result.status == 0:
             return self._failure(
                 item, "transient", "transport_error", error=result.error
             )
         if result.status in {401, 403}:
-            raise StopTask("ACCESS_DENIED", f"HTTP {result.status} for {item.url}")
+            code = f"http_{result.status}"
+            raise StopTask(
+                "ACCESS_DENIED",
+                f"HTTP {result.status} for {item.url}",
+                detail_code=code,
+                evidence=self._access_evidence(item, result, code),
+                failure_class="blocked",
+            )
         if result.status == 429 or 500 <= result.status < 600:
             return self._failure(item, "transient", f"http_{result.status}")
         if not result.ok:
             return self._failure(item, "permanent", f"http_{result.status}")
+
+        self._check_language(item, result)
 
         if (item.item_type == "navigation" and self.task.input.get("target_entry")
             and not self._navigation_allowed(result.url, item.result.get("advance"))):
@@ -1768,6 +1866,113 @@ class TaskRunner:
             failure_class=failure_class,
         )
 
+    def _stop_result(self, exc: StopTask) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "reason": exc.reason.lower(),
+            "failure_class": exc.failure_class,
+            "detail": exc.detail,
+        }
+        if exc.detail_code:
+            result["detail_code"] = exc.detail_code
+        if exc.evidence:
+            result["evidence"] = dict(exc.evidence)
+        return result
+
+    def _access_evidence(
+        self, item: WorkItem, result: Any, code: str
+    ) -> dict[str, Any]:
+        engine_info = self._engine_info()
+        engine = str(result.meta.get("engine") or "")
+        if not engine:
+            engines = engine_info.get("engines_used") or []
+            engine = ",".join(str(value) for value in engines)
+        return {
+            "code": code,
+            "kind": "challenge" if code == "challenge_unresolved" else "http",
+            "url": item.url,
+            "status": result.status or None,
+            "final_url": result.url or item.url,
+            "engine": engine or None,
+            "attempts": item.attempts,
+            "retry_after": engine_info.get("last_retry_after"),
+            "challenge_suspected": bool(result.meta.get("challenge_suspected")),
+            "rate_limit_events": int(engine_info.get("rate_limit_events") or 0),
+            "abandoned": True,
+        }
+
+    def _check_language(self, item: WorkItem, result: Any) -> None:
+        if item.item_type in self._language_checked_types:
+            return
+        content_type = str(result.meta.get("content_type") or "").lower()
+        body = result.body or b""
+        head = body[:512].lstrip().lower()
+        if not (
+            "text/html" in content_type
+            or head.startswith((b"<!doctype html", b"<html"))
+        ):
+            return
+        self._language_checked_types.add(item.item_type)
+        expected = _language_tag(
+            self.rule.site.get("locale") or self.rule.site.get("language")
+        )
+        expected_primary = _primary_language(expected)
+        url = result.url or item.url
+        if not expected_primary:
+            self._language_check = {
+                "status": "skipped",
+                "reason": "expected_language_missing",
+                "url": url,
+            }
+            return
+        page = HtmlPage(body, url)
+        actual, source = _detect_document_language(page, result.meta)
+        actual_primary = _primary_language(actual)
+        alternates = _document_alternates(page, url)
+        suggested_url = ""
+        for alternate in alternates:
+            if _primary_language(alternate["hreflang"]) != expected_primary:
+                continue
+            if alternate["hreflang"].lower() == expected.lower():
+                suggested_url = alternate["url"]
+                break
+            if not suggested_url:
+                suggested_url = alternate["url"]
+        status = (
+            "unknown"
+            if not actual_primary
+            else ("matched" if actual_primary == expected_primary else "mismatch")
+        )
+        self._language_check = {
+            "status": status,
+            "expected": expected or None,
+            "expected_primary": expected_primary,
+            "actual": actual or None,
+            "actual_primary": actual_primary or None,
+            "source": source or None,
+            "url": url,
+            "url_language": _url_language_prefix(url) or None,
+            "multilingual": bool(alternates),
+            "alternates": alternates,
+            "suggested_url": suggested_url or None,
+        }
+        if status != "mismatch":
+            return
+        detail = f"expected language {expected} but page is {actual or 'unknown'}"
+        if suggested_url:
+            detail += f"; matching alternate: {suggested_url}"
+        raise StopTask(
+            "LANGUAGE_MISMATCH",
+            detail,
+            detail_code="language_mismatch",
+            evidence={
+                **self._language_check,
+                "kind": "language",
+                "abandoned": True,
+                "attempts": item.attempts,
+            },
+            failure_class="permanent",
+        )
+
     def _cleanup_orphans(self) -> int:
         removed = 0
         if not self.out_dir.is_dir():
@@ -2037,6 +2242,7 @@ class TaskRunner:
                 return "PARTIAL" if valid else "FAILED"
         if self._stop_reason in {
             "ACCESS_DENIED",
+            "LANGUAGE_MISMATCH",
             "ADAPTER_FAILED",
             "ARCHIVE_MISS",
             "BUDGET_EXHAUSTED",
@@ -2186,6 +2392,13 @@ class TaskRunner:
         ]
         limitations.extend(self.rule.raw.get("evidence", {}).get("limitations", []))
         limitations = list(dict.fromkeys(str(item) for item in limitations))
+        stop_evidence = dict(self._stop_evidence)
+        if stop_evidence:
+            if self._stop_reason == "ACCESS_DENIED":
+                stop_evidence["consecutive_blocks"] = max(
+                    1, self._failure_classes().get("blocked", 0)
+                )
+            stop_evidence.setdefault("abandoned", True)
         return {
             "task_id": self.task.task_id,
             "task_type": self.task.task_type,
@@ -2197,10 +2410,13 @@ class TaskRunner:
             "outcome": outcome,
             "stop_reason": stop_reason,
             "stop_detail": stop_detail,
+            "stop_detail_code": self._stop_detail_code,
+            "stop_evidence": stop_evidence or None,
             "started_at": self.task.started_at,
             "finished_at": finished_at,
             "counts": counts,
             "failure_classes": self._failure_classes(),
+            "language_check": self._language_check,
             "recovery": self._recovery,
             "coverage": coverage,
             "business_acceptance": {

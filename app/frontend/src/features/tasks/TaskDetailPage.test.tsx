@@ -322,4 +322,53 @@ describe("task detail recovery", () => {
       unmount();
     }
   });
+
+  it("shows language mismatch marker and evidence", async () => {
+    const mismatch: TaskSummary = {
+      ...finishedTask,
+      outcome: "FAILED",
+      stop_reason: "LANGUAGE_MISMATCH",
+      stop_detail_code: "language_mismatch",
+      stop_detail: "expected language en-GB but page is fr",
+      language_check: {
+        status: "mismatch",
+        expected: "en-GB",
+        actual: "fr",
+        suggested_url: "https://fixture.test/en/",
+      },
+    };
+    const { unmount } = openTaskPage(mismatch);
+    try {
+      expect(await screen.findByText("语言与预期不一致")).toBeVisible();
+      expect(screen.getByText(/预期 en-GB · 实际 fr/)).toBeVisible();
+      expect(screen.getByText(/可用入口 https:\/\/fixture\.test\/en\//)).toBeVisible();
+    } finally {
+      unmount();
+    }
+  });
+
+  it("shows access stop code and request evidence", async () => {
+    const blocked: TaskSummary = {
+      ...finishedTask,
+      outcome: "FAILED",
+      stop_reason: "ACCESS_DENIED",
+      stop_detail_code: "http_403",
+      stop_detail: "HTTP 403 for https://fixture.test/p1.html",
+      stop_evidence: {
+        engine: "browser",
+        status: 403,
+        attempts: 2,
+        retry_after: 60,
+      },
+    };
+    const { unmount } = openTaskPage(blocked);
+    try {
+      expect(await screen.findByText("访问被拒绝（403）")).toBeVisible();
+      expect(
+        screen.getByText(/引擎 browser · HTTP 403 · 尝试 2 · Retry-After 60s/),
+      ).toBeVisible();
+    } finally {
+      unmount();
+    }
+  });
 });

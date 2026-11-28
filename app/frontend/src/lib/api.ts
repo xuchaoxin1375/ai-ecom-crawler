@@ -275,6 +275,39 @@ export interface QualityException {
   [key: string]: unknown;
 }
 
+export interface StopEvidence {
+  code?: string | null;
+  kind?: string | null;
+  url?: string | null;
+  status?: number | null;
+  final_url?: string | null;
+  engine?: string | null;
+  attempts?: number | null;
+  retry_after?: number | null;
+  consecutive_blocks?: number | null;
+  challenge_suspected?: boolean | null;
+  rate_limit_events?: number | null;
+  abandoned?: boolean | null;
+  detail?: string | null;
+  [key: string]: unknown;
+}
+
+export interface LanguageCheck {
+  status?: "matched" | "mismatch" | "unknown" | "skipped" | string | null;
+  expected?: string | null;
+  expected_primary?: string | null;
+  actual?: string | null;
+  actual_primary?: string | null;
+  source?: string | null;
+  url?: string | null;
+  url_language?: string | null;
+  multilingual?: boolean | null;
+  alternates?: { hreflang: string; url: string }[];
+  suggested_url?: string | null;
+  reason?: string | null;
+  [key: string]: unknown;
+}
+
 export interface TaskSummary {
   task_id: string;
   task_type: string;
@@ -288,6 +321,9 @@ export interface TaskSummary {
   outcome: string | null;
   stop_reason: string | null;
   stop_detail?: string | null;
+  stop_detail_code?: string | null;
+  stop_evidence?: StopEvidence | null;
+  language_check?: LanguageCheck | null;
   can_continue?: boolean;
   continue_hint?: string | null;
   recovery_state?: TaskRecoveryState | null;
@@ -363,6 +399,7 @@ export interface WorkbenchRunBrief {
   state: string;
   outcome: string | null;
   stop_reason: string | null;
+  stop_detail_code?: string | null;
   can_continue?: boolean;
   recovery_state?: TaskRecoveryState | null;
   counts: Record<string, number | undefined>;
@@ -551,6 +588,9 @@ export interface WorkbenchRunConfig {
   outcome: string | null;
   stop_reason: string | null;
   stop_detail: string | null;
+  stop_detail_code?: string | null;
+  stop_evidence?: StopEvidence | null;
+  language_check?: LanguageCheck | null;
   counts: TaskCounts;
   limits: WorkbenchRunLimits;
   definition: {

@@ -304,6 +304,44 @@ class WebApiTests(unittest.TestCase):
             self.assertEqual(health["worker"], "managed")
             self.assertEqual(health["max_tasks"], 1)
 
+    def test_task_detail_exposes_stop_evidence(self) -> None:
+        result_path = self.out_root / "task-1" / "task-result.json"
+        payload = json.loads(result_path.read_text(encoding="utf-8"))
+        payload.update(
+            {
+                "stop_reason": "LANGUAGE_MISMATCH",
+                "stop_detail": "expected language en-GB but page is fr",
+                "stop_detail_code": "language_mismatch",
+                "stop_evidence": {
+                    "code": "language_mismatch",
+                    "kind": "language",
+                    "abandoned": True,
+                },
+                "language_check": {
+                    "status": "mismatch",
+                    "expected": "en-GB",
+                    "actual": "fr",
+                    "suggested_url": "https://fixture.test/en/",
+                },
+            }
+        )
+        result_path.write_text(json.dumps(payload), encoding="utf-8")
+        self.store.update_task(
+            "task-1",
+            state="FINISHED",
+            outcome="FAILED",
+            stop_reason="LANGUAGE_MISMATCH",
+        )
+        response = self.client.get("/api/tasks/task-1")
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["stop_detail_code"], "language_mismatch")
+        self.assertEqual(body["stop_evidence"]["kind"], "language")
+        self.assertEqual(body["language_check"]["actual"], "fr")
+        self.assertEqual(
+            body["stop_detail"], "expected language en-GB but page is fr"
+        )
+
     def test_list_detail_and_filters(self) -> None:
         payload = self.client.get("/api/tasks").json()
         self.assertEqual(payload["total"], 1)

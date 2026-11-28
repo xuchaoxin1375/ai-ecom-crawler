@@ -153,6 +153,17 @@ def normalize_task_meta(meta: Mapping[str, Any]) -> dict[str, Any]:
         "locale": clean_text(meta.get("locale")),
         "state": state,
         "stop_reason": stop_reason,
+        "stop_detail_code": clean_text(meta.get("stop_detail_code")) or None,
+        "stop_evidence": (
+            dict(meta["stop_evidence"])
+            if isinstance(meta.get("stop_evidence"), Mapping)
+            else None
+        ),
+        "language_check": (
+            dict(meta["language_check"])
+            if isinstance(meta.get("language_check"), Mapping)
+            else None
+        ),
         "started_at": started_at,
         "finished_at": finished_at,
         "pending_products": pending_products,
@@ -608,6 +619,9 @@ def build_task_result(
     )
     if meta["limitations"]:
         result["limitations"] = list(meta["limitations"])
+    for key in ("stop_detail_code", "stop_evidence", "language_check"):
+        if meta.get(key) is not None:
+            result[key] = meta[key]
     return result
 
 
@@ -618,7 +632,9 @@ def _outcome(state: str, stop_reason: str, counts: Mapping[str, int]) -> str:
     failed = counts["failed_products"]
     pending = counts["pending_products"] + counts["pending_navigation_entries"]
     if valid == 0 and (
-        failed > 0 or stop_reason in {"ENVIRONMENT_ERROR", "PLAN_ERROR", "ACCESS_DENIED"}
+        failed > 0
+        or stop_reason
+        in {"ENVIRONMENT_ERROR", "PLAN_ERROR", "ACCESS_DENIED", "LANGUAGE_MISMATCH"}
     ):
         return "FAILED"
     if pending > 0 or failed > 0:

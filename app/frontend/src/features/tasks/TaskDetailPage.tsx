@@ -30,6 +30,7 @@ import {
   formatNumber,
   formatTime,
   outcomeLabel,
+  stopDetailCodeLabel,
   stopReasonLabel,
   taskRecoveryLabel,
   taskStateLabel,
@@ -58,6 +59,28 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
       <dd className="min-w-0 text-xs leading-5 text-ink-2">{children}</dd>
     </div>
   );
+}
+
+function stopEvidenceText(task: TaskSummary): string {
+  const parts: string[] = [];
+  const evidence = task.stop_evidence;
+  if (evidence) {
+    if (evidence.engine) parts.push(`引擎 ${evidence.engine}`);
+    if (evidence.status != null) parts.push(`HTTP ${evidence.status}`);
+    if (evidence.attempts != null) parts.push(`尝试 ${evidence.attempts}`);
+    if (evidence.retry_after != null) {
+      parts.push(`Retry-After ${evidence.retry_after}s`);
+    }
+    if (evidence.consecutive_blocks != null) {
+      parts.push(`连续被拦 ${evidence.consecutive_blocks}`);
+    }
+  }
+  const check = task.language_check;
+  if (check?.status === "mismatch") {
+    parts.push(`预期 ${check.expected || "未知"} · 实际 ${check.actual || "未知"}`);
+    if (check.suggested_url) parts.push(`可用入口 ${check.suggested_url}`);
+  }
+  return parts.join(" · ");
 }
 
 function DetailSkeleton() {
@@ -191,6 +214,7 @@ export function TaskDetailPage() {
   const site = batchQuery.data?.sites.find((item) => item.site_key === task?.site_key);
   const siteRule = site?.rule ?? null;
   const stale = task ? (task.rule?.stale ?? taskRuleIsStale(task, siteRule)) : false;
+  const evidenceText = task ? stopEvidenceText(task) : "";
   const activeVersion = task?.rule?.active_version ?? siteRule?.rule_version;
   const exportTaskId = site?.export_task_id ?? null;
   const currentDelivery = Boolean(
@@ -625,6 +649,20 @@ export function TaskDetailPage() {
                   {outcomeLabel(task.outcome)}
                 </Badge>
               ) : null}
+              {task.stop_detail_code ? (
+                <span title={task.stop_detail_code}>
+                  <Badge
+                    tone={
+                      task.stop_detail_code === "language_mismatch"
+                        ? "warning"
+                        : "danger"
+                    }
+                    dot={false}
+                  >
+                    {stopDetailCodeLabel(task.stop_detail_code)}
+                  </Badge>
+                </span>
+              ) : null}
               <Badge tone="neutral" dot={false}>
                 {taskTypeLabel(task.task_type)}
               </Badge>
@@ -659,9 +697,13 @@ export function TaskDetailPage() {
                 {task.plan_id}@{task.plan_version}
               </code>
             </p>
-            {task.stop_detail || task.recovery_state ? (
+            {task.stop_detail || task.recovery_state || evidenceText ? (
               <p className="mt-1 text-xs text-ink-3">
-                {[taskRecoveryLabel(task.recovery_state), task.stop_detail]
+                {[
+                  taskRecoveryLabel(task.recovery_state),
+                  task.stop_detail,
+                  evidenceText,
+                ]
                   .filter(Boolean)
                   .join(" · ")}
               </p>

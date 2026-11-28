@@ -83,6 +83,7 @@ import {
   formatClock,
   formatNumber,
   formatTime,
+  stopDetailCodeLabel,
   stopReasonLabel,
   taskRecoveryLabel,
   taskStatusLabel,
@@ -306,7 +307,11 @@ function recentStatusHint(item: WorkbenchRecentItem): string {
   if (!item.can_continue && !item.recovery_state) return "";
   const details: string[] = [];
   const recovery = taskRecoveryLabel(item.recovery_state);
-  const reason = item.stop_reason ? stopReasonLabel(item.stop_reason) : "";
+  const reason = item.stop_detail_code
+    ? stopDetailCodeLabel(item.stop_detail_code)
+    : item.stop_reason
+      ? stopReasonLabel(item.stop_reason)
+      : "";
   if (recovery) details.push(recovery);
   if (reason) details.push(reason);
   if (item.stop_detail) details.push(item.stop_detail);
