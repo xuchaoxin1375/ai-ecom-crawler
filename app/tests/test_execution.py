@@ -251,6 +251,12 @@ def fixture_server(
                 self.end_headers()
                 self.wfile.write(body)
                 return
+            if path == "/catalog/list":
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.end_headers()
+                self.wfile.write(b'<a class="product" href="p2.html">P2</a>')
+                return
             self.send_response(404)
             self.end_headers()
 
@@ -404,6 +410,50 @@ class ExecutionTests(unittest.TestCase):
             offline_archive = (second.get("runtime") or {}).get("archive") or {}
             self.assertGreater(offline_archive.get("hits", 0), 0)
             self.assertEqual(offline_archive.get("writes"), 0)
+
+    def test_entry_link_sources_override_and_inherit_the_global_selector(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary, fixture_server() as base:
+            root = Path(temporary)
+            text = RULE_TEMPLATE.replace("__BASE__", base).replace("^/p[0-9]+", "^/(catalog/)?p[0-9]+")
+            text = text.replace(
+                '  link_selector: "a.product"',
+                f'''  link_selector: 'a[href="/p3.html"]'
+  sources:
+    - type: entry_links
+      url: "{base}/"
+      link_selector: 'a[href="/p1.html"]'
+    - type: entry_links
+      url: "{base}/catalog/list"
+      link_selector: 'a[href="p2.html"]'
+    - type: entry_links
+      url: "{base}/list?p=3"''',
+            )
+            rule = root / "rule.yaml"
+            rule.write_text(text, encoding="utf-8")
+            db_path = root / "tasks.db"
+            result, _ = run_task(
+                rule_path=rule,
+                db_path=db_path,
+                out_root=root / "tasks",
+                task_id="entry-selectors",
+                task_type="discovery",
+                max_urls=10,
+                max_products=10,
+                max_seconds=30,
+                max_attempts=1,
+                per_domain_rps=50,
+            )
+            self.assertEqual(result["counts"]["valid_urls"], 3)
+            self.assertEqual(
+                {item.url: item.parent_url for item in TaskStore(db_path).items(
+                    "entry-selectors", "product"
+                )},
+                {
+                    f"{base}/p1.html": f"{base}/",
+                    f"{base}/catalog/p2.html": f"{base}/catalog/list",
+                    f"{base}/p3.html": f"{base}/list?p=3",
+                },
+            )
 
     def test_listing_source_max_pages_is_respected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary, fixture_server() as base:

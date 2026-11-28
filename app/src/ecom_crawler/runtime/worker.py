@@ -58,6 +58,10 @@ def engine_plan(rule: RulePackage) -> tuple[str, dict[str, str]]:
         for item_type, value in per_type.items():
             if isinstance(value, dict) and value.get("engine"):
                 overrides[str(item_type)] = normalize_engine(str(value["engine"]))
+    if rule.product_source:
+        # Browser listing waits expect HTML, while the product source needs raw JSON.
+        navigation = overrides.get("navigation", default)
+        overrides["shopify_json"] = "static" if navigation == "browser" else navigation
     return default, overrides
 
 

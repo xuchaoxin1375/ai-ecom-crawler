@@ -1035,6 +1035,57 @@
         },
         {
           "if": {
+            "properties": {
+              "discovery": {
+                "required": ["sources"],
+                "properties": {
+                  "sources": {
+                    "contains": {
+                      "required": ["type", "advance"],
+                      "properties": {
+                        "type": {"const": "listing"},
+                        "advance": {
+                          "required": ["type"],
+                          "properties": {
+                            "type": {"enum": ["load_more", "infinite_scroll"]}
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "schema_version": {"enum": ["1.2", "1.3"]},
+              "fetch": {
+                "if": {
+                  "required": ["per_url_type"],
+                  "properties": {
+                    "per_url_type": {
+                      "required": ["navigation"],
+                      "properties": {"navigation": {"required": ["engine"]}}
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "per_url_type": {
+                      "properties": {
+                        "navigation": {"properties": {"engine": {"const": "browser"}}}
+                      }
+                    }
+                  }
+                },
+                "else": {"properties": {"default_engine": {"const": "browser"}}}
+              }
+            }
+          }
+        },
+        {
+          "if": {
             "required": ["product_source"]
           },
           "then": {

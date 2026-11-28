@@ -10,8 +10,9 @@ from fastapi.testclient import TestClient
 from ecom_crawler.runtime.models import WorkbenchNode, WorkItem
 from ecom_crawler.runtime.rule import load_rule
 from ecom_crawler.runtime.store import TaskStore
+from ecom_crawler.runtime.worker import Worker
 from ecom_crawler.web.app import create_app
-from tests.test_execution import RULE_TEMPLATE
+from tests.test_execution import RULE_TEMPLATE, fixture_server
 
 CLIENT_HEADERS = {
     "Host": "127.0.0.1:8765",
@@ -78,7 +79,9 @@ class WorkbenchApiTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
-    def create_task_node(self) -> tuple[str, str]:
+    def create_task_node(
+        self, *, input_url: str = "https://fixture.example/", proxy: str | None = None
+    ) -> tuple[str, str]:
         group = self.client.post(
             "/api/workbench/groups",
             json={"name": "独立任务"},
@@ -89,7 +92,7 @@ class WorkbenchApiTests(unittest.TestCase):
             "/api/workbench/tasks",
             json={
                 "name": "fixture.example",
-                "input_url": "https://fixture.example/",
+                "input_url": input_url,
                 "parent_id": group_id,
                 "rule_id": "fixture-local",
                 "rule_version": "2026.11.21-1",
@@ -99,6 +102,7 @@ class WorkbenchApiTests(unittest.TestCase):
                 "language": "en-GB",
                 "market": "GB",
                 "category": "toy",
+                "proxy": proxy,
                 "limits": {
                     "max_urls": 10,
                     "max_products": 3,
@@ -109,6 +113,69 @@ class WorkbenchApiTests(unittest.TestCase):
         )
         self.assertEqual(created.status_code, 201, created.text)
         return group_id, created.json()["node"]["node_id"]
+
+    def test_start_collects_only_the_defined_product_entry(self) -> None:
+        origin = "http://fixture.example"
+        entry = f"{origin}/p1.html"
+        (self.rules_dir / "fixture.yaml").write_text(
+            RULE_TEMPLATE.replace("__BASE__", origin), encoding="utf-8"
+        )
+        requests: list[str] = []
+        with fixture_server(proxy_origin=origin, requests=requests) as proxy:
+            _, node_id = self.create_task_node(input_url=entry, proxy=proxy)
+            started = self.client.post(f"/api/workbench/tasks/{node_id}/start")
+            self.assertEqual(started.status_code, 202, started.text)
+            task_id = started.json()["task"]["task_id"]
+            task = self.store.get_task(task_id)
+            self.assertEqual(task.input.get("target_entry"), entry)
+
+            worker = Worker(self.store, out_root=self.out_root, per_domain_rps=50)
+            self.assertEqual(worker.run_once(), 1)
+        self.assertEqual(requests, ["/p1.html"])
+        self.assertEqual(self.store.get_task(task_id).state, "FINISHED")
+        self.assertEqual(
+            [(item.url, item.state) for item in self.store.items(task_id, "product")],
+            [(entry, "DONE")],
+        )
+
+    def test_start_rejects_entry_not_covered_by_bound_rule(self) -> None:
+        entry = "https://fixture.example/uncovered"
+        _, node_id = self.create_task_node(input_url=entry)
+        started = self.client.post(f"/api/workbench/tasks/{node_id}/start")
+        self.assertEqual(started.status_code, 400, started.text)
+        self.assertEqual(started.json()["error"]["code"], "INVALID_RULE")
+        self.assertIn(entry, started.json()["error"]["message"])
+        self.assertEqual(self.store.list_workbench_task_runs(), [])
+
+    def test_start_preserves_filtered_listing_when_paginating(self) -> None:
+        origin = "http://fixture.example"
+        entry = f"{origin}/list?brand=one&brand=two&p=2"
+        text = RULE_TEMPLATE.replace("__BASE__", origin).replace(
+            '  link_selector: "a.product"',
+            f'''  sources:
+    - type: listing
+      url: "{entry}"
+      product_link_selector: "a.product"
+      advance: {{type: page_param, param: p, max_pages: 3}}''',
+        )
+        (self.rules_dir / "fixture.yaml").write_text(text, encoding="utf-8")
+        requests: list[str] = []
+        with fixture_server(proxy_origin=origin, requests=requests) as proxy:
+            _, node_id = self.create_task_node(input_url=entry, proxy=proxy)
+            started = self.client.post(f"/api/workbench/tasks/{node_id}/start")
+            self.assertEqual(started.status_code, 202, started.text)
+            task_id = started.json()["task"]["task_id"]
+            self.assertEqual(self.store.get_task(task_id).input.get("target_entry"), entry)
+            worker = Worker(self.store, out_root=self.out_root, per_domain_rps=50)
+            worker.run_once()
+        self.assertEqual(
+            {request for request in requests if request.startswith("/list")},
+            {"/list?brand=one&brand=two&p=2", "/list?brand=one&brand=two&p=3"},
+        )
+        self.assertEqual(
+            {item.url for item in self.store.items(task_id, "product") if item.state == "DONE"},
+            {f"{origin}/p2.html", f"{origin}/p3.html"},
+        )
 
     def create_batch(self, name: str = "fixture batch") -> str:
         created = self.client.post(

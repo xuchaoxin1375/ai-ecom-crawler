@@ -6684,6 +6684,7 @@ def create_app(
                 max_seconds=effective_limits["max_seconds"],
                 max_attempts=int(max_attempts),
                 proxy=definition.proxy,
+                target_entry=target_entry(definition.input_url),
                 concurrency=rate_policy.get("concurrency"),
                 delay_ms=rate_policy.get("delay_ms"),
                 retry_backoff_ms=rate_policy.get("backoff_ms"),

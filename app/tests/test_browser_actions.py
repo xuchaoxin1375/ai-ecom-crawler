@@ -8,11 +8,16 @@ from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
+
+import jsonschema
+import yaml
 
 from ecom_crawler.execution import run_and_export
 from ecom_crawler.runtime.rule import RuleError, load_rule
 from ecom_crawler.runtime.store import TaskStore
 from tests.support import serve_http_fixture
+from tests.test_shopify import product_entry
 
 RULE_TEMPLATE = """\
 schema_version: "1.2"
@@ -243,7 +248,7 @@ def product_html(index: int) -> str:
 
 
 @contextmanager
-def fixture_server() -> Iterator[str]:
+def fixture_server(*, shopify_products: list[dict] | None = None) -> Iterator[str]:
     class QuietServer(ThreadingHTTPServer):
         def handle_error(self, request: Any, client_address: Any) -> None:
             import sys
@@ -255,6 +260,17 @@ def fixture_server() -> Iterator[str]:
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             base = f"http://127.0.0.1:{self.server.server_port}"  # type: ignore[attr-defined]
+            if urlsplit(self.path).path == "/products.json":
+                if shopify_products is None:
+                    self.send_error(403)
+                    return
+                body = json.dumps({"products": shopify_products}).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
             if self.path == "/listing-more.html":
                 body = LISTING_MORE_HTML.encode("utf-8")
             elif self.path == "/listing-scroll.html":
@@ -305,7 +321,9 @@ BROWSER_AVAILABLE = _browser_available()
 
 @unittest.skipUnless(BROWSER_AVAILABLE, "Patchright Chromium is not installed")
 class BrowserListingActionTests(unittest.TestCase):
-    def _run(self, root: Path, base: str, html_name: str, advance: str) -> Any:
+    def _run(
+        self, root: Path, base: str, html_name: str, advance: str, *, shopify: bool = False
+    ) -> Any:
         # The fixture attaches its scroll/click handlers at the end of the
         # document.  A 50-100 ms settle can observe a scroll before the
         # listener is ready and then stop after one stalled step; use a
@@ -322,6 +340,15 @@ class BrowserListingActionTests(unittest.TestCase):
         no_new_stop: 1""",
             "      advance:\n        " + advance,
         )
+        if shopify:
+            text = text.replace('schema_version: "1.2"', 'schema_version: "1.3"')
+            text += f'''
+product_source:
+  type: shopify_json
+  url: "{base}/products.json"
+  product_url_template: "{base}/{{handle}}.html"
+  max_pages: 1
+'''
         rule.write_text(text, encoding="utf-8")
         return run_and_export(
             rule_path=rule,
@@ -396,6 +423,30 @@ class BrowserListingActionTests(unittest.TestCase):
             self.assertIn("?page=", advance["final_url"])
             self.assertTrue(advance["urls"])
 
+    def test_shopify_json_and_browser_listing_share_one_rule(self) -> None:
+        for products in ([product_entry(7)], None):
+            with (
+                self.subTest(json_available=products is not None),
+                tempfile.TemporaryDirectory() as temporary,
+                fixture_server(shopify_products=products) as base,
+            ):
+                root = Path(temporary)
+                result = self._run(
+                    root,
+                    base,
+                    "listing-more.html",
+                    'type: load_more\n        button_selector: "#more"\n        max_clicks: 5\n        settle_ms: 500\n        no_new_stop: 2',
+                    shopify=True,
+                )
+                self._assert_valid_products(result, root, expected=7 if products else 6)
+                shopify = result.task_result["runtime"]["shopify_json"]
+                self.assertEqual(shopify["direct"], 1 if products else 0)
+                self.assertEqual(shopify["blocked"], 0 if products else 1)
+                items = TaskStore(root / "tasks.db").items("browser-listing", "navigation")
+                self.assertEqual(items[0].discovered_from, "shopify_json")
+                listing = next(item for item in items if item.discovered_from == "listing")
+                self.assertEqual(listing.result["advance"]["type"], "load_more")
+
     def test_infinite_scroll_appends_products(self) -> None:
         with tempfile.TemporaryDirectory() as temporary, fixture_server() as base:
             root = Path(temporary)
@@ -447,14 +498,24 @@ class BrowserListingActionTests(unittest.TestCase):
 
 
 class BrowserAdvanceValidationTests(unittest.TestCase):
-    def test_load_more_requires_schema_1_2(self) -> None:
+    def test_load_more_requires_schema_1_2_or_later(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             rule = Path(temporary) / "rule.yaml"
             text = RULE_TEMPLATE.replace("__BASE__", "https://example.test")
             text = text.replace('schema_version: "1.2"', 'schema_version: "1.1"')
             rule.write_text(text, encoding="utf-8")
+            schema_path = Path(__file__).resolve().parents[2] / "docs/schema/manifest.schema.json"
+            validator = jsonschema.Draft202012Validator(json.loads(schema_path.read_text(encoding="utf-8")))
+            self.assertFalse(validator.is_valid(yaml.safe_load(text)))
             with self.assertRaises(RuleError):
                 load_rule(rule)
+
+            for version in ("1.2", "1.3"):
+                with self.subTest(version=version):
+                    valid = text.replace('schema_version: "1.1"', f'schema_version: "{version}"')
+                    rule.write_text(valid, encoding="utf-8")
+                    validator.validate(yaml.safe_load(valid))
+                    self.assertEqual(load_rule(rule).raw["schema_version"], version)
 
     def test_load_more_requires_browser_navigation(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

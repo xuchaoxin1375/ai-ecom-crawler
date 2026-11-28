@@ -232,7 +232,6 @@ def discover_urls(
 ) -> list[str]:
     discovery = plan["discovery"]
     site = plan["site"]
-    entry_url = plan_entry_url(plan)
     includes = [re.compile(pattern) for pattern in plan["scope"].get("include", [])]
     excludes = [re.compile(pattern) for pattern in plan["scope"].get("exclude", [])]
     patterns = [re.compile(pattern) for pattern in discovery.get("product_url_patterns", [])]
@@ -248,7 +247,7 @@ def discover_urls(
         href = element.get("href")
         if not href:
             continue
-        absolute = urljoin(entry_url, href.strip())
+        absolute = urljoin(page.url, href.strip())
         parsed = urlparse(absolute)
         if parsed.scheme not in {"http", "https"}:
             continue

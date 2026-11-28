@@ -414,7 +414,12 @@ class TaskRunner:
                     item_type=item.item_type,
                 )
             else:
-                result = self.fetcher.get(item.url, item_type=item.item_type)
+                fetch_type = (
+                    "shopify_json"
+                    if item.discovered_from == "shopify_json" and item.item_type == "navigation"
+                    else item.item_type
+                )
+                result = self.fetcher.get(item.url, item_type=fetch_type)
         except UnsupportedAdvanceError as exc:
             return self._failure(
                 item, "permanent", "unsupported_advance", detail=str(exc)
@@ -467,7 +472,15 @@ class TaskRunner:
             remaining = self._remaining_product_limit()
             if remaining <= 0:
                 return "DONE", {"links": 0, "added": 0, "limit_reached": True}
-            urls = discover_urls(page, self.rule.raw, limit=remaining)
+            selector = None
+            for source in self.rule.sources:
+                if source["type"] != "entry_links":
+                    continue
+                source_url = str(source.get("url") or self.rule.entry_url)
+                if _normalize_url(source_url) == item.normalized_url:
+                    selector = source.get("link_selector")
+                    break
+            urls = discover_urls(page, self.rule.raw, limit=remaining, selector=selector)
             added = 0
             for url in urls:
                 if self._add_product_item(url, parent=item.url):

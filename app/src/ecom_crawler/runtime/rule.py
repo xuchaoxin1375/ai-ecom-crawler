@@ -442,9 +442,9 @@ def _validate_common(data: dict[str, Any]) -> None:
                 "set fetch.default_engine=browser or "
                 "fetch.per_url_type.navigation.engine=browser"
             )
-        if data["schema_version"] != "1.2":
+        if data["schema_version"] not in {"1.2", "1.3"}:
             raise RuleError(
-                "load_more/infinite_scroll require schema_version 1.2"
+                "load_more/infinite_scroll require schema_version 1.2 or 1.3"
             )
 
     output = _require_mapping(data["output"], "output")
@@ -641,7 +641,6 @@ def _validate_sources(value: Any, discovery: dict[str, Any]) -> None:
     sources = _require_list(value, "discovery.sources")
     if not sources:
         raise RuleError("discovery.sources must not be empty")
-    has_entry = False
     has_listing = False
     has_html_index = False
     for index, source in enumerate(sources):
@@ -654,10 +653,9 @@ def _validate_sources(value: Any, discovery: dict[str, Any]) -> None:
                 f"supported: {sorted(SUPPORTED_SOURCES)}"
             )
         if source_type == "entry_links":
-            has_entry = True
             if "url" in source:
                 _require_string(source.get("url"), f"{path}.url")
-            if "link_selector" in source:
+            if "link_selector" in source or not discovery.get("link_selector"):
                 _require_string(source.get("link_selector"), f"{path}.link_selector")
         if source_type == "listing":
             has_listing = True
@@ -749,15 +747,6 @@ def _validate_sources(value: Any, discovery: dict[str, Any]) -> None:
                     source.get("sitemap_patterns"), f"{path}.sitemap_patterns"
                 )
                 _validate_regex_list(patterns, f"{path}.sitemap_patterns")
-    if (
-        has_entry
-        and not discovery.get("link_selector")
-        and not any(
-            source.get("type") == "entry_links" and source.get("link_selector")
-            for source in sources
-        )
-    ):
-        raise RuleError("entry_links source needs a link_selector")
     if (
         has_listing
         and not discovery.get("link_selector")

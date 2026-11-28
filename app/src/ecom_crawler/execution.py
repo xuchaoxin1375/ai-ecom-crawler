@@ -17,8 +17,9 @@ from urllib.parse import urlparse
 from .bridge import convert_task_to_run_dir
 from .model import ContractError, ExportResult
 from .pipeline import export_run
+from .runtime.batch import target_entry_mode
 from .runtime.models import Task
-from .runtime.rule import load_rule
+from .runtime.rule import RuleError, load_rule
 from .runtime.store import TaskStore
 from .runtime.worker import Worker
 
@@ -89,6 +90,8 @@ def build_task(
     rule.validate_task_type(task_type)
     if task_type not in {"product", "discovery"}:
         raise ContractError(f"unsupported task_type: {task_type}")
+    if target_entry_mode(rule, target_entry) is None:
+        raise RuleError(f"规则未覆盖目标入口：{target_entry}")
     effective_concurrency = max(
         1,
         int(concurrency if concurrency is not None else rule.fetch.get("concurrency", 1)),
