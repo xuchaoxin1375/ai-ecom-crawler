@@ -362,6 +362,16 @@ class RunConfigApiTests(unittest.TestCase):
         self.assertEqual(empty.status_code, 409, empty.text)
         self.assertEqual(empty.json()["error"]["code"], "TASK_NOT_CONTINUABLE")
 
+    def test_continue_rejects_non_budget_error_with_pending_items(self) -> None:
+        _, node_id = self.create_task_node()
+        task_id = self.start_task(node_id)
+        self.mark_budget_exhausted(task_id, stop_detail="max_sitemaps", pending_products=2)
+        self.store.update_task(task_id, stop_reason="PLAN_ERROR", outcome="FAILED")
+        endpoint = f"/api/workbench/runs/{task_id}/config"
+        self.assertFalse(self.client.get(endpoint).json()["can_continue"])
+        self.assertFalse(self.client.get(f"/api/tasks/{task_id}").json()["can_continue"])
+        self.assertEqual(self.client.patch(endpoint, json={"action": "continue"}).status_code, 409)
+
 
 class FakeBudgetStore:
     def __init__(self, counts: dict[str, int]) -> None:

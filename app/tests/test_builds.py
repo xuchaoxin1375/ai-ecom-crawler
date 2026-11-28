@@ -2378,6 +2378,7 @@ class BuildWorkflowTests(unittest.TestCase):
                 }
             ],
         }
+        repair_gate = threading.Event()
         adapter = FakeBuildAdapter(
             self.root,
             rule_payloads=[initial_rule, repaired_rule],
@@ -2437,6 +2438,9 @@ class BuildWorkflowTests(unittest.TestCase):
             self.assertEqual(second_feedback.status_code, 201, second_feedback.text)
             second_feedback_id = second_feedback.json()["feedback"]["feedback_id"]
 
+            # Keep the repair build running until the late feedback check; a
+            # fast fake completion otherwise makes active_repair_build_id race.
+            adapter.gate = repair_gate
             repair = client.post(
                 f"/api/feedback/{feedback_id}/repair",
                 json={
@@ -2462,6 +2466,7 @@ class BuildWorkflowTests(unittest.TestCase):
             self.assertEqual(
                 late_feedback.json()["feedback"]["active_repair_build_id"], build_id
             )
+            repair_gate.set()
             result = self._wait_ready(client, build_id)
             self.assertEqual(result["outcome"], "succeeded", result)
             self.assertEqual(

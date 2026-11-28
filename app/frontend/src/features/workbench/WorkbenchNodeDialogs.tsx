@@ -282,6 +282,7 @@ interface ConfirmDialogProps {
   title: string;
   description: string;
   confirmLabel: string;
+  detail?: string;
   busy?: boolean;
   error?: string;
   onOpenChange: (open: boolean) => void;
@@ -293,6 +294,7 @@ export function WorkbenchConfirmDialog({
   title,
   description,
   confirmLabel,
+  detail,
   busy = false,
   error = "",
   onOpenChange,
@@ -311,7 +313,7 @@ export function WorkbenchConfirmDialog({
       <div className="px-4 py-5 sm:px-5">
         {error ? <ErrorNotice title="操作失败" message={error} compact /> : null}
         <p className="text-sm leading-6 text-ink-2">
-          子目录和任务定义会移动到上一级，不删除定义、运行或导出。
+          {detail ?? "子目录和任务定义会移动到上一级，不删除定义、运行或导出。"}
         </p>
       </div>
       <footer className="flex justify-end gap-2 border-t border-line bg-surface-muted px-4 py-3 sm:px-5">

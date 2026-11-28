@@ -89,6 +89,7 @@ from ..runtime.batch import (
     parse_sites,
     rule_domains,
     rule_has_catalog_discovery,
+    site_identity,
     target_entry,
     target_entry_mode,
     target_key,
@@ -582,6 +583,7 @@ class BatchCreateRequest(BaseModel):
     category: str | None = Field(default=None, max_length=120)
     note: str | None = Field(default=None, max_length=2000)
     folder_id: str | None = Field(default=None, max_length=40)
+    workbench_parent_id: str | None = Field(default=None, max_length=40)
     sites: list[str] = Field(default_factory=list, max_length=5000)
     sites_text: str = Field(default="", max_length=500000)
     preview: bool = False
@@ -1443,7 +1445,7 @@ def _counts(store: TaskStore, task: Task, result: dict[str, Any]) -> dict[str, i
 
 
 def _summary(store: TaskStore, task: Task, out_root: Path) -> dict[str, Any]:
-    result = _load_result(out_root, task.task_id)
+    result = _current_task_result(task, out_root)
     site_rule = store.get_site_rule(task.site_key or task.plan_id)
     active_version = site_rule.rule_version if site_rule else None
     active_sha256 = site_rule.sha256 if site_rule else None
@@ -1463,6 +1465,7 @@ def _summary(store: TaskStore, task: Task, out_root: Path) -> dict[str, Any]:
     ]
     latest_feedback = feedback[0] if feedback else None
     counts = _counts(store, task, result)
+    continuation = _workbench_run_can_continue(store, task, result)
     return {
         "task_id": task.task_id,
         "task_type": task.task_type,
@@ -1476,6 +1479,9 @@ def _summary(store: TaskStore, task: Task, out_root: Path) -> dict[str, Any]:
         "outcome": task.outcome,
         "stop_reason": task.stop_reason,
         "stop_detail": _workbench_stop_detail(task, counts, result),
+        "can_continue": continuation["can_continue"],
+        "continue_hint": continuation["continue_hint"],
+        **_task_recovery_payload(task, result),
         "limits": dict(task.limits),
         "counts": counts,
         "coverage": result.get("coverage") or {"status": "UNKNOWN"},
@@ -1607,9 +1613,37 @@ def _workbench_stop_detail(
     return str(detail) if detail else None
 
 
+def _current_task_result(task: Task, root: Path) -> dict[str, Any]:
+    if task.state not in TERMINAL_TASK_STATES or task.output.get("recovery_export_pending"):
+        return {}
+    return _load_result(root, task.task_id)
+
+
+def _task_recovery_payload(task: Task, result: dict[str, Any]) -> dict[str, Any]:
+    if task.state in {"RUNNING", "PAUSING", "CANCELLING"} and (
+        task.lease_expires_at is None or task.lease_expires_at <= time.time()
+    ):
+        recovery = "WAITING_FOR_WORKER"
+    elif task.output.get("recovery_export_pending"):
+        recovery = "EXPORT_PENDING"
+    elif (result.get("recovery") or {}).get("missing_product_records"):
+        recovery = "RESULT_INCOMPLETE"
+    elif task.output.get("recovered_at"):
+        recovery = "RECOVERED"
+    else:
+        recovery = None
+    return {"recovery_state": recovery, "recovered_at": task.output.get("recovered_at")}
+
+
 def _workbench_run_can_continue(
     store: TaskStore, task: Task, result: dict[str, Any]
 ) -> dict[str, Any]:
+    eligible = (
+        task.state == "FINISHED"
+        and task.stop_reason == "BUDGET_EXHAUSTED"
+        and task.archived_at is None
+        and not task.input.get("cloned_from")
+    )
     products = store.item_counts(task.task_id, "product")
     navigation = store.item_counts(task.task_id, "navigation")
     pending_products = products.get("PENDING", 0) + products.get("IN_FLIGHT", 0)
@@ -1623,9 +1657,7 @@ def _workbench_run_can_continue(
     )
     cloned_snapshot = bool(task.input.get("cloned_from"))
     can_continue = (
-        task.state == "FINISHED"
-        and task.archived_at is None
-        and not cloned_snapshot
+        eligible
         and (pending_products + pending_navigation > 0 or discovery_truncated)
     )
     hints: list[str] = []
@@ -1770,14 +1802,18 @@ def _workbench_run_config_payload(
     }
 
 
-def _workbench_task_brief(task: Task | None) -> dict[str, Any] | None:
+def _workbench_task_brief(store: TaskStore, task: Task | None, root: Path) -> dict[str, Any] | None:
     if task is None:
         return None
+    result = _current_task_result(task, root)
+    continuation = _workbench_run_can_continue(store, task, result)
     return {
         "task_id": task.task_id,
         "state": task.state,
         "outcome": task.outcome,
         "stop_reason": task.stop_reason,
+        "can_continue": continuation["can_continue"],
+        **_task_recovery_payload(task, result),
         "counts": task.counters,
         "started_at": task.started_at,
         "updated_at": task.updated_at,
@@ -1802,7 +1838,7 @@ def _workbench_path(
     return " / ".join(reversed(parts)) if parts else None
 
 
-def _workbench_tree_payload(store: TaskStore) -> dict[str, Any]:
+def _workbench_tree_payload(store: TaskStore, root: Path) -> dict[str, Any]:
     nodes = store.list_workbench_nodes()
     nodes_by_id = {node.node_id: node for node in nodes}
     definitions = {item.node_id: item for item in store.list_workbench_task_defs()}
@@ -1847,7 +1883,7 @@ def _workbench_tree_payload(store: TaskStore) -> dict[str, Any]:
         else:
             payload["definition"] = _workbench_definition_payload(definitions.get(node.node_id))
             payload["current_run"] = _workbench_task_brief(
-                current_by_node.get(node.node_id)
+                store, current_by_node.get(node.node_id), root,
             )
             payload["path"] = _workbench_path(node, nodes_by_id)
         items.append(payload)
@@ -3162,6 +3198,97 @@ def create_app(
         if batch is None:
             raise _error("NOT_FOUND", f"unknown batch: {batch_id}", 404)
         return batch
+
+    def require_workbench_parent(parent_id: str | None) -> WorkbenchNode | None:
+        if not parent_id:
+            return None
+        parent = store.get_workbench_node(parent_id)
+        if parent is None:
+            raise _error("TARGET_NOT_FOUND", f"unknown workbench parent: {parent_id}", 404)
+        if parent.node_type != "group":
+            raise _error("INVALID_PARENT", "parent must be a workbench group", 409)
+        return parent
+
+    def resolve_workbench_target_rule(
+        site: BatchSite, batch: Batch, entries: list[dict[str, Any]]
+    ) -> tuple[dict[str, Any] | None, str]:
+        """Resolve the rule a workbench import may use for one batch site."""
+        domain = normalize_site(site.input_value).site_key or site.domain
+        entry = target_entry(site.input_value)
+        keys = list(
+            dict.fromkeys(
+                (
+                    site.site_key,
+                    target_key(domain, entry, batch.market),
+                    domain,
+                )
+            )
+        )
+        rule: dict[str, Any] | None = None
+        note = "未匹配受管规则包"
+        for key in keys:
+            candidate, candidate_note = match_rule(key, entries)
+            if candidate is not None:
+                rule, note = candidate, candidate_note
+                break
+            note = candidate_note or note
+        if rule is None:
+            rule, note = match_target(
+                target_key(domain, entry, batch.market),
+                site.input_value,
+                entries,
+                True,
+                batch.market,
+            )
+        if (
+            rule is None
+            and site.readiness == "ready"
+            and site.rule_id
+            and site.rule_version
+            and not note.startswith(("站点规则已停用", "市场不匹配"))
+        ):
+            stored = [
+                entry
+                for entry in entries
+                if entry.get("valid")
+                and entry.get("rule_id") == site.rule_id
+                and entry.get("rule_version") == site.rule_version
+            ]
+            if len(stored) == 1:
+                rule = stored[0]
+                note = f"批次已复核规则 {site.rule_id}@{site.rule_version}"
+        if rule is None:
+            if site.note and site.note.startswith(("市场不匹配", "站点规则已停用")):
+                note = site.note
+            domain_candidates = [
+                entry
+                for entry in entries
+                if entry.get("valid")
+                and _workbench_host_key(domain)
+                in {
+                    _workbench_host_key(str(item))
+                    for item in entry.get("domains", [])
+                }
+            ]
+            conflicts = [
+                conflict
+                for entry in domain_candidates
+                if (conflict := market_conflict(entry, batch.market))
+            ]
+            if domain_candidates and len(conflicts) == len(domain_candidates):
+                note = conflicts[0]
+            return None, note
+        rule_hosts = {
+            _workbench_host_key(str(item)) for item in rule.get("domains", [])
+        }
+        if rule_hosts and _workbench_host_key(domain) not in rule_hosts:
+            return None, "规则与站点不匹配"
+        conflict = market_conflict(rule, batch.market)
+        if conflict:
+            return None, conflict
+        if not covers_target(rule, entry):
+            return None, "当前规则未验证此入口，需接入指定范围"
+        return rule, note
 
     def site_values(payload: BatchCreateRequest | BatchImportRequest) -> list[str]:
         values = [value.strip() for value in payload.sites if value.strip()]
@@ -4614,6 +4741,8 @@ def create_app(
     @app.get("/api/tasks/{task_id}/export")
     def export_task(task_id: str, partial: bool = False) -> Response:
         task = require_task(task_id)
+        if task.output.get("recovery_export_pending"):
+            raise _error("EXPORT_NOT_READY", "正在恢复已采数据，恢复完成后可导出", 409)
         if task.state not in {"FINISHED", "CANCELLED"} and not partial:
             raise _error("EXPORT_NOT_READY", "task is not finished; use partial=true", 409)
         run_dir = (root / task_id).resolve()
@@ -5512,7 +5641,7 @@ def create_app(
 
     @app.get("/api/workbench/tree")
     def get_workbench_tree() -> dict[str, Any]:
-        return _workbench_tree_payload(store)
+        return _workbench_tree_payload(store, root)
 
     @app.post("/api/workbench/groups", status_code=201)
     def create_workbench_group(payload: WorkbenchGroupCreateRequest) -> dict[str, Any]:
@@ -5608,8 +5737,11 @@ def create_app(
             raise _error("INVALID_GROUP", str(exc), 409) from exc
         return {"node_id": node_id, "dissolved": True, "moved": moved}
 
-    @app.post("/api/workbench/import-batch")
-    def import_workbench_batch(payload: WorkbenchBatchImportRequest) -> dict[str, Any]:
+    workbench_import_lock = threading.Lock()
+
+    def _import_workbench_batch(
+        payload: WorkbenchBatchImportRequest,
+    ) -> dict[str, Any]:
         if rules is None or not rules.is_dir():
             raise _error("RULES_NOT_CONFIGURED", "serve --rules-dir is not set", 400)
         batch = store.get_batch(payload.batch_id)
@@ -5617,126 +5749,344 @@ def create_app(
             raise _error("NOT_FOUND", f"unknown batch: {payload.batch_id}", 404)
         if batch.archived_at is not None:
             raise _error("INVALID_STATE", "batch is archived", 409)
-        if payload.parent_id:
-            parent = store.get_workbench_node(payload.parent_id)
-            if parent is None:
-                raise _error("NOT_FOUND", f"unknown workbench parent: {payload.parent_id}", 404)
-            if parent.node_type != "group":
-                raise _error("INVALID_PARENT", "parent must be a workbench group", 409)
+        intent = store.get_workbench_batch_import(batch.batch_id)
+        parent_id = (
+            payload.parent_id
+            if payload.parent_id is not None
+            else (intent.parent_id if intent else None)
+        )
+        parent = require_workbench_parent(parent_id)
+        target = {
+            "node_id": parent.node_id if parent else None,
+            "name": parent.name if parent else "根目录",
+            "missing": False,
+        }
+        store.upsert_workbench_batch_import(batch.batch_id, parent_id=parent_id)
         entries = _rule_entries(rules)
         definitions = store.list_workbench_task_defs()
-        existing_sites = {definition.site_key for definition in definitions}
+        existing_by_key = {definition.site_key: definition for definition in definitions}
+        existing_by_identity: dict[tuple[str, str | None, str], WorkbenchTaskDef] = {}
+        for definition in definitions:
+            identity = site_identity(
+                definition.domain,
+                definition.input_url,
+                definition.market or batch.market,
+            )
+            existing_by_identity.setdefault(identity, definition)
         runs = store.list_workbench_task_runs()
         mapped_tasks = {run.task_id for run in runs}
         siblings = [
             node
             for node in store.list_workbench_nodes()
-            if node.parent_id == payload.parent_id
+            if node.parent_id == parent_id
         ]
         next_order = max((item.sort_order for item in siblings), default=-1) + 1
         added: list[dict[str, Any]] = []
-        skipped: list[dict[str, str]] = []
-        for site in store.list_batch_sites(batch.batch_id):
-            if not site.site_key or site.site_key in existing_sites:
-                skipped.append({"site_key": site.site_key, "reason": "已在任务树"})
-                continue
-            if not site.rule_id or not site.rule_version:
-                skipped.append({"site_key": site.site_key, "reason": "未匹配规则"})
-                continue
-            matches = [
-                entry
-                for entry in entries
-                if entry.get("rule_id") == site.rule_id
-                and entry.get("rule_version") == site.rule_version
-            ]
-            if len(matches) != 1 or not matches[0].get("valid"):
-                skipped.append({"site_key": site.site_key, "reason": "规则不可用"})
-                continue
-            entry = matches[0]
-            task_types = list(entry.get("task_types", []))
-            task_type = "product" if "product" in task_types else (
-                task_types[0] if task_types else ""
-            )
-            if not task_type:
-                skipped.append({"site_key": site.site_key, "reason": "规则不支持任务类型"})
-                continue
-            rule_domains = [
-                _workbench_host_key(str(domain)) for domain in entry.get("domains", [])
-            ]
-            if rule_domains and _workbench_host_key(site.domain) not in rule_domains:
-                skipped.append({"site_key": site.site_key, "reason": "规则与站点不匹配"})
-                continue
-            raw_input = (site.input_value or "").strip()
-            input_url = (
-                raw_input
-                if re.match(r"^https?://", raw_input, re.IGNORECASE)
-                else f"https://{site.domain}/"
-            )
-            now = utc_now()
-            node = WorkbenchNode(
-                node_id=f"n-{uuid.uuid4().hex[:12]}",
-                node_type="task",
-                name=site.domain or site.site_key,
-                parent_id=payload.parent_id,
-                sort_order=next_order,
-                created_at=now,
-                updated_at=now,
-            )
-            definition = WorkbenchTaskDef(
-                node_id=node.node_id,
-                input_url=input_url,
-                domain=site.domain,
-                site_key=site.site_key,
-                batch_id=batch.batch_id,
-                country=batch.country,
-                language=batch.language,
-                market=batch.market,
-                category=batch.category,
-                task_type=task_type,
-                collection_mode=(
-                    batch.collection_mode
-                    if batch.collection_mode in {"sample", "formal"}
-                    else "formal"
-                ),
-                rule_id=site.rule_id,
-                rule_version=site.rule_version,
-                rule_path=str(entry["path"]),
-                limits={},
-                proxy=site.proxy,
-                note=site.note,
-                created_at=now,
-                updated_at=now,
-            )
-            try:
-                store.create_workbench_task(node, definition)
-            except ValueError as exc:
-                raise _error("CONFLICT", str(exc), 409) from exc
-            existing_sites.add(site.site_key)
-            next_order += 1
-            attached = False
-            if site.task_id and site.task_id not in mapped_tasks:
+        skipped: list[dict[str, Any]] = []
+        counts: Counter[str] = Counter()
+
+        def skip(
+            site: BatchSite,
+            category: str,
+            reason: str,
+            *,
+            existing_node_id: str | None = None,
+        ) -> None:
+            item: dict[str, Any] = {
+                "site_key": site.site_key,
+                "domain": site.domain,
+                "reason": reason,
+                "category": category,
+            }
+            if existing_node_id:
+                item["existing_node_id"] = existing_node_id
+            skipped.append(item)
+            counts[category] += 1
+
+        try:
+            for site in store.list_batch_sites(batch.batch_id):
+                counts["total"] += 1
+                identity = site_identity(site.domain, site.input_value, batch.market)
+                existing = existing_by_key.get(site.site_key) or existing_by_identity.get(
+                    identity
+                )
+                if existing is not None:
+                    skip(site, "existing", "已在任务树", existing_node_id=existing.node_id)
+                    continue
+                if site.readiness == "duplicate":
+                    skip(site, "duplicate", site.note or "批次内重复")
+                    continue
+                if site.readiness == "invalid":
+                    skip(site, "invalid", site.note or "网址无效")
+                    continue
+                rule, note = resolve_workbench_target_rule(site, batch, entries)
+                if rule is None:
+                    skip(site, "pending", note or "未匹配受管规则包")
+                    continue
+                task_types = list(rule.get("task_types", []))
+                task_type = (
+                    "product"
+                    if "product" in task_types
+                    else (task_types[0] if task_types else "")
+                )
+                if not task_type:
+                    skip(site, "pending", "规则不支持任务类型")
+                    continue
+                raw_input = (site.input_value or "").strip()
+                input_url = (
+                    raw_input
+                    if re.match(r"^https?://", raw_input, re.IGNORECASE)
+                    else f"https://{site.domain}/"
+                )
+                now = utc_now()
+                node = WorkbenchNode(
+                    node_id=f"n-{uuid.uuid4().hex[:12]}",
+                    node_type="task",
+                    name=site.domain or site.site_key,
+                    parent_id=parent_id,
+                    sort_order=next_order,
+                    created_at=now,
+                    updated_at=now,
+                )
+                definition = WorkbenchTaskDef(
+                    node_id=node.node_id,
+                    input_url=input_url,
+                    domain=site.domain,
+                    site_key=site.site_key,
+                    batch_id=batch.batch_id,
+                    country=batch.country,
+                    language=batch.language,
+                    market=batch.market,
+                    category=batch.category,
+                    task_type=task_type,
+                    collection_mode=(
+                        batch.collection_mode
+                        if batch.collection_mode in {"sample", "formal"}
+                        else "formal"
+                    ),
+                    rule_id=rule["rule_id"],
+                    rule_version=rule["rule_version"],
+                    rule_path=str(rule["path"]),
+                    limits={},
+                    proxy=site.proxy,
+                    note=site.note,
+                    created_at=now,
+                    updated_at=now,
+                )
                 try:
-                    attached = store.attach_workbench_run(
-                        node.node_id, site.task_id, utc_now()
+                    store.create_workbench_task(node, definition)
+                except ValueError as exc:
+                    skip(site, "failed", str(exc))
+                    continue
+                existing_by_key[site.site_key] = definition
+                existing_by_identity[identity] = definition
+                next_order += 1
+                attached = False
+                if site.task_id and site.task_id not in mapped_tasks:
+                    try:
+                        attached = store.attach_workbench_run(
+                            node.node_id, site.task_id, utc_now()
+                        )
+                    except (KeyError, ValueError):
+                        attached = False
+                    if attached:
+                        mapped_tasks.add(site.task_id)
+                added.append(
+                    {
+                        "node_id": node.node_id,
+                        "name": node.name,
+                        "site_key": site.site_key,
+                        "task_id": site.task_id,
+                        "attached": attached,
+                    }
+                )
+                counts["added"] += 1
+            store.mark_workbench_batch_import_attempt(batch.batch_id)
+        except Exception as exc:
+            detail = getattr(exc, "detail", None) or str(exc) or type(exc).__name__
+            store.mark_workbench_batch_import_attempt(
+                batch.batch_id, error=str(detail)[:500]
+            )
+            raise
+        return {
+            "batch_id": batch.batch_id,
+            "target": target,
+            "added": added,
+            "skipped": skipped,
+            "counts": {
+                key: counts[key]
+                for key in (
+                    "total",
+                    "added",
+                    "pending",
+                    "existing",
+                    "duplicate",
+                    "invalid",
+                    "failed",
+                )
+            },
+        }
+
+    @app.post("/api/workbench/import-batch")
+    def import_workbench_batch(payload: WorkbenchBatchImportRequest) -> dict[str, Any]:
+        with workbench_import_lock:
+            return _import_workbench_batch(payload)
+
+    @app.get("/api/workbench/pending-targets")
+    def workbench_pending_targets() -> dict[str, Any]:
+        entries = _rule_entries(rules) if rules is not None and rules.is_dir() else []
+        definitions = store.list_workbench_task_defs()
+        onboarding_available = (
+            build_manager is not None and not builds_disabled and not read_only
+        )
+        onboarding_reason = None
+        if not onboarding_available:
+            onboarding_reason = (
+                "只读模式不能启动构建"
+                if read_only
+                else "构建服务不可用；请配置规则目录后重启"
+            )
+        batches: list[dict[str, Any]] = []
+        total_pending = 0
+        for intent in store.list_workbench_batch_imports():
+            batch = store.get_batch(intent.batch_id)
+            if batch is None or batch.archived_at is not None:
+                continue
+            parent = (
+                store.get_workbench_node(intent.parent_id)
+                if intent.parent_id
+                else None
+            )
+            target = {
+                "node_id": intent.parent_id,
+                "name": parent.name if parent else None,
+                "missing": bool(intent.parent_id and parent is None),
+            }
+            sites = store.list_batch_sites(batch.batch_id)
+            defs_by_identity: dict[tuple[str, str | None, str], WorkbenchTaskDef] = {}
+            for definition in definitions:
+                identity = site_identity(
+                    definition.domain,
+                    definition.input_url,
+                    definition.market or batch.market,
+                )
+                defs_by_identity.setdefault(identity, definition)
+            counts: Counter[str] = Counter(sites=len(sites))
+            pending_sites: list[dict[str, Any]] = []
+            for site in sites:
+                identity = site_identity(site.domain, site.input_value, batch.market)
+                if identity in defs_by_identity:
+                    counts["in_workbench"] += 1
+                    continue
+                if site.readiness in {"invalid", "duplicate"}:
+                    counts[site.readiness] += 1
+                    continue
+                build = store.get_build(site.build_id) if site.build_id else None
+                if build is None:
+                    recent_builds = store.list_builds(
+                        batch_id=batch.batch_id,
+                        site_key=site.site_key,
+                        limit=1,
                     )
-                except (KeyError, ValueError):
-                    attached = False
-                if attached:
-                    mapped_tasks.add(site.task_id)
-            added.append(
+                    build = recent_builds[0] if recent_builds else None
+                rule, note = resolve_workbench_target_rule(site, batch, entries)
+                if build is not None and build.state in ACTIVE_BUILD_STATES:
+                    category = "building"
+                    action = "open_build"
+                    reason = f"构建中（{build.state}）"
+                elif build is not None and build.state == "FINISHED" and rule is None:
+                    category = "needs_onboarding"
+                    action = "open_build"
+                    reason = "构建完成但规则尚未激活或不可用"
+                elif rule is not None:
+                    category = "ready"
+                    action = "import"
+                    reason = note or "可加入任务树"
+                else:
+                    category = "needs_onboarding"
+                    reason = note or site.note or "未匹配受管规则包"
+                    blocked = reason.startswith(
+                        ("市场不匹配", "站点规则已停用")
+                    )
+                    action = (
+                        "build"
+                        if onboarding_available and not blocked
+                        else "none"
+                    )
+                    if build is not None and build.state in {"FAILED", "CANCELLED"}:
+                        reason = f"{reason}；最近构建 {build.build_id} {build.state}"
+                if action == "build" and site.task_id:
+                    action = "none"
+                    reason = "该目标已有运行但规则不可用；请先检查运行或重新接入"
+                counts[category] += 1
+                pending_sites.append(
+                    {
+                        "site_key": site.site_key,
+                        "domain": site.domain,
+                        "input_value": site.input_value,
+                        "identity": {
+                            "domain": identity[0],
+                            "entry": identity[1],
+                            "market": identity[2],
+                        },
+                        "readiness": site.readiness,
+                        "in_workbench": False,
+                        "action": action,
+                        "reason": reason,
+                        "active_rule": (
+                            {
+                                "rule_id": rule["rule_id"],
+                                "rule_version": rule["rule_version"],
+                            }
+                            if rule is not None
+                            else None
+                        ),
+                        "build_id": build.build_id if build is not None else None,
+                        "build_state": build.state if build is not None else None,
+                        "build_outcome": build.outcome if build is not None else None,
+                    }
+                )
+            if not pending_sites:
+                continue
+            total_pending += len(pending_sites)
+            batches.append(
                 {
-                    "node_id": node.node_id,
-                    "name": node.name,
-                    "site_key": site.site_key,
-                    "task_id": site.task_id,
-                    "attached": attached,
+                    "batch_id": batch.batch_id,
+                    "name": batch.name,
+                    "market": batch.market,
+                    "created_at": batch.created_at,
+                    "target": target,
+                    "attempted_at": intent.attempted_at,
+                    "last_error": intent.last_error,
+                    "counts": {
+                        key: counts[key]
+                        for key in (
+                            "sites",
+                            "in_workbench",
+                            "needs_onboarding",
+                            "building",
+                            "ready",
+                            "invalid",
+                            "duplicate",
+                        )
+                    },
+                    "truncated": len(pending_sites) > 500,
+                    "sites": pending_sites[:500],
                 }
             )
         return {
-            "batch_id": batch.batch_id,
-            "added": added,
-            "skipped": skipped,
+            "total_batches": len(batches),
+            "total_pending": total_pending,
+            "onboarding_available": onboarding_available,
+            "onboarding_unavailable_reason": onboarding_reason,
+            "batches": batches,
         }
+
+    @app.post("/api/workbench/pending-targets/{batch_id}/dismiss")
+    def dismiss_workbench_pending_target(batch_id: str) -> dict[str, Any]:
+        if not store.dismiss_workbench_batch_import(batch_id):
+            raise _error("NOT_FOUND", f"unknown pending batch: {batch_id}", 404)
+        return {"batch_id": batch_id, "dismissed": True}
 
     @app.post("/api/workbench/tasks", status_code=201)
     def create_workbench_task(payload: WorkbenchTaskCreateRequest) -> dict[str, Any]:
@@ -7073,6 +7423,7 @@ def create_app(
             )
         if payload.folder_id is not None:
             require_folder(payload.folder_id)
+        require_workbench_parent(payload.workbench_parent_id)
         batch = Batch(
             batch_id=f"b-{uuid.uuid4().hex[:12]}",
             name=payload.name.strip(),
@@ -7085,7 +7436,12 @@ def create_app(
             folder_id=payload.folder_id,
         )
         try:
-            store.create_batch(batch)
+            if payload.workbench_parent_id is not None:
+                store.create_batch_with_workbench_import(
+                    batch, parent_id=payload.workbench_parent_id
+                )
+            else:
+                store.create_batch(batch)
         except ValueError as exc:
             raise _error("CONFLICT", str(exc), 409) from exc
         report, _ = import_sites(

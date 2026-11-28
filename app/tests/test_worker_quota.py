@@ -7,7 +7,7 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 
-from ecom_crawler.runtime.models import Lease
+from ecom_crawler.runtime.models import Task
 from ecom_crawler.runtime.rule import load_rule
 from ecom_crawler.runtime.store import TaskStore
 from ecom_crawler.runtime.worker import Worker
@@ -68,8 +68,10 @@ class WorkerBrowserQuotaTests(unittest.TestCase):
             db = Path(temporary) / "tasks.db"
             first = Worker(TaskStore(db), out_root=temporary, max_browser_tasks=1)
             second = Worker(TaskStore(db), out_root=temporary, max_browser_tasks=1)
-            lease_a = Lease(task_id="task-a", owner="a", token=1, expires_at=time.time() + 30)
-            lease_b = Lease(task_id="task-b", owner="b", token=1, expires_at=time.time() + 30)
+            first.store.create_task(Task("task-a", "fixture", "1", "product", state="QUEUED"))
+            ((_, lease_a),) = first.store.claim_tasks("a", 1, 30)
+            second.store.create_task(Task("task-b", "fixture", "1", "product", state="QUEUED"))
+            ((_, lease_b),) = second.store.claim_tasks("b", 1, 30)
             slot_a = first._acquire_browser_slot("task-a", lease_a)
             self.assertEqual(slot_a, "browser-slot:0")
             result: dict[str, str | None] = {}

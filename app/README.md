@@ -77,6 +77,12 @@ python -m uv run --project app --extra dev --frozen --no-sync ruff check app
 
 不带参数时跑日常快跑组。`all` 串行执行完整后端回归，`all --jobs 2` 在 Windows 上用两个进程执行同一批用例。`parallel` 在 Windows 上对应构建和运行时两组。CI 使用串行 `all`，有失败或跳过时返回非零。其他分组和排错方式见[后端测试怎么跑](../docs/23-测试策略.md#后端测试怎么跑)。
 
+进程级恢复演练是单独入口，不进入默认测试发现；它启动真实 `serve` 子进程并在请求在途时强杀，覆盖整机断电式接管、商品明细丢失后的导出重建，以及不可重建时的明确异常。演练使用临时账本和回环 fixture，证据目录不要放入仓库：
+
+```powershell
+python -m uv run --project app --extra dev --frozen --no-sync python app/tests/recovery_drill.py all --root <证据目录>
+```
+
 `jsonschema`、`httpx` 和 `ruff` 是开发依赖；`jsonschema`／`httpx` 缺失时测试会失败，不会 skip。应用运行依赖包括 `lxml`、`pyyaml`、`scrapling[fetchers]`、`patchright`、`protego`、`fastapi`、`uvicorn` 和 `psutil`；`scrapling[fetchers]` 会带 `curl_cffi`、`playwright`、`browserforge` 和 `msgspec`。浏览器模式还需要 Chromium：
 
 ```powershell

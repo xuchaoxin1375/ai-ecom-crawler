@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -23,6 +23,7 @@ from .models import (
     RuleVersion,
     SiteRule,
     Task,
+    WorkbenchBatchImport,
     WorkbenchNode,
     WorkbenchRun,
     WorkbenchTaskDef,
@@ -166,6 +167,15 @@ CREATE INDEX IF NOT EXISTS idx_workbench_task_runs_node
 CREATE TABLE IF NOT EXISTS workbench_recent_dismissals (
     task_id TEXT PRIMARY KEY,
     dismissed_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS workbench_batch_imports (
+    batch_id TEXT PRIMARY KEY,
+    parent_id TEXT,
+    requested_at TEXT NOT NULL,
+    attempted_at TEXT,
+    last_error TEXT,
+    dismissed_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS builds (
@@ -834,8 +844,10 @@ class TaskStore:
         *,
         lease: Lease | None = None,
         delivery: Task | None = None,
+        expected_state: str | None = None,
+        publish: Callable[[], None] | None = None,
         **fields: Any,
-    ) -> None:
+    ) -> bool:
         unknown = set(fields) - TASK_COLUMNS
         if unknown:
             raise ValueError(f"unknown task fields: {sorted(unknown)}")
@@ -853,15 +865,22 @@ class TaskStore:
             values.append(utc_now())
         values.append(task_id)
         statement = f"UPDATE tasks SET {', '.join(assignments)} WHERE task_id = ?"
-        if lease is None:
+        if expected_state is not None:
+            statement += " AND state = ?"
+            values.append(expected_state)
+        if lease is None and publish is None:
             with self._connect() as connection:
-                connection.execute(statement, values)
-            return
+                return connection.execute(statement, values).rowcount == 1
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
-                _require_lease(connection, lease)
-                connection.execute(statement, values)
+                if lease is not None:
+                    _require_lease(connection, lease)
+                if connection.execute(statement, values).rowcount != 1:
+                    connection.rollback()
+                    return False
+                if publish is not None:
+                    publish()
                 if delivery is not None and delivery.batch_id and delivery.site_key:
                     connection.execute(
                         "UPDATE batch_sites SET delivery_task_id = ?, updated_at = ? "
@@ -872,6 +891,7 @@ class TaskStore:
                          task_id, int(delivery.input.get("collection_mode") != "sample")),
                     )
                 connection.commit()
+                return True
             except Exception:
                 connection.rollback()
                 raise
@@ -1108,6 +1128,8 @@ class TaskStore:
                     raise TaskTransitionError(
                         f"cannot continue task {task_id} in state {row['state']}"
                     )
+                if row["stop_reason"] != "BUDGET_EXHAUSTED":
+                    raise TaskTransitionError(f"task {task_id} was not stopped by a budget")
                 pending = connection.execute(
                     "SELECT COUNT(*) AS count FROM task_items "
                     "WHERE task_id = ? AND state IN ('PENDING', 'IN_FLIGHT')",
@@ -1344,6 +1366,9 @@ class TaskStore:
             try:
                 if lease is not None:
                     _require_lease(connection, lease)
+                    if _task_state(connection, task_id) != "RUNNING":
+                        connection.rollback()
+                        return []
                 rows = connection.execute(
                     """
                     SELECT * FROM task_items
@@ -1382,7 +1407,7 @@ class TaskStore:
         *,
         failure_class: str | None = None,
         lease: Lease | None = None,
-    ) -> None:
+    ) -> str:
         values = (
             state,
             failure_class,
@@ -1399,13 +1424,18 @@ class TaskStore:
         if lease is None:
             with self._connect() as connection:
                 connection.execute(statement, values)
-            return
+            return state
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
                 _require_lease(connection, lease)
+                if _task_state(connection, task_id) == "CANCELLING":
+                    state = "FAILED"
+                    cancelled = {"reason": "task_cancelled", "failure_class": "blocked"}
+                    values = (state, "blocked", json_dumps(cancelled), *values[3:])
                 connection.execute(statement, values)
                 connection.commit()
+                return state
             except Exception:
                 connection.rollback()
                 raise
@@ -1416,6 +1446,7 @@ class TaskStore:
         max_attempts: int,
         *,
         lease: Lease | None = None,
+        cancel: bool = False,
     ) -> dict[str, int]:
         """Reset in-flight items after a crash; fail those out of attempts."""
         with self._connect() as connection:
@@ -1423,9 +1454,12 @@ class TaskStore:
             try:
                 if lease is not None:
                     _require_lease(connection, lease)
-                result = _reconcile_items(
-                    connection, task_id, max_attempts, utc_now()
-                )
+                now = utc_now()
+                if cancel:
+                    rejected = _reject_in_flight(connection, task_id, now)
+                    result = {"in_flight": rejected, "reset": 0, "failed": rejected}
+                else:
+                    result = _reconcile_items(connection, task_id, max_attempts, now)
                 connection.commit()
             except Exception:
                 connection.rollback()
@@ -1444,6 +1478,7 @@ class TaskStore:
         now_iso = utc_now()
         task_ids: list[str] = []
         task_tokens: dict[str, int] = {}
+        item_reports: dict[str, dict[str, int]] = {}
         requeued = 0
         paused = 0
         cancelled = 0
@@ -1470,45 +1505,83 @@ class TaskStore:
                         json_loads(row["limits_json"], {}).get("max_attempts", 2)
                     )
                     if row["state"] == "RUNNING":
-                        _reconcile_items(connection, task_id, max_attempts, now_iso)
+                        reconciled = _reconcile_items(
+                            connection, task_id, max_attempts, now_iso
+                        )
+                        item_reports[task_id] = reconciled
                         connection.execute(
                             """
                             UPDATE tasks
                             SET state = 'QUEUED', outcome = NULL,
                                 stop_reason = NULL, finished_at = NULL,
+                                output_json = json_set(output_json, '$.recovered_at', ?,
+                                    '$.recovery_takeover_in_flight', ?,
+                                    '$.recovery_takeover_reset', ?,
+                                    '$.recovery_takeover_failed', ?),
                                 lease_owner = NULL, lease_expires_at = NULL,
                                 lease_heartbeat_at = NULL, updated_at = ?
                             WHERE task_id = ?
                             """,
-                            (now_iso, task_id),
+                            (
+                                now_iso,
+                                reconciled["in_flight"],
+                                reconciled["reset"],
+                                reconciled["failed"],
+                                now_iso,
+                                task_id,
+                            ),
                         )
                         requeued += 1
                     elif row["state"] == "PAUSING":
-                        _reconcile_items(connection, task_id, max_attempts, now_iso)
+                        reconciled = _reconcile_items(
+                            connection, task_id, max_attempts, now_iso
+                        )
+                        item_reports[task_id] = reconciled
                         connection.execute(
                             """
                             UPDATE tasks
                             SET state = 'PAUSED',
+                                output_json = json_set(output_json, '$.recovered_at', ?,
+                                    '$.recovery_takeover_in_flight', ?,
+                                    '$.recovery_takeover_reset', ?,
+                                    '$.recovery_takeover_failed', ?),
                                 lease_owner = NULL, lease_expires_at = NULL,
                                 lease_heartbeat_at = NULL, updated_at = ?
                             WHERE task_id = ?
                             """,
-                            (now_iso, task_id),
+                            (
+                                now_iso,
+                                reconciled["in_flight"],
+                                reconciled["reset"],
+                                reconciled["failed"],
+                                now_iso,
+                                task_id,
+                            ),
                         )
                         paused += 1
                     else:
-                        _reject_in_flight(connection, task_id, now_iso)
+                        rejected = _reject_in_flight(connection, task_id, now_iso)
+                        item_reports[task_id] = {
+                            "in_flight": rejected,
+                            "reset": 0,
+                            "failed": rejected,
+                        }
                         connection.execute(
                             """
                             UPDATE tasks
                             SET state = 'CANCELLED', outcome = 'CANCELLED',
                                 stop_reason = 'USER_CANCELLED',
+                                output_json = json_set(output_json, '$.recovered_at', ?,
+                                    '$.recovery_export_pending', 1,
+                                    '$.recovery_takeover_in_flight', ?,
+                                    '$.recovery_takeover_reset', 0,
+                                    '$.recovery_takeover_failed', ?),
                                 finished_at = ?, updated_at = ?,
                                 lease_owner = NULL, lease_expires_at = NULL,
                                 lease_heartbeat_at = NULL
                             WHERE task_id = ?
                             """,
-                            (now_iso, now_iso, task_id),
+                            (now_iso, rejected, rejected, now_iso, now_iso, task_id),
                         )
                         cancelled += 1
                 connection.commit()
@@ -1522,11 +1595,20 @@ class TaskStore:
             "cancelled": cancelled,
             "task_ids": task_ids,
             "task_tokens": task_tokens,
+            "items": item_reports,
         }
 
     def recover_orphaned_tasks(self) -> dict[str, Any]:
         """Backward-compatible alias for :meth:`settle_expired_tasks`."""
         return self.settle_expired_tasks()
+
+    def cancelled_tasks_pending_export(self) -> list[Task]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM tasks WHERE state = 'CANCELLED' "
+                "AND json_extract(output_json, '$.recovery_export_pending') = 1"
+            ).fetchall()
+        return [_task_from_row(row) for row in rows]
 
     def reset_in_flight(self, task_id: str) -> int:
         with self._connect() as connection:
@@ -1706,31 +1788,39 @@ class TaskStore:
     def create_batch(self, batch: Batch) -> None:
         with self._connect() as connection:
             try:
-                connection.execute(
-                    """
-                    INSERT INTO batches (
-                        batch_id, name, country, market, language, category,
-                        note, created_at, updated_at, archived_at, collection_mode,
-                        folder_id
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        batch.batch_id,
-                        batch.name,
-                        batch.country,
-                        batch.market,
-                        batch.language,
-                        batch.category,
-                        batch.note,
-                        batch.created_at,
-                        batch.updated_at,
-                        batch.archived_at,
-                        batch.collection_mode,
-                        batch.folder_id,
-                    ),
-                )
+                _insert_batch(connection, batch)
             except sqlite3.IntegrityError as exc:
                 raise ValueError(f"batch already exists: {batch.batch_id}") from exc
+
+    def create_batch_with_workbench_import(
+        self, batch: Batch, *, parent_id: str | None
+    ) -> None:
+        """Create a batch and its workbench import intent atomically."""
+        now = utc_now()
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                _insert_batch(connection, batch)
+                connection.execute(
+                    """
+                    INSERT INTO workbench_batch_imports (
+                        batch_id, parent_id, requested_at, attempted_at,
+                        last_error, dismissed_at
+                    ) VALUES (?, ?, ?, NULL, NULL, NULL)
+                    ON CONFLICT(batch_id) DO UPDATE SET
+                        parent_id = excluded.parent_id,
+                        requested_at = excluded.requested_at,
+                        dismissed_at = NULL
+                    """,
+                    (batch.batch_id, parent_id, now),
+                )
+                connection.commit()
+            except sqlite3.IntegrityError as exc:
+                connection.rollback()
+                raise ValueError(f"batch already exists: {batch.batch_id}") from exc
+            except Exception:
+                connection.rollback()
+                raise
 
     def get_batch(self, batch_id: str) -> Batch | None:
         with self._connect() as connection:
@@ -2768,6 +2858,76 @@ class TaskStore:
                 "SELECT * FROM workbench_task_defs WHERE node_id = ?", (node_id,)
             ).fetchone()
         return _workbench_task_def_from_row(row) if row else None
+
+    def get_workbench_batch_import(self, batch_id: str) -> WorkbenchBatchImport | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM workbench_batch_imports WHERE batch_id = ?",
+                (batch_id,),
+            ).fetchone()
+        return _workbench_batch_import_from_row(row) if row else None
+
+    def list_workbench_batch_imports(
+        self, *, include_dismissed: bool = False
+    ) -> list[WorkbenchBatchImport]:
+        query = "SELECT * FROM workbench_batch_imports"
+        if not include_dismissed:
+            query += " WHERE dismissed_at IS NULL"
+        query += " ORDER BY requested_at DESC, batch_id"
+        with self._connect() as connection:
+            rows = connection.execute(query).fetchall()
+        return [_workbench_batch_import_from_row(row) for row in rows]
+
+    def upsert_workbench_batch_import(
+        self, batch_id: str, *, parent_id: str | None
+    ) -> WorkbenchBatchImport:
+        now = utc_now()
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO workbench_batch_imports (
+                    batch_id, parent_id, requested_at, attempted_at,
+                    last_error, dismissed_at
+                ) VALUES (?, ?, ?, NULL, NULL, NULL)
+                ON CONFLICT(batch_id) DO UPDATE SET
+                    parent_id = excluded.parent_id,
+                    dismissed_at = NULL
+                """,
+                (batch_id, parent_id, now),
+            )
+            row = connection.execute(
+                "SELECT * FROM workbench_batch_imports WHERE batch_id = ?",
+                (batch_id,),
+            ).fetchone()
+        if row is None:
+            raise KeyError(f"unknown workbench batch import: {batch_id}")
+        return _workbench_batch_import_from_row(row)
+
+    def mark_workbench_batch_import_attempt(
+        self, batch_id: str, *, error: str | None = None
+    ) -> bool:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE workbench_batch_imports
+                SET attempted_at = ?, last_error = ?
+                WHERE batch_id = ?
+                """,
+                (utc_now(), error, batch_id),
+            )
+        return cursor.rowcount == 1
+
+    def dismiss_workbench_batch_import(self, batch_id: str) -> bool:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE workbench_batch_imports
+                SET dismissed_at = COALESCE(dismissed_at, ?)
+                WHERE batch_id = ?
+                """,
+                (utc_now(), batch_id),
+            )
+        return cursor.rowcount == 1
 
     def list_workbench_task_runs(self) -> list[WorkbenchRun]:
         with self._connect() as connection:
@@ -4772,6 +4932,11 @@ def _lease_valid(
     return row is not None
 
 
+def _task_state(connection: sqlite3.Connection, task_id: str) -> str | None:
+    row = connection.execute("SELECT state FROM tasks WHERE task_id = ?", (task_id,)).fetchone()
+    return str(row["state"]) if row else None
+
+
 def _require_lease(
     connection: sqlite3.Connection,
     lease: Lease,
@@ -4965,6 +5130,43 @@ def _workbench_task_def_from_row(row: sqlite3.Row) -> WorkbenchTaskDef:
         note=row["note"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+    )
+
+
+def _insert_batch(connection: sqlite3.Connection, batch: Batch) -> None:
+    connection.execute(
+        """
+        INSERT INTO batches (
+            batch_id, name, country, market, language, category,
+            note, created_at, updated_at, archived_at, collection_mode,
+            folder_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            batch.batch_id,
+            batch.name,
+            batch.country,
+            batch.market,
+            batch.language,
+            batch.category,
+            batch.note,
+            batch.created_at,
+            batch.updated_at,
+            batch.archived_at,
+            batch.collection_mode,
+            batch.folder_id,
+        ),
+    )
+
+
+def _workbench_batch_import_from_row(row: sqlite3.Row) -> WorkbenchBatchImport:
+    return WorkbenchBatchImport(
+        batch_id=row["batch_id"],
+        parent_id=row["parent_id"],
+        requested_at=row["requested_at"],
+        attempted_at=row["attempted_at"],
+        last_error=row["last_error"],
+        dismissed_at=row["dismissed_at"],
     )
 
 

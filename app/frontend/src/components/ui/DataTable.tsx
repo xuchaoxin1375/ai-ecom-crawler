@@ -1,6 +1,14 @@
 /* eslint-disable jsx-a11y/no-noninteractive-tabindex -- A horizontally
    scrollable table region needs a keyboard entry point. */
-import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  Fragment,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+} from "react";
 import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { ColumnResizeHandle } from "./ColumnResizeHandle";
@@ -63,6 +71,20 @@ interface DataTableProps<T> {
   onSortChange?: (sort: TableSort) => void;
   /** Switches to cards when the table container is narrower than 700px. */
   mobileCards?: boolean;
+  /** Card title column; defaults to the first data column. */
+  cardTitleKey?: string;
+  /** Accessible label for a clickable row. */
+  rowAriaLabel?: (row: T) => string;
+  /** Row selection click; nested controls are ignored. */
+  onRowClick?: (row: T) => void;
+  /** Row context menu; nested controls still bubble here. */
+  onRowContextMenu?: (event: ReactMouseEvent<HTMLElement>, row: T) => void;
+  /** Sticky offset for the header, e.g. top-0 inside an embedded pane. */
+  headerTopClassName?: string;
+  /** Extra classes for the scroll container, e.g. h-full overflow-auto. */
+  scrollerClassName?: string;
+  /** Extra vertical padding for embedded panes that need a denser row. */
+  cellPaddingClassName?: string;
   onWidthsCustomizedChange?: (customized: boolean) => void;
   onResetWidthsReady?: (reset: () => void) => void;
 }
@@ -91,6 +113,13 @@ export function DataTable<T>({
   onSort,
   onSortChange,
   mobileCards = false,
+  cardTitleKey,
+  rowAriaLabel,
+  onRowClick,
+  onRowContextMenu,
+  headerTopClassName,
+  scrollerClassName,
+  cellPaddingClassName,
   onWidthsCustomizedChange,
   onResetWidthsReady,
 }: DataTableProps<T>) {
@@ -172,20 +201,46 @@ export function DataTable<T>({
     return sum + column.width;
   }, 0);
 
+  // Distribute the available width without rounding past it: floor each
+  // proportional width, then hand the remaining pixels to the rightmost
+  // columns. A 1px overshoot otherwise creates a horizontal scrollbar in a
+  // fixed-height pane, which in turn steals height from the rows.
+  const scaledBaselines: Record<string, number> = {};
+  if (fillWidth && containerWidth > 0 && resizableDefaultTotal > 0) {
+    const available = Math.max(0, containerWidth - fixedTotal);
+    const adjustable = columns.filter(
+      (column) => typeof column.width === "number" && column.resizable !== false,
+    );
+    let allocated = 0;
+    for (const column of adjustable) {
+      const min = column.minWidth ?? DEFAULT_COLUMN_MIN_WIDTH;
+      const max = column.maxWidth ?? DEFAULT_COLUMN_MAX_WIDTH;
+      const ideal =
+        ((typeof column.width === "number" ? column.width : 0) /
+          resizableDefaultTotal) *
+        available;
+      const width = Math.min(max, Math.max(min, Math.floor(ideal)));
+      scaledBaselines[column.key] = width;
+      allocated += width;
+    }
+    let remainder = available - allocated;
+    for (let index = adjustable.length - 1; index >= 0 && remainder > 0; index -= 1) {
+      const column = adjustable[index];
+      const max = column.maxWidth ?? DEFAULT_COLUMN_MAX_WIDTH;
+      const current = scaledBaselines[column.key];
+      const add = Math.min(remainder, Math.max(0, max - current));
+      scaledBaselines[column.key] = current + add;
+      remainder -= add;
+    }
+  }
+
   function baselineWidth(column: DataTableColumn<T>): number | undefined {
     if (typeof column.width !== "number" || column.resizable === false) {
       return undefined;
     }
     if (!fillWidth) return column.width;
     if (containerWidth <= 0 || resizableDefaultTotal <= 0) return column.width;
-    const available = Math.max(0, containerWidth - fixedTotal);
-    const proportional = (column.width / resizableDefaultTotal) * available;
-    return Math.round(
-      Math.max(
-        column.minWidth ?? DEFAULT_COLUMN_MIN_WIDTH,
-        Math.min(column.maxWidth ?? DEFAULT_COLUMN_MAX_WIDTH, proportional),
-      ),
-    );
+    return scaledBaselines[column.key] ?? column.width;
   }
 
   function columnWidth(column: DataTableColumn<T>): number | string | undefined {
@@ -298,20 +353,43 @@ export function DataTable<T>({
   }
 
   const compact = density === "compact";
-  const cellPadding = compact ? "px-3 py-1.5" : "px-4 py-3";
+  const cellPadding = cn(compact ? "px-3 py-1.5" : "px-4 py-3", cellPaddingClassName);
   const headerPadding = "h-10 px-3 py-0";
-  const headerTopClass = resizable && overflowing ? "top-0" : "top-0 lg:top-14";
+  const headerTopClass =
+    headerTopClassName ?? (resizable && overflowing ? "top-0" : "top-0 lg:top-14");
   const scrollerClass = cn(
     "max-w-full",
     resizable && !overflowing
       ? "overflow-x-auto lg:overflow-x-visible"
       : "overflow-x-auto",
+    scrollerClassName,
   );
 
   function columnLabel(column: DataTableColumn<T>): string {
     return (
       column.label ?? (typeof column.header === "string" ? column.header : column.key)
     );
+  }
+
+  function isInteractiveTarget(target: EventTarget | null): boolean {
+    return (
+      target instanceof Element &&
+      target.closest(
+        "a, button, input, select, textarea, label, [contenteditable='true'], [role='button'], [role='menuitem']",
+      ) !== null
+    );
+  }
+
+  function handleRowClick(event: ReactMouseEvent<HTMLElement>, row: T) {
+    if (!onRowClick || isInteractiveTarget(event.target)) return;
+    onRowClick(row);
+  }
+
+  function handleRowKeyDown(event: ReactKeyboardEvent<HTMLElement>, row: T) {
+    if (!onRowClick || event.target !== event.currentTarget) return;
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    onRowClick(row);
   }
 
   function stickyClasses(column: DataTableColumn<T>, header: boolean): string {
@@ -425,20 +503,21 @@ export function DataTable<T>({
     (column) => column.key === "select" || column.sticky === "left",
   );
   const actionColumn = columns.find((column) => column.sticky === "right");
-  const dataColumnCount = columns.filter(
+  const dataColumns = columns.filter(
     (column) => column !== selectColumn && column !== actionColumn,
-  ).length;
+  );
+  const dataColumnCount = dataColumns.length;
   // Cards stack fields vertically; beyond a handful of data columns the table
   // with horizontal scrolling stays more compact and scannable.
   const cards =
     mobileCards && containerWidth > 0 && containerWidth < 700 && dataColumnCount <= 6;
   const titleColumn =
-    columns.find((column) => column !== selectColumn && column !== actionColumn) ??
+    (cardTitleKey
+      ? dataColumns.find((column) => column.key === cardTitleKey)
+      : undefined) ??
+    dataColumns[0] ??
     columns[0];
-  const bodyColumns = columns.filter(
-    (column) =>
-      column !== selectColumn && column !== actionColumn && column !== titleColumn,
-  );
+  const bodyColumns = dataColumns.filter((column) => column !== titleColumn);
   const sortableColumns = columns.filter((column) => column.sortable);
   const cardSortValue =
     sort && sortableColumns.some((column) => column.key === sort.key)
@@ -498,7 +577,7 @@ export function DataTable<T>({
     return (
       <div
         ref={scrollerRef}
-        className="max-w-full bg-surface"
+        className={cn("max-w-full bg-surface", scrollerClassName)}
         aria-busy={loading || undefined}
       >
         {renderCardToolbar()}
@@ -515,13 +594,24 @@ export function DataTable<T>({
         ) : rows.length ? (
           <ul className="divide-y divide-line" aria-label={caption}>
             {rows.map((row) => (
+              // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- Only clickable when onRowClick is set; Enter/Space are handled.
               <li
                 key={rowKey(row)}
                 className={cn(
                   cardPadding,
                   "bg-surface transition-colors hover:bg-surface-muted/60",
+                  onRowClick && "cursor-pointer",
                   typeof rowClassName === "function" ? rowClassName(row) : rowClassName,
                 )}
+                onClick={onRowClick ? (event) => handleRowClick(event, row) : undefined}
+                onContextMenu={
+                  onRowContextMenu ? (event) => onRowContextMenu(event, row) : undefined
+                }
+                onKeyDown={
+                  onRowClick ? (event) => handleRowKeyDown(event, row) : undefined
+                }
+                tabIndex={onRowClick ? 0 : undefined}
+                aria-label={rowAriaLabel?.(row)}
               >
                 <div className="flex items-start gap-3">
                   {selectColumn ? (
@@ -659,10 +749,24 @@ export function DataTable<T>({
                   key={rowKey(row)}
                   className={cn(
                     "bg-surface transition-colors duration-150 hover:bg-surface-muted",
+                    onRowClick && "cursor-pointer",
                     typeof rowClassName === "function"
                       ? rowClassName(row)
                       : rowClassName,
                   )}
+                  onClick={
+                    onRowClick ? (event) => handleRowClick(event, row) : undefined
+                  }
+                  onContextMenu={
+                    onRowContextMenu
+                      ? (event) => onRowContextMenu(event, row)
+                      : undefined
+                  }
+                  onKeyDown={
+                    onRowClick ? (event) => handleRowKeyDown(event, row) : undefined
+                  }
+                  tabIndex={onRowClick ? 0 : undefined}
+                  aria-label={rowAriaLabel?.(row)}
                 >
                   {renderEntries.map((entry) =>
                     entry.kind === "filler" ? (

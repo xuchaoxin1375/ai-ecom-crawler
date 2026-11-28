@@ -98,8 +98,6 @@ class TaskRunner:
         self.adapter_profile_dir = (self.out_dir / "adapter-browser-profile").resolve()
         self._adapter_use_profile = False
         self._adapter_stats: dict[str, Any] = {}
-        self.urls_path = self.out_dir / "urls.csv"
-        self.products_csv_path = self.out_dir / "products.csv"
         self.task_result_path = self.out_dir / "task-result.json"
         self.progress_path = self.out_dir / "task-progress.json"
         self._products: list[dict[str, Any]] = []
@@ -111,7 +109,7 @@ class TaskRunner:
         self._run_seconds_base = float(task.counters.get("run_seconds") or 0)
         self._last_budget_checkpoint = self._started_monotonic
         self._stop_reason = "NATURAL_END"
-        self._stop_detail = "entry-page sample exhausted"
+        self._stop_detail = "declared discovery sources exhausted"
         target = task.input.get("target_entry")
         self._target_product = target if target_entry_mode(rule, target) == "product" else None
         if self._target_product:
@@ -121,6 +119,7 @@ class TaskRunner:
         self._recovery: dict[str, Any] = {}
         self._corrupt_products = 0
         self._uncommitted_products = 0
+        self._missing_products = 0
         self._includes = [re.compile(pattern) for pattern in rule.scope.get("include", [])]
         self._excludes = [re.compile(pattern) for pattern in rule.scope.get("exclude", [])]
         self._product_patterns = [
@@ -147,21 +146,28 @@ class TaskRunner:
     def run(self) -> str:
         self.out_dir.mkdir(parents=True, exist_ok=True)
         self.store.assert_lease(self.lease)
-        self._recovery = self.store.reconcile_task(
-            self.task.task_id, self._max_attempts(), lease=self.lease
-        )
+        current = self.store.get_task(self.task.task_id)
+        if current is not None and current.state == "RUNNING":
+            self._recovery = self.store.reconcile_task(
+                self.task.task_id, self._max_attempts(), lease=self.lease
+            )
         self._recovery["orphan_files_removed"] = self._cleanup_orphans()
         self._recovery["stale_result"] = self._quarantine_stale_result()
         self._recovery["corrupt_product_lines"] = self._load_products()
         self._recovery["uncommitted_product_lines"] = self._uncommitted_products
+        self._recovery["missing_product_records"] = self._missing_products
+        takeover = recovery_takeover(self.task)
+        if any(takeover.values()):
+            self._recovery["takeover"] = takeover
         started_at = self.task.started_at or utc_now()
         self.task.started_at = started_at
-        self.store.update_task(
-            self.task.task_id,
-            lease=self.lease,
-            state="RUNNING",
-            started_at=started_at,
-        )
+        current = self.store.get_task(self.task.task_id)
+        if current is None or current.state != "RUNNING":
+            return self._settle()
+        if self._missing_products:
+            self._stop_reason = "ENVIRONMENT_ERROR"
+            self._stop_detail = f"缺少 {self._missing_products} 条已接纳商品明细，无法完整恢复结果"
+            return self._settle()
         if self.task.batch_id and self.task.site_key:
             try:
                 self.store.update_batch_site(
@@ -176,12 +182,11 @@ class TaskRunner:
         self._event(
             "task_started", task_type=self.task.task_type, plan_id=self.task.plan_id
         )
-        control = "FINISHED"
         try:
             if not self._target_product and self.task.input.get("discover", True) is not False:
                 self._probe_robots_sitemaps()
             self._seed_sources()
-            control = self._loop()
+            self._loop()
         except StopTask as exc:
             self._stop_reason = exc.reason
             self._stop_detail = exc.detail
@@ -209,8 +214,7 @@ class TaskRunner:
             self._stop_reason = "ENVIRONMENT_ERROR"
             self._stop_detail = f"{type(exc).__name__}: {exc}"
             self._event("task_error", reason=self._stop_reason, detail=self._stop_detail)
-        self._settle(control)
-        return control
+        return self._settle()
 
     def _loop(self) -> str:
         if getattr(self.fetcher, "thread_affine", False):
@@ -1729,16 +1733,21 @@ class TaskRunner:
         if product is not None:
             result["source_url"] = product.get("source_url")
             result["product_preview"] = _preview_payload(product)
-            self._append_product(product)
         failure_class = result.get("failure_class")
-        self.store.mark_item(
+        stored_state = self.store.mark_item(
             item.task_id,
             item.item_id,
             state,
-            result,
+            {**result, "product_record": product} if product is not None else result,
             failure_class=failure_class,
             lease=self.lease,
         )
+        if stored_state != state:
+            state = stored_state
+            failure_class = "blocked"
+            result = {"reason": "task_cancelled", "failure_class": failure_class}
+        elif product is not None:
+            self._append_product(product)
         self._append_jsonl(
             self.items_path,
             {
@@ -1981,28 +1990,36 @@ class TaskRunner:
             return f"{label}达到上限（{processed}/{int(limit)}）"
         return "任务预算耗尽"
 
-    def _settle(self, control: str) -> None:
-        self.store.assert_lease(self.lease)
-        if control == "PAUSED":
-            self.task.counters["run_seconds"] = round(
-                self._elapsed_run_seconds(), 3
-            )
-            self.store.update_task(
-                self.task.task_id,
-                lease=self.lease,
-                state="PAUSED",
-                counters=self.task.counters,
-            )
-            self._write_progress()
-            self._event("task_paused")
-            return
-        if control == "CANCELLED":
-            self._finalize("CANCELLED", "CANCELLED", "USER_CANCELLED", "user cancelled")
-            return
-        outcome = self._outcome()
-        self._finalize("FINISHED", outcome, self._stop_reason, self._stop_detail)
+    def _settle(self) -> str:
+        while (current := self.store.get_task(self.task.task_id)) is not None:
+            self.store.assert_lease(self.lease)
+            if current.state == "PAUSING":
+                self.store.reconcile_task(self.task.task_id, self._max_attempts(), lease=self.lease)
+                self.task.counters["run_seconds"] = round(self._elapsed_run_seconds(), 3)
+                if self.store.update_task(
+                    self.task.task_id,
+                    lease=self.lease,
+                    expected_state="PAUSING",
+                    state="PAUSED",
+                    counters=self.task.counters,
+                ):
+                    self._write_progress()
+                    self._event("task_paused")
+                    return "PAUSED"
+            elif current.state == "CANCELLING":
+                self.store.reconcile_task(self.task.task_id, self._max_attempts(), lease=self.lease, cancel=True)
+                if self._finalize("CANCELLING", "CANCELLED", "CANCELLED", "USER_CANCELLED", "user cancelled"):
+                    return "CANCELLED"
+            elif current.state == "RUNNING":
+                if self._finalize("RUNNING", "FINISHED", self._outcome(), self._stop_reason, self._stop_detail):
+                    return "FINISHED"
+            else:
+                return current.state
+        raise LeaseLostError(f"task {self.task.task_id} disappeared during settlement")
 
     def _outcome(self) -> str:
+        if self._missing_products:
+            return "PARTIAL" if self._products else "FAILED"
         counts = self.store.item_counts(self.task.task_id, "product")
         valid = counts.get("DONE", 0)
         pending = counts.get("PENDING", 0) + counts.get("IN_FLIGHT", 0)
@@ -2035,18 +2052,21 @@ class TaskRunner:
 
     def _finalize(
         self,
+        expected_state: str,
         state: str,
         outcome: str,
         stop_reason: str,
         stop_detail: str,
-    ) -> None:
+    ) -> bool:
         self.store.assert_lease(self.lease)
         finished_at = utc_now()
         task_result = self._task_result(state, outcome, stop_reason, stop_detail, finished_at)
-        self.out_dir.mkdir(parents=True, exist_ok=True)
-        _write_json(self.task_result_path, task_result)
-        self._write_urls_csv()
-        self._write_products_csv()
+        completed_items = self.store.items(self.task.task_id, "product")
+
+        def publish() -> None:
+            self.out_dir.mkdir(parents=True, exist_ok=True)
+            write_task_csvs(self.out_dir, completed_items, self._products, lock=self._write_lock)
+            _write_json(self.task_result_path, task_result)
         can_adopt = state == "FINISHED" and outcome == "COMPLETED" and (
             self.task.input.get("collection_mode") != "formal"
             or task_result["counts"].get("valid_products", 0) > 0
@@ -2055,16 +2075,19 @@ class TaskRunner:
         counters["run_seconds"] = round(self._elapsed_run_seconds(), 3)
         if "discovery_limit" in self.task.counters:
             counters["discovery_limit"] = self.task.counters["discovery_limit"]
-        self.store.update_task(
+        if not self.store.update_task(
             self.task.task_id,
             lease=self.lease,
             delivery=self.task if can_adopt else None,
+            expected_state=expected_state,
+            publish=publish,
             state=state,
             outcome=outcome,
             stop_reason=stop_reason,
             counters=counters,
             finished_at=finished_at,
-        )
+        ):
+            return False
         if self.task.batch_id and self.task.site_key:
             counts = task_result.get("counts") or {}
             valid = int(counts.get("valid_products") or 0)
@@ -2084,6 +2107,7 @@ class TaskRunner:
             except Exception:
                 logger.debug("batch site note update failed", exc_info=True)
         self._event("task_finished", state=state, outcome=outcome, stop_reason=stop_reason)
+        return True
 
     def _write_progress(self) -> None:
         counts = self._counts()
@@ -2310,125 +2334,25 @@ class TaskRunner:
         return counts
 
     def _counts(self) -> dict[str, int]:
-        items = self.store.items(self.task.task_id)
-        navigation = [item for item in items if item.item_type == "navigation"]
-        products = [item for item in items if item.item_type == "product"]
-        by_state = {state: 0 for state in ("PENDING", "IN_FLIGHT", "DONE", "EXCLUDED", "FAILED")}
-        for item in products:
-            by_state[item.state] = by_state.get(item.state, 0) + 1
-        pending = by_state["PENDING"] + by_state["IN_FLIGHT"]
-        processed = by_state["DONE"] + by_state["EXCLUDED"] + by_state["FAILED"]
-        if self.task.task_type == "discovery":
-            return {
-                "navigation_urls": len(navigation),
-                "discovered_urls": len(items),
-                "url_candidates": len(products),
-                "pending_urls": pending,
-                "valid_urls": by_state["DONE"],
-                "excluded_urls": by_state["EXCLUDED"],
-                "failed_urls": by_state["FAILED"],
-            }
-        return {
-            "navigation_urls": len(navigation),
-            "discovered_urls": len(items),
-            "product_candidates": len(products),
-            "pending_products": pending,
-            "in_flight_products": by_state["IN_FLIGHT"],
-            "processed_products": processed,
-            "valid_products": by_state["DONE"],
-            "excluded_products": by_state["EXCLUDED"],
-            "failed_products": by_state["FAILED"],
-            "partial_description_products": sum(
-                1
-                for product in self._products
-                if product.get("description_status") == "partial"
-            ),
-        }
+        return task_counts(self.task, self.store.items(self.task.task_id), self._products)
 
     def _load_products(self) -> int:
-        if not self.products_path.is_file():
+        if self.task.task_type != "product":
             return 0
-        done_urls: set[str] = set()
-        for item in self.store.items(self.task.task_id, "product"):
-            if item.state != "DONE":
-                continue
-            done_urls.add(_normalize_url(item.normalized_url))
-            committed = str(item.result.get("source_url") or "")
-            if committed:
-                done_urls.add(_normalize_url(committed))
-        valid_lines: list[str] = []
-        corrupt = 0
-        uncommitted = 0
-        for line in self.products_path.read_text(encoding="utf-8").splitlines():
-            if not line.strip():
-                continue
-            try:
-                product = json.loads(line)
-            except json.JSONDecodeError:
-                corrupt += 1
-                continue
-            source_url = str(product.get("source_url") or "")
-            if source_url and _normalize_url(source_url) not in done_urls:
-                uncommitted += 1
-                continue
-            valid_lines.append(line)
-            self._products.append(product)
-            if source_url:
-                self._seen_canonical.add(source_url)
-        if corrupt or uncommitted:
-            payload = "\n".join(valid_lines)
-            write_text(
-                self.products_path,
-                payload + "\n" if payload else "",
-                lock=self._write_lock,
-            )
+        items = self.store.items(self.task.task_id, "product")
+        products, corrupt, uncommitted, missing, repair_log = committed_products(self.products_path, items)
+        self._products = products
+        self._seen_canonical = {str(product["source_url"]) for product in products}
+        if repair_log:
+            write_product_log(self.products_path, products)
         self._corrupt_products = corrupt
         self._uncommitted_products = uncommitted
+        self._missing_products = missing
         return corrupt
 
     def _append_product(self, product: dict[str, Any]) -> None:
         self._products.append(product)
         self._append_jsonl(self.products_path, product)
-
-    def _write_urls_csv(self) -> None:
-        items = [
-            item
-            for item in self.store.items(self.task.task_id, "product")
-            if item.state == "DONE"
-        ]
-        buffer = io.StringIO()
-        writer = csv.writer(buffer, lineterminator="\n")
-        writer.writerow(["url", "source", "status", "title"])
-        for item in items:
-            writer.writerow(
-                [
-                    csv_safe(item.url),
-                    csv_safe(item.parent_url or ""),
-                    csv_safe(str(item.result.get("status", ""))),
-                    csv_safe(str(item.result.get("name", ""))),
-                ]
-            )
-        write_text(self.urls_path, buffer.getvalue(), lock=self._write_lock)
-
-    def _write_products_csv(self) -> None:
-        buffer = io.StringIO()
-        writer = csv.writer(buffer, lineterminator="\n")
-        writer.writerow(CSV_COLUMNS)
-        for product in self._products:
-            writer.writerow(
-                [
-                    csv_safe(str(product.get("name", ""))),
-                    format_price(float(product.get("price_amount", 0))),
-                    csv_safe(str(product.get("price_currency", ""))),
-                    csv_safe(str(product.get("primary_image_url", ""))),
-                    csv_safe(str(product.get("description_html", ""))),
-                    csv_safe(str(product.get("category", ""))),
-                    csv_safe(str(product.get("brand", ""))),
-                    csv_safe(str(product.get("attributes", ""))),
-                    csv_safe(str(product.get("source_url", ""))),
-                ]
-            )
-        write_text(self.products_csv_path, buffer.getvalue(), lock=self._write_lock)
 
     def _event(self, event_type: str, **payload: Any) -> None:
         self._append_jsonl(
@@ -2438,6 +2362,118 @@ class TaskRunner:
 
     def _append_jsonl(self, path: Path, payload: dict[str, Any]) -> None:
         append_jsonl(path, payload, lock=self._write_lock)
+
+
+def recovery_takeover(task: Task) -> dict[str, int]:
+    """Counters recorded by the last lease-expiry takeover, if any."""
+    return {
+        "in_flight": int(task.output.get("recovery_takeover_in_flight") or 0),
+        "reset": int(task.output.get("recovery_takeover_reset") or 0),
+        "failed": int(task.output.get("recovery_takeover_failed") or 0),
+    }
+
+
+def task_counts(task: Task, items: list[WorkItem], products: list[dict[str, Any]]) -> dict[str, int]:
+    navigation = [item for item in items if item.item_type == "navigation"]
+    by_state = {state: 0 for state in ("PENDING", "IN_FLIGHT", "DONE", "EXCLUDED", "FAILED")}
+    for item in items:
+        if item.item_type == "product":
+            by_state[item.state] += 1
+    common = {"navigation_urls": len(navigation), "discovered_urls": len(items)}
+    pending = by_state["PENDING"] + by_state["IN_FLIGHT"]
+    if task.task_type == "discovery":
+        return {
+            **common,
+            "url_candidates": sum(by_state.values()),
+            "pending_urls": pending,
+            "valid_urls": by_state["DONE"],
+            "excluded_urls": by_state["EXCLUDED"],
+            "failed_urls": by_state["FAILED"],
+        }
+    return {
+        **common,
+        "pending_navigation_entries": sum(item.state == "PENDING" for item in navigation),
+        "product_candidates": sum(by_state.values()),
+        "pending_products": by_state["PENDING"],
+        "in_flight_products": by_state["IN_FLIGHT"],
+        "processed_products": by_state["DONE"] + by_state["EXCLUDED"] + by_state["FAILED"],
+        "valid_products": by_state["DONE"],
+        "excluded_products": by_state["EXCLUDED"],
+        "failed_products": by_state["FAILED"],
+        "partial_description_products": sum(
+            product.get("description_status") == "partial" for product in products
+        ),
+    }
+
+
+def committed_products(
+    path: Path, items: list[WorkItem],
+) -> tuple[list[dict[str, Any]], int, int, int, bool]:
+    done = [item for item in items if item.item_type == "product" and item.state == "DONE"]
+    accepted = {
+        _normalize_url(str(item.result.get("source_url") or item.normalized_url)): item
+        for item in done
+    }
+    # Preserve legacy export order when the previous JSONL is available.
+    records: dict[str, dict[str, Any]] = {}
+    corrupt = 0
+    uncommitted = 0
+    if path.is_file():
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            if not line.strip():
+                continue
+            try:
+                product = json.loads(line)
+            except json.JSONDecodeError:
+                corrupt += 1
+                continue
+            if not isinstance(product, dict) or not product.get("source_url"):
+                corrupt += 1
+                continue
+            key = _normalize_url(str(product["source_url"]))
+            if key not in accepted or key in records:
+                uncommitted += 1
+                continue
+            durable = accepted[key].result.get("product_record")
+            records[key] = durable if isinstance(durable, dict) else product
+    restored = 0
+    for key, item in accepted.items():
+        durable = item.result.get("product_record")
+        if key not in records and isinstance(durable, dict) and durable.get("source_url"):
+            records[key] = durable
+            restored += 1
+    return list(records.values()), corrupt, uncommitted, len(done) - len(records), bool(corrupt or uncommitted or restored)
+
+
+def write_product_log(path: Path, products: list[dict[str, Any]]) -> None:
+    write_text(path, "".join(json.dumps(product, ensure_ascii=False) + "\n" for product in products))
+
+
+def write_task_csvs(
+    directory: Path, items: list[WorkItem], products: list[dict[str, Any]],
+    *, lock: threading.Lock | None = None,
+) -> None:
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, lineterminator="\n")
+    writer.writerow(["url", "source", "status", "title"])
+    for item in items:
+        if item.item_type == "product" and item.state == "DONE":
+            writer.writerow([
+                csv_safe(item.url), csv_safe(item.parent_url or ""),
+                csv_safe(str(item.result.get("status", ""))), csv_safe(str(item.result.get("name", ""))),
+            ])
+    write_text(directory / "urls.csv", buffer.getvalue(), lock=lock)
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, lineterminator="\n")
+    writer.writerow(CSV_COLUMNS)
+    for product in products:
+        writer.writerow([
+            format_price(float(product.get("price_amount", 0))) if column == "price_amount"
+            else csv_safe(str(product.get(column, "")))
+            for column in CSV_COLUMNS
+        ])
+    write_text(directory / "products.csv", buffer.getvalue(), lock=lock)
 
 
 def _engine_summary(engine_info: dict[str, Any]) -> str:
@@ -2478,10 +2514,8 @@ def _record_payload(record: Any) -> dict[str, Any]:
 def _preview_payload(product: dict[str, Any]) -> dict[str, Any]:
     """Keep a compact product preview in the work-item result.
 
-    The full record goes to ``products.jsonl``; duplicating description HTML in
-    the SQLite ledger would bloat it.  The API item list needs enough fields to
-    render the real product preview (price, description state, missing fields
-    and field sources) without reading the export files.
+    The API item list only returns the compact preview. The full record is
+    committed alongside the work item so damaged exports can be rebuilt.
     """
     return {
         "name": product.get("name"),

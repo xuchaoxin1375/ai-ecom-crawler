@@ -1,13 +1,24 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import tempfile
+import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from ecom_crawler.runtime.models import WorkbenchNode, WorkItem
+from ecom_crawler.runtime.batch import site_identity, target_key
+from ecom_crawler.runtime.models import (
+    RuleVersion,
+    SiteRule,
+    WorkbenchNode,
+    WorkbenchTaskDef,
+    WorkItem,
+    utc_now,
+)
 from ecom_crawler.runtime.rule import load_rule
 from ecom_crawler.runtime.store import TaskStore
 from ecom_crawler.runtime.worker import Worker
@@ -43,6 +54,24 @@ class WorkbenchStoreTests(unittest.TestCase):
         self.store.restore_workbench_runs(["task-1"])
         self.assertEqual(self.store.list_workbench_dismissals(), set())
 
+    def test_site_identity_normalizes_domain_entry_and_market(self) -> None:
+        self.assertEqual(
+            site_identity(
+                "www.Fixture.example",
+                "https://www.fixture.example/",
+                "gb",
+            ),
+            ("fixture.example", None, "GB"),
+        )
+        self.assertEqual(
+            site_identity(
+                "fixture.example",
+                "https://fixture.example/list?p=2",
+                "fr",
+            ),
+            ("fixture.example", "https://fixture.example/list?p=2", "FR"),
+        )
+
     def test_workbench_tables_are_created_for_existing_ledgers(self) -> None:
         with self.store._connect() as connection:
             names = {
@@ -55,6 +84,7 @@ class WorkbenchStoreTests(unittest.TestCase):
         self.assertIn("workbench_task_defs", names)
         self.assertIn("workbench_task_runs", names)
         self.assertIn("workbench_recent_dismissals", names)
+        self.assertIn("workbench_batch_imports", names)
 
 
 class WorkbenchApiTests(unittest.TestCase):
@@ -198,6 +228,32 @@ class WorkbenchApiTests(unittest.TestCase):
             rule_path="fixture.yaml",
         )
         return batch_id
+
+    def seed_active_rule(self, site_key: str) -> None:
+        rule_path = self.rules_dir / "fixture.yaml"
+        digest = hashlib.sha256(rule_path.read_bytes()).hexdigest()
+        now = utc_now()
+        self.store.create_rule_version(
+            RuleVersion(
+                rule_id="fixture-local",
+                rule_version="2026.11.21-1",
+                sha256=digest,
+                path=rule_path.name,
+                status="active",
+                activated_at=now,
+                activated_by="test-fixture",
+            )
+        )
+        self.store.upsert_site_rule(
+            SiteRule(
+                site_key=site_key,
+                rule_id="fixture-local",
+                rule_version="2026.11.21-1",
+                sha256=digest,
+                path=rule_path.name,
+                updated_at=now,
+            )
+        )
 
     def create_generic_task(self, request_id: str) -> str:
         created = self.client.post(
@@ -976,6 +1032,273 @@ class WorkbenchApiTests(unittest.TestCase):
             json={"batch_id": batch_id, "parent_id": group_id},
         )
         self.assertEqual(blocked.status_code, 409)
+
+    def test_import_uses_active_rule_across_scoped_and_domain_keys(self) -> None:
+        created = self.client.post(
+            "/api/batches",
+            json={
+                "name": "pending active rule",
+                "market": "GB",
+                "sites": ["https://fixture.example/"],
+            },
+        )
+        self.assertEqual(created.status_code, 201, created.text)
+        batch_id = created.json()["batch"]["batch_id"]
+        site = self.store.get_batch_site(batch_id, "fixture.example")
+        self.assertIsNotNone(site)
+        self.assertEqual(site.readiness, "needs_onboarding")
+        self.store.upsert_workbench_batch_import(batch_id, parent_id=None)
+        self.seed_active_rule(target_key("fixture.example", None, "GB"))
+
+        pending = self.client.get("/api/workbench/pending-targets")
+        self.assertEqual(pending.status_code, 200, pending.text)
+        payload = pending.json()
+        self.assertEqual(payload["total_pending"], 1)
+        self.assertEqual(payload["batches"][0]["sites"][0]["action"], "import")
+        self.assertEqual(
+            payload["batches"][0]["sites"][0]["active_rule"]["rule_version"],
+            "2026.11.21-1",
+        )
+
+        imported = self.client.post(
+            "/api/workbench/import-batch", json={"batch_id": batch_id}
+        )
+        self.assertEqual(imported.status_code, 200, imported.text)
+        self.assertEqual(imported.json()["counts"]["added"], 1)
+        definitions = self.store.list_workbench_task_defs()
+        self.assertEqual(len(definitions), 1)
+        self.assertEqual(definitions[0].site_key, "fixture.example")
+        self.assertEqual(definitions[0].rule_id, "fixture-local")
+        self.assertEqual(definitions[0].rule_version, "2026.11.21-1")
+        self.assertEqual(
+            self.client.get("/api/workbench/pending-targets").json()["total_pending"],
+            0,
+        )
+
+    def test_import_skips_existing_definition_by_canonical_identity(self) -> None:
+        group = self.client.post(
+            "/api/workbench/groups", json={"name": "identity"}
+        )
+        self.assertEqual(group.status_code, 201, group.text)
+        group_id = group.json()["node"]["node_id"]
+        now = utc_now()
+        self.store.create_workbench_task(
+            WorkbenchNode(
+                node_id="n-identity",
+                node_type="task",
+                parent_id=group_id,
+                name="fixture.example",
+                created_at=now,
+                updated_at=now,
+            ),
+            WorkbenchTaskDef(
+                node_id="n-identity",
+                input_url="https://fixture.example/",
+                domain="fixture.example",
+                site_key="fixture.example--different",
+                market="GB",
+                task_type="product",
+                collection_mode="formal",
+                rule_id="fixture-local",
+                rule_version="2026.11.21-1",
+                rule_path="fixture.yaml",
+                created_at=now,
+                updated_at=now,
+            ),
+        )
+        created = self.client.post(
+            "/api/batches",
+            json={
+                "name": "identity batch",
+                "market": "GB",
+                "sites": ["https://fixture.example/"],
+            },
+        )
+        self.assertEqual(created.status_code, 201, created.text)
+        batch_id = created.json()["batch"]["batch_id"]
+
+        imported = self.client.post(
+            "/api/workbench/import-batch",
+            json={"batch_id": batch_id, "parent_id": group_id},
+        )
+        self.assertEqual(imported.status_code, 200, imported.text)
+        payload = imported.json()
+        self.assertEqual(payload["added"], [])
+        self.assertEqual(payload["counts"]["existing"], 1)
+        self.assertEqual(payload["skipped"][0]["existing_node_id"], "n-identity")
+        self.assertEqual(len(self.store.list_workbench_task_defs()), 1)
+
+    def test_pending_target_create_dismiss_and_restore(self) -> None:
+        group = self.client.post(
+            "/api/workbench/groups", json={"name": "待接入"}
+        )
+        self.assertEqual(group.status_code, 201, group.text)
+        group_id = group.json()["node"]["node_id"]
+        created = self.client.post(
+            "/api/batches",
+            json={
+                "name": "pending batch",
+                "market": "GB",
+                "sites": ["https://unknown.example/"],
+                "workbench_parent_id": group_id,
+            },
+        )
+        self.assertEqual(created.status_code, 201, created.text)
+        batch_id = created.json()["batch"]["batch_id"]
+        intent = self.store.get_workbench_batch_import(batch_id)
+        self.assertIsNotNone(intent)
+        self.assertEqual(intent.parent_id, group_id)
+
+        pending = self.client.get("/api/workbench/pending-targets").json()
+        self.assertEqual(pending["total_batches"], 1)
+        self.assertEqual(pending["total_pending"], 1)
+        self.assertEqual(pending["batches"][0]["target"]["node_id"], group_id)
+        self.assertEqual(pending["batches"][0]["sites"][0]["action"], "build")
+
+        imported = self.client.post(
+            "/api/workbench/import-batch", json={"batch_id": batch_id}
+        )
+        self.assertEqual(imported.status_code, 200, imported.text)
+        self.assertEqual(imported.json()["counts"]["pending"], 1)
+        dismissed = self.client.post(
+            f"/api/workbench/pending-targets/{batch_id}/dismiss"
+        )
+        self.assertEqual(dismissed.status_code, 200, dismissed.text)
+        self.assertEqual(
+            self.client.get("/api/workbench/pending-targets").json()["total_batches"],
+            0,
+        )
+
+        restored = self.client.post(
+            "/api/workbench/import-batch",
+            json={"batch_id": batch_id, "parent_id": group_id},
+        )
+        self.assertEqual(restored.status_code, 200, restored.text)
+        self.assertEqual(
+            self.client.get("/api/workbench/pending-targets").json()["total_pending"],
+            1,
+        )
+
+    def test_pending_target_market_conflict_has_no_build_action(self) -> None:
+        created = self.client.post(
+            "/api/batches",
+            json={
+                "name": "market conflict",
+                "market": "US",
+                "sites": ["https://fixture.example/"],
+            },
+        )
+        self.assertEqual(created.status_code, 201, created.text)
+        batch_id = created.json()["batch"]["batch_id"]
+        site = self.store.get_batch_site(batch_id, "fixture.example")
+        self.assertEqual(site.readiness, "needs_onboarding")
+        self.store.upsert_workbench_batch_import(batch_id, parent_id=None)
+        pending = self.client.get("/api/workbench/pending-targets").json()
+        item = pending["batches"][0]["sites"][0]
+        self.assertEqual(item["action"], "none")
+        self.assertTrue(item["reason"].startswith("市场不匹配"))
+
+    def test_pending_target_missing_directory_requires_new_target(self) -> None:
+        batch_id = self.create_batch()
+        self.store.upsert_workbench_batch_import(batch_id, parent_id="g-missing")
+        pending = self.client.get("/api/workbench/pending-targets").json()
+        self.assertTrue(pending["batches"][0]["target"]["missing"])
+        blocked = self.client.post(
+            "/api/workbench/import-batch", json={"batch_id": batch_id}
+        )
+        self.assertEqual(blocked.status_code, 404, blocked.text)
+        self.assertEqual(blocked.json()["error"]["code"], "TARGET_NOT_FOUND")
+
+        group = self.client.post(
+            "/api/workbench/groups", json={"name": "有效目标"}
+        )
+        self.assertEqual(group.status_code, 201, group.text)
+        group_id = group.json()["node"]["node_id"]
+        imported = self.client.post(
+            "/api/workbench/import-batch",
+            json={"batch_id": batch_id, "parent_id": group_id},
+        )
+        self.assertEqual(imported.status_code, 200, imported.text)
+        self.assertEqual(imported.json()["counts"]["added"], 1)
+
+    def test_import_records_error_and_retry_clears_it(self) -> None:
+        group = self.client.post(
+            "/api/workbench/groups", json={"name": "失败恢复"}
+        )
+        self.assertEqual(group.status_code, 201, group.text)
+        group_id = group.json()["node"]["node_id"]
+        batch_id = self.create_batch()
+        failing = TestClient(
+            self.client.app,
+            headers=CLIENT_HEADERS,
+            raise_server_exceptions=False,
+        )
+        with patch.object(
+            TaskStore,
+            "create_workbench_task",
+            side_effect=RuntimeError("simulated import failure"),
+        ):
+            failed = failing.post(
+                "/api/workbench/import-batch",
+                json={"batch_id": batch_id, "parent_id": group_id},
+            )
+        self.assertEqual(failed.status_code, 500, failed.text)
+        pending = self.client.get("/api/workbench/pending-targets").json()
+        self.assertIn("simulated import failure", pending["batches"][0]["last_error"])
+
+        retried = self.client.post(
+            "/api/workbench/import-batch",
+            json={"batch_id": batch_id, "parent_id": group_id},
+        )
+        self.assertEqual(retried.status_code, 200, retried.text)
+        self.assertEqual(retried.json()["counts"]["added"], 1)
+        cleared = self.client.get("/api/workbench/pending-targets").json()
+        self.assertEqual(cleared["total_batches"], 0)
+
+    def test_concurrent_import_creates_one_definition(self) -> None:
+        group = self.client.post(
+            "/api/workbench/groups", json={"name": "并发加入"}
+        )
+        self.assertEqual(group.status_code, 201, group.text)
+        group_id = group.json()["node"]["node_id"]
+        batch_id = self.create_batch()
+        clients = [
+            TestClient(self.client.app, headers=CLIENT_HEADERS) for _ in range(2)
+        ]
+        barrier = threading.Barrier(2)
+        results: list[dict[str, object]] = []
+        lock = threading.Lock()
+
+        def run(client: TestClient) -> None:
+            barrier.wait(timeout=5)
+            response = client.post(
+                "/api/workbench/import-batch",
+                json={"batch_id": batch_id, "parent_id": group_id},
+            )
+            with lock:
+                results.append(
+                    {
+                        "status": response.status_code,
+                        "body": response.json(),
+                    }
+                )
+
+        threads = [
+            threading.Thread(target=run, args=(client,), daemon=True)
+            for client in clients
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(15)
+        self.assertFalse(any(thread.is_alive() for thread in threads))
+        self.assertEqual({item["status"] for item in results}, {200})
+        added = sum(
+            int(item["body"]["counts"]["added"])  # type: ignore[index]
+            for item in results
+        )
+        self.assertEqual(added, 1)
+        self.assertEqual(len(self.store.list_workbench_task_defs()), 1)
 
     def test_attach_existing_run_creates_or_reuses_definition(self) -> None:
         group = self.client.post(

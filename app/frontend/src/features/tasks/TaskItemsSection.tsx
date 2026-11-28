@@ -25,23 +25,35 @@ const PAGE_SIZE = 20;
 interface TaskItemsSectionProps {
   taskId: string;
   taskActive: boolean;
+  failedOnly?: boolean;
 }
 
-export function TaskItemsSection({ taskId, taskActive }: TaskItemsSectionProps) {
+export function TaskItemsSection({
+  taskId,
+  taskActive,
+  failedOnly,
+}: TaskItemsSectionProps) {
   const [taskTab, setTaskTab] = useState<TaskTab>("product");
   const [page, setPage] = useState(0);
 
   // Keep live polling and the terminal read on separate keys so the final
   // items are fetched once the task settles.
   const itemsQuery = useQuery({
-    queryKey: ["task-items", taskId, taskTab, page, taskActive ? "live" : "final"],
+    queryKey: [
+      "task-items",
+      taskId,
+      taskTab,
+      page,
+      taskActive ? "live" : "final",
+      failedOnly,
+    ],
     queryFn: ({ signal }) =>
       getTaskItems(
         taskId,
         taskTab,
         PAGE_SIZE,
         page * PAGE_SIZE,
-        undefined,
+        failedOnly ? "FAILED" : undefined,
         "asc",
         signal,
       ),
@@ -136,7 +148,7 @@ export function TaskItemsSection({ taskId, taskActive }: TaskItemsSectionProps) 
   ];
 
   return (
-    <section className="rounded-panel border border-line bg-surface">
+    <section id="task-items" className="rounded-panel border border-line bg-surface">
       <div className="flex items-start justify-between gap-4 border-b border-line px-5 py-4">
         <div>
           <h2 className="text-[17px] leading-6 font-semibold text-ink">任务明细</h2>

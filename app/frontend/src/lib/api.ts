@@ -288,6 +288,10 @@ export interface TaskSummary {
   outcome: string | null;
   stop_reason: string | null;
   stop_detail?: string | null;
+  can_continue?: boolean;
+  continue_hint?: string | null;
+  recovery_state?: TaskRecoveryState | null;
+  recovered_at?: string | null;
   limits?: Record<string, unknown>;
   counts: TaskCounts;
   coverage?: TaskCoverage | null;
@@ -312,6 +316,9 @@ export interface TaskSummary {
   started_at: string | null;
   finished_at: string | null;
 }
+
+export type TaskRecoveryState =
+  "WAITING_FOR_WORKER" | "EXPORT_PENDING" | "RESULT_INCOMPLETE" | "RECOVERED";
 
 export interface TaskPage {
   total: number;
@@ -356,6 +363,8 @@ export interface WorkbenchRunBrief {
   state: string;
   outcome: string | null;
   stop_reason: string | null;
+  can_continue?: boolean;
+  recovery_state?: TaskRecoveryState | null;
   counts: Record<string, number | undefined>;
   started_at: string | null;
   updated_at: string;
@@ -667,8 +676,33 @@ export interface WorkbenchTaskUpdateRequest {
   note?: string | null;
 }
 
+export interface WorkbenchBatchImportTarget {
+  node_id: string | null;
+  name: string | null;
+  missing: boolean;
+}
+
+export interface WorkbenchBatchImportSkipped {
+  site_key: string;
+  domain: string;
+  reason: string;
+  category: "added" | "pending" | "existing" | "duplicate" | "invalid" | "failed";
+  existing_node_id?: string;
+}
+
+export interface WorkbenchBatchImportCounts {
+  total: number;
+  added: number;
+  pending: number;
+  existing: number;
+  duplicate: number;
+  invalid: number;
+  failed: number;
+}
+
 export interface WorkbenchBatchImportResponse {
   batch_id: string;
+  target: WorkbenchBatchImportTarget;
   added: Array<{
     node_id: string;
     name: string;
@@ -676,7 +710,58 @@ export interface WorkbenchBatchImportResponse {
     task_id: string | null;
     attached: boolean;
   }>;
-  skipped: Array<{ site_key: string; reason: string }>;
+  skipped: WorkbenchBatchImportSkipped[];
+  counts: WorkbenchBatchImportCounts;
+}
+
+export interface WorkbenchPendingSiteIdentity {
+  domain: string;
+  entry: string | null;
+  market: string;
+}
+
+export interface WorkbenchPendingSite {
+  site_key: string;
+  domain: string;
+  input_value: string;
+  identity: WorkbenchPendingSiteIdentity;
+  readiness: string;
+  in_workbench: boolean;
+  action: "build" | "open_build" | "import" | "none";
+  reason: string;
+  active_rule: { rule_id: string; rule_version: string } | null;
+  build_id: string | null;
+  build_state: string | null;
+  build_outcome: string | null;
+}
+
+export interface WorkbenchPendingBatch {
+  batch_id: string;
+  name: string;
+  market: string | null;
+  created_at: string;
+  target: WorkbenchBatchImportTarget;
+  attempted_at: string | null;
+  last_error: string | null;
+  counts: {
+    sites: number;
+    in_workbench: number;
+    needs_onboarding: number;
+    building: number;
+    ready: number;
+    invalid: number;
+    duplicate: number;
+  };
+  truncated: boolean;
+  sites: WorkbenchPendingSite[];
+}
+
+export interface WorkbenchPendingTargets {
+  total_batches: number;
+  total_pending: number;
+  onboarding_available: boolean;
+  onboarding_unavailable_reason: string | null;
+  batches: WorkbenchPendingBatch[];
 }
 
 export interface WorkbenchRunAttachResponse {
@@ -1313,6 +1398,7 @@ export interface BatchDraftRequest {
   category?: string | null;
   note?: string | null;
   folder_id?: string | null;
+  workbench_parent_id?: string | null;
   sites?: string[];
   sites_text?: string;
 }
@@ -1967,6 +2053,22 @@ export function importWorkbenchBatch(body: {
     "/api/workbench/import-batch",
     "POST",
     body,
+  );
+}
+
+export function getWorkbenchPendingTargets(
+  signal?: AbortSignal,
+): Promise<WorkbenchPendingTargets> {
+  return getJson<WorkbenchPendingTargets>("/api/workbench/pending-targets", signal);
+}
+
+export function dismissWorkbenchPendingTarget(
+  batchId: string,
+): Promise<{ batch_id: string; dismissed: boolean }> {
+  return sendJson<{ batch_id: string; dismissed: boolean }>(
+    `/api/workbench/pending-targets/${encodeURIComponent(batchId)}/dismiss`,
+    "POST",
+    {},
   );
 }
 

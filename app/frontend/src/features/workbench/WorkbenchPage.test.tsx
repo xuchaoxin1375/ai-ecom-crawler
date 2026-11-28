@@ -5,6 +5,7 @@ import type {
   SystemInfo,
   TaskSummary,
   WorkbenchNode,
+  WorkbenchPendingTargets,
   WorkbenchRecentPage,
   WorkbenchRunConfig,
   WorkbenchTreePayload,
@@ -324,16 +325,98 @@ afterEach(() => {
   window.localStorage.clear();
 });
 
+const emptyPending: WorkbenchPendingTargets = {
+  total_batches: 0,
+  total_pending: 0,
+  onboarding_available: true,
+  onboarding_unavailable_reason: null,
+  batches: [],
+};
+
+const pendingWithBatch: WorkbenchPendingTargets = {
+  total_batches: 1,
+  total_pending: 1,
+  onboarding_available: true,
+  onboarding_unavailable_reason: null,
+  batches: [
+    {
+      batch_id: "b-pending",
+      name: "Fixture pending batch",
+      market: "GB",
+      created_at: date,
+      target: { node_id: null, name: "根目录", missing: false },
+      attempted_at: null,
+      last_error: null,
+      counts: {
+        sites: 1,
+        in_workbench: 0,
+        needs_onboarding: 0,
+        building: 0,
+        ready: 1,
+        invalid: 0,
+        duplicate: 0,
+      },
+      truncated: false,
+      sites: [
+        {
+          site_key: "fixture.example",
+          domain: "fixture.example",
+          input_value: "https://fixture.example/",
+          identity: { domain: "fixture.example", entry: null, market: "GB" },
+          readiness: "ready",
+          in_workbench: false,
+          action: "import",
+          reason: "生效版本 fixture-local@2026.11.21-1",
+          active_rule: {
+            rule_id: "fixture-local",
+            rule_version: "2026.11.21-1",
+          },
+          build_id: null,
+          build_state: null,
+          build_outcome: null,
+        },
+      ],
+    },
+  ],
+};
+
+const pendingWithBuild: WorkbenchPendingTargets = {
+  ...pendingWithBatch,
+  batches: [
+    {
+      ...pendingWithBatch.batches[0],
+      counts: {
+        ...pendingWithBatch.batches[0].counts,
+        needs_onboarding: 1,
+        ready: 0,
+      },
+      sites: [
+        {
+          ...pendingWithBatch.batches[0].sites[0],
+          readiness: "needs_onboarding",
+          action: "build",
+          reason: "未匹配受管规则包",
+          active_rule: null,
+        },
+      ],
+    },
+  ],
+};
+
 function stubFetch(
   systemReadOnly = false,
   recentPage: WorkbenchRecentPage = recent,
   treePage: WorkbenchTreePayload = tree,
+  pendingPage: WorkbenchPendingTargets = emptyPending,
 ) {
   let createdGroupCount = 0;
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const path = url.split("?")[0];
     if (path === "/api/workbench/tree") return Response.json(treePage);
+    if (path === "/api/workbench/pending-targets") {
+      return Response.json(pendingPage);
+    }
     if (path === "/api/rules") return Response.json(rules);
     if (path === "/api/system") {
       return Response.json(systemInfo(systemReadOnly));
@@ -434,9 +517,19 @@ function stubFetch(
         definition: { ...definition, ...body },
       });
     }
+    if (
+      path === "/api/batches/b-pending/sites/fixture.example/build" &&
+      init?.method === "POST"
+    ) {
+      return Response.json({
+        accepted: true,
+        build: { build_id: "build-pending", state: "QUEUED" },
+      });
+    }
     if (path === "/api/workbench/import-batch" && init?.method === "POST") {
       return Response.json({
         batch_id: "b-1",
+        target: { node_id: null, name: "根目录", missing: false },
         added: [
           {
             node_id: "n-imported",
@@ -447,6 +540,15 @@ function stubFetch(
           },
         ],
         skipped: [],
+        counts: {
+          total: 1,
+          added: 1,
+          pending: 0,
+          existing: 0,
+          duplicate: 0,
+          invalid: 0,
+          failed: 0,
+        },
       });
     }
     if (path === "/api/workbench/tasks/n-1" && init?.method === "PATCH") {
@@ -488,6 +590,36 @@ it("renders the task tree, recent run and structured events", async () => {
   expect((await screen.findAllByText("task_started")).length).toBeGreaterThan(0);
   expect(screen.getByRole("button", { name: "暂停 web-1" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /更多 web-1 操作/ })).toBeInTheDocument();
+});
+
+it("sorts recent runs from the table header and updates the sort badge", async () => {
+  const second = {
+    ...recent.items[0],
+    task_id: "web-2",
+    node_id: null,
+    definition_name: "Alpha atelier",
+    site_key: "alpha.example",
+    path: "法国",
+    started_at: "2026-01-01T00:00:00Z",
+  };
+  const page: WorkbenchRecentPage = {
+    ...recent,
+    total: 2,
+    counts: { ...recent.counts, recent: 2 },
+    items: [recent.items[0], second],
+  };
+  stubFetch(false, page);
+  renderPage("/workbench", { pathname: "/workbench" }, <WorkbenchPage />);
+
+  const table = await screen.findByRole("table", { name: "最近任务列表" });
+  const dataRows = () => within(table).getAllByRole("row").slice(1);
+  await waitFor(() => expect(dataRows()[0]).toHaveTextContent("fixture.example"));
+
+  fireEvent.click(within(table).getByRole("button", { name: "按「任务」排序" }));
+
+  expect(dataRows()[0]).toHaveTextContent("Alpha atelier");
+  expect(dataRows()[1]).toHaveTextContent("fixture.example");
+  expect(screen.getByText("任务 ↑")).toBeInTheDocument();
 });
 
 it("selects recent runs and switches the bottom pane tabs", async () => {
@@ -732,6 +864,56 @@ it("opens the import and new batch dialogs from the tree", async () => {
       ),
     ).toBe(true),
   );
+  await waitFor(() =>
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, init]) =>
+          String(url).endsWith("/api/workbench/import-batch") &&
+          init?.method === "POST",
+      ),
+    ).toBe(true),
+  );
+  expect(
+    await screen.findByRole("dialog", { name: "批次加入结果" }),
+  ).toBeInTheDocument();
+});
+
+it("retries a pending target batch from the tree header", async () => {
+  const fetchMock = stubFetch(false, recent, tree, pendingWithBatch);
+  renderPage("/workbench", { pathname: "/workbench" }, <WorkbenchPage />);
+
+  fireEvent.click(await screen.findByRole("button", { name: "待接入目标 1" }));
+  const dialog = await screen.findByRole("dialog", { name: "待接入目标" });
+  expect(within(dialog).getByText("Fixture pending batch")).toBeInTheDocument();
+  fireEvent.click(within(dialog).getByRole("button", { name: "重试加入" }));
+  await waitFor(() =>
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, init]) =>
+          String(url).endsWith("/api/workbench/import-batch") &&
+          init?.method === "POST" &&
+          String(init.body).includes("b-pending"),
+      ),
+    ).toBe(true),
+  );
+});
+
+it("starts an onboarding build from a pending target", async () => {
+  const fetchMock = stubFetch(false, recent, tree, pendingWithBuild);
+  renderPage("/workbench", { pathname: "/workbench" }, <WorkbenchPage />);
+
+  fireEvent.click(await screen.findByRole("button", { name: "待接入目标 1" }));
+  const dialog = await screen.findByRole("dialog", { name: "待接入目标" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "接入" }));
+  await waitFor(() =>
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, init]) =>
+          String(url).endsWith("/api/batches/b-pending/sites/fixture.example/build") &&
+          init?.method === "POST",
+      ),
+    ).toBe(true),
+  );
 });
 
 it("edits a task definition from the tree menu", async () => {
@@ -804,7 +986,7 @@ it("starts a finished task from the recent task context menu", async () => {
   fireEvent.contextMenu(row!);
 
   const menu = await screen.findByRole("menu", { name: "最近任务操作" });
-  fireEvent.click(within(menu).getByRole("menuitem", { name: /启动任务/ }));
+  fireEvent.click(within(menu).getByRole("menuitem", { name: /新建运行/ }));
   await waitFor(() =>
     expect(
       fetchMock.mock.calls.some(
@@ -814,6 +996,47 @@ it("starts a finished task from the recent task context menu", async () => {
       ),
     ).toBe(true),
   );
+});
+
+it("opens the existing run configuration from the budget stop action", async () => {
+  const stopped: WorkbenchRecentPage = {
+    ...recent,
+    counts: { ...recent.counts, running: 0 },
+    items: [
+      {
+        ...recent.items[0],
+        state: "FINISHED",
+        outcome: "PARTIAL",
+        stop_reason: "BUDGET_EXHAUSTED",
+        stop_detail: "任务时长达到入队时的上限 3600 秒（1 小时）",
+        can_continue: true,
+      },
+    ],
+  };
+  const fetchMock = stubFetch(false, stopped);
+  renderPage("/workbench", { pathname: "/workbench" }, <WorkbenchPage />);
+  expect(await screen.findByText("可续采")).toBeInTheDocument();
+  expect(screen.queryByText(/任务时长达到/)).not.toBeInTheDocument();
+
+  const info = screen.getByRole("button", {
+    name: "查看任务 web-1 的可续采说明",
+  });
+  fireEvent.mouseEnter(info);
+  expect(await screen.findByRole("tooltip")).toHaveTextContent(
+    "任务时长达到入队时的上限",
+  );
+  fireEvent.mouseLeave(info);
+  expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "续采此运行 web-1" }));
+  await screen.findByRole("tabpanel", { name: "运行配置" });
+  expect(
+    fetchMock.mock.calls.some(
+      ([url, init]) =>
+        String(url).includes("/api/workbench/tasks/n-1/start") &&
+        init?.method === "POST",
+    ),
+  ).toBe(false);
 });
 
 it("opens task details by double-clicking a started tree task", async () => {

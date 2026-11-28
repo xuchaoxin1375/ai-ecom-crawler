@@ -124,6 +124,21 @@ def target_key(domain: str, entry: str | None, market: str | None) -> str:
     return f"{domain}--{digest}"
 
 
+def site_identity(
+    domain: str, value: str, market: str | None
+) -> tuple[str, str | None, str]:
+    """Return the cross-batch identity used by workbench pending targets.
+
+    ``site_key`` is not stable across scoped and unscoped batches, so pending
+    target comparisons use domain, target entry and market instead.
+    """
+    parsed = normalize_site(value)
+    host = parsed.site_key or normalize_site(domain).site_key
+    if not host:
+        host = str(domain).strip().lower().removeprefix("www.")
+    return host, target_entry(value), (market or "").strip().upper()
+
+
 def rule_has_catalog_discovery(rule: RulePackage) -> bool:
     return bool(rule.product_source) or any(
         source.get("type") in {"listing", "sitemap", "html_index", "public_json"}

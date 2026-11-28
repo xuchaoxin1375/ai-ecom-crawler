@@ -25,7 +25,14 @@ from .fetcher import DomainLimiter, HybridFetcher, ScraplingFetcher, normalize_e
 from .models import Lease, Task, utc_now
 from .resources import cleanup_orphan_profiles, cleanup_task_resources
 from .rule import RuleError, RulePackage, load_rule
-from .runner import TaskRunner
+from .runner import (
+    TaskRunner,
+    committed_products,
+    recovery_takeover,
+    task_counts,
+    write_product_log,
+    write_task_csvs,
+)
 from .stealth import StealthConfig, StealthFetcher
 from .store import LeaseLostError, TaskStore
 
@@ -361,9 +368,8 @@ class Worker:
             return
         self._next_settle = now + max(0.5, self.lease_ttl_seconds / 2)
         report = self.store.settle_expired_tasks()
-        if not report["recovered"]:
-            return
-        logger.warning("settled expired tasks: %s", report)
+        if report["recovered"]:
+            logger.warning("settled expired tasks: %s", report)
         tokens = report.get("task_tokens", {})
         for task_id in report.get("task_ids", []):
             self._forget_lease(task_id)
@@ -375,6 +381,11 @@ class Worker:
                 )
             except Exception:
                 logger.exception("resource cleanup failed for task %s", task_id)
+        for task in self.store.cancelled_tasks_pending_export():
+            try:
+                self._publish_stopped_task(task, "USER_CANCELLED", "取消后从账本恢复结果")
+            except Exception:
+                logger.exception("export recovery failed for task %s", task.task_id)
 
     def _run_loop(
         self,
@@ -449,6 +460,8 @@ class Worker:
         if self.max_browser_tasks <= 0:
             return None
         while True:
+            if not self._ready_to_run(task_id, lease):
+                return None
             resource_id = self.store.claim_browser_slot(
                 task_id=task_id,
                 lease_token=lease.token,
@@ -461,6 +474,11 @@ class Worker:
                 return resource_id
             time.sleep(0.2)
 
+    def _ready_to_run(self, task_id: str, lease: Lease) -> bool:
+        self.store.assert_lease(lease)
+        current = self.store.get_task(task_id)
+        return current is not None and current.state == "RUNNING"
+
     def _release_browser_slot(self, task_id: str) -> None:
         with self._browser_slot_lock:
             resource_id = self._browser_slots.pop(task_id, None)
@@ -470,6 +488,9 @@ class Worker:
     def _run_task(self, task: Task, lease: Lease) -> None:
         browser_slot = False
         try:
+            if not self._ready_to_run(task.task_id, lease):
+                self._fail(task, lease, "ENVIRONMENT_ERROR", "execution stopped before startup")
+                return
             rule_path = task.input.get("rule_path")
             if not rule_path:
                 self._fail(task, lease, "PLAN_ERROR", "task input has no rule_path")
@@ -517,9 +538,15 @@ class Worker:
                 )
                 return
             if self._browser_semaphore is not None and self._needs_browser(rule):
-                self._browser_semaphore.acquire()
+                while not self._browser_semaphore.acquire(timeout=0.2):
+                    if not self._ready_to_run(task.task_id, lease):
+                        self._fail(task, lease, "ENVIRONMENT_ERROR", "execution stopped while waiting for a browser")
+                        return
                 browser_slot = True
                 self._acquire_browser_slot(task.task_id, lease)
+            if not self._ready_to_run(task.task_id, lease):
+                self._fail(task, lease, "ENVIRONMENT_ERROR", "execution stopped before startup")
+                return
             try:
                 if "rate_policy" in task.input and task.domain_key:
                     policy = task.input.get("rate_policy")
@@ -584,6 +611,8 @@ class Worker:
                 )
             except Exception as exc:  # noqa: BLE001 - task boundary
                 self._fail(task, lease, "ENVIRONMENT_ERROR", f"{type(exc).__name__}: {exc}")
+        except LeaseLostError:
+            logger.warning("task %s lost its lease during startup", task.task_id)
         finally:
             if browser_slot:
                 self._release_browser_slot(task.task_id)
@@ -609,37 +638,77 @@ class Worker:
         detail: str,
     ) -> None:
         try:
-            self.store.assert_lease(lease)
+            while (current := self.store.get_task(task.task_id)) is not None:
+                if current.state not in {"RUNNING", "PAUSING", "CANCELLING"}:
+                    return
+                max_attempts = int(current.limits.get("max_attempts", 2))
+                self.store.reconcile_task(
+                    task.task_id, max_attempts, lease=lease, cancel=current.state == "CANCELLING",
+                )
+                if current.state == "PAUSING":
+                    updated = self.store.update_task(
+                        task.task_id, lease=lease, expected_state="PAUSING", state="PAUSED",
+                    )
+                elif current.state == "CANCELLING":
+                    updated = self._publish_stopped_task(current, "USER_CANCELLED", "用户取消", lease=lease)
+                else:
+                    updated = self._publish_stopped_task(current, reason, detail, lease=lease)
+                if updated:
+                    return
         except LeaseLostError:
-            logger.warning(
-                "task %s lost its lease; skipping failure write", task.task_id
-            )
-            return
+            logger.warning("task %s lost its lease; skipping settlement", task.task_id)
+
+    def _publish_stopped_task(
+        self, task: Task, reason: str, detail: str, *, lease: Lease | None = None,
+    ) -> bool:
+        cancelled = reason == "USER_CANCELLED"
+        state = "CANCELLED" if cancelled else "FINISHED"
+        finished_at = task.finished_at or utc_now()
         task_dir = self.out_root / task.task_id
-        task_dir.mkdir(parents=True, exist_ok=True)
+        items = self.store.items(task.task_id)
+        products: list[dict[str, Any]] = []
+        missing = 0
+        product_log = task_dir / "products.jsonl"
+        if task.task_type == "product":
+            products, _, _, missing, _ = committed_products(product_log, items)
+        counts = task_counts(task, items, products)
+        outcome = "CANCELLED" if cancelled else "PARTIAL" if (products or counts.get("valid_urls")) else "FAILED"
+        if missing:
+            detail += f"。缺少 {missing} 条已接纳商品明细"
         payload = {
             "task_id": task.task_id,
             "task_type": task.task_type,
             "plan_id": task.plan_id,
             "plan_version": task.plan_version,
-            "state": "FINISHED",
-            "outcome": "FAILED",
+            "market": task.market,
+            "locale": task.input.get("locale"),
+            "state": state,
+            "outcome": outcome,
             "stop_reason": reason,
             "stop_detail": detail,
-            "failure_classes": {"transient": 0, "permanent": 0, "blocked": 0},
-            "counts": {},
+            "started_at": task.started_at or task.created_at,
+            "finished_at": finished_at,
+            "coverage": {"status": "UNKNOWN"},
+            "business_acceptance": {"status": "NOT_REVIEWED"},
+            "quality_exceptions": [],
+            "recovery": {
+                "missing_product_records": missing,
+                "takeover": recovery_takeover(task),
+            },
+            "counts": counts,
         }
-        write_json(task_dir / "task-result.json", payload)
-        try:
-            self.store.update_task(
-                task.task_id,
-                lease=lease,
-                state="FINISHED",
-                outcome="FAILED",
-                stop_reason=reason,
-                finished_at=utc_now(),
-            )
-        except LeaseLostError:
-            logger.warning(
-                "task %s lost its lease while writing failure", task.task_id
-            )
+
+        def publish() -> None:
+            task_dir.mkdir(parents=True, exist_ok=True)
+            if products:
+                write_product_log(product_log, products)
+            write_task_csvs(task_dir, items, products)
+            write_json(task_dir / "task-result.json", payload)
+
+        output = dict(task.output)
+        output.pop("recovery_export_pending", None)
+        return self.store.update_task(
+            task.task_id, lease=lease, expected_state=task.state, publish=publish,
+            state=state, outcome=outcome, stop_reason=reason, finished_at=finished_at,
+            counters={**task.counters, **counts}, output=output,
+        )

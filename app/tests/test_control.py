@@ -139,6 +139,13 @@ class ControlTransitionTests(unittest.TestCase):
         self.assertEqual(running.state, "QUEUED")
         self.assertEqual(pausing.state, "PAUSED")
         self.assertEqual(cancelling.state, "CANCELLED")
+        self.assertEqual(
+            report["items"]["recover-running"],
+            {"in_flight": 1, "reset": 1, "failed": 0},
+        )
+        self.assertEqual(running.output["recovery_takeover_in_flight"], 1)
+        self.assertEqual(running.output["recovery_takeover_reset"], 1)
+        self.assertEqual(running.output["recovery_takeover_failed"], 0)
 
         item = self.store.items("recover-running", "product")[0]
         self.assertEqual(item.state, "PENDING")

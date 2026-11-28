@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import csv
 import io
 import json
 import tempfile
@@ -15,6 +16,8 @@ from ecom_crawler.execution import build_task, submit_task
 from ecom_crawler.runtime.fetcher import DomainLimiter
 from ecom_crawler.runtime.lock import worker_lock
 from ecom_crawler.runtime.models import FetchResult, WorkItem
+from ecom_crawler.runtime.rule import load_rule
+from ecom_crawler.runtime.runner import TaskRunner
 from ecom_crawler.runtime.store import TaskStore
 from ecom_crawler.runtime.worker import Worker
 
@@ -552,6 +555,45 @@ class ControlFlowTests(unittest.TestCase):
         )
         self.assertEqual(result["counts"]["valid_products"], 1)
 
+    def test_control_after_claim_before_runner_start(self) -> None:
+        store = TaskStore(self.db_path)
+        for action, target in (("pause", "PAUSED"), ("cancel", "CANCELLED")):
+            with self.subTest(action=action):
+                task = self._queued_task(f"pre-start-{action}")
+                ((claimed, lease),) = store.claim_tasks("startup", 1, 30)
+                getattr(store, f"request_{action}")(task.task_id)
+                fetcher = StaticFetcher()
+                runner = TaskRunner(store, load_rule(self.rule_path), claimed, fetcher=fetcher,
+                                    out_root=self.out_root, lease=lease)
+                self.assertEqual(runner.run(), target)
+                self.assertEqual(store.get_task(task.task_id).state, target)
+                self.assertEqual(fetcher.requests, 0)
+
+    def test_expired_cancellation_rebuilds_export_from_accepted_item(self) -> None:
+        store = TaskStore(self.db_path)
+        task = self._queued_task("recover-cancelled-export")
+        url = "https://fixture.test/p1.html"
+        store.add_item(WorkItem(
+            task_id=task.task_id, item_id="committed", item_type="product",
+            url=url, normalized_url=url, state="DONE", result={
+                "source_url": url,
+                "product_record": {"source_url": url, "name": "Accepted", "price_amount": 1},
+            },
+        ))
+        ((_, lease),) = store.claim_tasks("stopped", 1, 30)
+        store.request_cancel(task.task_id)
+        store.release_lease(lease)
+        self.assertEqual(Worker(store, out_root=self.out_root).run_once(), 0)
+        recovered = store.get_task(task.task_id)
+        self.assertEqual(recovered.state, "CANCELLED")
+        self.assertFalse(recovered.output.get("recovery_export_pending"))
+        output = self.out_root / task.task_id
+        summary = json.loads((output / "task-result.json").read_text(encoding="utf-8"))
+        with (output / "products.csv").open(encoding="utf-8", newline="") as handle:
+            rows = list(csv.DictReader(handle))
+        self.assertEqual(summary["counts"]["valid_products"], len(rows))
+        self.assertEqual(rows[0]["name"], "Accepted")
+
     def test_worker_heartbeat_keeps_lease_alive(self) -> None:
         task = self._submit("heartbeat-flow")
         started = threading.Event()
@@ -667,6 +709,7 @@ class ControlFlowTests(unittest.TestCase):
         assert stored is not None
         self.assertEqual(stored.state, "FINISHED")
         self.assertEqual(stored.outcome, "COMPLETED")
+        self.assertEqual(stored.output["recovery_takeover_reset"], 1)
         self.assertEqual(
             TaskStore(self.db_path).item_counts(task.task_id, "product").get("DONE"),
             1,
@@ -676,6 +719,11 @@ class ControlFlowTests(unittest.TestCase):
         ).splitlines()
         self.assertEqual(len(lines), 1)
         self.assertNotIn("Stale product", lines[0])
+        result = json.loads(
+            (self.out_root / task.task_id / "task-result.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(result["recovery"]["takeover"]["reset"], 1)
+        self.assertEqual(result["recovery"]["takeover"]["in_flight"], 1)
 
     def _run_cli(self, argv: list[str]) -> tuple[int, str, str]:
         stdout = io.StringIO()

@@ -114,6 +114,18 @@
             "maxLength": 500000,
             "title": "Sites Text",
             "type": "string"
+          },
+          "workbench_parent_id": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workbench Parent Id"
           }
         },
         "required": [
@@ -8309,6 +8321,67 @@
           }
         },
         "summary": "Move Workbench Node"
+      }
+    },
+    "/api/workbench/pending-targets": {
+      "get": {
+        "operationId": "workbench_pending_targets_api_workbench_pending_targets_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Workbench Pending Targets Api Workbench Pending Targets Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Workbench Pending Targets"
+      }
+    },
+    "/api/workbench/pending-targets/{batch_id}/dismiss": {
+      "post": {
+        "operationId": "dismiss_workbench_pending_target_api_workbench_pending_targets__batch_id__dismiss_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "batch_id",
+            "required": true,
+            "schema": {
+              "title": "Batch Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Dismiss Workbench Pending Target Api Workbench Pending Targets  Batch Id  Dismiss Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Dismiss Workbench Pending Target"
       }
     },
     "/api/workbench/recent": {

@@ -182,6 +182,18 @@ class WorkbenchRun:
     created_at: str = field(default_factory=utc_now)
 
 
+@dataclass
+class WorkbenchBatchImport:
+    """Workbench intent and recovery state for adding one batch to the tree."""
+
+    batch_id: str
+    parent_id: str | None = None
+    requested_at: str = field(default_factory=utc_now)
+    attempted_at: str | None = None
+    last_error: str | None = None
+    dismissed_at: str | None = None
+
+
 BATCH_READINESS = {
     "ready",
     "needs_onboarding",

@@ -79,6 +79,21 @@ export function stopReasonLabel(reason: string | null | undefined): string {
   return STOP_REASON_LABELS[reason] ?? reason;
 }
 
+export function taskRecoveryLabel(state: string | null | undefined): string {
+  switch (state) {
+    case "WAITING_FOR_WORKER":
+      return "等待执行器接管";
+    case "EXPORT_PENDING":
+      return "正在恢复导出";
+    case "RESULT_INCOMPLETE":
+      return "部分商品明细无法恢复";
+    case "RECOVERED":
+      return "已从检查点恢复";
+    default:
+      return "";
+  }
+}
+
 export function taskStateTone(state: string | null | undefined): Tone {
   if (state === "FINISHED") return "success";
   if (state === "RUNNING" || state === "PAUSING" || state === "CANCELLING") {

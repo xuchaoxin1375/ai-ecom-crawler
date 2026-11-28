@@ -9,7 +9,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronDown,
@@ -46,12 +46,14 @@ import {
   createBatch,
   createWorkbenchGroup,
   createWorkbenchTask,
+  dismissWorkbenchPendingTarget,
   dismissWorkbenchRecent,
   dismissWorkbenchRecentBatch,
   dissolveWorkbenchGroup,
   getRules,
   getSystemInfo,
   getTaskItems,
+  getWorkbenchPendingTargets,
   getWorkbenchRecent,
   getWorkbenchTree,
   importWorkbenchBatch,
@@ -60,6 +62,7 @@ import {
   renameWorkbenchNode,
   restoreWorkbenchRecent,
   resumeTask,
+  startSiteBuild,
   startWorkbenchTask,
   taskExportUrl,
   updateWorkbenchTask,
@@ -67,6 +70,8 @@ import {
   type TaskItem,
   type WorkbenchAttachUnassignedResult,
   type WorkbenchNode,
+  type WorkbenchPendingBatch,
+  type WorkbenchPendingSite,
   type WorkbenchRecentItem,
   type WorkbenchRunConfigResult,
   type WorkbenchTaskCreateRequest,
@@ -78,6 +83,8 @@ import {
   formatClock,
   formatNumber,
   formatTime,
+  stopReasonLabel,
+  taskRecoveryLabel,
   taskStatusLabel,
   taskStatusTone,
 } from "../../lib/format";
@@ -106,10 +113,18 @@ import { ProductPreviewDialog } from "../sites/ProductPreviewDialog";
 import { PreviewSettingsButton } from "../sites/PreviewSettingsButton";
 import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
+import { DataTable, type DataTableColumn } from "../../components/ui/DataTable";
+import { InfoHint } from "../../components/ui/InfoHint";
 import { SearchInput } from "../../components/ui/SearchInput";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { ErrorNotice } from "../../components/ui/ErrorNotice";
 import { RowActionsMenu, type RowActionItem } from "../../components/ui/DropdownMenu";
+import { TableDisplayOptions } from "../../components/ui/TableDisplayOptions";
+import {
+  TableViewToggle,
+  densityViewOptions,
+} from "../../components/ui/TableViewToggle";
+import { useTablePreferences } from "../../components/ui/tablePreferences";
 import { Toast, useToast } from "../../components/ui/Toast";
 import { WorkbenchContextMenu } from "./WorkbenchContextMenu";
 import type { WorkbenchMenuItem } from "./WorkbenchContextMenu";
@@ -125,6 +140,8 @@ import {
 import {
   WorkbenchImportBatchDialog,
   WorkbenchNewBatchDialog,
+  WorkbenchPendingTargetsDialog,
+  type WorkbenchBatchAddResult,
 } from "./WorkbenchBatchDialogs";
 import { WorkbenchGroupDialog } from "./WorkbenchGroupDialog";
 import { WorkbenchLogView } from "./WorkbenchLogView";
@@ -281,6 +298,26 @@ function isActiveState(state: string | null | undefined): boolean {
   return Boolean(state && ACTIVE_TASK_STATES.has(state));
 }
 
+function recentStatusLabel(item: WorkbenchRecentItem): string {
+  return item.can_continue ? "可续采" : taskStatusLabel(item.state, item.outcome);
+}
+
+function recentStatusHint(item: WorkbenchRecentItem): string {
+  if (!item.can_continue && !item.recovery_state) return "";
+  const details: string[] = [];
+  const recovery = taskRecoveryLabel(item.recovery_state);
+  const reason = item.stop_reason ? stopReasonLabel(item.stop_reason) : "";
+  if (recovery) details.push(recovery);
+  if (reason) details.push(reason);
+  if (item.stop_detail) details.push(item.stop_detail);
+  const explanation = details.join(" · ");
+  if (!item.can_continue) return explanation;
+  const continuation = "可打开运行配置，保留已采数据继续采集。";
+  if (!explanation) return continuation;
+  const separator = /[。！？!?]$/.test(explanation) ? "" : "。";
+  return `${explanation}${separator}${continuation}`;
+}
+
 function stateDotClass(
   state: string | null | undefined,
   outcome: string | null | undefined,
@@ -307,14 +344,23 @@ function stateDotClass(
 export function WorkbenchPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const continueTaskId = searchParams.get("continue");
   const { toast, showToast, dismissToast } = useToast();
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(continueTaskId);
   const [groupDialogOpen, setGroupDialogOpen] = useState(false);
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
   const [importBatchDialogOpen, setImportBatchDialogOpen] = useState(false);
   const [newBatchDialogOpen, setNewBatchDialogOpen] = useState(false);
+  const [batchResult, setBatchResult] = useState<WorkbenchBatchAddResult | null>(null);
+  const [pendingDialogOpen, setPendingDialogOpen] = useState(false);
+  const [pendingBusy, setPendingBusy] = useState("");
+  const [pendingError, setPendingError] = useState("");
+  const [dismissPendingTarget, setDismissPendingTarget] =
+    useState<WorkbenchPendingBatch | null>(null);
+  const [dismissPendingBusy, setDismissPendingBusy] = useState(false);
   const [dialogParentId, setDialogParentId] = useState<string | null>(null);
   const [dialogError, setDialogError] = useState("");
   const [formBusy, setFormBusy] = useState<
@@ -326,6 +372,8 @@ export function WorkbenchPage() {
   const [queryValue, setQueryValue] = useState("");
   const [treeSearch, setTreeSearch] = useState("");
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
+  const [recentWidthsCustomized, setRecentWidthsCustomized] = useState(false);
+  const resetRecentWidthsRef = useRef<(() => void) | null>(null);
   const [treeWidth, setTreeWidth] = useState(() =>
     readStoredNumber(
       LAYOUT_KEYS.treeWidth,
@@ -346,7 +394,7 @@ export function WorkbenchPage() {
   const [bottomCollapsed, setBottomCollapsed] = useState(false);
   const [bottomTab, setBottomTab] = useState<
     "logs" | "data" | "detail" | "config" | "files"
-  >("logs");
+  >(continueTaskId ? "config" : "logs");
   const [previewItem, setPreviewItem] = useState<TaskItem | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewTab, setPreviewTab] = useState<"image" | "description">("image");
@@ -407,6 +455,14 @@ export function WorkbenchPage() {
     refetchInterval: 3000,
     placeholderData: (previous) => previous,
   });
+  const pendingQuery = useQuery({
+    queryKey: ["workbench-pending-targets"],
+    queryFn: ({ signal }) => getWorkbenchPendingTargets(signal),
+    refetchInterval: 10000,
+  });
+  const pendingTargets = pendingQuery.data ?? null;
+  const pendingTotal = pendingTargets?.total_pending ?? 0;
+  const pendingQueryError = pendingQuery.isError ? errorText(pendingQuery.error) : "";
   const nodes = useMemo(() => treeQuery.data?.nodes ?? [], [treeQuery.data]);
   const defaultGroupId = useMemo(
     () =>
@@ -620,6 +676,7 @@ export function WorkbenchPage() {
   function openNewBatchAt(parentId: string | null) {
     setDialogParentId(parentId ?? defaultGroupId);
     setDialogError("");
+    setBatchResult(null);
     setNewBatchDialogOpen(true);
   }
 
@@ -981,6 +1038,7 @@ export function WorkbenchPage() {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["workbench-tree"] }),
       queryClient.invalidateQueries({ queryKey: ["workbench-recent"] }),
+      queryClient.invalidateQueries({ queryKey: ["workbench-pending-targets"] }),
     ]);
   }
 
@@ -1110,14 +1168,21 @@ export function WorkbenchPage() {
     try {
       const response = await importWorkbenchBatch(values);
       setImportBatchDialogOpen(false);
+      setPendingError("");
       await refreshWorkbench();
-      const skipped = response.skipped.length;
+      const pending = response.counts.pending + response.counts.failed;
+      const changed = response.added.length > 0;
       showToast(
-        response.added.length ? "success" : "info",
-        response.added.length
-          ? `已加入 ${response.added.length} 个任务定义${skipped ? `，跳过 ${skipped} 个站点` : ""}。`
-          : `没有新增任务定义${skipped ? `；${skipped} 个站点已存在或规则不可用` : ""}。`,
+        changed ? "success" : "info",
+        changed
+          ? `已加入 ${response.added.length} 个任务定义${pending ? `，${pending} 个目标待接入` : ""}。`
+          : pending
+            ? `没有新增任务定义，${pending} 个目标待接入或加入失败。`
+            : "没有新增任务定义；站点已存在或规则不可用。",
       );
+      if (pending > 0) {
+        setPendingDialogOpen(true);
+      }
     } catch (error) {
       setDialogError(errorText(error));
     } finally {
@@ -1131,38 +1196,187 @@ export function WorkbenchPage() {
     if (readOnly) return;
     setFormBusy("new-batch");
     setDialogError("");
+    setBatchResult(null);
     const { workbench_parent_id, ...batchBody } = values;
     try {
-      const created = await createBatch(batchBody);
+      const created = await createBatch({
+        ...batchBody,
+        workbench_parent_id,
+      });
       const batchId = created.batch.batch_id;
-      let added = 0;
+      let counts: WorkbenchBatchAddResult["counts"] = {
+        total: 0,
+        added: 0,
+        pending: 0,
+        existing: 0,
+        duplicate: 0,
+        invalid: 0,
+        failed: 0,
+      };
+      let skipped: WorkbenchBatchAddResult["skipped"] = [];
+      let joinError = "";
       try {
         const imported = await importWorkbenchBatch({
           batch_id: batchId,
           parent_id: workbench_parent_id,
         });
-        added = imported.added.length;
+        counts = imported.counts;
+        skipped = imported.skipped;
       } catch (error) {
-        setNewBatchDialogOpen(false);
-        await refreshWorkbench();
+        joinError = errorText(error);
+      }
+      setBatchResult({
+        batchId,
+        batchName: created.batch.name,
+        parentId: workbench_parent_id,
+        added: counts.added,
+        counts,
+        skipped,
+        error: joinError || undefined,
+      });
+      await refreshWorkbench();
+      if (joinError) {
         showToast(
           "error",
-          `批次「${created.batch.name}」已创建，但加入任务树失败：${errorText(error)}`,
+          `批次「${created.batch.name}」已创建，但加入任务树失败：${joinError}`,
         );
-        return;
+      } else {
+        showToast(
+          counts.added ? "success" : "info",
+          counts.added
+            ? `批次「${created.batch.name}」已创建，并加入 ${counts.added} 个任务定义。`
+            : `批次「${created.batch.name}」已创建，但没有匹配到可加入的任务定义。`,
+        );
       }
-      setNewBatchDialogOpen(false);
-      await refreshWorkbench();
-      showToast(
-        added ? "success" : "info",
-        added
-          ? `批次「${created.batch.name}」已创建，并加入 ${added} 个任务定义。`
-          : `批次「${created.batch.name}」已创建，但没有匹配到可加入的任务定义。`,
-      );
     } catch (error) {
       setDialogError(errorText(error));
     } finally {
       setFormBusy("");
+    }
+  }
+
+  async function retryBatchResult() {
+    if (!batchResult || readOnly) return;
+    setFormBusy("new-batch");
+    setDialogError("");
+    try {
+      const imported = await importWorkbenchBatch({
+        batch_id: batchResult.batchId,
+        parent_id: batchResult.parentId,
+      });
+      setBatchResult({
+        ...batchResult,
+        added: imported.counts.added,
+        counts: imported.counts,
+        skipped: imported.skipped,
+        error: undefined,
+      });
+      await refreshWorkbench();
+      showToast(
+        imported.counts.added ? "success" : "info",
+        imported.counts.added
+          ? `已补加 ${imported.counts.added} 个任务定义。`
+          : "没有可补加的任务定义；待接入目标仍保留在清单中。",
+      );
+    } catch (error) {
+      setBatchResult({
+        ...batchResult,
+        error: errorText(error),
+      });
+    } finally {
+      setFormBusy("");
+    }
+  }
+
+  function closeBatchResult() {
+    setNewBatchDialogOpen(false);
+    setBatchResult(null);
+    setDialogError("");
+    void refreshWorkbench();
+  }
+
+  function viewPendingFromResult() {
+    setNewBatchDialogOpen(false);
+    setBatchResult(null);
+    setDialogError("");
+    setPendingError("");
+    setPendingDialogOpen(true);
+  }
+
+  function openPendingDialog() {
+    setPendingError("");
+    setPendingDialogOpen(true);
+  }
+
+  async function retryPendingBatch(
+    batch: WorkbenchPendingBatch,
+    targetId: string | null,
+  ) {
+    if (readOnly) return;
+    setPendingBusy(`batch:${batch.batch_id}`);
+    setPendingError("");
+    try {
+      const imported = await importWorkbenchBatch({
+        batch_id: batch.batch_id,
+        parent_id: targetId,
+      });
+      await refreshWorkbench();
+      const pending = imported.counts.pending + imported.counts.failed;
+      showToast(
+        imported.counts.added ? "success" : "info",
+        imported.counts.added
+          ? `已补加 ${imported.counts.added} 个任务定义${pending ? `，${pending} 个目标仍待处理` : ""}。`
+          : pending
+            ? `没有新增任务定义，${pending} 个目标仍待处理。`
+            : "批次目标已全部加入任务树。",
+      );
+    } catch (error) {
+      setPendingError(errorText(error));
+    } finally {
+      setPendingBusy("");
+    }
+  }
+
+  async function buildPendingSite(
+    batch: WorkbenchPendingBatch,
+    site: WorkbenchPendingSite,
+  ) {
+    if (readOnly) return;
+    setPendingBusy(`site:${batch.batch_id}:${site.site_key}`);
+    setPendingError("");
+    try {
+      const response = await startSiteBuild(batch.batch_id, site.site_key);
+      await refreshWorkbench();
+      showToast(
+        "success",
+        `已启动 ${site.domain || site.site_key} 的接入构建 ${response.build.build_id}。`,
+      );
+    } catch (error) {
+      setPendingError(errorText(error));
+    } finally {
+      setPendingBusy("");
+    }
+  }
+
+  function askDismissPendingBatch(batch: WorkbenchPendingBatch) {
+    if (readOnly) return;
+    setPendingError("");
+    setDismissPendingTarget(batch);
+  }
+
+  async function confirmDismissPendingBatch() {
+    if (!dismissPendingTarget) return;
+    setDismissPendingBusy(true);
+    setPendingError("");
+    try {
+      await dismissWorkbenchPendingTarget(dismissPendingTarget.batch_id);
+      setDismissPendingTarget(null);
+      await refreshWorkbench();
+      showToast("success", "已忽略该批次的待接入提醒；构建和任务不受影响。");
+    } catch (error) {
+      setPendingError(errorText(error));
+    } finally {
+      setDismissPendingBusy(false);
     }
   }
 
@@ -1416,12 +1630,18 @@ export function WorkbenchPage() {
     }
   }
 
+  function openRunConfig(taskId: string) {
+    setSelectedTaskId(taskId);
+    setBottomTab("config");
+    setBottomCollapsed(false);
+  }
+
   function recentMenuGroups(item: WorkbenchRecentItem): RowActionItem[][] {
     const active = isActiveState(item.state);
     const node = item.node_id ? nodesById.get(item.node_id) : undefined;
     const first: RowActionItem[] = [];
 
-    if (item.state === "RUNNING") {
+    if (item.state === "RUNNING" || item.state === "QUEUED") {
       first.push({
         key: "pause",
         label: "暂停任务",
@@ -1448,12 +1668,32 @@ export function WorkbenchPage() {
         onSelect: () => void controlTask(item, "cancel"),
       });
     }
+    if (item.can_continue) {
+      first.push({
+        key: "continue",
+        label: "续采此运行",
+        hint: "保留已采数据",
+        icon: <Play size={14} />,
+        disabled: readOnly,
+        onSelect: () => openRunConfig(item.task_id),
+      });
+    } else if (item.outcome === "PARTIAL" && item.counts.failed_products) {
+      first.push({
+        key: "failures",
+        label: "查看失败项",
+        icon: <ExternalLink size={14} />,
+        onSelect: () =>
+          navigate(
+            `/tasks/${encodeURIComponent(item.task_id)}?items=failed#task-items`,
+          ),
+      });
+    }
     if (node && !active) {
       const retry = item.outcome === "FAILED";
       first.push({
         key: retry ? "retry" : "start",
-        label: retry ? "重试任务" : "启动任务",
-        hint: "新建运行",
+        label: "新建运行",
+        hint: "按任务定义重新采集",
         icon: retry ? <RotateCcw size={14} /> : <Play size={14} />,
         disabled: readOnly,
         onSelect: () => void runNode(node),
@@ -1469,8 +1709,7 @@ export function WorkbenchPage() {
           icon: <SlidersHorizontal size={14} />,
           onSelect: () => {
             selectRecent(item);
-            setBottomTab("config");
-            setBottomCollapsed(false);
+            openRunConfig(item.task_id);
           },
         },
         ...(item.node_id
@@ -1563,6 +1802,354 @@ export function WorkbenchPage() {
       ],
     ].filter((group) => group.length > 0);
   }
+
+  const recentColumns: DataTableColumn<WorkbenchRecentItem>[] = [
+    {
+      key: "select",
+      label: "选择",
+      header: (
+        <input
+          type="checkbox"
+          className="h-3.5 w-3.5 cursor-pointer accent-accent"
+          checked={allVisibleSelected}
+          aria-label="选择全部最近任务"
+          onChange={toggleAllVisibleSelection}
+          ref={(element) => {
+            if (element) element.indeterminate = someVisibleSelected;
+          }}
+        />
+      ),
+      width: 48,
+      resizable: false,
+      sticky: "left",
+      hideable: false,
+      skeleton: false,
+      headerClassName: "px-3",
+      cellClassName: "px-3",
+      cell: (item) => (
+        <input
+          type="checkbox"
+          className="h-3.5 w-3.5 cursor-pointer accent-accent"
+          checked={selectedTaskIds.has(item.task_id)}
+          aria-label={`选择任务 ${item.task_id}`}
+          onChange={() => toggleRunSelection(item.task_id)}
+        />
+      ),
+    },
+    {
+      key: "status",
+      header: "状态",
+      label: "状态",
+      width: 118,
+      minWidth: 96,
+      maxWidth: 220,
+      hideable: true,
+      sortable: true,
+      sortValue: (item) => recentStatusLabel(item),
+      cell: (item) => {
+        const statusLabel = recentStatusLabel(item);
+        const statusHint = recentStatusHint(item);
+        return (
+          <div className="flex items-center gap-1">
+            <Badge tone={taskStatusTone(item.state, item.outcome)}>{statusLabel}</Badge>
+            {statusHint ? (
+              <InfoHint
+                content={statusHint}
+                label={`查看任务 ${item.task_id} 的${statusLabel}说明`}
+              />
+            ) : null}
+          </div>
+        );
+      },
+    },
+    {
+      key: "task",
+      header: "任务 / 站点",
+      compactHeader: "任务",
+      label: "任务",
+      width: 300,
+      minWidth: 180,
+      maxWidth: 720,
+      hideable: false,
+      sortable: true,
+      sortValue: (item) =>
+        (item.definition_name || item.site_key || item.task_id).toLocaleLowerCase(),
+      cell: (item, { compact }) => {
+        const title = item.definition_name || item.site_key || item.task_id;
+        return (
+          <div
+            className="min-w-0"
+            title={`${title} · ${item.path || "未加入任务树"} · ${item.task_id}`}
+          >
+            <div className="flex min-w-0 items-center gap-1.5">
+              <span className="truncate font-semibold text-ink">{title}</span>
+              <span className="shrink-0 rounded border border-line bg-surface-muted px-1 text-[10px] leading-4 text-ink-3">
+                {definitionTag(item)}
+              </span>
+            </div>
+            {compact ? null : (
+              <p className="mt-0.5 truncate text-xs text-ink-3">
+                {item.path || "未加入任务树"} · {item.task_id}
+              </p>
+            )}
+          </div>
+        );
+      },
+    },
+    {
+      key: "progress",
+      header: "进度",
+      label: "进度",
+      width: 150,
+      minWidth: 120,
+      maxWidth: 280,
+      hideable: true,
+      sortable: true,
+      sortValue: (item) => progressFor(item).percent,
+      cell: (item, { compact }) => {
+        const progress = progressFor(item);
+        const processed = formatNumber(progress.processed);
+        const total = progress.total ? formatNumber(progress.total) : "—";
+        if (compact) {
+          return (
+            <div
+              className="flex items-center gap-2"
+              title={`进度 ${progress.percent}% · ${processed} / ${total}`}
+            >
+              <span className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-surface-sunken">
+                <span
+                  className="block h-full rounded-full bg-accent"
+                  style={{ width: `${progress.percent}%` }}
+                />
+              </span>
+              <span className="w-9 shrink-0 text-right text-xs tabular text-ink-3">
+                {progress.percent}%
+              </span>
+            </div>
+          );
+        }
+        return (
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-surface-sunken">
+                <span
+                  className="block h-full rounded-full bg-accent"
+                  style={{ width: `${progress.percent}%` }}
+                />
+              </span>
+              <span className="w-9 shrink-0 text-right text-xs tabular text-ink-3">
+                {progress.percent}%
+              </span>
+            </div>
+            <p className="mt-1 text-xs tabular text-ink-3">
+              {processed} / {total}
+            </p>
+          </div>
+        );
+      },
+    },
+    {
+      key: "results",
+      header: "有效 / 失败",
+      compactHeader: "有效/失败",
+      label: "有效 / 失败",
+      width: 104,
+      minWidth: 88,
+      maxWidth: 200,
+      align: "right",
+      hideable: true,
+      sortable: true,
+      sortValue: (item) => Number(item.counts?.valid_products || 0),
+      cell: (item, { compact }) => {
+        const valid = Number(item.counts?.valid_products || 0);
+        const failed = Number(item.counts?.failed_products || 0);
+        const label = `有效 ${formatNumber(valid)}、失败 ${formatNumber(failed)}`;
+        if (compact) {
+          return (
+            <span
+              className="text-xs tabular whitespace-nowrap"
+              title={label}
+              aria-label={label}
+            >
+              <span className="font-medium text-ink">{formatNumber(valid)}</span>
+              <span className="text-ink-3"> / {formatNumber(failed)}</span>
+            </span>
+          );
+        }
+        return (
+          <div>
+            <p className="text-sm font-medium tabular text-ink">
+              {formatNumber(valid)}
+            </p>
+            <p className="text-xs text-ink-3">失败 {formatNumber(failed)}</p>
+          </div>
+        );
+      },
+    },
+    {
+      key: "started",
+      header: "启动",
+      label: "启动",
+      width: 100,
+      minWidth: 84,
+      maxWidth: 180,
+      hideable: true,
+      sortable: true,
+      sortValue: (item) => item.started_at || item.created_at,
+      cell: (item, { compact }) => {
+        const live =
+          item.state === "RUNNING" ||
+          item.state === "PAUSING" ||
+          item.state === "CANCELLING";
+        const startedAt = item.started_at || item.created_at;
+        const started = compactTime(startedAt);
+        const full = formatTime(startedAt);
+        if (compact) {
+          return (
+            <span className="text-xs tabular whitespace-nowrap text-ink-2" title={full}>
+              {started}
+            </span>
+          );
+        }
+        return (
+          <div className="text-xs text-ink-3" title={full}>
+            <p className="tabular text-ink-2">{started}</p>
+            <p className="tabular">
+              {elapsedLabel(
+                startedAt,
+                live ? null : item.finished_at || item.updated_at,
+              )}
+            </p>
+          </div>
+        );
+      },
+    },
+    {
+      key: "actions",
+      label: "操作",
+      header: <span className="sr-only">操作</span>,
+      width: 104,
+      resizable: false,
+      sticky: "right",
+      hideable: false,
+      align: "right",
+      headerClassName: "px-2",
+      cellClassName: "px-2",
+      skeleton: false,
+      cell: (item) => {
+        const busy = recentRowBusy(item);
+        const rowMenuGroups = recentMenuGroups(item);
+        return (
+          <div className="flex items-center justify-end gap-0.5">
+            {item.state === "RUNNING" ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 w-7 px-0"
+                aria-label={`暂停 ${item.task_id}`}
+                title="暂停"
+                disabled={readOnly || busy}
+                onClick={() => void controlTask(item, "pause")}
+              >
+                <Pause size={14} aria-hidden="true" />
+              </Button>
+            ) : item.state === "PAUSED" ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 w-7 px-0"
+                aria-label={`继续 ${item.task_id}`}
+                title="继续"
+                disabled={readOnly || busy}
+                onClick={() => void controlTask(item, "resume")}
+              >
+                <Play size={14} aria-hidden="true" />
+              </Button>
+            ) : item.state === "QUEUED" ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 w-7 px-0"
+                aria-label={`取消 ${item.task_id}`}
+                title="取消任务"
+                disabled={readOnly || busy}
+                onClick={() => void controlTask(item, "cancel")}
+              >
+                <X size={14} aria-hidden="true" />
+              </Button>
+            ) : item.can_continue ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={readOnly || busy}
+                aria-label={`续采此运行 ${item.task_id}`}
+                onClick={() => openRunConfig(item.task_id)}
+              >
+                <Play size={14} aria-hidden="true" />
+                续采
+              </Button>
+            ) : item.outcome === "FAILED" && item.node_id ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 w-7 px-0"
+                aria-label={`重试 ${item.task_id}`}
+                title="按任务定义新建一次运行"
+                disabled={readOnly || busy}
+                onClick={() => {
+                  const node = nodes.find(
+                    (candidate) => candidate.node_id === item.node_id,
+                  );
+                  if (node) void runNode(node);
+                }}
+              >
+                <RotateCcw size={14} aria-hidden="true" />
+              </Button>
+            ) : (
+              <a
+                className="inline-flex h-7 w-7 items-center justify-center rounded-control text-ink-2 hover:bg-surface-muted"
+                href={taskExportUrl(item.task_id)}
+                aria-label={`导出 ${item.task_id}`}
+                title="导出当前任务结果"
+              >
+                <Download size={14} aria-hidden="true" />
+              </a>
+            )}
+            <RowActionsMenu
+              label={`更多 ${item.task_id} 操作`}
+              groups={rowMenuGroups}
+              busy={busy}
+              trigger={
+                <button
+                  type="button"
+                  className="flex h-7 w-7 items-center justify-center rounded-control text-ink-3 transition-colors hover:bg-surface-muted hover:text-ink data-[state=open]:bg-surface-muted data-[state=open]:text-ink disabled:pointer-events-none disabled:opacity-40"
+                  aria-label={`更多 ${item.task_id} 操作`}
+                  title="更多操作"
+                >
+                  <MoreHorizontal size={15} aria-hidden="true" />
+                </button>
+              }
+            />
+          </div>
+        );
+      },
+    },
+  ];
+
+  const recentTable = useTablePreferences({
+    tableKey: "workbench-recent",
+    columns: recentColumns,
+    defaultDensity: "default",
+  });
+  const recentSort = recentTable.sort;
+  const recentSortColumn = recentSort
+    ? recentColumns.find((column) => column.key === recentSort.key)
+    : undefined;
+  const recentSortBadge = recentSort
+    ? `${recentSortColumn?.label ?? "自定义"} ${
+        recentSort.direction === "asc" ? "↑" : "↓"
+      }`
+    : "按启动时间";
 
   function renderNode(node: WorkbenchNode, depth: number): ReactNode {
     if (visibleNodeIds && !visibleNodeIds.has(node.node_id)) return null;
@@ -1696,10 +2283,13 @@ export function WorkbenchPage() {
             <button
               type="button"
               className="flex h-6 w-6 shrink-0 items-center justify-center rounded-control text-ink-3 hover:bg-surface-muted hover:text-accent"
-              aria-label={`启动 ${node.name}`}
-              title={readOnly ? "只读预览不能启动任务" : "启动任务"}
+              aria-label={`${run?.can_continue ? "续采" : run ? "新建运行" : "启动"} ${node.name}`}
+              title={run?.can_continue ? "续采此运行" : run ? "新建运行" : "启动任务"}
               disabled={readOnly || actionBusy === `start:${node.node_id}`}
-              onClick={() => void runNode(node)}
+              onClick={() => {
+                if (run?.can_continue) openRunConfig(run.task_id);
+                else void runNode(node);
+              }}
             >
               <Play size={13} aria-hidden="true" />
             </button>
@@ -1795,6 +2385,20 @@ export function WorkbenchPage() {
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-0.5">
+                {pendingTotal > 0 ? (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="h-8 gap-1 px-2 text-[11px]"
+                    onClick={openPendingDialog}
+                    aria-label={`待接入目标 ${pendingTotal}`}
+                    title="待接入目标"
+                  >
+                    <ListPlus size={13} aria-hidden="true" />
+                    <span>待接入</span>
+                    <span>{pendingTotal}</span>
+                  </Button>
+                ) : null}
                 <Button
                   size="sm"
                   variant="primary"
@@ -2025,7 +2629,7 @@ export function WorkbenchPage() {
                       tone={scope === "removed" ? "neutral" : "info"}
                       className="px-1.5 py-0 text-[10px] font-medium"
                     >
-                      {scope === "removed" ? "仅本列表" : "按启动时间"}
+                      {scope === "removed" ? "仅本列表" : recentSortBadge}
                     </Badge>
                   </h2>
                   <p
@@ -2114,7 +2718,7 @@ export function WorkbenchPage() {
 
               <div className="flex flex-wrap divide-x divide-line border-t border-line bg-surface-muted">
                 {[
-                  ["最近任务", recentCounts.recent, "按启动时间"],
+                  ["最近任务", recentCounts.recent, "当前列表"],
                   ["运行中", recentCounts.running, "实时"],
                   ["排队中", recentCounts.queued, "等待槽位"],
                   ["有效商品", validCount, "当前列表"],
@@ -2166,6 +2770,18 @@ export function WorkbenchPage() {
                   右键或 ⋯ 操作 · 仅已结束可移除
                 </span>
                 <div className="ml-auto flex flex-wrap items-center gap-1.5">
+                  <TableViewToggle
+                    value={recentTable.density}
+                    options={densityViewOptions}
+                    onChange={recentTable.setDensity}
+                  />
+                  <TableDisplayOptions
+                    columns={recentColumns}
+                    visible={recentTable.visible}
+                    onToggleColumn={recentTable.toggleColumn}
+                    onResetWidths={() => resetRecentWidthsRef.current?.()}
+                    widthsDefault={!recentWidthsCustomized}
+                  />
                   <SearchInput
                     className="w-44 sm:w-56"
                     density="sm"
@@ -2279,14 +2895,37 @@ export function WorkbenchPage() {
               </div>
             ) : null}
 
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              <div className="flex min-h-full flex-col">
-                {recentQuery.isPending ? (
-                  <p className="px-3 py-4 text-xs text-ink-3" role="status">
-                    正在读取最近任务…
-                  </p>
-                ) : !recentError && recentItems.length === 0 ? (
-                  <div className="p-4">
+            <div className="min-h-0 flex-1">
+              <DataTable
+                caption="最近任务列表"
+                columns={recentTable.visibleColumns}
+                rows={recentTable.sortRows(recentItems)}
+                rowKey={(item) => item.task_id}
+                density={recentTable.density}
+                sort={recentTable.sort}
+                onSort={recentTable.toggleSort}
+                onSortChange={recentTable.setSort}
+                resizeKey="workbench-recent"
+                mobileCards
+                cardTitleKey="task"
+                headerTopClassName="top-0"
+                scrollerClassName="h-full overflow-auto [scrollbar-gutter:stable]"
+                cellPaddingClassName="py-1.5"
+                rowClassName={(item) =>
+                  selectedTaskId === item.task_id ? "bg-accent-soft" : ""
+                }
+                rowAriaLabel={(item) =>
+                  `运行 ${item.task_id}，${recentStatusLabel(item)}`
+                }
+                onRowClick={selectRecent}
+                onRowContextMenu={openRecentMenu}
+                onResetWidthsReady={(reset) => {
+                  resetRecentWidthsRef.current = reset;
+                }}
+                onWidthsCustomizedChange={setRecentWidthsCustomized}
+                loading={recentQuery.isPending}
+                empty={
+                  recentError ? null : (
                     <EmptyState
                       title={
                         scope === "removed"
@@ -2301,237 +2940,9 @@ export function WorkbenchPage() {
                           : "从左侧任务目录启动任务后，运行会出现在这里。"
                       }
                     />
-                  </div>
-                ) : null}
-
-                {recentItems.length ? (
-                  <div className="shrink-0 overflow-x-auto">
-                    <table className="w-full min-w-[700px] table-fixed text-left text-sm">
-                      <thead className="bg-surface-muted text-[11px] font-medium text-ink-3">
-                        <tr>
-                          <th className="w-[44px] py-2 pl-5 pr-2">
-                            <input
-                              type="checkbox"
-                              className="h-3.5 w-3.5 cursor-pointer accent-accent"
-                              checked={allVisibleSelected}
-                              aria-label="选择全部最近任务"
-                              onChange={toggleAllVisibleSelection}
-                              ref={(element) => {
-                                if (element) {
-                                  element.indeterminate = someVisibleSelected;
-                                }
-                              }}
-                            />
-                          </th>
-                          <th className="w-[78px] px-2 py-2">状态</th>
-                          <th className="px-2 py-2">任务 / 站点</th>
-                          <th className="w-[142px] px-2 py-2">进度</th>
-                          <th className="w-[84px] px-2 py-2 text-right">有效 / 失败</th>
-                          <th className="w-[88px] px-2 py-2">启动</th>
-                          <th className="sticky right-0 w-[82px] border-l border-line bg-surface-muted px-2 py-2 text-right">
-                            操作
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-line">
-                        {recentItems.map((item) => {
-                          const progress = progressFor(item);
-                          const elapsedLive =
-                            item.state === "RUNNING" ||
-                            item.state === "PAUSING" ||
-                            item.state === "CANCELLING";
-                          const selected = selectedTaskId === item.task_id;
-                          const busy = recentRowBusy(item);
-                          const rowMenuGroups = recentMenuGroups(item);
-                          return (
-                            <tr
-                              key={item.task_id}
-                              className={cn(
-                                "group align-middle",
-                                selected ? "bg-accent-soft" : "hover:bg-surface-muted",
-                              )}
-                              onClick={() => selectRecent(item)}
-                              onContextMenu={(event) => openRecentMenu(event, item)}
-                            >
-                              <td
-                                className="py-2 pl-5 pr-2"
-                                onClick={(event) => event.stopPropagation()}
-                              >
-                                <input
-                                  type="checkbox"
-                                  className="h-3.5 w-3.5 cursor-pointer accent-accent"
-                                  checked={selectedTaskIds.has(item.task_id)}
-                                  aria-label={`选择任务 ${item.task_id}`}
-                                  onChange={() => toggleRunSelection(item.task_id)}
-                                />
-                              </td>
-                              <td className="px-2.5 py-2">
-                                <Badge tone={taskStatusTone(item.state, item.outcome)}>
-                                  {taskStatusLabel(item.state, item.outcome)}
-                                </Badge>
-                              </td>
-                              <td className="px-2.5 py-2">
-                                <div className="min-w-0">
-                                  <div className="flex min-w-0 items-center gap-1.5">
-                                    <span className="truncate font-medium text-ink">
-                                      {item.definition_name ||
-                                        item.site_key ||
-                                        item.task_id}
-                                    </span>
-                                    <span className="shrink-0 rounded border border-line bg-surface-muted px-1 text-[10px] leading-4 text-ink-3">
-                                      {definitionTag(item)}
-                                    </span>
-                                  </div>
-                                  <p
-                                    className="mt-0.5 truncate text-[10.5px] text-ink-3"
-                                    title={`${item.path || "未加入任务树"} · ${item.task_id}`}
-                                  >
-                                    {item.path || "未加入任务树"} · {item.task_id}
-                                  </p>
-                                </div>
-                              </td>
-                              <td className="px-2.5 py-2">
-                                <div className="flex items-center gap-2">
-                                  <span className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-surface-sunken">
-                                    <span
-                                      className="block h-full rounded-full bg-accent"
-                                      style={{ width: `${progress.percent}%` }}
-                                    />
-                                  </span>
-                                  <span className="w-8 shrink-0 text-right text-[10.5px] tabular text-ink-3">
-                                    {progress.percent}%
-                                  </span>
-                                </div>
-                                <p className="mt-1 text-[10.5px] tabular text-ink-3">
-                                  {formatNumber(progress.processed)} /{" "}
-                                  {progress.total ? formatNumber(progress.total) : "—"}
-                                </p>
-                              </td>
-                              <td className="px-2.5 py-2 text-right text-xs">
-                                <p className="font-medium tabular text-ink">
-                                  {formatNumber(
-                                    Number(item.counts?.valid_products || 0),
-                                  )}
-                                </p>
-                                <p className="text-ink-3">
-                                  失败{" "}
-                                  {formatNumber(
-                                    Number(item.counts?.failed_products || 0),
-                                  )}
-                                </p>
-                              </td>
-                              <td className="px-2.5 py-2 text-[11px] text-ink-3">
-                                <p className="tabular text-ink-2">
-                                  {compactTime(item.started_at || item.created_at)}
-                                </p>
-                                <p className="tabular">
-                                  {elapsedLabel(
-                                    item.started_at || item.created_at,
-                                    elapsedLive
-                                      ? null
-                                      : item.finished_at || item.updated_at,
-                                  )}
-                                </p>
-                              </td>
-                              <td
-                                className={cn(
-                                  "sticky right-0 border-l border-line px-2 py-2",
-                                  selected
-                                    ? "bg-accent-soft"
-                                    : "bg-surface group-hover:bg-surface-muted",
-                                )}
-                                onClick={(event) => event.stopPropagation()}
-                              >
-                                <div className="flex items-center justify-end gap-0.5">
-                                  {item.state === "RUNNING" ? (
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      className="h-7 w-7 px-0"
-                                      aria-label={`暂停 ${item.task_id}`}
-                                      title="暂停"
-                                      disabled={readOnly || busy}
-                                      onClick={() => void controlTask(item, "pause")}
-                                    >
-                                      <Pause size={14} aria-hidden="true" />
-                                    </Button>
-                                  ) : item.state === "PAUSED" ? (
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      className="h-7 w-7 px-0"
-                                      aria-label={`继续 ${item.task_id}`}
-                                      title="继续"
-                                      disabled={readOnly || busy}
-                                      onClick={() => void controlTask(item, "resume")}
-                                    >
-                                      <Play size={14} aria-hidden="true" />
-                                    </Button>
-                                  ) : item.state === "QUEUED" ? (
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      className="h-7 w-7 px-0"
-                                      aria-label={`取消 ${item.task_id}`}
-                                      title="取消任务"
-                                      disabled={readOnly || busy}
-                                      onClick={() => void controlTask(item, "cancel")}
-                                    >
-                                      <X size={14} aria-hidden="true" />
-                                    </Button>
-                                  ) : item.outcome === "FAILED" && item.node_id ? (
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      className="h-7 w-7 px-0"
-                                      aria-label={`重试 ${item.task_id}`}
-                                      title="按任务定义新建一次运行"
-                                      disabled={readOnly || busy}
-                                      onClick={() => {
-                                        const node = nodes.find(
-                                          (candidate) =>
-                                            candidate.node_id === item.node_id,
-                                        );
-                                        if (node) void runNode(node);
-                                      }}
-                                    >
-                                      <RotateCcw size={14} aria-hidden="true" />
-                                    </Button>
-                                  ) : (
-                                    <a
-                                      className="inline-flex h-7 w-7 items-center justify-center rounded-control text-ink-2 hover:bg-surface-muted"
-                                      href={taskExportUrl(item.task_id)}
-                                      aria-label={`导出 ${item.task_id}`}
-                                      title="导出当前任务结果"
-                                    >
-                                      <Download size={14} aria-hidden="true" />
-                                    </a>
-                                  )}
-                                  <RowActionsMenu
-                                    label={`更多 ${item.task_id} 操作`}
-                                    groups={rowMenuGroups}
-                                    busy={busy}
-                                    trigger={
-                                      <button
-                                        type="button"
-                                        className="flex h-7 w-7 items-center justify-center rounded-control text-ink-3 transition-colors hover:bg-surface-muted hover:text-ink data-[state=open]:bg-surface-muted data-[state=open]:text-ink disabled:pointer-events-none disabled:opacity-40"
-                                        aria-label={`更多 ${item.task_id} 操作`}
-                                        title="更多操作"
-                                      >
-                                        <MoreHorizontal size={15} aria-hidden="true" />
-                                      </button>
-                                    }
-                                  />
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                ) : null}
-              </div>
+                  )
+                }
+              />
             </div>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line bg-surface-muted px-2.5 py-1.5 text-[11px] text-ink-3">
               <span>
@@ -3143,16 +3554,25 @@ export function WorkbenchPage() {
                     const canStart =
                       !run || (!isActiveState(runState) && runState !== null);
                     const items: WorkbenchMenuItem[] = [];
+                    if (run?.can_continue) {
+                      items.push({
+                        key: "continue",
+                        label: "续采此运行",
+                        icon: <Play size={14} />,
+                        disabled: readOnly,
+                        onSelect: () => openRunConfig(run.task_id),
+                      });
+                    }
                     if (canStart) {
                       items.push({
                         key: "start",
-                        label: "启动任务",
+                        label: run ? "新建运行" : "启动任务",
                         icon: <Play size={14} />,
                         disabled: readOnly,
                         onSelect: () => void runNode(node),
                       });
                     }
-                    if (runState === "RUNNING") {
+                    if (runState === "RUNNING" || runState === "QUEUED") {
                       items.push({
                         key: "pause",
                         label: "暂停运行",
@@ -3372,13 +3792,55 @@ export function WorkbenchPage() {
           initialParentId={dialogParentId}
           busy={formBusy === "new-batch"}
           error={dialogError}
+          result={batchResult}
           onOpenChange={(open) => {
             setNewBatchDialogOpen(open);
-            if (!open) setDialogError("");
+            if (!open) {
+              setDialogError("");
+              setBatchResult(null);
+            }
           }}
           onSubmit={(values) => void createBatchAndImport(values)}
+          onRetry={() => void retryBatchResult()}
+          onViewPending={viewPendingFromResult}
+          onDone={closeBatchResult}
         />
       ) : null}
+      <WorkbenchPendingTargetsDialog
+        open={pendingDialogOpen}
+        data={pendingTargets}
+        nodes={nodes}
+        busy={pendingBusy}
+        error={pendingError || pendingQueryError}
+        readOnly={readOnly}
+        onOpenChange={(open) => {
+          setPendingDialogOpen(open);
+          if (!open) setPendingError("");
+        }}
+        onRetry={(batch, targetId) => void retryPendingBatch(batch, targetId)}
+        onBuild={(batch, site) => void buildPendingSite(batch, site)}
+        onDismiss={askDismissPendingBatch}
+      />
+      <WorkbenchConfirmDialog
+        open={Boolean(dismissPendingTarget)}
+        title="忽略待接入提醒"
+        description={
+          dismissPendingTarget
+            ? `不再在待接入清单显示「${dismissPendingTarget.name}」的剩余目标。`
+            : ""
+        }
+        detail="只隐藏提醒，不取消正在进行的构建，不删除批次、任务定义或运行；再次添加同一批次会重新出现。"
+        confirmLabel="忽略此批次"
+        busy={dismissPendingBusy}
+        error={pendingError}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDismissPendingTarget(null);
+            setPendingError("");
+          }
+        }}
+        onConfirm={() => void confirmDismissPendingBatch()}
+      />
       {attachRun ? (
         <WorkbenchAttachDialog
           open

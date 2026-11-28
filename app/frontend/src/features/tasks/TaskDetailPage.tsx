@@ -31,6 +31,7 @@ import {
   formatTime,
   outcomeLabel,
   stopReasonLabel,
+  taskRecoveryLabel,
   taskStateLabel,
   taskStateTone,
 } from "../../lib/format";
@@ -119,6 +120,7 @@ export function TaskDetailPage() {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeView = parseTaskView(searchParams.get("view"));
+  const failedOnly = searchParams.get("items") === "failed";
   const returnTo = readListReturn(location.state);
   const backHref = returnTo?.href ?? "/tasks";
   const backLabel = returnTo?.label ?? "全部任务";
@@ -387,6 +389,14 @@ export function TaskDetailPage() {
     ]);
   }
   const controlActions: RowActionItem[] = [];
+  if (task.state === "QUEUED") {
+    controlActions.push({
+      key: "pause",
+      label: "暂停任务",
+      icon: <Pause size={14} />,
+      onSelect: () => void control("pause"),
+    });
+  }
   if (active && primary?.kind !== "cancel") {
     controlActions.push({
       key: "cancel",
@@ -440,12 +450,22 @@ export function TaskDetailPage() {
     </>
   );
 
-  const dataContent = isDiscovery ? (
-    <TaskItemsSection taskId={task.task_id} taskActive={active} />
-  ) : (
+  const dataContent = (
     <>
-      <TaskCsvPreview taskId={task.task_id} live={active} />
-      <TaskItemsSection taskId={task.task_id} taskActive={active} />
+      {!isDiscovery && !failedOnly ? (
+        <TaskCsvPreview taskId={task.task_id} live={active} />
+      ) : null}
+      {failedOnly ? (
+        <Link className="text-sm text-accent underline" to="?view=data">
+          查看全部工作项
+        </Link>
+      ) : null}
+      <TaskItemsSection
+        key={String(failedOnly)}
+        taskId={task.task_id}
+        taskActive={active}
+        failedOnly={failedOnly}
+      />
     </>
   );
 
@@ -622,6 +642,13 @@ export function TaskDetailPage() {
                 {task.plan_id}@{task.plan_version}
               </code>
             </p>
+            {task.stop_detail || task.recovery_state ? (
+              <p className="mt-1 text-xs text-ink-3">
+                {[taskRecoveryLabel(task.recovery_state), task.stop_detail]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </p>
+            ) : null}
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-3">
               <span>站点 {task.site_key}</span>
               <span>更新 {formatTime(task.updated_at)}</span>
@@ -634,9 +661,28 @@ export function TaskDetailPage() {
           </div>
 
           <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:shrink-0 lg:justify-end">
+            {task.can_continue ? (
+              <Button asChild variant="primary">
+                <Link to={`/workbench?continue=${encodeURIComponent(task.task_id)}`}>
+                  续采此运行
+                </Link>
+              </Button>
+            ) : task.outcome === "PARTIAL" &&
+              task.counts.failed_products &&
+              !failedOnly ? (
+              <Button asChild variant="primary">
+                <Link to="?items=failed">查看失败项</Link>
+              </Button>
+            ) : null}
             {primary ? (
               <Button
-                variant={primary.kind === "cancel" ? "danger" : "primary"}
+                variant={
+                  primary.kind === "cancel"
+                    ? "danger"
+                    : task.can_continue || task.outcome === "PARTIAL"
+                      ? "secondary"
+                      : "primary"
+                }
                 onClick={
                   primary.kind === "export"
                     ? downloadTask
@@ -647,7 +693,7 @@ export function TaskDetailPage() {
                         }
                       : () => void control(primary.kind)
                 }
-                disabled={Boolean(busy)}
+                disabled={Boolean(busy) || task.recovery_state === "EXPORT_PENDING"}
               >
                 {primary.kind === "pause" ? (
                   <Pause size={14} aria-hidden="true" />

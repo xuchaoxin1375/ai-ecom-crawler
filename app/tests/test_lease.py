@@ -149,12 +149,21 @@ class LeaseTests(unittest.TestCase):
         report = self.store.settle_expired_tasks()
         self.assertEqual(report["paused"], 1)
         self.assertEqual(report["cancelled"], 1)
+        self.assertEqual(
+            report["items"]["lease-pausing"],
+            {"in_flight": 1, "reset": 1, "failed": 0},
+        )
+        self.assertEqual(
+            report["items"]["lease-cancelling"],
+            {"in_flight": 1, "reset": 0, "failed": 1},
+        )
 
         paused = self.store.get_task("lease-pausing")
         cancelled = self.store.get_task("lease-cancelling")
         assert paused is not None and cancelled is not None
         self.assertEqual(paused.state, "PAUSED")
         self.assertEqual(cancelled.state, "CANCELLED")
+        self.assertEqual(cancelled.output["recovery_takeover_failed"], 1)
         self.assertIsNotNone(cancelled.finished_at)
         self.assertEqual(
             self.store.item_counts("lease-pausing", "product").get("IN_FLIGHT", 0),

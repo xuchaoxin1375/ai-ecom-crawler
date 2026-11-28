@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DataTable, type DataTableColumn } from "./DataTable";
 
@@ -192,6 +192,38 @@ describe("DataTable sorting affordance", () => {
   });
 });
 
+describe("DataTable row interactions", () => {
+  it("selects rows by click or keyboard but ignores nested controls", () => {
+    const onRowClick = vi.fn();
+    const onRowContextMenu = vi.fn();
+    render(
+      <DataTable
+        caption="测试列表"
+        columns={columns}
+        rows={rows}
+        rowKey={(row) => row.id}
+        rowAriaLabel={(row) => `行 ${row.id}`}
+        onRowClick={onRowClick}
+        onRowContextMenu={onRowContextMenu}
+      />,
+    );
+    const row = screen.getByRole("row", { name: "行 a" });
+
+    fireEvent.click(within(row).getByText("Alpha"));
+    expect(onRowClick).toHaveBeenCalledWith(rows[0]);
+
+    onRowClick.mockClear();
+    fireEvent.click(within(row).getByRole("button", { name: "查看" }));
+    expect(onRowClick).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(row, { key: "Enter" });
+    expect(onRowClick).toHaveBeenCalledWith(rows[0]);
+
+    fireEvent.contextMenu(within(row).getByText("Alpha"));
+    expect(onRowContextMenu).toHaveBeenCalledWith(expect.anything(), rows[0]);
+  });
+});
+
 describe("DataTable mobile cards", () => {
   function withNarrowContainer(test: () => void) {
     const descriptor = Object.getOwnPropertyDescriptor(
@@ -245,6 +277,26 @@ describe("DataTable mobile cards", () => {
       });
       fireEvent.change(sort, { target: { value: "" } });
       expect(onSortChange).toHaveBeenCalledWith(null);
+    });
+  });
+
+  it("uses cardTitleKey for the card title instead of the first data column", () => {
+    withNarrowContainer(() => {
+      render(
+        <DataTable
+          caption="测试列表"
+          columns={columns}
+          rows={rows}
+          rowKey={(row) => row.id}
+          resizeKey="test-table-card-title"
+          mobileCards
+          cardTitleKey="count"
+        />,
+      );
+      const cards = screen.getAllByRole("listitem");
+      expect(within(cards[0]).getByText("3")).toBeInTheDocument();
+      expect(within(cards[0]).getByText("名称")).toBeInTheDocument();
+      expect(within(cards[0]).getByText("Alpha")).toBeInTheDocument();
     });
   });
 
