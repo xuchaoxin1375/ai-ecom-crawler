@@ -383,6 +383,103 @@ it("activates a verified candidate from the build detail", async () => {
   );
 });
 
+it("explains why incomplete candidate evidence blocks activation", async () => {
+  const validation = {
+    status: "INCOMPLETE" as const,
+    candidate_smoke: {
+      executed: true,
+      valid_products: 2,
+      failed_products: 0,
+      excluded_products: 0,
+      currencies: { GBP: 2 },
+    },
+    issue_checks: [],
+    regression: {
+      executed: false,
+      required: true,
+      required_checked: 3,
+      checked: 0,
+      regressions: [],
+    },
+    content_audit: { products_checked: 2, description_gaps: 0 },
+    diff: { changed_fields: ["description_selector"], discovery_changed: false },
+    evidence_sha256: "a".repeat(64),
+  };
+  const build = buildFixture({
+    state: "FINISHED",
+    outcome: "succeeded",
+    mode: "repair",
+    rule: {
+      rule_id: "fixture-rule",
+      rule_version: "2026.11.28-1",
+      path: "rules/fixture.yaml",
+    },
+    source_rule: { rule_version: "2026.11.27-1", sha256: "b".repeat(64) },
+    candidate_rule: { rule_version: "2026.11.28-1", sha256: "a".repeat(64) },
+    change_summary: {
+      rule_id: "fixture-rule",
+      rule_version: "2026.11.28-1",
+      parent_version: "2026.11.27-1",
+      changed_fields: ["description_selector"],
+      discovery_changed: false,
+      scope_changed: false,
+      market_changed: false,
+      currency_changed: false,
+    },
+    validation,
+  });
+  const siteRule: SiteRuleResponse = {
+    site_key: "fixture.test",
+    rule_id: "fixture-rule",
+    active: {
+      rule_version: "2026.11.27-1",
+      sha256: "b".repeat(64),
+      path: "rules/fixture.yaml",
+      activated_at: date,
+    },
+    candidates: [
+      {
+        rule_version: "2026.11.28-1",
+        sha256: "a".repeat(64),
+        build_id: "build-1",
+        validation_status: "INCOMPLETE",
+        validation,
+        change_summary: {
+          rule_id: "fixture-rule",
+          rule_version: "2026.11.28-1",
+          parent_version: "2026.11.27-1",
+          changed_fields: ["description_selector"],
+          discovery_changed: false,
+          scope_changed: false,
+          market_changed: false,
+          currency_changed: false,
+        },
+        created_at: date,
+      },
+    ],
+    stale_tasks: 0,
+    open_feedback: 0,
+    retired_at: null,
+    retired_by: null,
+  };
+  await renderBuild(
+    build,
+    {
+      available: true,
+      reasoning_capture_enabled: false,
+      max_repair_rounds: 1,
+    },
+    "/builds/build-1",
+    siteRule,
+  );
+
+  expect(await screen.findByText("验证证据不完整，不能激活")).toBeVisible();
+  expect(screen.queryByRole("button", { name: "激活规则" })).not.toBeInTheDocument();
+  expect(
+    await screen.findByText("构建完成，候选规则已安装；验证证据不完整，不能激活。"),
+  ).toBeVisible();
+});
+
 it("links merged feedback and creates one shared rerun", async () => {
   const build = buildFixture({
     state: "FINISHED",

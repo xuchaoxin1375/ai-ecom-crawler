@@ -38,7 +38,11 @@ import {
 import { cn } from "../../lib/cn";
 import { useManualRefresh } from "../../lib/liveRefresh";
 import { readListReturn } from "../../lib/listReturn";
-import { buildIsActive, buildServiceBlockReason } from "../sites/site";
+import {
+  buildIsActive,
+  buildServiceBlockReason,
+  validationActivationBlockedReason,
+} from "../sites/site";
 import {
   buildEventText,
   buildEventTone,
@@ -580,6 +584,10 @@ export function BuildDetailPage() {
   const candidateRuleId = build.rule?.rule_id ?? build.change_summary?.rule_id ?? null;
   const candidateSourceVersion =
     build.source_rule?.rule_version ?? build.change_summary?.parent_version ?? null;
+  const candidateBlockedReason =
+    candidateVersion && build.validation
+      ? validationActivationBlockedReason(build.validation)
+      : null;
 
   const primary =
     build.state === "QUEUED" || build.state === "CREATED"
@@ -952,7 +960,9 @@ export function BuildDetailPage() {
         <p className="flex items-start gap-2 rounded-panel border border-success/25 bg-success-soft px-4 py-3 text-xs leading-5 text-success">
           <FileText className="mt-0.5 shrink-0" size={14} aria-hidden="true" />
           {candidateVersion
-            ? "构建完成，候选规则已安装；可在下方核对当前状态、激活或回滚。"
+            ? candidateBlockedReason
+              ? `构建完成，候选规则已安装；${candidateBlockedReason}。`
+              : "构建完成，候选规则已安装；可在下方核对当前状态和验证证据。"
             : "构建完成。"}
         </p>
       ) : null}
