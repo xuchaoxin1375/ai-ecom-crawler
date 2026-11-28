@@ -5,7 +5,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import sys
+import time
 import unittest
+from collections import defaultdict
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -16,7 +18,6 @@ GROUPS = {
         "test_normalize",
         "test_csv_contract",
         "test_rule_diff",
-        "test_batches",
     ),
     "api": (
         "test_web",
@@ -61,20 +62,41 @@ FULL_SHARDS = ("shard-1", "shard-2")
 PARALLEL_TIMEOUT = 180
 _CHILD = "_parallel-child"
 
-# Approximate serial seconds for the slowest modules. Other modules are still
-# discovered and get an estimate based on their test count.
+# Rounded seconds from the Windows serial baseline in docs/23. Modules absent
+# from the baseline use an estimate based on their test count.
 _MODULE_SECONDS = {
-    "tests.test_builds": 50,
+    "tests.test_builds": 75,
+    "tests.test_batches": 28,
+    "tests.test_web": 23,
+    "tests.test_browser_actions": 22,
+    "tests.test_workbench": 11,
+    "tests.test_hybrid": 9,
+    "tests.test_control_flow": 7,
+    "tests.test_execution": 7,
     "tests.test_browser": 4,
-    "tests.test_browser_actions": 12,
-    "tests.test_hybrid": 8,
-    "tests.test_web": 8,
-    "tests.test_control_flow": 6,
-    "tests.test_batches": 4,
     "tests.test_test_runner": 4,
-    "tests.test_execution": 3,
+    "tests.test_shopify": 3,
+    "tests.test_stop_evidence": 3,
+    "tests.test_run_config": 2,
+    "tests.test_feedback": 2,
+    "tests.test_rule_lifecycle": 2,
     "tests.test_harness": 2,
 }
+
+
+class ModuleTimingResult(unittest.TextTestResult):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.case_times: dict[str, list[float]] = defaultdict(list)
+        self._case_started = 0.0
+
+    def startTest(self, test: unittest.TestCase) -> None:
+        super().startTest(test)
+        self._case_started = time.perf_counter()
+
+    def stopTest(self, test: unittest.TestCase) -> None:
+        self.case_times[type(test).__module__].append(time.perf_counter() - self._case_started)
+        super().stopTest(test)
 
 
 def load_suite(
@@ -163,11 +185,15 @@ def run_suite(suite: unittest.TestSuite, scope: str, *, quiet: bool) -> int:
     sys.stderr.write(f"Backend suite: {scope}; {selected} tests selected\n")
     sys.stderr.flush()
     verbosity = 0 if quiet else 2
-    if sys.version_info >= (3, 12):
-        runner = unittest.TextTestRunner(verbosity=verbosity, durations=10)
-    else:
-        runner = unittest.TextTestRunner(verbosity=verbosity)
+    duration_options = {"durations": 10} if sys.version_info >= (3, 12) else {}
+    runner = unittest.TextTestRunner(
+        verbosity=verbosity, resultclass=ModuleTimingResult, **duration_options,
+    )
     result = runner.run(suite)
+    timings = [(sum(times), module, len(times)) for module, times in result.case_times.items()]
+    sys.stderr.write(f"Backend module timings ({scope}):\n")
+    for seconds, module, count in sorted(timings, key=lambda row: (-row[0], row[1])):
+        sys.stderr.write(f"  {seconds:8.3f}s  {count:3d} tests  {module}\n")
     for test, reason in result.skipped:
         sys.stderr.write(f"Not verified: {test}: {reason}\n")
     if result.testsRun != selected:

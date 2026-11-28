@@ -585,7 +585,7 @@ export function WorkbenchNewBatchDialog({
               onChange={(event) => setSitesText(event.target.value)}
             />
             <p className="mt-1.5 text-[11px] leading-5 text-ink-3">
-              每行一个站点；未匹配规则的站点会留在批次中等待接入，不会创建任务定义。
+              每行一个站点。未匹配规则的站点会在所选目录显示为「待接入」，可从节点启动接入构建。
             </p>
           </div>
         </div>

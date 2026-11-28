@@ -14,6 +14,7 @@ from tests.run import (
     iter_cases,
     load_suite,
     parallel_plan,
+    run_suite,
     split_full_suite,
 )
 
@@ -47,6 +48,20 @@ class TestSelectionTests(unittest.TestCase):
         shards.pop(next(iter(shards)))
         with self.assertRaisesRegex(ValueError, "differ from full test discovery"):
             parallel_plan(shards, full_suite=full_suite)
+
+    def test_quiet_suite_reports_module_timing_and_still_rejects_skips(self) -> None:
+        class Fixture(unittest.TestCase):
+            @unittest.skip("required fixture unavailable")
+            def test_skip(self) -> None:
+                pass
+
+        report = io.StringIO()
+        with contextlib.redirect_stderr(report):
+            code = run_suite(unittest.TestSuite([Fixture("test_skip")]), "fixture", quiet=True)
+        self.assertEqual(code, 1)
+        self.assertIn("Backend module timings (fixture):", report.getvalue())
+        self.assertIn(f"1 tests  {__name__}", report.getvalue())
+        self.assertIn("Not verified:", report.getvalue())
 
 
 if sys.platform == "win32":
@@ -103,8 +118,8 @@ receipt.write_text(fingerprint, encoding='ascii')
         def test_both_workers_pass_and_remove_their_temporary_directories(self) -> None:
             code, report, _ = self._run("pass")
             self.assertEqual(code, 0, report)
-            self.assertIn("build: passed", report)
-            self.assertIn("runtime: passed", report)
+            self.assertRegex(report, r"build: passed in \d+\.\d+s")
+            self.assertRegex(report, r"runtime: passed in \d+\.\d+s")
 
         def test_zero_exit_without_completion_receipt_fails(self) -> None:
             code, report, _ = self._run("missing-receipt")

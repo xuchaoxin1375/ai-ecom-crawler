@@ -1376,6 +1376,48 @@ class WorkbenchApiTests(unittest.TestCase):
         self.assertEqual(started.status_code, 202, started.text)
         self.assertEqual(started.json()["task"]["task_type"], "product")
 
+    def test_root_batch_keeps_recovery_intent_before_import(self) -> None:
+        payload = {"name": "root batch", "market": "GB", "sites": ["https://fixture.example/"]}
+        root_batch = self.client.post("/api/batches", json={**payload, "workbench_parent_id": None})
+        ordinary_batch = self.client.post("/api/batches", json=payload)
+        self.assertEqual(root_batch.status_code, 201, root_batch.text)
+        self.assertEqual(ordinary_batch.status_code, 201, ordinary_batch.text)
+        root_id = root_batch.json()["batch"]["batch_id"]
+        ordinary_id = ordinary_batch.json()["batch"]["batch_id"]
+
+        pending = self.client.get("/api/workbench/pending-targets").json()
+        self.assertEqual([batch["batch_id"] for batch in pending["batches"]], [root_id])
+        self.assertIsNone(pending["batches"][0]["target"]["node_id"])
+        self.assertIsNone(self.store.get_workbench_batch_import(ordinary_id))
+        imported = self.client.post("/api/workbench/import-batch", json={"batch_id": root_id})
+        self.assertEqual(imported.status_code, 200, imported.text)
+        self.assertEqual(imported.json()["counts"]["added"], 1)
+
+    def test_pending_target_identity_respects_market_and_legacy_market_fallback(self) -> None:
+        _, node_id = self.create_task_node()
+        for market in ("GB", "FR"):
+            created = self.client.post(
+                "/api/batches",
+                json={
+                    "name": f"{market} batch",
+                    "market": market,
+                    "sites": ["https://fixture.example/"],
+                    "workbench_parent_id": None,
+                },
+            )
+            self.assertEqual(created.status_code, 201, created.text)
+
+        with patch("ecom_crawler.web.app.site_identity", wraps=site_identity) as normalize:
+            pending = self.client.get("/api/workbench/pending-targets").json()
+        self.assertEqual(normalize.call_count, 3)
+        self.assertEqual([batch["market"] for batch in pending["batches"]], ["FR"])
+
+        self.store.update_workbench_task(node_id, utc_now(), market=None)
+        with patch("ecom_crawler.web.app._rule_entries") as rules:
+            pending = self.client.get("/api/workbench/pending-targets").json()
+        self.assertEqual(pending["total_pending"], 0)
+        rules.assert_not_called()
+
     def test_pending_target_market_conflict_has_no_build_action(self) -> None:
         created = self.client.post(
             "/api/batches",

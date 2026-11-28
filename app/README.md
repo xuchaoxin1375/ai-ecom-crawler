@@ -76,7 +76,7 @@ python -m uv run --project app --extra dev --frozen --no-sync python app/tests/r
 python -m uv run --project app --extra dev --frozen --no-sync ruff check app
 ```
 
-不带参数时跑日常快跑组。`all` 串行执行完整后端回归，`all --jobs 2` 在 Windows 上用两个进程执行同一批用例。`parallel` 在 Windows 上对应构建和运行时两组。CI 使用串行 `all`，有失败或跳过时返回非零。其他分组和排错方式见[后端测试怎么跑](../docs/23-测试策略.md#后端测试怎么跑)。
+不带参数时运行基础契约快跑组。涉及批次或任务接口时运行 `api`，用进程内 FastAPI `TestClient` 和临时 SQLite，可加 `-k` 定位到具体用例。运行 `all` 无需手动启动面板，涉及采集和浏览器的用例会自行启动本地夹具。`all` 串行执行完整后端回归，`all --jobs 2` 在 Windows 上用两个进程执行同一批用例。`parallel` 在 Windows 上对应构建和运行时两组。CI 使用串行 `all`，有失败或跳过时返回非零。`-q` 保留模块和分片耗时。 [后端测试分组](../docs/23-测试策略.md#后端测试怎么跑) · [什么时候起服务](../docs/23-测试策略.md#什么时候起服务)
 
 进程级恢复演练是单独入口，不进入默认测试发现；它启动真实 `serve` 子进程并在请求在途时强杀，覆盖整机断电式接管、商品明细丢失后的导出重建，以及不可重建时的明确异常。演练使用临时账本和回环 fixture，证据目录不要放入仓库：
 

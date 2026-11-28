@@ -1945,11 +1945,9 @@ export function WorkbenchPage() {
         (item.definition_name || item.site_key || item.task_id).toLocaleLowerCase(),
       cell: (item, { compact }) => {
         const title = item.definition_name || item.site_key || item.task_id;
+        const location = item.path || (item.node_id ? "根目录" : "未加入任务树");
         return (
-          <div
-            className="min-w-0"
-            title={`${title} · ${item.path || "未加入任务树"} · ${item.task_id}`}
-          >
+          <div className="min-w-0" title={`${title} · ${location} · ${item.task_id}`}>
             <div className="flex min-w-0 items-center gap-1.5">
               <span className="truncate font-semibold text-ink">{title}</span>
               <span className="shrink-0 rounded border border-line bg-surface-muted px-1 text-[10px] leading-4 text-ink-3">
@@ -1958,7 +1956,7 @@ export function WorkbenchPage() {
             </div>
             {compact ? null : (
               <p className="mt-0.5 truncate text-xs text-ink-3">
-                {item.path || "未加入任务树"} · {item.task_id}
+                {location} · {item.task_id}
               </p>
             )}
           </div>
@@ -2464,7 +2462,10 @@ export function WorkbenchPage() {
     : (selectedNode?.name ?? "");
   const selectedDefinition =
     selectedRecent?.definition ?? selectedNode?.definition ?? null;
-  const selectedPath = selectedRecent?.path ?? selectedNode?.path ?? null;
+  const selectedPath =
+    selectedRecent?.path ??
+    selectedNode?.path ??
+    (selectedRecent?.node_id || selectedNode ? "根目录" : "未加入任务树");
   const detailCounts =
     selectedRecent?.counts ?? selectedNode?.current_run?.counts ?? {};
 
@@ -3503,7 +3504,7 @@ export function WorkbenchPage() {
                             : "未启动",
                         ],
                         ["任务 ID", selectedTaskId || "—"],
-                        ["位置", selectedPath || "未加入任务树"],
+                        ["位置", selectedPath],
                         [
                           "规则",
                           selectedDefinition

@@ -117,6 +117,7 @@ class _Worker:
     temp: Path
     receipt: Path
     fingerprint: str
+    started: float
 
     def passed(self) -> bool:
         return (
@@ -152,6 +153,7 @@ def _start_worker(
     job: _Job, command: list[str], root: Path, name: str, fingerprint: str, quiet: bool,
     deadline: float, modules: tuple[str, ...] = (),
 ) -> _Worker:
+    started = time.monotonic()
     temp = root / name
     temp.mkdir()
     log = root / f"{name}.log"
@@ -180,7 +182,7 @@ def _start_worker(
                 process.kill()
             process.wait(timeout=_CLEANUP_SECONDS)
             raise
-    return _Worker(name, process, temp, receipt, fingerprint)
+    return _Worker(name, process, temp, receipt, fingerprint, started)
 
 
 def _report(message: str) -> None:
@@ -212,13 +214,16 @@ def run_parallel(
         code = 0
         while pending:
             if time.monotonic() >= deadline:
-                raise TimeoutError(f"parallel time limit reached ({timeout}s)")
+                names = ", ".join(worker.name for worker in pending)
+                raise TimeoutError(f"parallel time limit reached ({timeout}s); pending: {names}")
             for worker in pending.copy():
                 if worker.process.poll() is None:
                     continue
                 pending.remove(worker)
                 passed = worker.passed()
-                _report(f"{worker.name}: {'passed' if passed else 'failed or incomplete'}")
+                elapsed = time.monotonic() - worker.started
+                outcome = "passed" if passed else "failed or incomplete"
+                _report(f"{worker.name}: {outcome} in {elapsed:.2f}s")
                 if not passed:
                     code = 1
             if pending:

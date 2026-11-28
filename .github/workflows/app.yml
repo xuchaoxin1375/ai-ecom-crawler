@@ -29,14 +29,17 @@ jobs:
         # 固定本机验证过的版本；升级时同时复跑 --frozen 检查。
         run: python -m pip install "uv==0.13.9"
 
+      - name: Sync backend dependencies
+        run: python -m uv sync --project app --extra dev --frozen
+
       - name: Install Chromium
-        run: python -m uv run --project app --frozen python -m patchright install --with-deps chromium
+        run: python -m uv run --project app --extra dev --frozen --no-sync python -m patchright install --with-deps chromium
 
       - name: Run backend tests
-        run: python -m uv run --project app --extra dev --frozen python app/tests/run.py all -q
+        run: python -m uv run --project app --extra dev --frozen --no-sync python app/tests/run.py all -q
 
       - name: Run Ruff
-        run: python -m uv run --project app --extra dev --frozen ruff check app
+        run: python -m uv run --project app --extra dev --frozen --no-sync ruff check app
 
   frontend:
     runs-on: ubuntu-latest

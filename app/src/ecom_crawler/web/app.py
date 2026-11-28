@@ -6045,8 +6045,19 @@ def create_app(
 
     @app.get("/api/workbench/pending-targets")
     def workbench_pending_targets() -> dict[str, Any]:
-        entries = _rule_entries(rules) if rules is not None and rules.is_dir() else []
-        definitions = store.list_workbench_task_defs()
+        entries: list[dict[str, Any]] | None = None
+        intents = store.list_workbench_batch_imports()
+        definitions = store.list_workbench_task_defs() if intents else []
+        scoped_identities: set[tuple[str, str | None, str]] = set()
+        unscoped_identities: set[tuple[str, str | None]] = set()
+        for definition in definitions:
+            domain, entry, market = site_identity(
+                definition.domain, definition.input_url, definition.market
+            )
+            if definition.market:
+                scoped_identities.add((domain, entry, market))
+            else:
+                unscoped_identities.add((domain, entry))
         onboarding_available = (
             build_manager is not None and not builds_disabled and not read_only
         )
@@ -6059,7 +6070,7 @@ def create_app(
             )
         batches: list[dict[str, Any]] = []
         total_pending = 0
-        for intent in store.list_workbench_batch_imports():
+        for intent in intents:
             batch = store.get_batch(intent.batch_id)
             if batch is None or batch.archived_at is not None:
                 continue
@@ -6074,19 +6085,12 @@ def create_app(
                 "missing": bool(intent.parent_id and parent is None),
             }
             sites = store.list_batch_sites(batch.batch_id)
-            defs_by_identity: dict[tuple[str, str | None, str], WorkbenchTaskDef] = {}
-            for definition in definitions:
-                identity = site_identity(
-                    definition.domain,
-                    definition.input_url,
-                    definition.market or batch.market,
-                )
-                defs_by_identity.setdefault(identity, definition)
             counts: Counter[str] = Counter(sites=len(sites))
             pending_sites: list[dict[str, Any]] = []
             for site in sites:
                 identity = site_identity(site.domain, site.input_value, batch.market)
-                if identity in defs_by_identity:
+                domain, entry, _ = identity
+                if identity in scoped_identities or (domain, entry) in unscoped_identities:
                     counts["in_workbench"] += 1
                     continue
                 if site.readiness in {"invalid", "duplicate"}:
@@ -6100,6 +6104,8 @@ def create_app(
                         limit=1,
                     )
                     build = recent_builds[0] if recent_builds else None
+                if entries is None:
+                    entries = _rule_entries(rules) if rules is not None and rules.is_dir() else []
                 rule, note = resolve_workbench_target_rule(site, batch, entries)
                 if build is not None and build.state in ACTIVE_BUILD_STATES:
                     category = "building"
@@ -7649,7 +7655,7 @@ def create_app(
             folder_id=payload.folder_id,
         )
         try:
-            if payload.workbench_parent_id is not None:
+            if "workbench_parent_id" in payload.model_fields_set:
                 store.create_batch_with_workbench_import(
                     batch, parent_id=payload.workbench_parent_id
                 )
