@@ -631,10 +631,6 @@ export function SystemSettingsPage() {
           ),
         )
       : 0;
-  const diskWarning =
-    data.storage.disk_total_bytes > 0 &&
-    data.storage.disk_free_bytes / data.storage.disk_total_bytes < 0.1;
-
   let switchDisabledReason = "";
   if (readOnly) switchDisabledReason = "只读预览不能修改访问设置。";
   else if (disabledFromLan)
@@ -1240,30 +1236,6 @@ export function SystemSettingsPage() {
           kind="build"
           onRestartRequired={setRestartNotice}
         />
-        <div className="border-t border-line px-4 py-4 sm:px-6">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-xs font-medium text-ink-3">磁盘占用</p>
-            <p className={cn("text-xs", diskWarning ? "text-warning" : "text-ink-3")}>
-              {diskWarning ? "剩余空间低于 10%" : `剩余 ${100 - usedPercent}%`}
-            </p>
-          </div>
-          <div
-            className="mt-2 h-2 overflow-hidden rounded-full bg-surface-muted"
-            role="progressbar"
-            aria-label="磁盘使用率"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={usedPercent}
-          >
-            <div
-              className={cn(
-                "h-full rounded-full transition-[width]",
-                diskWarning ? "bg-warning" : "bg-accent",
-              )}
-              style={{ width: `${usedPercent}%` }}
-            />
-          </div>
-        </div>
       </section>
 
       <CollectionPolicySettings />

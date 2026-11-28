@@ -110,6 +110,7 @@ export function ResourceGauges({
   const diskUsed = Number(data?.storage.disk_used_bytes || 0);
   const diskFree = Number(data?.storage.disk_free_bytes || 0);
   const diskPercent = diskTotal > 0 ? (diskUsed / diskTotal) * 100 : 0;
+  const diskLow = diskTotal > 0 && diskFree / diskTotal < 0.1;
   const cpu = resources?.available ? resources.cpu_percent : null;
   const memory = resources?.available ? resources.memory_percent : null;
   const windowSeconds = resources?.cpu_window_ms
@@ -184,7 +185,11 @@ export function ResourceGauges({
               label="磁盘占用"
               value={diskTotal ? diskPercent : null}
               tone={toneFor(diskPercent, 90, 95)}
-              hint={diskTotal ? `${formatBytes(diskFree)} 可用` : "磁盘信息不可用"}
+              hint={
+                diskTotal
+                  ? `${formatBytes(diskFree)} 可用${diskLow ? " · 剩余低于 10%" : ""}`
+                  : "磁盘信息不可用"
+              }
               icon={<HardDrive size={12} aria-hidden="true" />}
             />
           </div>
