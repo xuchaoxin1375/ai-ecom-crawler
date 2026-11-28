@@ -66,7 +66,9 @@ function stopEvidenceText(task: TaskSummary): string {
   const evidence = task.stop_evidence;
   if (evidence) {
     if (evidence.engine) parts.push(`引擎 ${evidence.engine}`);
-    if (evidence.status != null) parts.push(`HTTP ${evidence.status}`);
+    if (typeof evidence.status === "number") {
+      parts.push(`HTTP ${evidence.status}`);
+    }
     if (evidence.attempts != null) parts.push(`尝试 ${evidence.attempts}`);
     if (evidence.retry_after != null) {
       parts.push(`Retry-After ${evidence.retry_after}s`);
@@ -78,6 +80,8 @@ function stopEvidenceText(task: TaskSummary): string {
   const check = task.language_check;
   if (check?.status === "mismatch") {
     parts.push(`预期 ${check.expected || "未知"} · 实际 ${check.actual || "未知"}`);
+    if (check.source) parts.push(`来源 ${check.source}`);
+    if (check.multilingual) parts.push("多语言站点");
     if (check.suggested_url) parts.push(`可用入口 ${check.suggested_url}`);
   }
   return parts.join(" · ");
@@ -215,6 +219,8 @@ export function TaskDetailPage() {
   const siteRule = site?.rule ?? null;
   const stale = task ? (task.rule?.stale ?? taskRuleIsStale(task, siteRule)) : false;
   const evidenceText = task ? stopEvidenceText(task) : "";
+  const stopDetailText =
+    task?.stop_detail_code === "language_mismatch" ? "" : task?.stop_detail;
   const activeVersion = task?.rule?.active_version ?? siteRule?.rule_version;
   const exportTaskId = site?.export_task_id ?? null;
   const currentDelivery = Boolean(
@@ -692,18 +698,15 @@ export function TaskDetailPage() {
               ) : null}
             </div>
             <p className="mt-1 max-w-3xl text-sm leading-6 text-ink-2">
-              {stopReasonLabel(task.stop_reason)} · 规则{" "}
+              {task.stop_detail_code ? null : `${stopReasonLabel(task.stop_reason)} · `}
+              规则{" "}
               <code className="font-mono text-[11px]">
                 {task.plan_id}@{task.plan_version}
               </code>
             </p>
-            {task.stop_detail || task.recovery_state || evidenceText ? (
+            {stopDetailText || task.recovery_state || evidenceText ? (
               <p className="mt-1 text-xs text-ink-3">
-                {[
-                  taskRecoveryLabel(task.recovery_state),
-                  task.stop_detail,
-                  evidenceText,
-                ]
+                {[taskRecoveryLabel(task.recovery_state), stopDetailText, evidenceText]
                   .filter(Boolean)
                   .join(" · ")}
               </p>

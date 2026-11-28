@@ -334,6 +334,7 @@ describe("task detail recovery", () => {
         status: "mismatch",
         expected: "en-GB",
         actual: "fr",
+        source: "html_lang",
         suggested_url: "https://fixture.test/en/",
       },
     };
@@ -342,6 +343,8 @@ describe("task detail recovery", () => {
       expect(await screen.findByText("语言与预期不一致")).toBeVisible();
       expect(screen.getByText(/预期 en-GB · 实际 fr/)).toBeVisible();
       expect(screen.getByText(/可用入口 https:\/\/fixture\.test\/en\//)).toBeVisible();
+      expect(screen.getByText(/来源 html_lang/)).toBeVisible();
+      expect(screen.queryByText(/HTTP mismatch/)).not.toBeInTheDocument();
     } finally {
       unmount();
     }
