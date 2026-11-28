@@ -1803,6 +1803,7 @@ export function getTaskItems(
   state?: string,
   order: "asc" | "desc" = "asc",
   signal?: AbortSignal,
+  includeDescription = false,
 ): Promise<TaskItemPage> {
   return getJson<TaskItemPage>(
     `/api/tasks/${encodeURIComponent(taskId)}/items${query({
@@ -1811,6 +1812,7 @@ export function getTaskItems(
       offset,
       state,
       order,
+      include_description: includeDescription,
     })}`,
     signal,
   );

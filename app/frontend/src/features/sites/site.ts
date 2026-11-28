@@ -449,6 +449,16 @@ export function previewMeta(item: TaskItem): string {
   return [product.brand, product.category].filter(Boolean).map(String).join(" · ");
 }
 
+export function previewDescription(item: TaskItem): string {
+  const product = productPreview(item);
+  return htmlToText(product.description_text || product.description_html || "");
+}
+
+export function previewAttributes(item: TaskItem): string {
+  const value = productPreview(item).attributes;
+  return value ? String(value) : "";
+}
+
 export function previewDescriptionStatus(item: TaskItem): string {
   const value = productPreview(item).description_status;
   return value ? descriptionStatusLabel(String(value)) : "";

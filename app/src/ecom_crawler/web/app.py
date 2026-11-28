@@ -24,6 +24,7 @@ from collections import Counter
 from collections.abc import Iterable
 from contextlib import asynccontextmanager
 from dataclasses import replace
+from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
@@ -1949,7 +1950,93 @@ def _workbench_recent_payload(
     }
 
 
-def _item_payload(item: WorkItem) -> dict[str, Any]:
+PRODUCT_INDEX_MAX_BYTES = 128 * 1024 * 1024
+
+
+@lru_cache(maxsize=8)
+def _cached_product_index(
+    path_text: str,
+    mtime_ns: int,
+    size: int,
+) -> dict[str, dict[str, str]]:
+    """Index exported product rows by source URL for on-demand list enrichment.
+
+    The cache key carries the file timestamp and size so a live products.jsonl
+    is re-read after each append without persisting descriptions in the ledger.
+    """
+
+    path = Path(path_text)
+    index: dict[str, dict[str, str]] = {}
+    try:
+        if path.suffix.lower() == ".csv":
+            with path.open(encoding="utf-8", newline="") as handle:
+                for row in csv.DictReader(handle):
+                    if not row:
+                        continue
+                    source_url = str(row.get("source_url") or "").strip()
+                    if not source_url:
+                        continue
+                    normalized = {key: str(row.get(key) or "") for key in CSV_COLUMNS}
+                    index[source_url] = normalized
+                    index.setdefault(source_url.rstrip("/"), normalized)
+        else:
+            with path.open(encoding="utf-8") as handle:
+                for line in handle:
+                    if not line.strip():
+                        continue
+                    try:
+                        record = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(record, dict):
+                        continue
+                    source_url = str(record.get("source_url") or "").strip()
+                    if not source_url:
+                        continue
+                    normalized = {
+                        key: str(record.get(key) or "") for key in CSV_COLUMNS
+                    }
+                    index[source_url] = normalized
+                    index.setdefault(source_url.rstrip("/"), normalized)
+    except (OSError, csv.Error, UnicodeDecodeError):
+        return {}
+    return index
+
+
+def _product_row_index(task: Task, root: Path) -> dict[str, dict[str, str]]:
+    task_dir = root / task.task_id
+    terminal = task.state in {"FINISHED", "CANCELLED"}
+    csv_path = task_dir / "products.csv"
+    jsonl_path = task_dir / "products.jsonl"
+    path = csv_path if terminal and csv_path.is_file() else jsonl_path
+    if not path.is_file():
+        return {}
+    try:
+        stat = path.stat()
+    except OSError:
+        return {}
+    if stat.st_size > PRODUCT_INDEX_MAX_BYTES:
+        return {}
+    return _cached_product_index(str(path), stat.st_mtime_ns, stat.st_size)
+
+
+def _item_payload(
+    item: WorkItem,
+    product_index: dict[str, dict[str, str]] | None = None,
+) -> dict[str, Any]:
+    result = {
+        key: value for key, value in item.result.items() if key != "product_record"
+    }
+    if product_index and item.item_type == "product" and item.state == "DONE":
+        row = product_index.get(item.url) or product_index.get(item.url.rstrip("/"))
+        if row:
+            preview = dict(result.get("product_preview") or {})
+            for key in ("description_html", "attributes"):
+                value = row.get(key)
+                if value:
+                    preview[key] = value
+            if preview:
+                result["product_preview"] = preview
     return {
         "item_id": item.item_id,
         "item_type": item.item_type,
@@ -1958,7 +2045,7 @@ def _item_payload(item: WorkItem) -> dict[str, Any]:
         "occurred_at": item.updated_at,
         "attempts": item.attempts,
         "failure_class": item.failure_class,
-        "result": item.result,
+        "result": result,
     }
 
 
@@ -4348,14 +4435,16 @@ def create_app(
         }
 
     @app.get("/api/tasks/{task_id}/items")
-    def list_items(        task_id: str,
+    def list_items(
+        task_id: str,
         kind: Annotated[str, Query(pattern="^(url|product)$")] = "product",
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         offset: Annotated[int, Query(ge=0)] = 0,
         state: Annotated[str | None, Query(max_length=20)] = None,
         order: Annotated[str, Query(pattern="^(asc|desc)$")] = "asc",
+        include_description: bool = False,
     ) -> dict[str, Any]:
-        require_task(task_id)
+        task = require_task(task_id)
         item_type = "navigation" if kind == "url" else "product"
         items = store.items(task_id, item_type)
         if state:
@@ -4363,9 +4452,17 @@ def create_app(
             items = [item for item in items if item.state == wanted]
         if order == "desc":
             items = list(reversed(items))
+        product_index = (
+            _product_row_index(task, root)
+            if include_description and item_type == "product"
+            else None
+        )
         return {
             "total": len(items),
-            "items": [_item_payload(item) for item in items[offset : offset + limit]],
+            "items": [
+                _item_payload(item, product_index)
+                for item in items[offset : offset + limit]
+            ],
         }
 
     @app.get("/api/media/image")

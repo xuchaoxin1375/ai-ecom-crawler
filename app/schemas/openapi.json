@@ -7669,6 +7669,16 @@
               "title": "Order",
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "include_description",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Description",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {

@@ -489,6 +489,66 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(failed["total"], 1)
         self.assertEqual(failed["items"][0]["item_id"], "p-2")
 
+    def test_items_can_include_full_description_from_export(self) -> None:
+        csv_path = self.out_root / "task-1" / "products.csv"
+        csv_path.write_text(
+            "name,price_amount,price_currency,primary_image_url,description_html,"
+            "category,brand,attributes,source_url\n"
+            'Sample,6.45,EUR,,<p>Full description</p>,Textile,Fixture,'
+            "Taille#S|M,https://fixture.test/p0.html\n",
+            encoding="utf-8",
+        )
+
+        plain = self.client.get(
+            "/api/tasks/task-1/items?kind=product&state=DONE"
+        ).json()
+        self.assertNotIn(
+            "description_html",
+            plain["items"][0]["result"].get("product_preview", {}),
+        )
+
+        enriched = self.client.get(
+            "/api/tasks/task-1/items?kind=product&state=DONE&include_description=true"
+        ).json()
+        preview = enriched["items"][0]["result"]["product_preview"]
+        self.assertEqual(preview["description_html"], "<p>Full description</p>")
+        self.assertEqual(preview["attributes"], "Taille#S|M")
+
+    def test_items_include_description_from_live_jsonl(self) -> None:
+        self.store.create_task(make_task("running-1", state="RUNNING"))
+        self.store.add_item(
+            WorkItem(
+                task_id="running-1",
+                item_id="live-1",
+                item_type="product",
+                url="https://fixture.test/live.html",
+                normalized_url="https://fixture.test/live.html",
+                state="DONE",
+                stage="product",
+            )
+        )
+        task_dir = self.out_root / "running-1"
+        task_dir.mkdir()
+        (task_dir / "products.jsonl").write_text(
+            json.dumps(
+                {
+                    "name": "Live sample",
+                    "description_html": "<p>Live description</p>",
+                    "attributes": "Taille#L",
+                    "source_url": "https://fixture.test/live.html",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        payload = self.client.get(
+            "/api/tasks/running-1/items?kind=product&state=DONE&include_description=true"
+        ).json()
+        preview = payload["items"][0]["result"]["product_preview"]
+        self.assertEqual(preview["description_html"], "<p>Live description</p>")
+        self.assertEqual(preview["attributes"], "Taille#L")
+
     def test_csv_preview_reads_export_header_and_rows(self) -> None:
         csv_path = self.out_root / "task-1" / "products.csv"
         csv_path.write_text(

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 import { getTaskCsv, type TaskItem } from "../../lib/api";
@@ -7,25 +7,14 @@ import { useManualRefresh } from "../../lib/liveRefresh";
 import { cn } from "../../lib/cn";
 import { Button } from "../../components/ui/Button";
 import { ErrorNotice } from "../../components/ui/ErrorNotice";
+import { DescriptionModeToggle } from "./DescriptionModeToggle";
 import { ProductThumb } from "./ProductThumb";
 import { ProductPreviewDialog } from "./ProductPreviewDialog";
 import { PreviewSettingsButton } from "./PreviewSettingsButton";
+import { useDescriptionMode } from "./descriptionMode";
 import { htmlToText, previewImage } from "./site";
 
 const PAGE_SIZE = 20;
-const DESCRIPTION_MODE_KEY = "ecom.csv-description-mode";
-
-type DescriptionMode = "truncate" | "wrap";
-
-function readDescriptionMode(): DescriptionMode {
-  try {
-    return window.localStorage.getItem(DESCRIPTION_MODE_KEY) === "wrap"
-      ? "wrap"
-      : "truncate";
-  } catch {
-    return "truncate";
-  }
-}
 
 const COLUMN_LABELS: Record<string, string> = {
   name: "商品名",
@@ -88,17 +77,8 @@ export function TaskCsvPreview({ taskId, live }: TaskCsvPreviewProps) {
   const [previewItem, setPreviewItem] = useState<TaskItem | null>(null);
   const [previewTab, setPreviewTab] = useState<"image" | "description">("image");
   const [previewOpen, setPreviewOpen] = useState(false);
-  const [descriptionMode, setDescriptionMode] =
-    useState<DescriptionMode>(readDescriptionMode);
+  const [descriptionMode, setDescriptionMode] = useDescriptionMode();
   const { refreshing, runRefresh } = useManualRefresh();
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(DESCRIPTION_MODE_KEY, descriptionMode);
-    } catch {
-      // A blocked storage area should not break the preview.
-    }
-  }, [descriptionMode]);
 
   function openPreview(item: TaskItem, tab: "image" | "description") {
     setPreviewItem(item);
@@ -135,33 +115,10 @@ export function TaskCsvPreview({ taskId, live }: TaskCsvPreviewProps) {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <div
-            className="flex items-center gap-0.5 rounded-full border border-line bg-surface p-0.5"
-            role="group"
-            aria-label="描述显示方式"
-          >
-            {(
-              [
-                ["truncate", "单行"],
-                ["wrap", "换行"],
-              ] as const
-            ).map(([value, label]) => (
-              <button
-                key={value}
-                type="button"
-                aria-pressed={descriptionMode === value}
-                className={cn(
-                  "h-6 rounded-full px-2 text-[10.5px] font-medium",
-                  descriptionMode === value
-                    ? "bg-accent-soft text-accent"
-                    : "text-ink-3 hover:bg-surface-muted hover:text-ink",
-                )}
-                onClick={() => setDescriptionMode(value)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+          <DescriptionModeToggle
+            value={descriptionMode}
+            onChange={setDescriptionMode}
+          />
           <PreviewSettingsButton />
           <Button
             size="sm"

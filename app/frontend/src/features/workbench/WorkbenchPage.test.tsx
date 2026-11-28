@@ -294,6 +294,9 @@ const productItem = {
       brand: "Fixture",
       category: "toy",
       primary_image_url: "https://images.example.test/fixture.jpg",
+      description_html: "<p>Soft cotton fabric for the fixture preview.</p>",
+      description_status: "complete",
+      attributes: "Taille#S|M",
     },
   },
 };
@@ -603,10 +606,33 @@ it("shows live product data and runtime log lines", async () => {
   fireEvent.click(screen.getByRole("tab", { name: "实时数据" }));
   expect(await screen.findByText("Fixture product")).toBeInTheDocument();
   expect(screen.getByText("Fixture · toy")).toBeInTheDocument();
+  expect(
+    screen.getByText("Soft cotton fabric for the fixture preview."),
+  ).toBeInTheDocument();
+  expect(screen.getByText("Taille#S|M")).toBeInTheDocument();
 
   expect(
     screen.getByRole("button", { name: "预览设置：图片代理" }),
   ).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "换行" }));
+  expect(screen.getByRole("button", { name: "换行" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+
+  fireEvent.click(
+    screen.getByRole("button", { name: "查看完整描述：Fixture product" }),
+  );
+  const descriptionDialog = await screen.findByRole("dialog");
+  expect(
+    within(descriptionDialog).getByRole("tab", { name: "完整描述" }),
+  ).toHaveAttribute("aria-selected", "true");
+  expect(
+    within(descriptionDialog).getByText("Soft cotton fabric for the fixture preview."),
+  ).toBeInTheDocument();
+  fireEvent.click(
+    within(descriptionDialog).getByRole("button", { name: "关闭商品预览" }),
+  );
 
   const thumb = screen.getByTitle("查看大图：Fixture product");
   const thumbSrc = thumb.querySelector("img")?.getAttribute("src") ?? "";

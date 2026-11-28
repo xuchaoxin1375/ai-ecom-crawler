@@ -29,6 +29,7 @@ import { imageProxyUrl } from "../../lib/media";
 import {
   htmlToText,
   missingReasonsText,
+  previewAttributes,
   previewImage,
   previewMeta,
   previewName,
@@ -160,6 +161,7 @@ export function ProductPreviewDialog({
 
   const product = activeItem ? productPreview(activeItem) : {};
   const image = activeItem ? previewImage(activeItem) : "";
+  const attributes = activeItem ? previewAttributes(activeItem) : "";
   const description = String(
     product.description_text || product.description_html || "",
   );
@@ -406,6 +408,22 @@ export function ProductPreviewDialog({
               </div>
             ) : activeTab === "description" && hasDescription ? (
               <div className="space-y-3">
+                {attributes || product.description_status ? (
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-3">
+                    {attributes ? (
+                      <span className="break-words">属性：{attributes}</span>
+                    ) : null}
+                    {product.description_status ? (
+                      <Badge
+                        tone={descriptionStatusTone(String(product.description_status))}
+                        dot={false}
+                      >
+                        描述
+                        {descriptionStatusLabel(String(product.description_status))}
+                      </Badge>
+                    ) : null}
+                  </div>
+                ) : null}
                 <pre className="max-h-[56vh] overflow-auto whitespace-pre-wrap rounded-panel border border-line bg-surface-muted p-4 font-sans text-sm leading-6 text-ink-2">
                   {plainDescription}
                 </pre>

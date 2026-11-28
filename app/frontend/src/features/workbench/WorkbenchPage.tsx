@@ -73,6 +73,8 @@ import {
   type WorkbenchTaskUpdateRequest,
 } from "../../lib/api";
 import {
+  descriptionStatusLabel,
+  descriptionStatusTone,
   formatClock,
   formatNumber,
   formatTime,
@@ -85,7 +87,20 @@ import {
   useManualRefresh,
   useStableUpdatedAt,
 } from "../../lib/liveRefresh";
-import { previewMeta, previewName, previewPrice, previewImage } from "../sites/site";
+import {
+  previewAttributes,
+  previewDescription,
+  previewDescriptionStatusRaw,
+  previewMeta,
+  previewName,
+  previewPrice,
+  previewImage,
+} from "../sites/site";
+import { DescriptionModeToggle } from "../sites/DescriptionModeToggle";
+import {
+  useDescriptionMode,
+  WORKBENCH_DESCRIPTION_MODE_KEY,
+} from "../sites/descriptionMode";
 import { ProductThumb } from "../sites/ProductThumb";
 import { ProductPreviewDialog } from "../sites/ProductPreviewDialog";
 import { PreviewSettingsButton } from "../sites/PreviewSettingsButton";
@@ -334,6 +349,10 @@ export function WorkbenchPage() {
   >("logs");
   const [previewItem, setPreviewItem] = useState<TaskItem | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewTab, setPreviewTab] = useState<"image" | "description">("image");
+  const [descriptionMode, setDescriptionMode] = useDescriptionMode(
+    WORKBENCH_DESCRIPTION_MODE_KEY,
+  );
   const [treeMenu, setTreeMenu] = useState<{
     x: number;
     y: number;
@@ -414,7 +433,16 @@ export function WorkbenchPage() {
       activeSelected ? "live" : "final",
     ],
     queryFn: ({ signal }) =>
-      getTaskItems(selectedTaskId as string, "product", 50, 0, "DONE", "desc", signal),
+      getTaskItems(
+        selectedTaskId as string,
+        "product",
+        50,
+        0,
+        "DONE",
+        "desc",
+        signal,
+        true,
+      ),
     enabled: Boolean(selectedTaskId) && bottomTab === "data" && !bottomCollapsed,
     refetchInterval: activeSelected ? 3000 : false,
   });
@@ -554,8 +582,9 @@ export function WorkbenchPage() {
     );
   }
 
-  function openPreview(item: TaskItem) {
+  function openPreview(item: TaskItem, tab: "image" | "description" = "image") {
     setPreviewItem(item);
+    setPreviewTab(tab);
     setPreviewOpen(true);
   }
 
@@ -2696,6 +2725,10 @@ export function WorkbenchPage() {
                       打开任务详情
                     </Link>
                   ) : null}
+                  <DescriptionModeToggle
+                    value={descriptionMode}
+                    onChange={setDescriptionMode}
+                  />
                   <PreviewSettingsButton />
                 </div>
                 {!selectedTaskId ? (
@@ -2723,68 +2756,108 @@ export function WorkbenchPage() {
                   </p>
                 ) : (
                   <div className="min-h-0 flex-1 overflow-auto">
-                    <table className="w-full min-w-[680px] table-fixed text-left text-xs">
+                    <table className="w-full min-w-[720px] table-fixed text-left text-xs">
                       <thead className="sticky top-0 z-10 bg-surface-muted text-[10.5px] font-medium text-ink-3">
                         <tr>
-                          <th className="px-2.5 py-1.5">商品</th>
-                          <th className="w-[88px] px-2 py-1.5">价格</th>
-                          <th className="w-[76px] px-2 py-1.5">状态</th>
-                          <th className="w-[92px] px-2 py-1.5">采集时间</th>
-                          <th className="w-[70px] px-2 py-1.5 text-right">来源</th>
+                          <th className="w-[28%] px-2.5 py-1.5">商品</th>
+                          <th className="w-[28%] px-2 py-1.5">描述</th>
+                          <th className="w-[72px] px-2 py-1.5">价格</th>
+                          <th className="w-[10%] px-2 py-1.5">属性</th>
+                          <th className="w-[88px] px-2 py-1.5">采集时间</th>
+                          <th className="w-[52px] px-2 py-1.5 text-right">来源</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-line">
-                        {taskDataItems.map((item) => (
-                          <tr key={item.item_id} className="hover:bg-surface-muted">
-                            <td className="px-2.5 py-1.5">
-                              <button
-                                type="button"
-                                className="flex min-w-0 items-center gap-2 rounded-control text-left hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
-                                title={`查看大图：${previewName(item)}`}
-                                onClick={() => openPreview(item)}
-                              >
-                                <ProductThumb
-                                  src={previewImage(item)}
-                                  alt={previewName(item)}
-                                  taskId={selectedTaskId}
-                                  className="h-9 w-9 rounded-control border border-line bg-surface-muted"
-                                />
-                                <span className="min-w-0">
-                                  <span className="block truncate font-medium text-ink">
-                                    {previewName(item)}
+                        {taskDataItems.map((item) => {
+                          const description = previewDescription(item);
+                          const attributes = previewAttributes(item);
+                          const descriptionStatus = previewDescriptionStatusRaw(item);
+                          return (
+                            <tr key={item.item_id} className="hover:bg-surface-muted">
+                              <td className="px-2.5 py-1.5 align-top">
+                                <button
+                                  type="button"
+                                  className="flex w-full min-w-0 items-center gap-2 overflow-hidden rounded-control text-left hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                                  title={`查看大图：${previewName(item)}`}
+                                  onClick={() => openPreview(item)}
+                                >
+                                  <ProductThumb
+                                    src={previewImage(item)}
+                                    alt={previewName(item)}
+                                    taskId={selectedTaskId}
+                                    className="h-9 w-9 shrink-0 rounded-control border border-line bg-surface-muted"
+                                  />
+                                  <span className="min-w-0">
+                                    <span className="block truncate font-medium text-ink">
+                                      {previewName(item)}
+                                    </span>
+                                    <span
+                                      className="block truncate text-[10.5px] text-ink-3"
+                                      title={previewMeta(item) || item.url}
+                                    >
+                                      {previewMeta(item) || item.url}
+                                    </span>
                                   </span>
-                                  <span
-                                    className="block truncate text-[10.5px] text-ink-3"
-                                    title={previewMeta(item) || item.url}
-                                  >
-                                    {previewMeta(item) || item.url}
-                                  </span>
+                                </button>
+                              </td>
+                              <td className="px-2 py-1.5 align-top">
+                                <div className="flex min-w-0 flex-col gap-1">
+                                  {description ? (
+                                    <button
+                                      type="button"
+                                      className={cn(
+                                        "block w-full text-left text-[11px] leading-4 text-ink-2 hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40",
+                                        descriptionMode === "wrap"
+                                          ? "whitespace-pre-wrap break-words"
+                                          : "truncate",
+                                      )}
+                                      title="点击查看完整描述"
+                                      aria-label={`查看完整描述：${previewName(item)}`}
+                                      onClick={() => openPreview(item, "description")}
+                                    >
+                                      {description}
+                                    </button>
+                                  ) : (
+                                    <span className="text-[11px] text-ink-3">—</span>
+                                  )}
+                                  {descriptionStatus &&
+                                  descriptionStatus.toLowerCase() !== "complete" ? (
+                                    <Badge
+                                      tone={descriptionStatusTone(descriptionStatus)}
+                                      dot={false}
+                                    >
+                                      {descriptionStatusLabel(descriptionStatus)}
+                                    </Badge>
+                                  ) : null}
+                                </div>
+                              </td>
+                              <td className="px-2 py-1.5 align-top text-ink-2 tabular">
+                                {previewPrice(item)}
+                              </td>
+                              <td className="px-2 py-1.5 align-top">
+                                <span
+                                  className="line-clamp-2 break-words text-[11px] text-ink-2"
+                                  title={attributes || undefined}
+                                >
+                                  {attributes || "—"}
                                 </span>
-                              </button>
-                            </td>
-                            <td className="px-2 py-1.5 text-ink-2 tabular">
-                              {previewPrice(item)}
-                            </td>
-                            <td className="px-2 py-1.5">
-                              <span className="rounded border border-line bg-surface-muted px-1 py-0.5 text-[10px] text-ink-3">
-                                {item.state}
-                              </span>
-                            </td>
-                            <td className="px-2 py-1.5 text-[10.5px] text-ink-3 tabular">
-                              {formatTime(item.occurred_at)}
-                            </td>
-                            <td className="px-2 py-1.5 text-right">
-                              <a
-                                className="text-[11px] text-accent hover:underline"
-                                href={item.url}
-                                target="_blank"
-                                rel="noreferrer"
-                              >
-                                来源页
-                              </a>
-                            </td>
-                          </tr>
-                        ))}
+                              </td>
+                              <td className="px-2 py-1.5 align-top text-[10.5px] text-ink-3 tabular">
+                                {formatTime(item.occurred_at)}
+                              </td>
+                              <td className="px-2 py-1.5 align-top text-right">
+                                <a
+                                  className="text-[11px] text-accent hover:underline"
+                                  href={item.url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  来源页
+                                </a>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -3398,12 +3471,12 @@ export function WorkbenchPage() {
         />
       ) : null}
       <ProductPreviewDialog
-        key={`${previewItem?.item_id ?? "none"}-${previewOpen}`}
+        key={`${previewItem?.item_id ?? "none"}-${previewTab}-${previewOpen}`}
         open={previewOpen}
         item={previewItem}
         items={taskDataItems}
         taskId={selectedTaskId}
-        initialTab="image"
+        initialTab={previewTab}
         onOpenChange={setPreviewOpen}
       />
       <Toast toast={toast} onDismiss={dismissToast} />
